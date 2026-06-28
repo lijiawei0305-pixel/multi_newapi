@@ -61,6 +61,17 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 		}
 	}
 
+	// mt: 2D 倍率（层级 × 模型分组，§2.15）—— 平台级旁路覆盖。最终 groupRatio =
+	// GroupRatio[UserGroup(层级)] × (UsingGroup ∈ model_groups ? GroupRatio[UsingGroup] : 1)。
+	// 与上方租户覆盖同为「请求维度 groupRatio」单点，预扣与结算共用其结果。命中即返；
+	// 未装配 / miss / panic 一律回退下方原生 GetGroupGroupRatio/GetGroupRatio（安全第一，绝不破坏计费）。
+	if grouphook.ModelGroup2DResolver != nil {
+		if r, ok := grouphook.ModelGroup2DResolver(relayInfo.UserGroup, relayInfo.UsingGroup); ok {
+			groupRatioInfo.GroupRatio = r
+			return groupRatioInfo
+		}
+	}
+
 	// check user group special ratio
 	userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(relayInfo.UserGroup, relayInfo.UsingGroup)
 	if ok {

@@ -26,7 +26,7 @@ func SetMtRouter(router *gin.Engine) {
 
 	app := mtwire.New(model.DB)
 
-	// 安装代理增量旁路钩子（消耗分润 / 注册归属）。所有节点都装（钩子由原生 service/controller 调用）。
+	// 安装代理增量旁路钩子（消耗分润 / 注册归属 / 2D 倍率层级×模型分组）。所有节点都装（钩子由原生 service/controller/计费侧调用）。
 	app.InstallHooks()
 	// 安装租户用户组倍率覆盖钩子（作用于 /v1 计费的 groupRatio 单一解析点）。所有节点都装。
 	app.InstallGroupRatioHook()
@@ -116,6 +116,17 @@ func SetMtRouter(router *gin.Engine) {
 		adminWithdrawGroup.GET("", app.HandleAdminListWithdrawals)
 		adminWithdrawGroup.POST("/:id/approve", app.HandleAdminApproveWithdrawal)
 		adminWithdrawGroup.POST("/:id/reject", app.HandleAdminRejectWithdrawal)
+	}
+
+	// 主站模型分组管理（全局，非租户维度，§2.15）：增删改 + 设倍率/绑渠道。复用 new-api AdminAuth。
+	// 写操作同步真源 GroupRatio + UserUsableGroups（见 internal/mtwire/modelgroup.go）。
+	adminModelGroupGroup := router.Group("/api/admin/model-groups")
+	adminModelGroupGroup.Use(middleware.AdminAuth())
+	{
+		adminModelGroupGroup.GET("", app.HandleAdminListModelGroups)
+		adminModelGroupGroup.POST("", app.HandleAdminCreateModelGroup)
+		adminModelGroupGroup.PUT("/:name", app.HandleAdminUpdateModelGroup)
+		adminModelGroupGroup.DELETE("/:name", app.HandleAdminDeleteModelGroup)
 	}
 
 	common.SysLog("multitenant (tenant + tokenplan + agent) routes registered")

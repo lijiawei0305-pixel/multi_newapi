@@ -20,3 +20,19 @@ import "context"
 //
 // 该解析点同时供「预扣」与「结算」复用（见 relay/helper.HandleGroupRatio），覆盖一处即两端一致。
 var TenantGroupRatioResolver func(ctx context.Context, userID int64, group string) (float64, bool)
+
+// ModelGroup2DResolver 解析「2D 倍率（层级 × 模型分组）」覆盖（见 doc/detailed-design.md §2.15）。
+//
+// 把计费倍率从一维升级为二维相乘：
+//
+//		最终 groupRatio = GroupRatio[userGroup(层级)] × ( usingGroup ∈ model_groups ? GroupRatio[usingGroup] : 1 )
+//
+//	  - userGroup：用户所属层级（User.Group，如 default/vip/svip），倍率在原生 GroupRatio；
+//	  - usingGroup：本次请求所用 token 组；若它是「已登记的模型分组」，叠乘其 GroupRatio 作折扣系数，否则系数=1（仅层级）。
+//	  - 返回 (ratio, true)：用该 ratio 作计费 groupRatio（装配且无异常时恒命中）；
+//	  - 返回 (_, false)：任何错误 / panic / 未装配——调用方回退原生 GetGroupGroupRatio/GetGroupRatio。
+//	  - nil（未装配，如单测 / 平台未启用）：调用方一律回退原生倍率。
+//
+// 与 TenantGroupRatioResolver 同为「请求维度 groupRatio」旁路覆盖；预扣与结算共用其结果（覆盖一处即两端一致）。
+// 安全第一：实现侧自身兜底 panic，miss/错误一律回退，绝不阻断或破坏计费。
+var ModelGroup2DResolver func(userGroup, usingGroup string) (float64, bool)

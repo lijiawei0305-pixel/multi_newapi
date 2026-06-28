@@ -85,10 +85,12 @@ func migrateUsersPromotionChannelID(db *gorm.DB) error {
 // 钩子装配：把真实实现注入 agenthook 包级变量（原生 service/controller 旁路调用）
 // ============================================================================
 
-// InstallHooks 注入「消耗分润」「注册归属」两个旁路钩子。由 SetMtRouter 在 master/all 节点调用一次。
+// InstallHooks 注入「消耗分润」「注册归属」两个旁路钩子，并装配 2D 倍率钩子（层级×模型分组，§2.15）。
+// 由 SetMtRouter 在所有节点调用一次。所有钩子都装：原生 service/controller/计费侧旁路调用，nil 即未装配回退。
 func (a *App) InstallHooks() {
 	agenthook.ConsumeCommission = a.creditConsumeCommission
 	agenthook.AttributeRegistration = a.attributeRegistration
+	a.InstallModelGroup2DHook()
 }
 
 // attributeRegistration 是 agenthook.AttributeRegistration 实现：把新用户归属到对应代理（租户）。

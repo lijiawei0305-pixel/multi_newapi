@@ -20,6 +20,7 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/agent"
 	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
+	"github.com/QuantumNous/new-api/internal/modelgroup"
 	"github.com/QuantumNous/new-api/internal/payment"
 	paymentrepo "github.com/QuantumNous/new-api/internal/payment/gormrepo"
 	"github.com/QuantumNous/new-api/internal/pricing"
@@ -61,6 +62,11 @@ type App struct {
 	// RedemptionRepo 兑换码仓储（原生 quota 口径）：建码预扣 + 单赢家兑换 + 按租户列表。
 	RedemptionRepo *walletrepo.Repo
 
+	// --- 2D 倍率（层级 × 模型分组，Phase 1，§2.15）---
+	// ModelGroupRepo 持有 model_groups 登记 + 进程内缓存（IsModelGroup 供 /v1 计费热路径免查库）。
+	// 单实例：计费旁路钩子（resolveModelGroup2D）与后台增删（HandleAdmin*ModelGroup*）共享同一缓存。
+	ModelGroupRepo *modelgroup.Repo
+
 	// --- payment/recharge 模块（目标③）---
 	// RechargeGateway 下单（落库 RCG 订单 + 调 auth-service）与内网入账（强幂等状态机）。
 	RechargeGateway *payment.Gateway
@@ -94,6 +100,11 @@ func New(db *gorm.DB) *App {
 	promoRepo := promotionrepo.New(db)
 	promoSvc := promotion.NewService(promoRepo)
 	redemptionRepo := walletrepo.New(db)
+
+	// 2D 倍率：模型分组登记仓储 + 缓存。此处 best-effort 预热缓存（首次启动表未迁移则失败，
+	// 由 Migrate() 后再重载；非 master 节点表已存在即可装载）。
+	mgRepo := modelgroup.New(db)
+	_ = mgRepo.ReloadCache(context.Background())
 
 	// tokenplan：GORM 仓储（同时满足 PlanRepo + SubscriptionRepo）+ 纯函数成本守卫。
 	tp := tprepo.New(db)
@@ -136,6 +147,7 @@ func New(db *gorm.DB) *App {
 		PromotionRepo:   promoRepo,
 		Promotion:       promoSvc,
 		RedemptionRepo:  redemptionRepo,
+		ModelGroupRepo:  mgRepo,
 		RechargeGateway: rechargeGateway,
 		rechargeCfg:     rechargeCfg,
 		authClient:      authClient, // 复用同一客户端供 tokenplan 购买（SUB）下单
@@ -169,6 +181,13 @@ func (a *App) Migrate() error {
 	}
 	if err := paymentrepo.AutoMigrate(a.DB); err != nil { // payment_orders（Track 2 充值订单）
 		return err
+	}
+	if err := modelgroup.AutoMigrate(a.DB); err != nil { // model_groups（2D 倍率 · 模型分组登记，§2.15）
+		return err
+	}
+	// 迁移后重载模型分组缓存（master 节点建表 / 补 seed 后，IsModelGroup 即时生效）。
+	if a.ModelGroupRepo != nil {
+		_ = a.ModelGroupRepo.ReloadCache(context.Background())
 	}
 	// new-api 原生表 users 增列 tenant_id：用幂等 raw ALTER（不改 new-api model.User struct，避免 upstream rebase 冲突）。
 	if err := migrateUsersTenantID(a.DB); err != nil {

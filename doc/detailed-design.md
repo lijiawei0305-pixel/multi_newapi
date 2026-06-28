@@ -495,6 +495,34 @@ type ViolationSink interface {             // 违规事件记录 + 管理端查�
 
 ---
 
+### 2.15 ModelGroupRatio 2D 倍率（层级 × 模型分组）★ Phase 2 新增
+
+> 需求来自用户多轮互动确认（见对话）。把计费倍率从「一维（一个 group 一个倍率）」升级为「二维相乘」。
+
+**两个维度**
+- **层级（tier）** = 用户的 `User.Group`（`default`/`vip`/`svip`…），**管理员或代理分配**，用户**不可自选**（沿用 [[user-usable-groups-default-only]]：UserUsableGroups 不含层级）。倍率存 new-api 原生 `GroupRatio`（default=1、vip=0.8、svip=0.6）。
+- **模型分组（model group）** = token 的组（`claude-kiro`/`openai-plus`…），= 名字+倍率+绑定渠道（new-api 原生 `channel.group` 绑定），**用户建 Key 时自选**（须在 `UserUsableGroups` 内）。倍率亦存 `GroupRatio`；用一个**模型分组登记表 `model_groups`** 标记「哪些 group 是模型分组」+ 元数据（描述/绑定渠道/启用）。
+
+**核心算法**（计费单点 `relay/helper.HandleGroupRatio`，预扣+结算共用）：
+```
+最终 groupRatio = GroupRatio[UserGroup(层级)]  ×  ( UsingGroup ∈ model_groups ? GroupRatio[UsingGroup] : 1 )
+```
+- vip 选 claude-kiro → 0.8 × 0.3 = 0.24；vip 不选（default token）→ 0.8 × 1 = 0.8。
+- **边界天然安全**：UsingGroup 是层级名（vip）或非模型分组 → 模型分组系数=1 → 仅层级，不重复算。
+- **方向**：模型分组倍率是**折扣乘数**（claude-kiro=0.3 = 三折）。
+
+**接线**（照 [[grouphook]] 旁路模式，绝不破坏计费）：新增叶子钩子 `grouphook.ModelGroup2DResolver func(userGroup, usingGroup) (float64, bool)`，由 mtwire 注入（实现读 `GetGroupRatio` × model_groups 登记）。`HandleGroupRatio` 调用顺序：① 租户覆盖 `TenantGroupRatioResolver`（现状，Phase 2 改 2D 感知）→ ② **2D 解析**（本节）→ ③ 原生 `GetGroupGroupRatio`/`GetGroupRatio` 兜底。任何 miss/错误/未装配一律回退，安全第一。
+
+**自选机制**：管理员后台增删模型分组 → 同步 `GroupRatio[name]=ratio` + 登记 `model_groups` + 把 name 加入 `UserUsableGroups`（用户建 Key 下拉即出现）。
+
+**Phase 1（先做，本次）**：平台级 2D —— model_groups 表+repo、2D 钩子+计费接线、模型分组登记同步 UserUsableGroups、**后台「模型分组管理」UI**（增删/设倍率/绑渠道）、claude-kiro（现 kiro 渠道改组名）+ openai-plus（现 gpt 渠道）跑通、不同层级×模型分组 日志核对倍率=相乘。
+
+**Phase 2（后叠）**：代理参与 —— 代理给自己用户设层级（扩「我的用户」）、代理调本租户模型分组倍率（扩 grouphook per-tenant 覆盖）、**按组合下限**：代理每个 (层级×模型分组) ≥ 主站同组合基准（扩 [[pricing-guard]]）、协调 grouphook 与 2D 优先级。
+
+**单测策略**：2D 相乘（含 default×1、层级名作 usingGroup 不重复算、未登记模型分组系数=1）；模型分组 CRUD 同步 GroupRatio/UserUsableGroups；钩子未装配/panic 回退全局；预扣与结算同值。
+
+---
+
 ## 3. 端到端关键数据流
 
 ### 3.1 调用计费（双桶独立路由）
