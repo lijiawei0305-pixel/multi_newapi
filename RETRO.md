@@ -151,6 +151,13 @@
 - **解决**：加只读信号 `GET /api/tenant/agent-context`(UserAuth)→`{is_agent_owner}`（直读 Host 租户 owner）；侧栏加 `agentOwnerOnly` 维度按它过滤（loading 期 fail-closed 隐藏）；自助路由加 `beforeLoad`→非 owner `redirect /403`。实测：普通用户 0 项菜单 + 直接 URL 跳 403；代理在自己站 6 项。
 - **升级**：**凡是后端按特殊范围(owner/角色/租户)守的功能，前端菜单与路由守卫必须用对应的后端信号同范围门控**，不能只判"登录"；可见性脱离鉴权 = 用户撞 403 的糟糕体验。
 
+### [已解决] new-api 默认把 vip 暴露成"所有人可自选分组"（分组越权 + 计费风险）
+- **现象**：任意普通用户建 API Key 时可自选 `vip` 分组并真的用上（享 0.8x 低价），无需管理员分配。`svip`/`kiro` 却正确受限（"无权访问 X 分组"）。
+- **根因**：`setting/user_usable_group.go` 硬编码默认 `userUsableGroups = {default, vip}` —— vip 被当成公共可自选分组。中继校验 `GetUserUsableGroups(userGroup)`（=全局 UserUsableGroups + 用户自身 group），vip 在全局表里 → 谁都能用。
+- **解决**：把 `UserUsableGroups` 选项固化为仅 `{"default":"默认分组"}`（运行期 `PUT /api/option` 已改，并固化进 `internal/mtwire/seed.go` 首次初始化）。效果：用户只能用**管理员分配给他的分组**（`GetUserUsableGroups` 总会补上用户自身 `User.Group`）；vip/svip/kiro 等高级分组一律"管理员后台配渠道 + 设 User.Group 分配"。实测：chanuser1(default) 自选分组只剩 default、旧 vip token 调用被拒；admin 设 kirouser=kiro → 路由到 kiro 渠道(claude)。
+- **子坑**：直接 `UPDATE users SET group=...` 改分组**不刷用户缓存**（`GetUserGroup` 读 `GetUserCache`），relay 仍读旧分组；**必须走 admin API `PUT /api/user/`** 才会刷新。改用户属性一律走 API，不直改 DB。
+- **升级**：**新增/启用任何"高级分组"后，确认它不在 `UserUsableGroups` 自选表里**（默认仅 default）；高级分组只能管理员分配。属计费越权红线。
+
 ---
 
 ## 四、工具链与协作

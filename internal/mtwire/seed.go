@@ -47,6 +47,16 @@ func (a *App) Seed() error {
 		} else {
 			common.SysLog("mtwire: 首次初始化，theme.frontend 已固化为 default")
 		}
+
+		// 分组（vip/svip/kiro 等）一律由管理员后台配置 + 给用户分配（设 User.Group），
+		// 用户不得在建 API Key 时自选高级分组。new-api 默认 UserUsableGroups={default,vip}
+		// 把 vip 暴露成"所有人可自选"（见 RETRO「分组自选越权」）；这里固化为仅 default：
+		// 用户只能用自己被管理员分配的分组（GetUserUsableGroups 总会补上用户自身 group）。
+		if err := model.UpdateOption("UserUsableGroups", `{"default":"默认分组"}`); err != nil {
+			common.SysError("mtwire: 固化 UserUsableGroups=default-only 失败: " + err.Error())
+		} else {
+			common.SysLog("mtwire: 首次初始化，UserUsableGroups 已固化为仅 default（高级分组仅管理员分配）")
+		}
 	}
 
 	// 6 档套餐 + 为 demo 租户上架（均幂等）。
