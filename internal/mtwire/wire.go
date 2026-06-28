@@ -18,6 +18,8 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/QuantumNous/new-api/internal/agent"
+	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
 	"github.com/QuantumNous/new-api/internal/payment"
 	paymentrepo "github.com/QuantumNous/new-api/internal/payment/gormrepo"
 	"github.com/QuantumNous/new-api/internal/pricing"
@@ -42,6 +44,13 @@ type App struct {
 	Retail        tokenplan.PlanRetailService
 	Subscriptions tokenplan.SubscriptionService
 
+	// --- agent 模块（代理核心闭环）---
+	// AgentRepo 持有具体类型：列表/seed 用到非接口方法（ListProfiles/ListWithdrawals/EnsureWallet 等）。
+	AgentRepo     *agentrepo.Repo
+	AgentService  agent.AgentService
+	Withdrawals   agent.WithdrawalService
+	AgentEarnings agent.EarningSink // 真实收益入账口（写 agent_earning_logs，幂等），注入 tokenplan + consume hook
+
 	// --- payment/recharge 模块（目标③）---
 	// RechargeGateway 下单（落库 RCG 订单 + 调 auth-service）与内网入账（强幂等状态机）。
 	RechargeGateway *payment.Gateway
@@ -60,15 +69,21 @@ func New(db *gorm.DB) *App {
 	resolver := tenant.NewResolver(tr, tenant.NewMemCache())
 	tsvc := tenant.NewService(tr, tenant.NewSlugValidator())
 
+	// agent：GORM 仓储（4 表）+ 真实成本守卫；服务 / 提现状态机 / 收益入账口。
+	ar := agentrepo.New(db)
+	guard := pricing.NewGuard() // 复用真实成本保护守卫（纯函数，零依赖）；设代理折扣经其校验
+	agentSvc := agent.NewService(ar, guard)
+	withdrawals := agent.NewWithdrawalService(ar)
+	agentEarnings := agent.NewEarningSink(ar) // 真实入账：写 agent_earning_logs（幂等）+ 累加钱包
+
 	// tokenplan：GORM 仓储（同时满足 PlanRepo + SubscriptionRepo）+ 纯函数成本守卫。
 	tp := tprepo.New(db)
-	guard := pricing.NewGuard() // 复用真实成本保护守卫（纯函数，零依赖）
 	catalog := tokenplan.NewCatalog(tp)
 	retail := tokenplan.NewRetailService(tp, guard)
 	// Purchase 经 subPayment 落一条真实 pending 订单（前缀 SUB），可被支付回调用
-	// App.ActivatePaidTokenplanOrder 激活（见 subscription_bridge.go）。risk 仍占位；agent 差价
-	// 收益 Sink 仍为 noop，真实注入由 Master 装配（ActivateFromPayment 已会调用，注入即生效）。
-	subs := tokenplan.NewSubscriptionService(tp, tp, newSubPayment(newSubOrderStore(db)), allowAllRisk{}, noopEarnings{}, nil)
+	// App.ActivatePaidTokenplanOrder 激活（见 subscription_bridge.go）。risk 仍占位；agent 套餐差价
+	// 收益经 tokenplanEarningAdapter 真实落到 agent 钱包（ActivateFromPayment 激活事务内、按 source_order_id 幂等）。
+	subs := tokenplan.NewSubscriptionService(tp, tp, newSubPayment(newSubOrderStore(db)), allowAllRisk{}, newTokenplanEarningAdapter(agentEarnings), nil)
 
 	// payment/recharge：GORM 订单仓储（payment_orders，仅存 RCG 充值订单）+ auth-service 客户端（PaySDK）。
 	// 入账 Sink 只挂 recharge→原生 quota；SUB 套餐订单不入 payment_orders，由内网入账端点按前缀
@@ -95,6 +110,10 @@ func New(db *gorm.DB) *App {
 		Catalog:         catalog,
 		Retail:          retail,
 		Subscriptions:   subs,
+		AgentRepo:       ar,
+		AgentService:    agentSvc,
+		Withdrawals:     withdrawals,
+		AgentEarnings:   agentEarnings,
 		RechargeGateway: rechargeGateway,
 		rechargeCfg:     rechargeCfg,
 	}
@@ -116,7 +135,14 @@ func (a *App) Migrate() error {
 	if err := tprepo.AutoMigrate(a.DB); err != nil {
 		return err
 	}
+	if err := agentrepo.AutoMigrate(a.DB); err != nil { // agent_profiles/agent_wallets/agent_earning_logs/agent_withdrawals
+		return err
+	}
 	if err := paymentrepo.AutoMigrate(a.DB); err != nil { // payment_orders（Track 2 充值订单）
+		return err
+	}
+	// new-api 原生表 users 增列 tenant_id：用幂等 raw ALTER（不改 new-api model.User struct，避免 upstream rebase 冲突）。
+	if err := migrateUsersTenantID(a.DB); err != nil {
 		return err
 	}
 	// 目标③桥接表：mt_subscription_orders（SUB 套餐订单状态机）+ mt_native_subscription_plans
@@ -126,10 +152,9 @@ func (a *App) Migrate() error {
 
 // ----------------------------------------------------------------------------
 // Phase 2 占位适配（最小可跑；真实集成顺延，见报告「风险/未决」）。
-// 这些类型仅满足 tokenplan 的消费者依赖接口，使 Purchase 流程在 new-api 内可端到端跑通：
-//   - allowAllRisk  一律放行（Trial 用户/实名/设备限购等真实规则顺延 internal/risk）；
-//   - noopEarnings  不入账（套餐差价分润真实落到 internal/agent 钱包顺延）。
+//   - allowAllRisk 一律放行（Trial 用户/实名/设备限购等真实规则顺延 internal/risk）。
 //
+// 套餐差价分润占位 noopEarnings 已被 tokenplanEarningAdapter 取代（真实落到 internal/agent 钱包，见 agent.go）；
 // 支付占位 stubPayment 已被 subPayment 取代（落真实 SUB 订单，见 subscription_bridge.go）。
 // ----------------------------------------------------------------------------
 
@@ -139,11 +164,6 @@ type allowAllRisk struct{}
 func (allowAllRisk) CheckPurchaseLimit(_ context.Context, _ tokenplan.PurchaseLimitCheck) error {
 	return nil
 }
-
-// noopEarnings 是占位代理收益接收器。
-type noopEarnings struct{}
-
-func (noopEarnings) AddEarning(_ context.Context, _ tokenplan.EarningEntry) error { return nil }
 
 // randToken 返回一个十六进制随机串（订单号占位）；熵不足时回退时间戳。
 func randToken(n int) string {

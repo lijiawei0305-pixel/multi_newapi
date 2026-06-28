@@ -19,14 +19,17 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Activity,
   Box,
+  Coins,
   CreditCard,
   FileText,
   FlaskConical,
   Gauge,
+  HandCoins,
   Key,
   LayoutDashboard,
   ListTodo,
   MessageSquare,
+  Network,
   Package,
   Radio,
   ServerCog,
@@ -116,6 +119,11 @@ export function useSidebarData(): SidebarData {
             icon: Wallet,
           },
           {
+            title: t('My Earnings'),
+            url: '/agent-earnings',
+            icon: Coins,
+          },
+          {
             title: t('Profile'),
             url: '/profile',
             icon: User,
@@ -160,6 +168,16 @@ export function useSidebarData(): SidebarData {
             title: t('Subscription Monitor'),
             url: '/subscription-monitor',
             icon: Gauge,
+          },
+          {
+            title: t('Sub-Agent Management'),
+            url: '/agents',
+            icon: Network,
+          },
+          {
+            title: t('Withdrawal Review'),
+            url: '/withdrawals',
+            icon: HandCoins,
           },
           {
             title: t('System Info'),

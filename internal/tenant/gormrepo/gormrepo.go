@@ -20,12 +20,14 @@ import (
 const mysqlDupErrNo = 1062
 
 // tenantRow 是 tenants 表的 GORM 模型。slug 唯一索引保证一期二级域名 label 唯一。
+// owner_user_id：代理 owner（new-api users.id），1:1 独占本租户；带索引以支持「按 owner 反查租户」。
 type tenantRow struct {
 	ID               int64     `gorm:"column:id;primaryKey;autoIncrement"`
 	Slug             string    `gorm:"column:slug;type:varchar(63);not null;uniqueIndex:idx_tenants_slug"`
 	Name             string    `gorm:"column:name;type:varchar(128);not null"`
 	Status           string    `gorm:"column:status;type:varchar(16);not null;default:active"`
 	TokenplanEnabled bool      `gorm:"column:tokenplan_enabled;not null;default:false"`
+	OwnerUserID      int64     `gorm:"column:owner_user_id;not null;default:0;index:idx_tenants_owner"`
 	CreatedAt        time.Time `gorm:"column:created_at"`
 	UpdatedAt        time.Time `gorm:"column:updated_at"`
 }
@@ -70,6 +72,7 @@ func (r *Repo) CreateTenant(ctx context.Context, t *tenant.Tenant) error {
 		Name:             t.Name,
 		Status:           string(t.Status),
 		TokenplanEnabled: t.TokenplanEnabled,
+		OwnerUserID:      t.OwnerUserID,
 		CreatedAt:        t.CreatedAt,
 		UpdatedAt:        t.UpdatedAt,
 	}
@@ -108,6 +111,20 @@ func (r *Repo) SetTenantStatus(ctx context.Context, id int64, s tenant.TenantSta
 	res := r.db.WithContext(ctx).Model(&tenantRow{}).
 		Where("id = ?", id).
 		Update("status", string(s))
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return tenant.ErrTenantNotFound
+	}
+	return nil
+}
+
+// UpdateName 仅改租户展示名（GORM 自动维护 updated_at）；行不存在返回 ErrTenantNotFound。
+func (r *Repo) UpdateName(ctx context.Context, tenantID int64, name string) error {
+	res := r.db.WithContext(ctx).Model(&tenantRow{}).
+		Where("id = ?", tenantID).
+		Update("name", name)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -163,9 +180,38 @@ func mapTenantResult(row *tenantRow, err error) (*tenant.Tenant, error) {
 		Name:             row.Name,
 		Status:           tenant.TenantStatus(row.Status),
 		TokenplanEnabled: row.TokenplanEnabled,
+		OwnerUserID:      row.OwnerUserID,
 		CreatedAt:        row.CreatedAt,
 		UpdatedAt:        row.UpdatedAt,
 	}, nil
+}
+
+// SetOwnerUserID 设置/改写租户的代理 owner（设代理流程在建租户后调用）。
+// 行不存在返回 ErrTenantNotFound。这是「代理=User+Tenant 1:1」归属落地的写入点。
+func (r *Repo) SetOwnerUserID(ctx context.Context, tenantID, ownerUserID int64) error {
+	res := r.db.WithContext(ctx).Model(&tenantRow{}).
+		Where("id = ?", tenantID).
+		Update("owner_user_id", ownerUserID)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return tenant.ErrTenantNotFound
+	}
+	return nil
+}
+
+// OwnerUserID 直读某租户当前 owner_user_id（绕过解析缓存，供 agent_owner 鉴权做权威校验）。
+// 行不存在返回 (0, ErrTenantNotFound)。
+func (r *Repo) OwnerUserID(ctx context.Context, tenantID int64) (int64, error) {
+	var row tenantRow
+	if err := r.db.WithContext(ctx).Select("owner_user_id").Take(&row, "id = ?", tenantID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, tenant.ErrTenantNotFound
+		}
+		return 0, err
+	}
+	return row.OwnerUserID, nil
 }
 
 // isDuplicate 判断是否唯一键冲突：优先用 GORM TranslateError 归一化的 ErrDuplicatedKey，

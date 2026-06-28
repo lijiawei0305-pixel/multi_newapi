@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 
+	"gorm.io/gorm"
+
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/agent"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
 	"github.com/QuantumNous/new-api/model"
@@ -15,6 +18,10 @@ import (
 const (
 	demoSlug = "tokendream"
 	demoName = "TokenDream"
+
+	// demo 代理 owner 用户（便于 UI/E2E 有可登录的代理样例）。
+	demoAgentUsername = "demoagent"
+	demoAgentPassword = "demoagent123" // 8-20 位，满足 new-api 校验；演示用，部署后请改。
 )
 
 // Seed 幂等地写入演示数据（仅 master 节点调用，见 router/mt-router.go）：
@@ -53,7 +60,58 @@ func (a *App) Seed() error {
 			return err
 		}
 	}
+
+	// demo 代理：把 tokendream 的 owner 设为 demo 代理用户，并写一条 agent_profile + 钱包（幂等）。
+	// 仅当尚未设代理（owner==0）才设置，避免覆盖运营人工改派。
+	if t.OwnerUserID == 0 {
+		if err := a.seedDemoAgent(ctx, t.ID); err != nil {
+			common.SysError("mtwire: seed demo agent failed: " + err.Error())
+		}
+	}
 	return nil
+}
+
+// seedDemoAgent 确保 demo 代理用户存在，并把其设为 tenantID 的 owner + 写 agent_profile + 钱包。
+func (a *App) seedDemoAgent(ctx context.Context, tenantID int64) error {
+	ownerID, err := a.ensureDemoAgentUser()
+	if err != nil {
+		return err
+	}
+	if err := a.TenantRepo.SetOwnerUserID(ctx, tenantID, ownerID); err != nil {
+		return err
+	}
+	if err := a.AgentService.SetAgentType(ctx, tenantID, agent.AgentTypeNormal, agent.AgentParams{
+		CostPrice:       50,
+		PackageDiscount: 0.9,
+		CommissionRatio: 0.2,
+		Level:           1,
+	}); err != nil {
+		return err
+	}
+	return a.AgentRepo.EnsureWallet(ctx, tenantID, ownerID)
+}
+
+// ensureDemoAgentUser 幂等地取/建 demo 代理用户（new-api 原生 users 表，经 model.User.Insert 正确散列口令）。
+func (a *App) ensureDemoAgentUser() (int64, error) {
+	var u model.User
+	err := model.DB.Where("username = ?", demoAgentUsername).First(&u).Error
+	if err == nil {
+		return int64(u.Id), nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, err
+	}
+	nu := model.User{
+		Username:    demoAgentUsername,
+		Password:    demoAgentPassword,
+		DisplayName: "Demo Agent",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+	}
+	if err := nu.Insert(0); err != nil {
+		return 0, err
+	}
+	return int64(nu.Id), nil
 }
 
 // ensureDemoTenant 返回 demo 租户 + 是否本次新建（created）；不存在则经 TenantService.Create

@@ -14,6 +14,12 @@ import (
 	"github.com/QuantumNous/new-api/model"
 )
 
+// noopEarnings 是测试用占位收益接收器（不入账）。生产装配已改用 tokenplanEarningAdapter（见 agent.go），
+// 本桩仅用于桥接单测里构造不关心分润落账的 SubscriptionService。
+type noopEarnings struct{}
+
+func (noopEarnings) AddEarning(_ context.Context, _ tokenplan.EarningEntry) error { return nil }
+
 // newBridgeTestApp 建一个仅含 tokenplan + 桥接所需依赖的最小 App（不经 New，避免耦合 Track 2
 // 并发演进中的 recharge 装配）。sqlite(:memory:) 单连接（每连接独立库）。
 func newBridgeTestApp(t *testing.T) (*App, *gorm.DB) {

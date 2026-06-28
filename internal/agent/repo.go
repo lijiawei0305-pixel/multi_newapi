@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// agentRecord 是代理资料的内部存储结构（按 userID）。
+// agentRecord 是代理资料的内部存储结构（按 tenantID）。
 type agentRecord struct {
 	t         AgentType
 	params    AgentParams
@@ -20,7 +20,7 @@ type agentRecord struct {
 // 读-改-写，等价于 detailed-design §6.2 的原子条件更新，保证 -race 下的幂等与金额守恒。
 type MemRepo struct {
 	mu          sync.Mutex
-	profiles    map[int64]agentRecord  // userID -> 代理资料
+	profiles    map[int64]agentRecord  // tenantID -> 代理资料
 	wallets     map[int64]*AgentWallet // tenantID -> 钱包
 	earnings    []EarningEntry         // 收益日志（追加）
 	seenEarning map[string]bool        // 幂等键 -> 已入账
@@ -60,17 +60,17 @@ func (r *MemRepo) SeedAPIBalance(tenantID int64, amount float64) {
 	w.UpdatedAt = r.now()
 }
 
-func (r *MemRepo) SetAgentType(_ context.Context, userID int64, t AgentType, p AgentParams) error {
+func (r *MemRepo) SetAgentType(_ context.Context, tenantID int64, t AgentType, p AgentParams) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.profiles[userID] = agentRecord{t: t, params: p, updatedAt: r.now()}
+	r.profiles[tenantID] = agentRecord{t: t, params: p, updatedAt: r.now()}
 	return nil
 }
 
-func (r *MemRepo) GetAgentType(_ context.Context, userID int64) (AgentType, AgentParams, bool, error) {
+func (r *MemRepo) GetAgentType(_ context.Context, tenantID int64) (AgentType, AgentParams, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	rec, ok := r.profiles[userID]
+	rec, ok := r.profiles[tenantID]
 	if !ok {
 		return "", AgentParams{}, false, nil
 	}

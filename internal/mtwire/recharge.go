@@ -78,6 +78,11 @@ func (rechargeQuotaSink) OnPaid(_ context.Context, o payment.PaidOrder) error {
 	if q <= 0 {
 		return nil
 	}
+	// TODO(recharge_spread / 口径未决)：充值差价分润 = 用户实付¥ − 代理成本¥。当前单一汇率模型下，
+	// 用户实付 = AmountUSD × USDExchangeRate（= 主站标准价），代理无独立「充值成本/加价率」字段，
+	// 故差价恒为 0、暂不入账。待数据模型补充 agent 充值加价/成本率后，在此按
+	// (o.ActualPaid − agentRechargeCostCNY) 经 AgentEarnings.AddEarning(source=recharge_spread,
+	// SourceID=o.OrderNo) 幂等落账（须先有 agent_profile）。详见报告「风险/未决」。
 	// db=true：同步落 users.quota + 异步刷新额度缓存（与 EpayNotify/Stripe 入账一致）。
 	return model.IncreaseUserQuota(int(o.UserID), q, true)
 }

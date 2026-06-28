@@ -48,12 +48,17 @@ func (s TenantStatus) CanTransitionTo(next TenantStatus) bool {
 }
 
 // Tenant 是租户实体（对应 proposal §6 `tenants` 表，含 tokenplan_enabled）。
+//
+// OwnerUserID 是「代理=User+Tenant 1:1」决策落地的归属列：指向 new-api users.id 中
+// 独占本租户的代理 owner（0 = 尚未设代理 / 主站根域）。设代理时由管理端写入，
+// principalFrom 据此把「Host 解析出的租户.owner == 当前 session 用户」识别为 RoleAgentOwner。
 type Tenant struct {
 	ID               int64
 	Slug             string
 	Name             string
 	Status           TenantStatus
 	TokenplanEnabled bool
+	OwnerUserID      int64
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }

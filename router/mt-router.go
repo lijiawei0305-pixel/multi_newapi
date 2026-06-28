@@ -26,6 +26,9 @@ func SetMtRouter(router *gin.Engine) {
 
 	app := mtwire.New(model.DB)
 
+	// 安装代理增量旁路钩子（消耗分润 / 注册归属）。所有节点都装（钩子由原生 service/controller 调用）。
+	app.InstallHooks()
+
 	if common.IsMasterNode {
 		if err := app.Migrate(); err != nil {
 			common.FatalLog("mt-router: AutoMigrate multitenant tables failed: " + err.Error())
@@ -47,6 +50,13 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.GET("/subscriptions", middleware.UserAuth(), app.HandleListSubscriptions)
 		// 充值下单（目标③）：UserAuth + Host 租户；下单 → 调 auth-service → 返支付凭据。
 		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), app.HandleWalletRecharge)
+		// 代理自助（owner 维度）：UserAuth + AgentOwnerAuth（权威校验 Host 租户 owner == 当前用户）。
+		agentSelf := tenantGroup.Group("", middleware.UserAuth(), app.AgentOwnerAuth())
+		{
+			agentSelf.POST("/withdrawals", app.HandleAgentRequestWithdrawal)
+			agentSelf.GET("/withdrawals", app.HandleAgentListWithdrawals)
+			agentSelf.GET("/earnings", app.HandleAgentListEarnings)
+		}
 	}
 
 	// 内网入账（目标③）：auth-service 验签后回调，仅内网 + 共享密钥头校验。
@@ -72,5 +82,23 @@ func SetMtRouter(router *gin.Engine) {
 		adminSubGroup.GET("", app.HandleAdminListSubscriptions)
 	}
 
-	common.SysLog("multitenant (tenant + tokenplan) routes registered")
+	// 主站代理管理（全局，非租户维度）：设代理 / 列表 / 改代理。复用 new-api AdminAuth。
+	adminAgentGroup := router.Group("/api/admin/agents")
+	adminAgentGroup.Use(middleware.AdminAuth())
+	{
+		adminAgentGroup.GET("", app.HandleAdminListAgents)
+		adminAgentGroup.POST("", app.HandleAdminCreateAgent)
+		adminAgentGroup.PATCH("/:id", app.HandleAdminUpdateAgent)
+	}
+
+	// 主站提现审核（全局，非租户维度）：列表 / 通过 / 拒绝。复用 new-api AdminAuth。
+	adminWithdrawGroup := router.Group("/api/admin/withdrawals")
+	adminWithdrawGroup.Use(middleware.AdminAuth())
+	{
+		adminWithdrawGroup.GET("", app.HandleAdminListWithdrawals)
+		adminWithdrawGroup.POST("/:id/approve", app.HandleAdminApproveWithdrawal)
+		adminWithdrawGroup.POST("/:id/reject", app.HandleAdminRejectWithdrawal)
+	}
+
+	common.SysLog("multitenant (tenant + tokenplan + agent) routes registered")
 }

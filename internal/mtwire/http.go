@@ -47,7 +47,11 @@ func tenantFrom(c *gin.Context) *tenant.Tenant {
 }
 
 // principalFrom 组装请求级 Principal：UserID/Role 取自 new-api 鉴权写入 gin ctx 的 id/role，
-// TenantID 取自 Host 中间件。new-api 无 agent_owner 角色，故仅映射 admin / user。
+// TenantID 取自 Host 中间件。角色映射：admin（new-api 管理员）> agent_owner（Host 租户 owner==当前用户）> user。
+//
+// agent_owner 识别用「Host 解析出的租户.OwnerUserID == 当前 session 用户」。此处取自（可能缓存的）
+// 已解析租户，作为下游 ctx 的角色提示；代理自助端点的**权威**鉴权另由 App.AgentOwnerAuth 做直读 DB 校验
+// （绕过解析缓存），故角色提示即便因缓存短暂滞后也不影响安全边界。
 func principalFrom(c *gin.Context) appctx.Principal {
 	p := appctx.Principal{
 		UserID: int64(c.GetInt("id")),
@@ -58,6 +62,9 @@ func principalFrom(c *gin.Context) appctx.Principal {
 	}
 	if t := tenantFrom(c); t != nil {
 		p.TenantID = t.ID
+		if p.Role != appctx.RoleAdmin && p.UserID > 0 && t.OwnerUserID == p.UserID {
+			p.Role = appctx.RoleAgentOwner
+		}
 	}
 	return p
 }
