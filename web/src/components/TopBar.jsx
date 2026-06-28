@@ -59,6 +59,14 @@ export default function TopBar({ brand, route }) {
             主页
           </NavLink>
           <NavLink
+            to="#/playground"
+            active={route === 'playground'}
+            themeColor={themeColor}
+            testid="nav-playground"
+          >
+            游乐场
+          </NavLink>
+          <NavLink
             to="#/plans"
             active={route === 'plans'}
             themeColor={themeColor}

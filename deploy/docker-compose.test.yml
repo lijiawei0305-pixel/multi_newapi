@@ -12,6 +12,12 @@ services:
       SQL_DSN: "root:testpass123@tcp(mysql:3306)/new-api-test?charset=utf8mb4&parseTime=true&loc=Local"
       PORT: "3000"
       WEB_DIST: "/web/dist"
+      # 上游渠道凭据：**仅引用**服务器 .env 的同名变量，值不入库（compose 自动插值）。
+      UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL}"
+      UPSTREAM_API_KEY: "${UPSTREAM_API_KEY}"
+      # 模型默认价占位（USD/百万 token，可选覆盖）：缺省 in=1.25 / out=10。
+      MODEL_PRICE_IN_PER_1M: "${MODEL_PRICE_IN_PER_1M:-1.25}"
+      MODEL_PRICE_OUT_PER_1M: "${MODEL_PRICE_OUT_PER_1M:-10}"
     depends_on:
       - mysql
     restart: on-failure       # app 内已对 mysql 未就绪重试；耗尽后由此兜底重启

@@ -9,8 +9,10 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -25,11 +27,16 @@ import (
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 
+	"newapi-mt/internal/billing"
+	billingrepo "newapi-mt/internal/billing/gormrepo"
 	"newapi-mt/internal/identity"
 	idstore "newapi-mt/internal/identity/gormstore"
 	"newapi-mt/internal/platform/appctx"
 	"newapi-mt/internal/platform/apperr"
+	"newapi-mt/internal/platform/quota"
 	"newapi-mt/internal/pricing"
+	"newapi-mt/internal/relay"
+	"newapi-mt/internal/relay/upstream"
 	"newapi-mt/internal/tenant"
 	"newapi-mt/internal/tenant/gormrepo"
 	"newapi-mt/internal/tokenplan"
@@ -157,6 +164,49 @@ type tokenplanEarnings struct{}
 
 func (tokenplanEarnings) AddEarning(_ context.Context, _ tokenplan.EarningEntry) error { return nil }
 
+// --- Slice 4 中继计费适配桩（billing 双桶 / 模型价 / 收益 / 租户活跃）---
+
+// walletSourceAdapter 把 wallet.WalletQuotaFactory（For(Principal)）适配为
+// billing.WalletSourceFactory（WalletSource(ctx,userID,tenantID)），供 QuotaRouter 选钱包桶。
+type walletSourceAdapter struct{ f wallet.WalletQuotaFactory }
+
+func (a walletSourceAdapter) WalletSource(_ context.Context, userID, tenantID int64) (quota.Source, error) {
+	return a.f.For(appctx.Principal{UserID: userID, TenantID: tenantID}), nil
+}
+
+// staticModelCatalog 是 billing.ModelCatalog 的**占位**实现：对所有模型返回同一组默认单价
+// （USD per token），单价由 env 可调（MODEL_PRICE_IN_PER_1M / MODEL_PRICE_OUT_PER_1M）。
+// TODO(模型价)：真实实现应复用 New API 模型价表，按 model 精确定价（含分组倍率），见交付报告风险。
+type staticModelCatalog struct {
+	inPerToken  float64 // 输入单价（USD/token）
+	outPerToken float64 // 输出单价（USD/token）
+}
+
+func (c staticModelCatalog) Price(_ context.Context, _ string) (float64, float64, error) {
+	return c.inPerToken, c.outPerToken, nil
+}
+
+// noopBillingEarnings 是 billing.EarningSink 的 noop 实现：丢弃 consume_commission 分润。
+// Slice 后续接真实 agent 模块（按代理分润比例入账可提现余额）。
+type noopBillingEarnings struct{}
+
+func (noopBillingEarnings) AddEarning(_ context.Context, _ billing.EarningEntry) error { return nil }
+
+// tenantStatusChecker 把 tenant.TenantRepo 适配为 identity.TenantStatusChecker，
+// 供 AccessGuard.RequireTenantActive 在 /v1 入口拦截冻结/删除租户。
+type tenantStatusChecker struct{ repo tenant.TenantRepo }
+
+func (c tenantStatusChecker) StatusOf(ctx context.Context, tenantID int64) (identity.TenantStatus, bool, error) {
+	t, err := c.repo.GetTenant(ctx, tenantID)
+	if err != nil {
+		if apperr.Is(err, "TENANT_NOT_FOUND") {
+			return "", false, nil // 租户不存在视为非 active
+		}
+		return "", false, err // 基础设施错误原样上浮
+	}
+	return identity.TenantStatus(t.Status), true, nil
+}
+
 func main() {
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
@@ -190,6 +240,9 @@ func main() {
 	if err := tprepo.AutoMigrate(db); err != nil {
 		log.Fatalf("[server] migrate tokenplan tables: %v", err)
 	}
+	if err := billingrepo.AutoMigrate(db); err != nil {
+		log.Fatalf("[server] migrate billing tables: %v", err)
+	}
 
 	repo := gormrepo.New(db)
 	svc := tenant.NewService(repo, tenant.NewSlugValidator())
@@ -197,9 +250,9 @@ func main() {
 
 	store := idstore.New(db)
 	authn := identity.NewAuthenticator(store)
-	// RequireAdmin / RequireTenantOwner 仅看 Principal，不需要 TenantStatusChecker，故传 nil；
-	// RequireTenantActive（需 checker）本切未用。
-	guard := identity.NewAccessGuard(nil)
+	// RequireAdmin / RequireTenantOwner 仅看 Principal；RequireTenantActive（/v1 入口用）需
+	// TenantStatusChecker，故注入 tenant repo 适配器（冻结/删除租户在中继入口被拦截）。
+	guard := identity.NewAccessGuard(tenantStatusChecker{repo: repo})
 
 	wRepo := walletrepo.New(db)
 	wSvc := wallet.NewService(wRepo, fixedRatioPricing{}, noopEarningSink{})
@@ -210,6 +263,27 @@ func main() {
 	catalog := tokenplan.NewCatalog(tpRepo)
 	retailSvc := tokenplan.NewRetailService(tpRepo, pricing.NewGuard())
 	subSvc := tokenplan.NewSubscriptionService(tpRepo, tpRepo, tokenplanPayment{}, tokenplanRisk{db: db}, tokenplanEarnings{}, nil)
+
+	// billing 双桶计费装配（doc/api-contract §2.9 / §4）：
+	//   QuotaRouter：SubscriptionChecker=tokenplan(HasActive)，钱包桶=wallet，套餐桶=tokenplan；
+	//   BillingService：算上游成本→选桶→原子扣减→写计费日志→消耗分润（noop）。
+	billingLogs := billingrepo.New(db)
+	walletQF := wallet.NewQuotaFactory(wRepo)
+	subQF := tokenplan.NewQuotaFactory(tpRepo, nil)
+	quotaRouter := billing.NewQuotaRouter(subSvc, walletSourceAdapter{f: walletQF}, subQF)
+	modelCatalog := staticModelCatalog{
+		// 默认占位价：in $1.25/1M、out $10/1M（env 可调，注释见 staticModelCatalog）。
+		inPerToken:  parsePricePer1M("MODEL_PRICE_IN_PER_1M", 1.25),
+		outPerToken: parsePricePer1M("MODEL_PRICE_OUT_PER_1M", 10),
+	}
+	billingSvc := billing.NewService(modelCatalog, quotaRouter, billingLogs, noopBillingEarnings{})
+
+	// 上游渠道池（OpenAI 兼容）：凭据从 env 注入，禁止入库；缺省时 /v1 转发返回 UPSTREAM_ERROR。
+	upstreamBase := os.Getenv("UPSTREAM_BASE_URL")
+	upstreamPool := upstream.New(upstreamBase, os.Getenv("UPSTREAM_API_KEY"))
+	if upstreamBase == "" {
+		log.Printf("[server] WARN UPSTREAM_BASE_URL unset; /v1 forwarding will fail until configured")
+	}
 
 	if err := seedAll(context.Background(), db, svc, repo, store, wRepo, tpRepo); err != nil {
 		log.Fatalf("[server] seed: %v", err)
@@ -228,6 +302,11 @@ func main() {
 		retail:   retailSvc,
 		subSvc:   subSvc,
 		guard:    guard,
+		// Slice 4 中继计费
+		billingSvc:   billingSvc,
+		billingLogs:  billingLogs,
+		upstream:     upstreamPool,
+		modelCatalog: modelCatalog,
 	})
 	log.Printf("[server] listening on :%s (web_dist=%s)", port, webDist)
 	if err := r.Run(":" + port); err != nil {
@@ -263,11 +342,12 @@ func openDB(dsn string) (*gorm.DB, error) {
 	return nil, fmt.Errorf("mysql unreachable after %d attempts: %w", maxAttempts, lastErr)
 }
 
-// seededPlan 是 seed 后回填了主键的套餐摘要（供建租户上架记录）。
+// seededPlan 是 seed 后回填了主键的套餐摘要（供建租户上架记录 + 演示订阅快照）。
 type seededPlan struct {
-	id        int64
-	code      string
-	basePrice float64
+	id            int64
+	code          string
+	basePrice     float64
+	monthLimitUSD float64
 }
 
 // seedAll 幂等地建立全部演示数据：6 档主站套餐 + 每租户（用户/钱包/兑换码 + admin/agent 角色用户 +
@@ -282,13 +362,24 @@ func seedAll(ctx context.Context, db *gorm.DB, svc tenant.TenantService, repo te
 		if err != nil {
 			return err
 		}
-		if err := seedIdentityWallet(ctx, store, wRepo, tid, spec); err != nil {
+		uid, err := seedIdentityWallet(ctx, store, wRepo, tid, spec)
+		if err != nil {
 			return err
 		}
 		if err := seedTenantRoles(ctx, store, tid, spec.slug); err != nil {
 			return err
 		}
 		if err := seedTenantListings(ctx, tpRepo, tid, spec.slug, plans); err != nil {
+			return err
+		}
+		// 演示主用户（demo@<slug>）幂等激活一份 mini 套餐 → /v1 走「套餐桶」（独立计量）。
+		if mini, ok := findSeededPlan(plans, "mini"); ok {
+			if err := seedSubscription(ctx, tpRepo, tid, uid, mini, spec.slug); err != nil {
+				return err
+			}
+		}
+		// payg 用户（payg@<slug>，无套餐，钱包余额）→ /v1 走「钱包桶」，演示双桶分流。
+		if err := seedPaygUser(ctx, store, wRepo, tid, spec.slug); err != nil {
 			return err
 		}
 	}
@@ -304,7 +395,7 @@ func seedPlans(ctx context.Context, tpRepo *tprepo.Repo) ([]seededPlan, error) {
 		if err != nil {
 			return nil, fmt.Errorf("seed plan %s: %w", p.Code, err)
 		}
-		out = append(out, seededPlan{id: id, code: p.Code, basePrice: p.BasePrice})
+		out = append(out, seededPlan{id: id, code: p.Code, basePrice: p.BasePrice, monthLimitUSD: p.MonthLimitUSD})
 		log.Printf("[seed] plan code=%s id=%d base=%.2f¥ month_limit=%.0fUSD", p.Code, id, p.BasePrice, p.MonthLimitUSD)
 	}
 	return out, nil
@@ -388,7 +479,8 @@ func ensureTenant(ctx context.Context, svc tenant.TenantService, repo tenant.Ten
 }
 
 // seedIdentityWallet 幂等地为租户建演示用户 + API Token + 钱包余额 + 兑换码，并把 Token 明文写入日志（供测试）。
-func seedIdentityWallet(ctx context.Context, store *idstore.Store, wRepo *walletrepo.Repo, tid int64, spec tenantSeed) error {
+// 返回演示主用户的 ID（供后续 seed 其演示订阅）。
+func seedIdentityWallet(ctx context.Context, store *idstore.Store, wRepo *walletrepo.Repo, tid int64, spec tenantSeed) (int64, error) {
 	u, err := store.EnsureUser(ctx, &idstore.User{
 		TenantID:  tid,
 		Username:  spec.username,
@@ -396,13 +488,13 @@ func seedIdentityWallet(ctx context.Context, store *idstore.Store, wRepo *wallet
 		SeedToken: spec.rawToken,
 	})
 	if err != nil {
-		return fmt.Errorf("seed user %s: %w", spec.username, err)
+		return 0, fmt.Errorf("seed user %s: %w", spec.username, err)
 	}
 	if err := store.EnsureToken(ctx, tid, u.ID, "default", spec.rawToken); err != nil {
-		return fmt.Errorf("seed token for %s: %w", spec.username, err)
+		return 0, fmt.Errorf("seed token for %s: %w", spec.username, err)
 	}
 	if err := wRepo.EnsureBalance(ctx, tid, u.ID, spec.balanceUSD); err != nil {
-		return fmt.Errorf("seed balance for %s: %w", spec.username, err)
+		return 0, fmt.Errorf("seed balance for %s: %w", spec.username, err)
 	}
 	if err := wRepo.EnsureRedemption(ctx, &wallet.RedemptionCode{
 		TenantID:  tid,
@@ -410,11 +502,79 @@ func seedIdentityWallet(ctx context.Context, store *idstore.Store, wRepo *wallet
 		AmountUSD: spec.redeemUSD,
 		Status:    wallet.RedemptionEnabled,
 	}); err != nil {
-		return fmt.Errorf("seed redemption for %s: %w", spec.username, err)
+		return 0, fmt.Errorf("seed redemption for %s: %w", spec.username, err)
 	}
 	log.Printf("[seed] tenant=%s(id=%d) user=%s(id=%d) token=%q balance=%.2fUSD redeem=%s(%.0fUSD)",
 		spec.slug, tid, spec.username, u.ID, spec.rawToken, spec.balanceUSD, spec.redeemCode, spec.redeemUSD)
+	return u.ID, nil
+}
+
+// paygBalanceUSD 是 payg 演示用户的初始钱包余额（USD）；用于钱包桶后付费计费演示。
+const paygBalanceUSD = 50
+
+// seedPaygUser 幂等地为租户建 payg 用户（payg@<slug>，role user）+ API Token + 钱包余额（无套餐）。
+// 该用户无 active 套餐，故 /v1 调用经 QuotaRouter 选「钱包桶」，与主用户的「套餐桶」形成双桶演示。
+func seedPaygUser(ctx context.Context, store *idstore.Store, wRepo *walletrepo.Repo, tid int64, slug string) error {
+	username := "payg@" + slug
+	rawToken := "sk-td-payg-" + slug
+	u, err := store.EnsureUser(ctx, &idstore.User{
+		TenantID:  tid,
+		Username:  username,
+		Role:      appctx.RoleUser,
+		SeedToken: rawToken,
+	})
+	if err != nil {
+		return fmt.Errorf("seed payg user %s: %w", username, err)
+	}
+	if err := store.EnsureToken(ctx, tid, u.ID, "default", rawToken); err != nil {
+		return fmt.Errorf("seed payg token %s: %w", username, err)
+	}
+	if err := wRepo.EnsureBalance(ctx, tid, u.ID, paygBalanceUSD); err != nil {
+		return fmt.Errorf("seed payg balance %s: %w", username, err)
+	}
+	log.Printf("[seed] tenant=%s(id=%d) user=%s(id=%d, role=user) token=%q balance=%.2fUSD (wallet-bucket, no plan)",
+		slug, tid, username, u.ID, rawToken, float64(paygBalanceUSD))
 	return nil
+}
+
+// seedSubscription 幂等地为某用户激活一份套餐订阅（固定 order_no → INSERT IGNORE，重启不重复建）。
+// 走 SubscriptionRepo.ActivateFromOrder（仅插订阅行，不读待支付订单），有效期 30 天。
+func seedSubscription(ctx context.Context, tpRepo *tprepo.Repo, tid, userID int64, plan seededPlan, slug string) error {
+	if userID <= 0 {
+		return nil // 主用户回读失败时跳过（不致命）
+	}
+	now := time.Now()
+	sub := &tokenplan.Subscription{
+		TenantID:       tid,
+		UserID:         userID,
+		PlanID:         plan.id,
+		PurchasedPrice: plan.basePrice,
+		MonthLimitUSD:  plan.monthLimitUSD,
+		UsedUSD:        0,
+		Status:         tokenplan.SubActive,
+		StartAt:        now,
+		ExpireAt:       now.AddDate(0, 0, 30),
+		SourceOrderID:  fmt.Sprintf("seed_sub_%d_%s", tid, plan.code),
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	created, err := tpRepo.ActivateFromOrder(ctx, sub)
+	if err != nil {
+		return fmt.Errorf("seed subscription tenant=%s user=%d plan=%s: %w", slug, userID, plan.code, err)
+	}
+	log.Printf("[seed] tenant=%s(id=%d) user=%d subscription plan=%s month_limit=%.0fUSD created=%v (subscription-bucket)",
+		slug, tid, userID, plan.code, plan.monthLimitUSD, created)
+	return nil
+}
+
+// findSeededPlan 在 seed 套餐摘要中按 code 查找。
+func findSeededPlan(plans []seededPlan, code string) (seededPlan, bool) {
+	for _, p := range plans {
+		if p.code == code {
+			return p, true
+		}
+	}
+	return seededPlan{}, false
 }
 
 // routerDeps 聚合 buildRouter 所需依赖，避免过长形参。
@@ -432,6 +592,11 @@ type routerDeps struct {
 	retail  tokenplan.PlanRetailService
 	subSvc  tokenplan.SubscriptionService
 	guard   identity.AccessGuard
+	// Slice 4 中继计费
+	billingSvc   billing.BillingService
+	billingLogs  *billingrepo.Repo
+	upstream     relay.UpstreamPool
+	modelCatalog billing.ModelCatalog
 }
 
 // buildRouter 装配路由：健康检查、租户中间件 + /api（公开/鉴权两组）、静态资源（SPA fallback）。
@@ -456,6 +621,7 @@ func buildRouter(d routerDeps) *gin.Engine {
 	authed.GET("/tenant/wallet", walletBalanceHandler(d.wRepo))
 	authed.POST("/tenant/wallet/redeem", walletRedeemHandler(d.wSvc, d.wRepo))
 	authed.POST("/tenant/wallet/recharge", walletRechargeHandler())
+	authed.GET("/tenant/billing-logs", billingLogsHandler(d.billingLogs)) // 🅤 我的计费流水（近 N 条）
 
 	// tokenplan 套餐（api-contract §2.4）。角色守卫在 handler 内（admin/agent_owner）。
 	authed.GET("/tenant/token-plans", tenantTokenPlansHandler(d.retail))                  // 🅤 本租户上架套餐
@@ -467,6 +633,12 @@ func buildRouter(d routerDeps) *gin.Engine {
 	authed.GET("/admin/token-plans/:id", adminGetPlanHandler(d.catalog, d.guard))         // 🅐 单套餐
 	authed.POST("/admin/token-plans", adminCreatePlanHandler(d.catalog, d.guard))         // 🅐 新建
 	authed.PATCH("/admin/token-plans/:id", adminUpdatePlanHandler(d.catalog, d.guard))    // 🅐 改价/改档
+
+	// /v1 模型调用入口（OpenAI 兼容，api-contract §2.9）：Bearer=用户租户 API Token。
+	// 不挂 tenantMiddleware——租户/用户由 Token 反查得出（Principal 携带 TenantID）。
+	v1 := r.Group("/v1")
+	v1.Use(authMiddleware(d.authn))
+	v1.POST("/chat/completions", chatCompletionsHandler(d.guard, d.upstream, d.billingSvc, d.billingLogs, d.modelCatalog))
 
 	registerStatic(r, d.webDist)
 	return r
@@ -580,9 +752,11 @@ func devLoginHandler(store *idstore.Store) gin.HandlerFunc {
 		// httpOnly + SameSite=Lax；secure=false 以兼容 localhost(http) 与 CF(https) 测试栈。
 		c.SetSameSite(http.SameSiteLaxMode)
 		c.SetCookie(sessionCookie, u.SeedToken, int(7*24*time.Hour/time.Second), "/", "", false, true)
+		// api_token 明文回传（**仅测试栈，生产删除**）：供前端 playground 作 /v1 Bearer 调用。
 		c.JSON(http.StatusOK, gin.H{
-			"user":   gin.H{"id": u.ID, "username": u.Username, "role": u.Role},
-			"tenant": gin.H{"slug": t.Slug, "site_name": t.Name},
+			"user":      gin.H{"id": u.ID, "username": u.Username, "role": u.Role},
+			"tenant":    gin.H{"slug": t.Slug, "site_name": t.Name},
+			"api_token": u.SeedToken,
 		})
 	}
 }
@@ -664,6 +838,220 @@ func walletRechargeHandler() gin.HandlerFunc {
 			},
 		})
 	}
+}
+
+// ---- Slice 4 中继计费 handlers（api-contract §2.9 /v1 + 计费流水）----
+
+// chatCompletionsHandler 是 POST /v1/chat/completions（OpenAI 兼容）入口。
+// 鉴权由 authMiddleware 完成（Bearer=用户租户 API Token → Principal）。
+//
+// 流程（后付费，api-contract §2.9 / §4；桶路由下沉 billing.Charge 内部）：
+//
+//	租户活跃校验 → 转发上游 → 仅 2xx 才计费（usage×模型价 → 选桶 → 原子扣减 → 写日志 → 分润）。
+//
+// 双桶（独立计量不回退）：有 active 套餐→套餐桶 Meter；否则钱包桶。
+// 后付费豁免：扣费失败（QUOTA_INSUFFICIENT / SUBSCRIPTION_EXHAUSTED / SUBSCRIPTION_EXPIRED）
+// 时已转发上游、产生真实成本，故仅落一条 unpaid 流水留痕，**仍原样回送上游响应**。
+// TODO(预扣)：高额请求应在转发前按预算预扣，扣不动直接拒绝，防止欠费滥用（见交付报告风险）。
+// 若改判为预检语义，则把扣费失败改为返回相应错误码、不回送响应。
+func chatCompletionsHandler(guard identity.AccessGuard, pool relay.UpstreamPool, billingSvc billing.BillingService, logs *billingrepo.Repo, modelCatalog billing.ModelCatalog) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, ok := principalFrom(c)
+		if !ok {
+			writeErr(c, errUnauthorized())
+			return
+		}
+		// 租户活跃校验（冻结/删除租户在此拦截 → TENANT_INACTIVE）。
+		if err := guard.RequireTenantActive(c.Request.Context(), p.TenantID); err != nil {
+			writeErr(c, err)
+			return
+		}
+		// 读原始请求体（原样透传上游；编排层不改写）。
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			writeErr(c, apperr.New(relay.CodeUpstreamError, "读取请求体失败", http.StatusBadRequest))
+			return
+		}
+		model := extractModel(body)
+		if model == "" {
+			writeErr(c, apperr.New("MODEL_REQUIRED", "缺少 model 字段", http.StatusBadRequest))
+			return
+		}
+		reqID := requestID(c)
+
+		// 转发上游。传输层失败 → UPSTREAM_ERROR；有响应（含 4xx/5xx）则在 resp 携带。
+		resp, usage, ferr := pool.Forward(c.Request.Context(), relay.RelayRequest{
+			Model:     model,
+			Endpoint:  "/v1/chat/completions",
+			Body:      body,
+			RequestID: reqID,
+			ClientIP:  c.ClientIP(),
+		})
+		if ferr != nil {
+			writeErr(c, apperr.New(relay.CodeUpstreamError, "上游转发失败", http.StatusBadGateway).Wrap(ferr))
+			return
+		}
+		// 上游非 2xx：原样回送错误响应，不计费、不记日志（未产生有效用量）。
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			writeUpstream(c, resp)
+			return
+		}
+
+		// 计费（选桶/扣减/日志/分润下沉 billing.Charge 内部）。
+		result, cerr := billingSvc.Charge(c.Request.Context(), billing.ChargeRequest{
+			RequestID:        reqID,
+			UserID:           p.UserID,
+			TenantID:         p.TenantID,
+			Model:            model,
+			PromptTokens:     usage.PromptTokens,
+			CompletionTokens: usage.CompletionTokens,
+		})
+		if cerr != nil {
+			if isBucketError(cerr) {
+				// 后付费豁免：留痕 unpaid 流水，仍回送上游响应。
+				_ = logs.WriteUnpaid(c.Request.Context(), billing.CallLogEntry{
+					RequestID:        reqID,
+					TenantID:         p.TenantID,
+					UserID:           p.UserID,
+					Model:            model,
+					PromptTokens:     usage.PromptTokens,
+					CompletionTokens: usage.CompletionTokens,
+					BucketKind:       bucketKindForError(cerr),
+					UpstreamCostUSD:  upstreamCostUSD(c.Request.Context(), modelCatalog, model, usage),
+				})
+				c.Header("X-TD-Billing", "unpaid:"+apperr.CodeOf(cerr))
+				writeUpstream(c, resp)
+				return
+			}
+			// 非桶错误（模型未定价 / 基础设施）：真实失败，返回错误。
+			writeErr(c, cerr)
+			return
+		}
+
+		// 计费成功：回写计费元信息头（不污染 OpenAI 响应体）+ 原样回送上游响应。
+		c.Header("X-TD-Bucket", string(result.BucketKind))
+		c.Header("X-TD-Charged-USD", formatUSD(result.ChargedUSD))
+		c.Header("X-TD-Remaining-USD", formatUSD(result.RemainingUSD))
+		writeUpstream(c, resp)
+	}
+}
+
+// billingLogsHandler 返回当前用户在本租户的近 N 条计费流水（鉴权，本人本租户 scope）。
+// 查询参数 limit（默认 50，上限 200）。
+func billingLogsHandler(logs *billingrepo.Repo) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, ok := principalFrom(c)
+		if !ok {
+			writeErr(c, errUnauthorized())
+			return
+		}
+		limit := 50
+		if v := c.Query("limit"); v != "" {
+			if n, e := strconv.Atoi(v); e == nil && n > 0 {
+				if n > 200 {
+					n = 200
+				}
+				limit = n
+			}
+		}
+		views, err := logs.ListByUser(c.Request.Context(), p.TenantID, p.UserID, limit)
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		out := make([]gin.H, 0, len(views))
+		for _, v := range views {
+			out = append(out, gin.H{
+				"id":                v.ID,
+				"request_id":        v.RequestID,
+				"model":             v.Model,
+				"prompt_tokens":     v.PromptTokens,
+				"completion_tokens": v.CompletionTokens,
+				"bucket":            v.BucketKind,
+				"upstream_cost_usd": v.UpstreamCostUSD,
+				"charged_usd":       v.ChargedUSD,
+				"gross_profit_usd":  v.GrossProfitUSD,
+				"status":            v.Status,
+				"created_at":        v.CreatedAt,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"data": out})
+	}
+}
+
+// ---- /v1 handler 辅助 ----
+
+// extractModel 仅解析请求体的 model 字段（其余字段原样透传上游，不在此解析）。
+func extractModel(body []byte) string {
+	var m struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &m)
+	return strings.TrimSpace(m.Model)
+}
+
+// requestID 取调用链 ID：优先 X-Request-Id 头，缺省按时间生成（落计费日志/幂等键）。
+func requestID(c *gin.Context) string {
+	if id := strings.TrimSpace(c.GetHeader("X-Request-Id")); id != "" {
+		return id
+	}
+	return fmt.Sprintf("v1_%d", time.Now().UnixNano())
+}
+
+// writeUpstream 原样回送上游响应（状态码 + Content-Type + 响应体）。
+func writeUpstream(c *gin.Context, resp relay.RelayResponse) {
+	ct := resp.Headers["Content-Type"]
+	if ct == "" {
+		ct = "application/json"
+	}
+	c.Data(resp.StatusCode, ct, resp.Body)
+}
+
+// isBucketError 判定是否为「桶不足/超额/过期」类后付费可豁免错误。
+func isBucketError(err error) bool {
+	switch apperr.CodeOf(err) {
+	case billing.CodeQuotaInsufficient, billing.CodeSubscriptionExhausted, billing.CodeSubscriptionExpired:
+		return true
+	default:
+		return false
+	}
+}
+
+// bucketKindForError 由桶错误码反推扣费桶来源（供 unpaid 流水标注实际拒绝的桶）。
+func bucketKindForError(err error) quota.Kind {
+	switch apperr.CodeOf(err) {
+	case billing.CodeSubscriptionExhausted, billing.CodeSubscriptionExpired:
+		return quota.KindSubscription
+	case billing.CodeQuotaInsufficient:
+		return quota.KindWallet
+	default:
+		return ""
+	}
+}
+
+// upstreamCostUSD 按模型价×用量算上游成本（USD），供 unpaid 流水留痕；未定价返回 0。
+func upstreamCostUSD(ctx context.Context, catalog billing.ModelCatalog, model string, usage relay.Usage) float64 {
+	in, out, err := catalog.Price(ctx, model)
+	if err != nil {
+		return 0
+	}
+	return float64(usage.PromptTokens)*in + float64(usage.CompletionTokens)*out
+}
+
+// formatUSD 以定点 8 位小数序列化金额（与 decimal(20,8) 计量口径一致）。
+func formatUSD(v float64) string {
+	return strconv.FormatFloat(v, 'f', 8, 64)
+}
+
+// parsePricePer1M 读取「每百万 token 美元价」env 并转为单 token 单价（USD/token）；非法/缺省回退 def。
+func parsePricePer1M(key string, def float64) float64 {
+	per1M := def
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 {
+			per1M = f
+		}
+	}
+	return per1M / 1_000_000
 }
 
 // ---- tokenplan handlers（api-contract §2.4）----

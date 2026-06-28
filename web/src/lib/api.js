@@ -14,7 +14,7 @@ function withHost(path) {
   return `${path}${sep}host=${encodeURIComponent(host)}`;
 }
 
-export async function apiFetch(path, { method = 'GET', body } = {}) {
+export async function apiFetch(path, { method = 'GET', body, headers } = {}) {
   let resp;
   try {
     resp = await fetch(withHost(path), {
@@ -23,6 +23,7 @@ export async function apiFetch(path, { method = 'GET', body } = {}) {
       headers: {
         Accept: 'application/json',
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(headers || {}), // 调用方自定义头（如 /v1 的 Authorization: Bearer <api_token>）
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
@@ -45,7 +46,18 @@ export async function apiFetch(path, { method = 'GET', body } = {}) {
   return {
     ok: false,
     status: resp.status,
-    code: (payload && payload.code) || 'INTERNAL',
-    message: (payload && payload.message) || '',
+    // 兼容我方信封 {code,message} 与 OpenAI 风格 {error:{code,message}}（/v1 调用走后者）
+    code: (payload && (payload.code || (payload.error && payload.error.code))) || 'INTERNAL',
+    message: (payload && (payload.message || (payload.error && payload.error.message))) || '',
   };
+}
+
+// ── 游乐场 /v1 调用用的内存态登录令牌（dev-login 返回 api_token）──
+// 存内存而非 localStorage：演示令牌，整页刷新即失效，避免持久化/泄露；跨路由 remount 仍保留。
+let _playgroundAuth = null; // { apiToken, username } | null
+export function setPlaygroundAuth(v) {
+  _playgroundAuth = v || null;
+}
+export function getPlaygroundAuth() {
+  return _playgroundAuth;
 }
