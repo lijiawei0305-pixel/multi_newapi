@@ -47,7 +47,8 @@
 > **Wave 3+4 完成（2026-06-28）**：relay/promotion/siteconfig/stats + payment/tokenplan/risk 全部逻辑层完成并验收。tokenplan 实现 month_limit 原子计量（500 goroutine 不击穿）、激活幂等、Trial 三维限购单赢家、回调幂等。**至此 14 个后端模块逻辑层全部跑绿。**
 > **★ Slice 1 完成（2026-06-28）· 集成纵切打通**：Master 调度 后端 Worker(gin+GORM tenant)+前端 Worker(React/Semi 品牌页)，过**预上传 gate**(`scripts/preflight.sh`)→ tar 上传服务器 → 构建镜像 → `newapi_test` 栈(127.0.0.1:3100, DB `new-api-test`, 独立 redis, **不碰现网**) → 真实 MySQL→GORM→解析→`/api/tenant/current` → **playwright-cli 浏览器冒烟全过**（demo 租户品牌渲染 ✓、未知域名 404 站点未开通 ✓）。**Mac 代码→服务器构建→DB→端点→浏览器 全链路打通。** 提交 `637526a`。
 > **★ Slice 2 完成（2026-06-28）· 身份与钱包 + 真实域名**：① 接入真实域名 **`https://tokendream.wedreamhub.com`**（CF 代理，源站宝塔 nginx vhost → 测试栈 3100，CF Full 用源站自签 443，详见 RETRO）；② 后端 Worker：identity 鉴权中间件（Bearer/Cookie→Principal）+ Wallet GORM（余额/兑换/充值-stub）+ dev-login + seed `tokendream` 租户/用户/钱包/兑换码；前端 Worker：hash 路由 + 钱包页（uiux §3.3）。③ **浏览器 E2E 全过（真实域名）**：TokenDream 品牌渲染 ✓、登录 ✓、余额 $110 ✓、兑换 WELCOME10→+10 ✓、再兑 `REDEEM_CODE_USED` ✓、未登录 401 ✓、充值 stub ✓、紫色主题换肤 ✓。提交 `637526a`/`d8fb903`。
-> **下一步**：Slice 3（tokenplan 套餐：CRUD/购买/计量 + 购买页，接 payment-stub→真实）；之后 Slice 4（中继计费 `/v1/*`）。沿用 Master-Worker + preflight gate + 测试栈 E2E。问题持续记 `RETRO.md`。
+> **★ Slice 3 完成（2026-06-28）· tokenplan 套餐**（核心增量）：后端 Worker：tokenplan GORM（4+1 表，原子 Meter/幂等激活）+ 9 端点（套餐列表/购买/我的套餐/管理员 CRUD/代理上架改价）+ seed 6 档套餐 + admin/agent 角色用户 + stub 支付（同步激活）+ Trial 限购（user 维）；前端 Worker：购买页（6 营销卡片，uiux §4.1）+ 我的套餐（进度条）。**浏览器 E2E 全过（真实域名）**：6 档卡片营销渲染 ✓（Trial ¥6.90/-99%/$80…Max ¥8999/$25000，Pro 推荐角标+描边）、购买 Mini 激活 ✓、我的套餐显示 trial+mini ✓、Trial 再购 `PURCHASE_LIMIT_EXCEEDED` ✓、user 调 admin 403 ✓。提交 `c9082f2`。
+> **下一步**：Slice 4（中继计费 `/v1/*` 接 relay + 双桶扣费 + 日志；tokenplan 计量经 SubscriptionQuota 真实消耗；接真实支付回调激活）。沿用 Master-Worker + preflight gate + 测试栈 E2E。问题持续记 `RETRO.md`。
 
 ---
 

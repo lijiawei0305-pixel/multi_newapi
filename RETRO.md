@@ -43,6 +43,12 @@
 - **解决/规避**：源站侧自治修复——给 `tokendream` vhost 加 `listen 443 ssl` + **自签证书**（CF Full 不校验源站证书），同时保留 80（兼容 Flexible）。无需改 CF 面板。**已验证**：CF 全链路 healthz/品牌/钱包均 200。
 - **升级**：测试栈单域名用自签即可；正式上线 `*.wedreamhub.com` 通配建议用 CF Origin CA 证书（Full strict）或宝塔 Let's Encrypt。`scripts/` 可加 vhost 模板。
 
+### [已解决] 长镜像构建期 SSH 连接被远端关闭（构建仍完成）
+- **现象**：`ssh ... 'docker compose up -d --build'` 在构建中途返回 `exit 255 / Connection closed by remote host`。
+- **根因**：构建（go+node 多阶段）+ 运行容器同时占用，输出流式传输期间 SSH 会话被远端断开（资源瞬时压力/网络抖动）；但 `docker compose up -d --build` 的构建是在服务器侧进行，**断的是 ssh 输出流、不是构建本身**。
+- **解决/规避**：重连后 `docker compose ps`/`docker images`/`docker logs` 核实——镜像已重建、容器已 healthy、seed 已跑。**构建实际完成**。
+- **升级**：后续长构建可改 `ssh newapi628 'cd ... && nohup docker compose ... up -d --build > /tmp/build.log 2>&1 &'` 后轮询 `build.log`，避免 ssh 断流误判；或先 `docker compose build` 再 `up -d`。
+
 ---
 
 ## 二、构建与依赖

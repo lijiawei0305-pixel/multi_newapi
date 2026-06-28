@@ -48,7 +48,7 @@
 **纵切顺序**（每切 = GORM repo + 迁移 + handler + 装配 + 测试栈 E2E）：
 - [x] **Slice 1 · 租户管道**：GORM `TenantRepo` + `tenants/tenant_domains` 迁移 + 按 Host 解析的 `GET /api/tenant/current` → 测试栈跑通 → curl/playwright 冒烟（证明 Mac 代码→服务器构建→DB→端点→浏览器 全链路）
 - [x] **Slice 2 · 身份与钱包**：Identity 鉴权中间件 + Wallet GORM + 充值/余额端点
-- [ ] **Slice 3 · tokenplan**：套餐 CRUD/购买/计量 + 购买页对接 `api-contract.md`
+- [x] **Slice 3 · tokenplan**：套餐 CRUD/购买/计量 + 购买页对接 `api-contract.md`
 - [ ] **Slice 4 · 中继计费**：`/v1/*` 接 relay + 双桶扣费 + 日志
 - [ ] 组装层适配器（见 progress.md「组装层 TODO」与 `api-contract.md` §4）
 
