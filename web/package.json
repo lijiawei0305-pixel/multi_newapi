@@ -1,0 +1,21 @@
+{
+  "name": "newapi628-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "newapi628 多租户代理分销平台前端 (vite + React + Semi)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@douyinfe/semi-ui": "^2.72.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7"
+  }
+}

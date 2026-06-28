@@ -1,0 +1,32 @@
+# 让 docker build 上下文精简，并避免把 Mac 平台相关产物带进 Linux 镜像。
+# 关键：排除 web/node_modules（含平台相关二进制，会破坏镜像内 vite 构建）与 web/dist（stage1 重新构建）。
+.git
+.gitignore
+.dockerignore
+
+# node / 前端产物（stage1 在镜像内重装/重建）
+**/node_modules
+web/dist
+web/build
+
+# go 构建产物
+/dist
+/bin
+/newapi-mt
+*.test
+*.out
+
+# 文档/运维/调试，构建不需要
+*.md
+doc
+deploy
+.claude
+.playwright
+/scratchpad
+
+# os / editor / 日志
+*.log
+.DS_Store
+**/.DS_Store
+.idea
+.vscode

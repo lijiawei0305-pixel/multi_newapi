@@ -36,3 +36,7 @@ mysql_data/
 
 # scratch
 /scratchpad/
+
+# playwright-cli skill (本机本项目调试用, 不入库)
+/.claude/skills/playwright-cli/
+/.playwright/

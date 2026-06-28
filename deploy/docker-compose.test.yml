@@ -1,0 +1,33 @@
+# 集成自测编排（Slice 1 租户管道）。部署时用项目名隔离：
+#   docker compose -p newapi_test -f deploy/docker-compose.test.yml up -d --build
+# 不写 container_name / 外部网络：靠 -p 前缀隔离，默认网络自动创建。
+services:
+  app:
+    build:
+      context: ..            # 上下文为仓库根（Dockerfile 在根）
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3100:3000" # 仅本机回环暴露，避免裸公网
+    environment:
+      SQL_DSN: "root:testpass123@tcp(mysql:3306)/new-api-test?charset=utf8mb4&parseTime=true&loc=Local"
+      PORT: "3000"
+      WEB_DIST: "/web/dist"
+    depends_on:
+      - mysql
+    restart: on-failure       # app 内已对 mysql 未就绪重试；耗尽后由此兜底重启
+
+  mysql:
+    image: mysql:8.2
+    # 让 root 用 native_password，避免 caching_sha2 在非 TLS 下的公钥交换问题。
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: "testpass123"
+      MYSQL_DATABASE: "new-api-test"
+    volumes:
+      - mysql_test_data:/var/lib/mysql
+
+  redis:
+    image: redis:latest       # 预留给后续 Slice（缓存/限流），本 Slice 未使用
+
+volumes:
+  mysql_test_data:
