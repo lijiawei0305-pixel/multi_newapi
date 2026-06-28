@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
+	"github.com/QuantumNous/new-api/model"
 )
 
 // demo 租户常量（proposal §8 / 任务要求）。域名由 tenant.Service.Create 自动派生为
@@ -24,9 +26,20 @@ const (
 func (a *App) Seed() error {
 	ctx := context.Background()
 
-	t, err := a.ensureDemoTenant(ctx)
+	t, created, err := a.ensureDemoTenant(ctx)
 	if err != nil {
 		return err
+	}
+
+	// 首次初始化（新库）时把前端主题固化为 default：我们所有页面都在新版前端 web/default，
+	// new-api 默认 theme.frontend=classic 会服务经典前端、看不到我们的页面（见 RETRO「双前端」）。
+	// 仅首次设置（与建租户同条件），尊重后续运营人工切换。
+	if created {
+		if err := model.UpdateOption("theme.frontend", "default"); err != nil {
+			common.SysError("mtwire: 固化 theme.frontend=default 失败: " + err.Error())
+		} else {
+			common.SysLog("mtwire: 首次初始化，theme.frontend 已固化为 default")
+		}
 	}
 
 	// 6 档套餐 + 为 demo 租户上架（均幂等）。
@@ -43,18 +56,23 @@ func (a *App) Seed() error {
 	return nil
 }
 
-// ensureDemoTenant 返回 demo 租户；不存在则经 TenantService.Create 建租户 + 派生域名。
-func (a *App) ensureDemoTenant(ctx context.Context) (*tenant.Tenant, error) {
+// ensureDemoTenant 返回 demo 租户 + 是否本次新建（created）；不存在则经 TenantService.Create
+// 建租户 + 派生域名。created=true 表示首次初始化（新库），调用方据此固化一次性初始配置。
+func (a *App) ensureDemoTenant(ctx context.Context) (*tenant.Tenant, bool, error) {
 	t, err := a.TenantRepo.GetTenantBySlug(ctx, demoSlug)
 	if err == nil {
-		return t, nil
+		return t, false, nil
 	}
 	if !errors.Is(err, tenant.ErrTenantNotFound) {
-		return nil, err
+		return nil, false, err
 	}
-	return a.TenantService.Create(ctx, tenant.CreateTenantInput{
+	created, err := a.TenantService.Create(ctx, tenant.CreateTenantInput{
 		Slug:             demoSlug,
 		Name:             demoName,
 		TokenplanEnabled: true,
 	})
+	if err != nil {
+		return nil, false, err
+	}
+	return created, true, nil
 }
