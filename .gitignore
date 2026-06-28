@@ -1,0 +1,38 @@
+# secrets / keys — 严禁入库
+*.pem
+*.key
+*_ed25519
+*_rsa
+id_*
+.env
+.env.*
+!.env.example
+config.yaml
+
+# go build
+/newapi-mt
+/bin/
+/dist/
+*.test
+*.out
+/vendor/
+
+# node / frontend
+node_modules/
+/web/dist/
+/web/build/
+
+# runtime data
+mysql_data/
+/data/
+/logs/
+*.log
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# scratch
+/scratchpad/
