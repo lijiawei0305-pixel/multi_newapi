@@ -158,6 +158,11 @@
 - **子坑**：直接 `UPDATE users SET group=...` 改分组**不刷用户缓存**（`GetUserGroup` 读 `GetUserCache`），relay 仍读旧分组；**必须走 admin API `PUT /api/user/`** 才会刷新。改用户属性一律走 API，不直改 DB。
 - **升级**：**新增/启用任何"高级分组"后，确认它不在 `UserUsableGroups` 自选表里**（默认仅 default）；高级分组只能管理员分配。属计费越权红线。
 
+### [Phase 1 已完成] 2D 倍率（层级 × 模型分组）—— 计费交互 + 调试坑
+- **做了什么**：计费倍率升级二维相乘（见 `doc/detailed-design.md` §2.15）。`grouphook.ModelGroup2DResolver`（mtwire 注入）在 `HandleGroupRatio` 算 `GetGroupRatio(UserGroup层级) × (IsModelGroup(UsingGroup) ? GetGroupRatio(UsingGroup) : 1)`；`model_groups` 登记表标记模型分组；admin API `/api/admin/model-groups` CRUD 同步 GroupRatio+UserUsableGroups；后台「模型分组管理」页。实测：vip×claude-kiro=0.24、default×claude-kiro=0.3、admin default=1，全对。
+- **关键交互（Phase 2 必处理）**：`HandleGroupRatio` 优先级 = ①租户覆盖 `TenantGroupRatioResolver`（命中即返）→ ②2D → ③原生兜底。所以**代理租户对某组的 markup 覆盖会抢在 2D 前生效**：chanuser1 在 tokendream（tenant_groups 有 default=1.5）→ default token 走 markup=1.5、claude-kiro token 走 2D=0.3（无该组覆盖）。Phase 1 此交互"覆盖优先、按组各管各"已知且可接受；**Phase 2 代理参与时要把 markup 与 2D 组合（按组合下限保护）并重定优先级**。
+- **调试坑**：① `tenant_groups` 列名是 **`group_name` 不是 `group`**（`SELECT \`group\`` 静默返空，配合 `CONCAT` 遇 NULL 返空更难发现）——查多租户分组覆盖用 `group_name` 或 `SELECT *\G`。② mtwire `New()` 预热模型分组缓存早于 `Migrate()` 建表，启动有一条 `Table doesn't exist` 报错但无害（迁移后重载）；Phase 2 可调 New/Migrate 顺序消除。
+
 ---
 
 ## 四、工具链与协作
