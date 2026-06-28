@@ -47,7 +47,7 @@
 > - **UI**（web/default）：管理「子代理管理」`/agents` + 「提现审核」`/withdrawals`；代理「我的收益」`/agent-earnings`。
 > - **E2E 实测**：seed `demoagent`/`demoagent123`=tokendream owner；购买 lite→demoagent 得 `tokenplan_spread ¥179.8`（幂等不双计）；申请提现¥100→可提现79.8/冻结100→admin 通过→冻结0（金额守恒）；三页浏览器渲染确认。
 > - **遗留**：`consume_commission`/`recharge_spread` 未端到端实测（需子用户真实 /v1 调用 + recharge 口径未决）；推广渠道码归属、代理自助(用户组/兑换码/套餐上架 UI-04)、设代理 admin UI 的"建租户"完整流 待补。
-- [ ] **6d 代理装修配置 UI**（品牌 tabs：品牌/联系/充值/内容/首页/协议，接 SiteConfig）+ 我的用户组/我的用户/推广渠道/兑换码 UI
+- [x] **6d 代理自助分销（P1-UI-04，测试栈 E2E 全过）**：套餐上架改价(保护线)/推广渠道/兑换码(代理 quota 预扣+用户兑换单赢家)/我的用户/用户组倍率(floor 校验) 5 页 + 端点（新表 `agent_promotion_channels`/`agent_redemption_codes`/`tenant_groups`，全 `AgentOwnerAuth`+scopeByTenant）。遗留：用户组倍率作用于 /v1 计费的接线、注册经渠道码归属、代理装修配置 UI（品牌 tabs→二期 P2-UI-01）
 - [ ] **6e 违禁词屏蔽（Phase 2 新增功能）** —— relay hook 扫用户消息→提醒/拦截 + 违规日志；管理员词库 CRUD + 违规审阅。规格见 `doc/detailed-design.md` §2.14（含开放问题，实现前先与用户确认）
 
 ## 3. 目标③：计费硬化（**架构已定：复用 new-api 原生计费 + 桥接我们的套餐**）
