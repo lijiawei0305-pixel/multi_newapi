@@ -48,6 +48,8 @@ import { useEmailVerification } from '@/features/auth/hooks/use-email-verificati
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
   getAffiliateCode,
+  getPromotionChannel,
+  savePromotionChannel,
   saveAffiliateCode,
 } from '@/features/auth/lib/storage'
 
@@ -128,9 +130,16 @@ export function SignUpForm({
   }, [requiresLegalConsent])
 
   useEffect(() => {
-    const aff = new URLSearchParams(window.location.search).get('aff')?.trim()
+    const params = new URLSearchParams(window.location.search)
+    const aff = params.get('aff')?.trim()
     if (aff) {
       saveAffiliateCode(aff)
+    }
+    // Agent promotion link: /sign-up?channel=<code>. Persist (like aff) so it survives
+    // navigation and is submitted with registration for tenant+channel attribution.
+    const channel = params.get('channel')?.trim()
+    if (channel) {
+      savePromotionChannel(channel)
     }
   }, [])
 
@@ -162,6 +171,7 @@ export function SignUpForm({
         email: data.email || undefined,
         verification_code: verificationCode || undefined,
         aff_code: getAffiliateCode(),
+        channel: getPromotionChannel() || undefined,
         turnstile: turnstileToken,
       })
 

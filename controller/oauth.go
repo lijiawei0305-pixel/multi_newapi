@@ -7,6 +7,8 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/internal/platform/agenthook"
+	"github.com/QuantumNous/new-api/internal/promotion"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/gin-contrib/sessions"
@@ -325,6 +327,16 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 
 		// Perform post-transaction tasks
 		user.FinalizeOAuthUserCreation(inviterId)
+	}
+
+	// 代理增量：OAuth 注册归属。OAuth 回调走重定向，body 无 channel 字段，仅 best-effort 从 Referer
+	// 提渠道码（通常落空→回落 Host 归属，保持原有行为）。漏挂会丢失 OAuth 注册的代理归属。旁路 / best-effort。
+	channelCode := ""
+	if code, perr := promotion.ParseChannelCode(c.Request.Referer()); perr == nil {
+		channelCode = code
+	}
+	if agenthook.AttributeRegistration != nil {
+		agenthook.AttributeRegistration(c.Request.Context(), c.Request.Host, channelCode, int64(user.Id))
 	}
 
 	return user, nil

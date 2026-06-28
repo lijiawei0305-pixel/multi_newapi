@@ -10,6 +10,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -19,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/platform/agenthook"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 	"github.com/QuantumNous/new-api/internal/pricing"
+	"github.com/QuantumNous/new-api/internal/promotion"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -59,6 +61,26 @@ func migrateUsersTenantID(db *gorm.DB) error {
 	).Error
 }
 
+// migrateUsersPromotionChannelID 幂等地给 new-api 原生 users 表加 promotion_channel_id 列 + 索引
+// （= agent_promotion_channels.id；经渠道码注册的用户落此列，0 = 无渠道）。与 tenant_id 同套路：
+// 先查 information_schema 确认无列才 ALTER，不触碰 new-api 的 model.User（避免 upstream rebase 冲突）。
+func migrateUsersPromotionChannelID(db *gorm.DB) error {
+	var count int64
+	if err := db.Raw(
+		`SELECT COUNT(*) FROM information_schema.columns
+		 WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'promotion_channel_id'`,
+	).Scan(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil // 已有列：幂等跳过
+	}
+	return db.Exec(
+		`ALTER TABLE users ADD COLUMN promotion_channel_id BIGINT NOT NULL DEFAULT 0,
+		 ADD INDEX idx_users_promotion_channel (promotion_channel_id)`,
+	).Error
+}
+
 // ============================================================================
 // 钩子装配：把真实实现注入 agenthook 包级变量（原生 service/controller 旁路调用）
 // ============================================================================
@@ -69,10 +91,14 @@ func (a *App) InstallHooks() {
 	agenthook.AttributeRegistration = a.attributeRegistration
 }
 
-// attributeRegistration 是 agenthook.AttributeRegistration 实现：按注册 Host 解析租户并把新用户
-// 归属到该代理名下（UPDATE users SET tenant_id）。主站根域/未知 Host 解析不到则不归属（tenant_id=0）。
+// attributeRegistration 是 agenthook.AttributeRegistration 实现：把新用户归属到对应代理（租户）。
+// 优先级：渠道码 > 注册 Host > 主站根域（均不命中则 tenant_id 保持 0）。
+//   - 有渠道码且命中渠道 → UPDATE users SET tenant_id+promotion_channel_id、registered_count+1、落归属记录；
+//   - 无码 / 未知码 → 回落按注册 Host 解析租户（仅 UPDATE tenant_id，promotion_channel_id 保持 0）；
+//   - 主站根域 / 未知 Host → 不归属。
+//
 // best-effort：任何失败仅记日志，绝不影响注册主流程。
-func (a *App) attributeRegistration(ctx context.Context, host string, userID int64) {
+func (a *App) attributeRegistration(ctx context.Context, host, channelCode string, userID int64) {
 	defer func() {
 		if r := recover(); r != nil {
 			common.SysError("mtwire: attributeRegistration panic recovered")
@@ -81,6 +107,52 @@ func (a *App) attributeRegistration(ctx context.Context, host string, userID int
 	if userID <= 0 {
 		return
 	}
+	// 渠道码优先：命中即归属到渠道所属租户+渠道，不再回落 Host。
+	if code := strings.TrimSpace(channelCode); code != "" {
+		if a.attributeByChannel(ctx, code, userID) {
+			return
+		}
+		// 未知渠道码：让位给 Host 兜底（不静默丢归属）。
+	}
+	a.attributeByHost(ctx, host, userID)
+}
+
+// attributeByChannel 按渠道码归属：查渠道→UPDATE users(tenant_id,promotion_channel_id)→
+// 落归属记录(幂等 by user_id)→registered_count 原子 +1。命中渠道返回 true（调用方据此不再回落 Host）。
+// 渠道码未知 / 渠道无效租户返回 false（让位 Host 兜底）。任一写失败仅记日志（best-effort）。
+func (a *App) attributeByChannel(ctx context.Context, code string, userID int64) bool {
+	if a.PromotionRepo == nil {
+		return false
+	}
+	ch, err := a.PromotionRepo.GetChannelByCode(ctx, code)
+	if err != nil || ch == nil || ch.TenantID <= 0 {
+		return false // 未知渠道码 / 无效渠道：回落 Host
+	}
+	// 归属：tenant_id + promotion_channel_id 一次写入（经渠道码注册的权威归属）。
+	if err := a.DB.WithContext(ctx).Table("users").
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{"tenant_id": ch.TenantID, "promotion_channel_id": ch.ID}).Error; err != nil {
+		common.SysError("mtwire: attribute user to channel failed: " + err.Error())
+		return true // 渠道码已识别：不回落 Host（避免双重归属到不同租户）
+	}
+	// 归属记录按 user_id 幂等；registered_count 原子 +1。注册天然一次，计数不重复。
+	if err := a.PromotionRepo.CreateAttribution(ctx, &promotion.Attribution{
+		UserID:      userID,
+		TenantID:    ch.TenantID,
+		ChannelID:   ch.ID,
+		ChannelCode: ch.ChannelCode,
+	}); err != nil {
+		common.SysError("mtwire: create promotion attribution failed: " + err.Error())
+	}
+	if err := a.PromotionRepo.IncrRegisteredCount(ctx, ch.ID); err != nil {
+		common.SysError("mtwire: incr registered_count failed: " + err.Error())
+	}
+	return true
+}
+
+// attributeByHost 按注册 Host 解析租户并 UPDATE users SET tenant_id（promotion_channel_id 保持 0）。
+// 主站根域 / 未知 Host 解析不到则不归属（tenant_id 保持 0）。best-effort。
+func (a *App) attributeByHost(ctx context.Context, host string, userID int64) {
 	t, err := a.TenantResolver.ResolveByHost(ctx, host)
 	if err != nil || t == nil || t.ID <= 0 {
 		return // 主站根域 / 未知 Host：归属主站（tenant_id 保持 0）

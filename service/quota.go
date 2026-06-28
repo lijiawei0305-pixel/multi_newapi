@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/internal/platform/agenthook"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -443,6 +444,16 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 	if sendEmail {
 		if (quota + preConsumedQuota) != 0 {
 			checkAndSendQuotaNotify(relayInfo, quota, preConsumedQuota)
+		}
+	}
+
+	// 代理消耗分润（旁路 / best-effort）：本次总消费 = quota + preConsumedQuota（>0 才计佣）。
+	// PostConsumeQuota 是钱包桶与套餐桶的统一收口——订阅桶在上方分支已委托
+	// PostConsumeUserSubscriptionDelta，故两类消费都流经此处，单点挂钩即覆盖、不会漏也不会重复。
+	// 钩子内部自身幂等（键=RequestId）且绝不返回错误阻断扣费；未装配（nil）时直接跳过。
+	if relayInfo != nil && agenthook.ConsumeCommission != nil {
+		if total := int64(quota) + int64(preConsumedQuota); total > 0 {
+			agenthook.ConsumeCommission(int64(relayInfo.UserId), total, relayInfo.RequestId, relayInfo.BillingSource)
 		}
 	}
 

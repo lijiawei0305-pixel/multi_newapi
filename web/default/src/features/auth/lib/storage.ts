@@ -27,6 +27,9 @@ For commercial licensing, please contact support@quantumnous.com
 const STORAGE_KEYS = {
   USER_ID: 'uid',
   AFFILIATE: 'aff',
+  // Promotion channel code from agent links (/sign-up?channel=<code>); persisted like
+  // the affiliate code so it survives navigation between sign-up/sign-in.
+  PROMOTION_CHANNEL: 'promotion_channel',
   STATUS: 'status',
 } as const
 
@@ -102,5 +105,36 @@ export function saveAffiliateCode(code: string): void {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save affiliate code:', error)
+  }
+}
+
+// ============================================================================
+// Promotion Channel Code Storage (agent links: /sign-up?channel=<code>)
+// ============================================================================
+
+/**
+ * Get promotion channel code from localStorage
+ */
+export function getPromotionChannel(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(STORAGE_KEYS.PROMOTION_CHANNEL) ?? ''
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to get promotion channel:', error)
+    return ''
+  }
+}
+
+/**
+ * Save promotion channel code to localStorage
+ */
+export function savePromotionChannel(code: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.PROMOTION_CHANNEL, code)
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to save promotion channel:', error)
   }
 }

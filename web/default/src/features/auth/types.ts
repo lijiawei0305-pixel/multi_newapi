@@ -38,6 +38,9 @@ export interface RegisterPayload {
   email?: string
   verification_code?: string
   aff_code?: string
+  // Promotion channel code from an agent link (/sign-up?channel=<code>); attributes the
+  // new user to that agent's tenant + channel on the backend.
+  channel?: string
   turnstile?: string
 }
 

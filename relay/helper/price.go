@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/platform/grouphook"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -47,6 +48,17 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 	if exists {
 		logger.LogDebug(ctx, "final group: %s", autoGroup)
 		relayInfo.UsingGroup = autoGroup.(string)
+	}
+
+	// mt: 租户用户组倍率覆盖 —— 本函数是「请求维度 groupRatio」的单一解析点，预扣(ModelPriceHelper)
+	// 与结算(PostTextConsumeQuota 读 PriceData.GroupRatioInfo.GroupRatio)共用其结果，故覆盖一处即两端一致。
+	// 命中所属租户对该 usingGroup 的 enabled 覆盖即用租户倍率计费；未命中/无租户/出错/未装配一律
+	// 回退下方全局 GetGroupRatio（安全第一，绝不破坏计费）。
+	if grouphook.TenantGroupRatioResolver != nil {
+		if r, ok := grouphook.TenantGroupRatioResolver(ctx, int64(relayInfo.UserId), relayInfo.UsingGroup); ok {
+			groupRatioInfo.GroupRatio = r
+			return groupRatioInfo
+		}
 	}
 
 	// check user group special ratio

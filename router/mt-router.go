@@ -28,6 +28,8 @@ func SetMtRouter(router *gin.Engine) {
 
 	// 安装代理增量旁路钩子（消耗分润 / 注册归属）。所有节点都装（钩子由原生 service/controller 调用）。
 	app.InstallHooks()
+	// 安装租户用户组倍率覆盖钩子（作用于 /v1 计费的 groupRatio 单一解析点）。所有节点都装。
+	app.InstallGroupRatioHook()
 
 	if common.IsMasterNode {
 		if err := app.Migrate(); err != nil {

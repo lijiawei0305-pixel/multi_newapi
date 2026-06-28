@@ -57,3 +57,39 @@ func TestUpsertAndListGroups_ScopedByTenant(t *testing.T) {
 		t.Fatalf("t99 groups = %+v, want empty", l3)
 	}
 }
+
+// TestLookupEnabledGroupRatio 验证计费路径的「启用倍率覆盖」点查：命中 / 无行 / 跨租户隔离 / 已禁用。
+func TestLookupEnabledGroupRatio(t *testing.T) {
+	ctx := context.Background()
+	r := newGroupTestRepo(t)
+
+	// 命中：enabled 覆盖 → (ratio, true, nil)。
+	if err := r.UpsertGroup(ctx, 1, "vip", 1.8); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if ratio, ok, err := r.LookupEnabledGroupRatio(ctx, 1, "vip"); err != nil || !ok || ratio != 1.8 {
+		t.Fatalf("hit = (%v,%v,%v), want (1.8,true,nil)", ratio, ok, err)
+	}
+
+	// 无行：未配置组 → (0,false,nil)，调用方回退全局。
+	if ratio, ok, err := r.LookupEnabledGroupRatio(ctx, 1, "default"); ok || ratio != 0 || err != nil {
+		t.Fatalf("missing = (%v,%v,%v), want (0,false,nil)", ratio, ok, err)
+	}
+
+	// 跨租户隔离：他租户覆盖不可见。
+	if _, ok, _ := r.LookupEnabledGroupRatio(ctx, 2, "vip"); ok {
+		t.Fatalf("cross-tenant lookup should miss")
+	}
+
+	// 已禁用：enabled=false 行 → (0,false,nil)，回退全局（不可用禁用的倍率计费）。
+	// 用原生 SQL 显式写 enabled=0：GORM 的 Create 会省略 bool 零值并套用列 default:true，无法落库为 false。
+	if err := r.db.WithContext(ctx).Exec(
+		`INSERT INTO tenant_groups (tenant_id, group_name, ratio, enabled) VALUES (?, ?, ?, ?)`,
+		1, "svip", 2.5, false,
+	).Error; err != nil {
+		t.Fatalf("insert disabled row: %v", err)
+	}
+	if ratio, ok, err := r.LookupEnabledGroupRatio(ctx, 1, "svip"); ok || ratio != 0 || err != nil {
+		t.Fatalf("disabled = (%v,%v,%v), want (0,false,nil)", ratio, ok, err)
+	}
+}

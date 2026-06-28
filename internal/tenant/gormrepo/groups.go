@@ -2,8 +2,10 @@ package gormrepo
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"github.com/QuantumNous/new-api/internal/tenant"
@@ -44,6 +46,25 @@ func (r *Repo) UpsertGroup(ctx context.Context, tenantID int64, groupName string
 			"updated_at": now,
 		}),
 	}).Create(&row).Error
+}
+
+// LookupEnabledGroupRatio 读某租户某用户组「已启用」的倍率覆盖（计费路径用）。
+// 命中 (tenant_id, group_name) 且 enabled=true → 返回 (ratio, true, nil)；
+// 无行 / 已禁用 → (0, false, nil)；查询出错 → (0, false, err)。调用方据 (false 或 err) 回退全局倍率。
+// 走 (tenant_id, group_name) 唯一索引，单行点查，无 N+1。
+func (r *Repo) LookupEnabledGroupRatio(ctx context.Context, tenantID int64, groupName string) (float64, bool, error) {
+	var row groupRow
+	err := r.db.WithContext(ctx).
+		Select("ratio").
+		Where("tenant_id = ? AND group_name = ? AND enabled = ?", tenantID, groupName, true).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return row.Ratio, true, nil
 }
 
 // ListGroups 列出某租户的用户组倍率配置（按组名升序）。

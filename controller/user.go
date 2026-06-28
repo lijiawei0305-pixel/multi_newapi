@@ -13,6 +13,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/internal/platform/agenthook"
+	"github.com/QuantumNous/new-api/internal/promotion"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -184,12 +186,18 @@ func Register(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserPasswordRegisterDisabled)
 		return
 	}
-	var user model.User
-	err := json.NewDecoder(c.Request.Body).Decode(&user)
+	// 在原生 model.User 之外额外读注册请求里的 channel 字段（代理推广链接 /sign-up?channel=<code> 提交），
+	// 用匿名内嵌避免改 new-api 的 model.User struct（embed 后 username/password 等字段照常解析）。
+	var body struct {
+		model.User
+		Channel string `json:"channel"`
+	}
+	err := json.NewDecoder(c.Request.Body).Decode(&body)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
+	user := body.User
 	if err := common.Validate.Struct(&user); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserInputInvalid, map[string]any{"Error": err.Error()})
 		return
@@ -236,6 +244,19 @@ func Register(c *gin.Context) {
 	if err := model.DB.Where("username = ?", cleanUser.Username).First(&insertedUser).Error; err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
 		return
+	}
+
+	// 代理增量：把新用户归属到对应代理。归属优先级 渠道码 > Host > 主站根域（实现见 mtwire）。
+	// 渠道码来源：注册 body 的 channel（前端 sign-up 页从 ?channel= 读并提交）优先；为空则兜底从
+	// Referer（/sign-up?channel=<code>）提码。旁路 / best-effort：失败不影响注册结果。未装配（nil）跳过。
+	channelCode := strings.TrimSpace(body.Channel)
+	if channelCode == "" {
+		if code, perr := promotion.ParseChannelCode(c.Request.Referer()); perr == nil {
+			channelCode = code
+		}
+	}
+	if agenthook.AttributeRegistration != nil {
+		agenthook.AttributeRegistration(c.Request.Context(), c.Request.Host, channelCode, int64(insertedUser.Id))
 	}
 	// 生成默认令牌
 	if constant.GenerateDefaultToken {

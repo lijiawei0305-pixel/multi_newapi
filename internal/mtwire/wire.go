@@ -169,6 +169,10 @@ func (a *App) Migrate() error {
 	if err := migrateUsersTenantID(a.DB); err != nil {
 		return err
 	}
+	// users 增列 promotion_channel_id（经渠道码注册的归属落此列）：同套幂等 raw ALTER。
+	if err := migrateUsersPromotionChannelID(a.DB); err != nil {
+		return err
+	}
 	// 目标③桥接表：mt_subscription_orders（SUB 套餐订单状态机）+ mt_native_subscription_plans
 	// （tokenplan→原生 SubscriptionPlan 映射）。均为 mt_ 前缀，不与原生订阅表冲突。
 	return migrateSubscriptionBridge(a.DB)

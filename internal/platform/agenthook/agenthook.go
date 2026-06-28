@@ -15,6 +15,9 @@ import "context"
 // nil = 未装配。实现必须自身幂等且 best-effort（失败仅记日志，不返回错误）。
 var ConsumeCommission func(userID int64, quotaUnits int64, requestID, billingSource string)
 
-// AttributeRegistration 在新用户创建后被调用，按注册 Host 解析租户并把用户归属到该代理名下
-// （UPDATE users SET tenant_id；主站根域解析不到租户则跳过）。nil = 未装配。best-effort。
-var AttributeRegistration func(ctx context.Context, host string, userID int64)
+// AttributeRegistration 在新用户创建后被调用，把用户归属到对应代理（租户）。
+// 归属优先级：渠道码 channelCode（经代理推广链接 /sign-up?channel=<code> 注册）> 注册 Host >
+// 主站根域（均解析不到则 tenant_id 保持 0）。channelCode 命中时还会写 promotion_channel_id、
+// 令该渠道 registered_count+1 并落一条归属记录；channelCode 为空或未知则回落 Host 归属。
+// nil = 未装配。best-effort（实现内部兜底 panic/error，绝不阻断注册主流程）。
+var AttributeRegistration func(ctx context.Context, host, channelCode string, userID int64)
