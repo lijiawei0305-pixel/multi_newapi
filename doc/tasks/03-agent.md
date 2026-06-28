@@ -7,13 +7,13 @@
 
 ## A. 数据模型与迁移
 - [ ] `agent_levels`、`agent_wallets`、`agent_earning_logs`、`agent_withdrawals` 迁移 ｜ ✅ 迁移跑通
-- [ ] `agent_earning_logs.source_type` 含 `recharge_spread/consume_commission/tokenplan_spread/tokenplan_commission/manual_adjustment` ｜ ✅ 枚举校验
+- [x] `agent_earning_logs.source_type` 含 `recharge_spread/consume_commission/tokenplan_spread/tokenplan_commission/manual_adjustment` ｜ ✅ 枚举校验
 
 ## B. 接口与领域逻辑
-- [ ] `port.go`：`AgentService`、`EarningSink`、`WithdrawalService` ｜ ✅ `go build` 通过
-- [ ] `SetAgentType`（设类型/成本价/折扣/分润/等级，经 `PricingGuard`）｜ ✅ 单测：非法类型/击穿保护线被拒
-- [ ] `AddEarning`（写日志 + 增 `withdrawable_balance`，幂等）｜ ✅ 单测：重复 source_id 不重复入账
-- [ ] 提现状态机 `pending→approved/rejected`（冻结/解冻）｜ ✅ 单测：迁移合法性 + 金额守恒
+- [x] `port.go`：`AgentService`、`EarningSink`、`WithdrawalService` ｜ ✅ `go build` 通过
+- [x] `SetAgentType`（设类型/成本价/折扣/分润/等级，经 `PricingGuard`）｜ ✅ 单测：非法类型/击穿保护线被拒
+- [x] `AddEarning`（写日志 + 增 `withdrawable_balance`，幂等）｜ ✅ 单测：重复 source_id 不重复入账
+- [x] 提现状态机 `pending→approved/rejected`（冻结/解冻）｜ ✅ 单测：迁移合法性 + 金额守恒
 
 ## C. 服务与 API
 - [ ] 管理员：搜索用户、设代理、设等级、启用/禁用 ｜ ✅ 接口测：用户→代理转换成功
@@ -21,5 +21,5 @@
 - [ ] 提现：申请（冻结）→ 管理员审核（通过=线下打款标记/拒绝=解冻）｜ ✅ E2E：全流程可演示
 
 ## D. 验收
-- [ ] 提现金额超过可提现余额被拒 `WITHDRAW_INSUFFICIENT` ｜ ✅ 测试红→绿
-- [ ] 代理只能看自己钱包/收益 ｜ ✅ 跨租户隔离测试
+- [x] 提现金额超过可提现余额被拒 `WITHDRAW_INSUFFICIENT` ｜ ✅ 测试红→绿
+- [x] 代理只能看自己钱包/收益 ｜ ✅ 跨租户隔离测试

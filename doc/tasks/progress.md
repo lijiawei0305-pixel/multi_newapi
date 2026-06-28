@@ -13,7 +13,7 @@
 
 - 🟡 **Wave 0 · 基建**：[00-infra](00-infra.md) — ✅ go module · platform(apperr/appctx) · 包骨架 · git；⏳ fork new-api · 迁移 · 镜像 · 宝塔网关
 - 🟡 **Wave 1 · 基础层**：[01-tenant](01-tenant.md) ＋ [02-identity](02-identity.md) ＋ [04-pricing](04-pricing.md) — ✅ 接口+领域逻辑+单测（`go test -race` 绿，覆盖率 98/100/100%）；⏳ 迁移 · GORM repo · handler · 集成
-- [ ] **Wave 2 · 领域核心**：[03-agent](03-agent.md) ＋ [05-billing](05-billing.md) ＋ [06-wallet](06-wallet.md)
+- 🟡 **Wave 2 · 领域核心**：[03-agent](03-agent.md) ＋ [05-billing](05-billing.md) ＋ [06-wallet](06-wallet.md) — ✅ 接口+领域逻辑+单测（99/100/98%，含 `-race` 并发不透支与幂等）；⏳ 迁移 · GORM · handler · 集成
 - [ ] **Wave 3 · 入口（核心 MVP 收口）**：[11-relay](11-relay.md) ＋ [09-promotion](09-promotion.md) ＋ [10-siteconfig](10-siteconfig.md) ＋ [12-stats](12-stats.md)　← 至此核心 MVP 可演示（方案 A 第一批 ≈3 天）
 - [ ] **Wave 4 · tokenplan 批次**：[08-payment](08-payment.md) ＋ [07-tokenplan](07-tokenplan.md) ＋ [13-risk](13-risk.md)（限购/满额）　← 方案 A 第二批 ≈+1.5–2 天
 
@@ -27,9 +27,9 @@
 | 🟡 | 🏢 Tenant 多租户基础 | [01-tenant](01-tenant.md) | infra | 接口+逻辑+单测 ✓ 98%；迁移·GORM·中间件 ⏳ |
 | 🟡 | 🔐 Identity & Access | [02-identity](02-identity.md) | tenant | 接口+守卫+单测 ✓ 100%；迁移·GORM·中间件 ⏳ |
 | 🟡 | 💱 Pricing & CostGuard | [04-pricing](04-pricing.md) | infra | 纯逻辑+单测 ✓ 100%；迁移·GORM·集成 ⏳ |
-| - [ ] | 🧑‍💼 Agent 代理体系 | [03-agent](03-agent.md) | pricing | 钱包/收益/提现 |
-| - [ ] | 🧮 Billing & Quota | [05-billing](05-billing.md) | pricing, agent | 双桶路由中枢 |
-| - [ ] | 👛 Wallet & Recharge | [06-wallet](06-wallet.md) | pricing, agent, payment | WalletQuota |
+| 🟡 | 🧑‍💼 Agent 代理体系 | [03-agent](03-agent.md) | pricing | 接口+逻辑+单测 ✓ 99%；迁移·GORM·handler ⏳ |
+| 🟡 | 🧮 Billing & Quota | [05-billing](05-billing.md) | pricing, agent | 双桶路由+计费+单测 ✓ 100%；迁移·txn·E2E ⏳ |
+| 🟡 | 👛 Wallet & Recharge | [06-wallet](06-wallet.md) | pricing, agent, payment | 充值/兑换/WalletQuota+并发 ✓ 98%；迁移·GORM·handler ⏳ |
 | - [ ] | 🎟️ TokenPlan 套餐 ★ | [07-tokenplan](07-tokenplan.md) | pricing, payment, risk, agent | 核心增量，SubscriptionQuota |
 | - [ ] | 💳 Payment 支付回调 | [08-payment](08-payment.md) | — (被 wallet/tokenplan 注入) | auth-service 新增 |
 | - [ ] | 📣 Promotion 推广归属 | [09-promotion](09-promotion.md) | tenant | 渠道/归属 |
@@ -38,10 +38,12 @@
 | - [ ] | 📊 Stats 统计看板 | [12-stats](12-stats.md) | billing, tokenplan | 含满额预警 |
 | - [ ] | 🛡️ RiskControl 风控 | [13-risk](13-risk.md) | infra | 限购/限流/告警 |
 
-进度：**0 / 14 模块全量完成**；🟡 **4 模块核心就绪**（infra 基建 · tenant · identity · pricing）—— 接口+领域逻辑+单测完成，`go test -race -cover` 全绿（平均 ~99%），待补迁移/GORM/handler/集成。
+进度：**0 / 14 模块全量完成**；🟡 **7 模块核心就绪**（infra · tenant · identity · pricing · agent · billing · wallet）—— 接口+领域逻辑+单测完成，`go test -race -cover` 全绿（平均 ~99%），待补迁移/GORM/handler/集成。
 
 > **本轮进展（2026-06-28，Wave 0–1 启动）**：Master-Worker 自动化已跑通首批 —— Wave 0 引导（Go module + `platform` 包 + 13 包骨架 + git）已提交 `7f1f7a2`；3 个 Worker 子 Agent 并行完成 tenant/identity/pricing 的接口+领域逻辑+单测（TDD，纯标准库，依赖倒置可独立单测）。Master 已独立复跑质量门（gofmt/build/vet/test-race）全绿后才更新本看板。
-> **下一步**：Wave 2（agent/billing/wallet）；或先补 Wave 0 的迁移基建与 GORM/Redis 真实实现，再把 Wave 1 三模块从 🟡 收尾为 ✅。
+> **Wave 2 完成（2026-06-28）**：新增共享契约 `platform/quota`（QuotaSource/Router/Receipt）；3 个 Worker 并行完成 agent/billing/wallet（接口+领域逻辑+单测，含 `-race` 并发不透支/幂等/兑换码单赢家）。Master 已独立复跑质量门全绿。
+> **组装层 TODO（记录，留待集成）**：`wallet.EarningEntry` 与 `agent.EarningEntry` 字段不同，`cmd/main` 需薄适配器映射（`Reference→agent.SourceID` 非空做幂等键）并处理 USD↔¥ 单位；billing 的 `WalletSourceFactory/SubscriptionSourceFactory` 在 main 注入 wallet/tokenplan 的桶实现。
+> **下一步**：Wave 3（relay/promotion/siteconfig/stats）；之后 Wave 4（payment/tokenplan/risk）。逻辑层全绿后统一做 Wave 0 集成（fork new-api + 迁移 + GORM/Redis + 部署独立测试栈）把 🟡 收尾为 ✅。
 
 ---
 
