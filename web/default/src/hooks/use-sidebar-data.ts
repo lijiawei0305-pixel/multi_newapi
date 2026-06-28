@@ -22,6 +22,7 @@ import {
   CreditCard,
   FileText,
   FlaskConical,
+  Gauge,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -30,6 +31,7 @@ import {
   Radio,
   ServerCog,
   Settings,
+  ShoppingBag,
   Ticket,
   User,
   Users,
@@ -104,6 +106,11 @@ export function useSidebarData(): SidebarData {
         title: t('Personal'),
         items: [
           {
+            title: t('Buy Plans'),
+            url: '/plans',
+            icon: ShoppingBag,
+          },
+          {
             title: t('Wallet'),
             url: '/wallet',
             icon: Wallet,
@@ -148,6 +155,11 @@ export function useSidebarData(): SidebarData {
             title: t('Token Plans'),
             url: '/token-plans',
             icon: Package,
+          },
+          {
+            title: t('Subscription Monitor'),
+            url: '/subscription-monitor',
+            icon: Gauge,
           },
           {
             title: t('System Info'),

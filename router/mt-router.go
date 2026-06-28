@@ -56,5 +56,12 @@ func SetMtRouter(router *gin.Engine) {
 		adminPlanGroup.PATCH("/:id", app.HandleAdminUpdatePlan)
 	}
 
+	// 管理端订阅监控（当前租户维度，租户来自 Host）。前置 TenantMiddleware + new-api AdminAuth。
+	adminSubGroup := router.Group("/api/admin/subscriptions")
+	adminSubGroup.Use(app.TenantMiddleware(), middleware.AdminAuth())
+	{
+		adminSubGroup.GET("", app.HandleAdminListSubscriptions)
+	}
+
 	common.SysLog("multitenant (tenant + tokenplan) routes registered")
 }

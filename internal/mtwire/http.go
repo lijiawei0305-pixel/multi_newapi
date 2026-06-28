@@ -3,6 +3,7 @@ package mtwire
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -120,7 +121,11 @@ func (a *App) HandleListTokenPlans(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
-	respondOK(c, views)
+	out := make([]buyerPlanOut, 0, len(views))
+	for _, v := range views {
+		out = append(out, toBuyerPlanOut(v))
+	}
+	respondOK(c, out)
 }
 
 // HandlePurchase POST /api/tenant/token-plans/:id/purchase —— 下单（返回支付凭据）。需 UserAuth。
@@ -163,12 +168,33 @@ func (a *App) HandleListSubscriptions(c *gin.Context) {
 		respondErr(c, tenant.ErrTenantNotFound)
 		return
 	}
-	subs, err := a.TokenPlanRepo.ListSubscriptionsByUser(reqCtx(c), t.ID, int64(c.GetInt("id")), time.Now())
+	ctx := reqCtx(c)
+	subs, err := a.TokenPlanRepo.ListSubscriptionsByUser(ctx, t.ID, int64(c.GetInt("id")), time.Now())
 	if err != nil {
 		respondErr(c, err)
 		return
 	}
-	respondOK(c, subs)
+	plans, err := a.planByID(ctx)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	out := make([]buyerSubOut, 0, len(subs))
+	for _, s := range subs {
+		p := plans[s.PlanID] // 套餐已删则零值，plan_code/plan_name 留空
+		out = append(out, buyerSubOut{
+			PlanCode:    p.Code,
+			PlanName:    p.Name,
+			Status:      string(s.Status),
+			UsedUSD:     s.UsedUSD,
+			LimitUSD:    s.MonthLimitUSD,
+			UsagePct:    usagePct(s.UsedUSD, s.MonthLimitUSD),
+			PeriodStart: isoUTC(s.StartAt),
+			PeriodEnd:   isoUTC(s.ExpireAt),
+			CreatedAt:   isoUTC(s.CreatedAt),
+		})
+	}
+	respondOK(c, out)
 }
 
 // ============================ 主站管理（全局套餐目录） ============================
@@ -328,4 +354,191 @@ func (a *App) HandleAdminUpdatePlan(c *gin.Context) {
 		return
 	}
 	respondOK(c, gin.H{"id": id})
+}
+
+// ============================ 买家 / 管理端订阅监控 DTO（Phase 2 · 6a） ============================
+//
+// 前端契约对齐：买家套餐/订阅 + 管理端订阅监控统一用 snake_case，货币后缀区分
+// （`*_cny`=人民币、`*_usd`=美元额度，见 doc/api-contract.md §1）；时间为 ISO-8601 UTC。
+
+// buyerPlanOut 是买家「可购套餐」卡片。retail_price_cny 为本租户上架价（未上架回退主站售价）。
+type buyerPlanOut struct {
+	ID             int64   `json:"id"`
+	Code           string  `json:"code"`
+	Name           string  `json:"name"`
+	RetailPriceCNY float64 `json:"retail_price_cny"`
+	AnchorPriceCNY float64 `json:"anchor_price_cny"`
+	MonthLimitUSD  float64 `json:"month_limit_usd"`
+	ValidDays      int     `json:"valid_days"`
+	DiscountLabel  string  `json:"discount_label"`
+	Badge          string  `json:"badge"`
+	IsRecommended  bool    `json:"is_recommended"`
+	Sort           int     `json:"sort"`
+}
+
+// toBuyerPlanOut 把代理视角套餐视图映射为买家卡片（零售价取视图 RetailPrice）。
+func toBuyerPlanOut(v tokenplan.TenantPlanView) buyerPlanOut {
+	return buyerPlanOut{
+		ID:             v.Plan.ID,
+		Code:           v.Plan.Code,
+		Name:           v.Plan.Name,
+		RetailPriceCNY: v.RetailPrice,
+		AnchorPriceCNY: v.Plan.AnchorPrice,
+		MonthLimitUSD:  v.Plan.MonthLimitUSD,
+		ValidDays:      v.Plan.ValidDays,
+		DiscountLabel:  v.Plan.DiscountLabel,
+		Badge:          v.Plan.Badge,
+		IsRecommended:  v.Plan.IsRecommended,
+		Sort:           v.Plan.Sort,
+	}
+}
+
+// buyerSubOut 是买家「我的订阅」条目。status 透传领域枚举（active/exhausted/expired/refunded）。
+type buyerSubOut struct {
+	PlanCode    string  `json:"plan_code"`
+	PlanName    string  `json:"plan_name"`
+	Status      string  `json:"status"`
+	UsedUSD     float64 `json:"used_usd"`
+	LimitUSD    float64 `json:"limit_usd"`
+	UsagePct    float64 `json:"usage_pct"`
+	PeriodStart string  `json:"period_start"`
+	PeriodEnd   string  `json:"period_end"`
+	CreatedAt   string  `json:"created_at"`
+}
+
+// adminSubOut 是管理端「订阅监控」条目（当前租户维度，含满额预警）。
+type adminSubOut struct {
+	UserID     int64   `json:"user_id"`
+	Username   string  `json:"username"`
+	PlanCode   string  `json:"plan_code"`
+	Status     string  `json:"status"`
+	UsedUSD    float64 `json:"used_usd"`
+	LimitUSD   float64 `json:"limit_usd"`
+	UsagePct   float64 `json:"usage_pct"`
+	AlertLevel string  `json:"alert_level"`
+	PeriodEnd  string  `json:"period_end"`
+}
+
+// HandleAdminListSubscriptions GET /api/admin/subscriptions —— 当前租户全部订阅 + 用量 + 满额预警。
+// 需 AdminAuth；租户取自 Host（TenantMiddleware）。只读：不改额度/状态（惰性过期落库由仓储完成）。
+func (a *App) HandleAdminListSubscriptions(c *gin.Context) {
+	t := tenantFrom(c)
+	if t == nil {
+		respondErr(c, tenant.ErrTenantNotFound)
+		return
+	}
+	ctx := reqCtx(c)
+	subs, err := a.TokenPlanRepo.ListSubscriptionsByTenant(ctx, t.ID, time.Now())
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	plans, err := a.planByID(ctx)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	names := a.usernamesByIDs(ctx, subUserIDs(subs))
+	out := make([]adminSubOut, 0, len(subs))
+	for _, s := range subs {
+		pct := usagePct(s.UsedUSD, s.MonthLimitUSD)
+		out = append(out, adminSubOut{
+			UserID:     s.UserID,
+			Username:   names[s.UserID], // 取不到给空
+			PlanCode:   plans[s.PlanID].Code,
+			Status:     string(s.Status),
+			UsedUSD:    s.UsedUSD,
+			LimitUSD:   s.MonthLimitUSD,
+			UsagePct:   pct,
+			AlertLevel: alertLevel(pct, s.Status),
+			PeriodEnd:  isoUTC(s.ExpireAt),
+		})
+	}
+	respondOK(c, out)
+}
+
+// ---- 共享映射辅助（订阅监控/我的订阅复用）----
+
+// planByID 取全部套餐并建 id→Plan 映射，供订阅条目补 plan_code/plan_name。
+func (a *App) planByID(ctx context.Context) (map[int64]tokenplan.Plan, error) {
+	plans, err := a.Catalog.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[int64]tokenplan.Plan, len(plans))
+	for _, p := range plans {
+		m[p.ID] = p
+	}
+	return m, nil
+}
+
+// subUserIDs 提取订阅去重后的 user_id 集（供批量回查用户名）。
+func subUserIDs(subs []tokenplan.Subscription) []int64 {
+	seen := make(map[int64]struct{}, len(subs))
+	ids := make([]int64, 0, len(subs))
+	for _, s := range subs {
+		if _, ok := seen[s.UserID]; ok {
+			continue
+		}
+		seen[s.UserID] = struct{}{}
+		ids = append(ids, s.UserID)
+	}
+	return ids
+}
+
+// usernamesByIDs 批量回查 new-api users 表的 id→username（只读、单次 IN 查询，避免 N+1）。
+// 直接走共享 *gorm.DB 原始查询，不引入 new-api model 包；查询失败/缺失一律给空（用户名非关键字段）。
+func (a *App) usernamesByIDs(ctx context.Context, ids []int64) map[int64]string {
+	out := make(map[int64]string, len(ids))
+	if len(ids) == 0 {
+		return out
+	}
+	var rows []struct {
+		ID       int64
+		Username string
+	}
+	if err := a.DB.WithContext(ctx).
+		Table("users").Select("id, username").
+		Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return out
+	}
+	for _, r := range rows {
+		out[r.ID] = r.Username
+	}
+	return out
+}
+
+// usagePct 计算用量占比百分比 = used/limit*100（保留两位）；limit<=0 时记 0（防除零，对齐任务口径）。
+func usagePct(used, limit float64) float64 {
+	if limit > 0 {
+		return round2(used / limit * 100)
+	}
+	return 0
+}
+
+// alertLevel 按用量占比分级满额预警：>=100 或已置 exhausted→exhausted；>=95→critical；>=80→warn；否则 none。
+// exhausted 状态优先判定：Meter 整笔拒绝时 used 可能略低于 limit，但订阅已终态满额。
+func alertLevel(pct float64, status tokenplan.SubStatus) string {
+	if status == tokenplan.SubExhausted || pct >= 100 {
+		return "exhausted"
+	}
+	switch {
+	case pct >= 95:
+		return "critical"
+	case pct >= 80:
+		return "warn"
+	default:
+		return "none"
+	}
+}
+
+// round2 四舍五入到两位小数（用量占比展示用）。
+func round2(v float64) float64 { return math.Round(v*100) / 100 }
+
+// isoUTC 把时间格式化为 ISO-8601 UTC（doc/api-contract.md §1）；零值返回空串。
+func isoUTC(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
