@@ -452,6 +452,49 @@ type RiskEngine interface {
 
 ---
 
+### 2.14 ContentModeration 内容审核（违禁词屏蔽）★ Phase 2 新增
+
+**职责**：在 /v1 调用链中扫描**用户输入消息**是否含违禁词；命中则**给出提醒**（默认放行+提醒，可配置拦截），并**记录违规事件供管理员审阅**。横切但独立成模块（`internal/moderation`）以便单测。租户维度：每租户可自定义词库（默认继承全站基础库）。
+
+**对外接口（消费者定义）**
+```go
+type Moderator interface {
+    // 扫描本次请求的用户消息；返回是否命中、命中词、动作与提醒文案。转发前调用。
+    ScanUserMessages(ctx, p *Principal, msgs []Message) (*ModerationResult, error)
+}
+type ModerationResult struct {
+    Hit      bool
+    Matches  []string          // 命中违禁词（入库前脱敏/截断）
+    Action   ModerationAction  // remind（放行+提醒）| block（拦截）
+    Reminder string            // 面向用户的提醒文案
+}
+type BannedWordRepo interface {            // 管理端词库 CRUD（AdminAuth）
+    ListWords(ctx, tenantID int64) ([]BannedWord, error)
+    UpsertWord(ctx, w BannedWord) error
+    DeleteWord(ctx, tenantID, id int64) error
+}
+type ViolationSink interface {             // 违规事件记录 + 管理端查阅
+    Record(ctx, ev ViolationEvent) error
+    ListForAdmin(ctx, tenantID int64, f ViolationFilter) ([]ViolationEvent, error)
+}
+```
+
+**数据模型**
+- `banned_words`：`id, tenant_id(0=全站基础库), word, match_type(contains|exact|regex), action(remind|block), enabled, created_at`。
+- `content_violations`：`id, tenant_id, user_id, token_id, model, matched_words(json), excerpt(脱敏片段), action_taken, created_at`（管理端按租户/用户/时间查阅）。
+
+**接入点（relay hook）**：顺序「鉴权→租户→风控→模型权限→**内容审核**→桶路由→转发→扣费→日志」中，转发**前**调 `ScanUserMessages`。`block`→拒绝并返回 `CONTENT_BLOCKED` + 提醒；`remind`→放行但 `Record` 事件并回传提醒；无论动作均 `Record`（管理员可见）。
+
+**管理端**：`GET/POST/DELETE /api/admin/moderation/words`（词库 CRUD）；`GET /api/admin/moderation/violations`（违规日志，租户隔离）。
+
+**错误码**：`CONTENT_BLOCKED`（命中且拦截）。
+
+**单测策略**：词匹配（大小写/全半角归一、contains/exact/regex）；命中→必记录；租户词库隔离；remind vs block 分支；大词库性能（建议 Aho-Corasick 多模匹配）。
+
+**开放问题（明日与用户确认，勿臆测）**：① 默认 remind 还是 block？② 词库谁管：仅主站管理员，还是代理可自定义本租户词库？③ 匹配粒度（分词/正则/变体绕过对抗）④ 提醒形式（拒绝返回 vs 放行追加提醒 vs 注入 system）⑤ 是否同时审核 AI 输出(output) 还是仅用户输入⑥ 与 RiskControl 合并还是独立模块。
+
+---
+
 ## 3. 端到端关键数据流
 
 ### 3.1 调用计费（双桶独立路由）

@@ -38,6 +38,7 @@
 | tokenplan 套餐 | 改套餐定义 / 月度计量 / 购买 / 到期 / 代理上架改价 / 限购防刷 | [`doc/proposal.md`](doc/proposal.md) §8 | proposal §8 §2.4 |
 | 详细设计（跨模块） | 写代码前看模块边界 / Go 接口契约 / 数据流时序 / 单测策略 | [`doc/detailed-design.md`](doc/detailed-design.md) | 全模块 |
 | 任务与进度（开发跟踪） | 认领任务 / 看构建顺序 / 勾选进度 / 查模块 MET 与验收标准 | [`doc/tasks/progress.md`](doc/tasks/progress.md) | 14 模块 |
+| 验收标准（三期 · 质量门） | 验收某期/某项 / 查 12 道通用技术门与阈值 / 定义完成(DoD) / 写演示判据 | [`doc/acceptance.md`](doc/acceptance.md) | proposal §17 §18 |
 | 自动化开发起始 Prompt | 启动 Master-Worker 全自动开发 / 查质量门与部署规范 | [`doc/prompt.md`](doc/prompt.md) | 全流程 |
 | API 契约（前后端对齐） | 前端对接 / 加改端点 / 查错误码注册表 / 对象字段 | [`doc/api-contract.md`](doc/api-contract.md) | proposal §10 §13 |
 | UIUX 改造规格（对标 TOKEN HUB） | 还原界面 / 逐页规格 / 设计令牌 / tokenplan 页 / 侧栏 IA | [`doc/uiux.md`](doc/uiux.md) | proposal §9 |
@@ -98,3 +99,14 @@
 - **W4 — Mac 只调试、部署在服务器。** 本项目唯一环境是服务器 `64.90.4.114`（见上「服务器与部署」）；Mac 仅代码编辑/调试，构建/迁移/集成/部署/E2E 一律在服务器执行；私钥不入库。
 - **W5 —** TODO（例如：改 `doc/` 路由文档与代码同步更新）。
 - **W6 —** TODO（按需补充）。
+
+---
+
+## 待办看板（用户介入 / 明日继续）
+
+> 「精简」原则的临时例外（用户要求置顶可见）；完成即移除/下沉到 `doc/tasks/phase2.md`。细节见 phase2.md ③ 与 `doc/detailed-design.md`。
+
+- 🔴 **[需你提供] 微信/支付宝商户凭据** —— 接真实支付的**唯一阻塞**（现 auth-service=mock，充值/购买闭环已 E2E 通过）。需：微信 `mch_id`/`app_id`/`api_v3_key`/商户私钥 `apiclient_key.pem`/微信支付公钥+`pub_key_id`；支付宝 `app_id`/应用私钥/应用公钥证书/支付宝公钥证书/根证书。拿到后→填 `auth-service/config.yaml`(wxpay/alipay) + `mock:false` + 接真实 V3 SDK(`wechatpay-go`/`smartwalle/alipay`)→沙箱小额验收（入账侧零改）。
+- ⏭ **[明日] ①+② 买家页「立即购买」端到端闭环** —— 购买响应转 snake_case + tokenplan 购买走 auth-service mock，使 立即购买→扫码→确认→激活原生订阅→/v1 可用（与充值一样可演示）。详见 phase2.md ③「遗留接线」。
+- 🆕 **[明日 · Phase 2 新功能] 违禁词屏蔽** —— 识别用户发送的违禁消息→提醒用户→管理员可见。规格已补 `doc/detailed-design.md` §2.14（含开放问题，实现前先与用户确认细节）。
+- 候选下一步：7c 风控（Redis RPM/并发 + Trial 三维限购）｜ 6b 代理管理 UI ｜ 真实支付（待凭据）。
