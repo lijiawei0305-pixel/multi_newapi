@@ -1,7 +1,8 @@
 # 前端 · OEM 品牌装修
 
 > **占位文档（stub）。** 由 `CLAUDE.md` 路由表指向，改前端 / 装修配置 / 上传前先读此文。
-> 权威来源：`newapi-multitenant-development-plan.md` §9 第二阶段前端与品牌形象。
+> **UIUX 详规见 [`doc/uiux.md`](uiux.md)**（对标 TOKEN HUB 9 张截图的逐页规格 + 设计令牌 + tokenplan 页）；接口见 [`doc/api-contract.md`](api-contract.md)。
+> 权威来源：`proposal.md` §9 / §11（二期前端与品牌、接口预留）。
 
 ## 范围
 

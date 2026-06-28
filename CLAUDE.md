@@ -40,6 +40,7 @@
 | 任务与进度（开发跟踪） | 认领任务 / 看构建顺序 / 勾选进度 / 查模块 MET 与验收标准 | [`doc/tasks/progress.md`](doc/tasks/progress.md) | 14 模块 |
 | 自动化开发起始 Prompt | 启动 Master-Worker 全自动开发 / 查质量门与部署规范 | [`doc/prompt.md`](doc/prompt.md) | 全流程 |
 | API 契约（前后端对齐） | 前端对接 / 加改端点 / 查错误码注册表 / 对象字段 | [`doc/api-contract.md`](doc/api-contract.md) | proposal §10 §13 |
+| UIUX 改造规格（对标 TOKEN HUB） | 还原界面 / 逐页规格 / 设计令牌 / tokenplan 页 / 侧栏 IA | [`doc/uiux.md`](doc/uiux.md) | proposal §9 |
 | 代理 · 租户管理 | 改代理类型 / 等级 / 钱包 / 推广 / 兑换码 / 站点配置 | [`doc/agent-tenant.md`](doc/agent-tenant.md) | §3 §10.1 §10.2 |
 | 域名 · SSL | 改 wildcard / 自定义域名绑定 / HTTPS 证书 | [`doc/domains-ssl.md`](doc/domains-ssl.md) | §6 |
 | 渠道 · 模型 · 中继转发 | 改上游渠道 / 模型映射 / 统一网关 / 限流风控 / 调用入口 | [`doc/relay-channels.md`](doc/relay-channels.md) | §2 §10.7 |
