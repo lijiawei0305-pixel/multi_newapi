@@ -49,6 +49,7 @@ import type {
   WaffoPayMethod,
 } from '../types'
 import { CreemProductsSection } from './creem-products-section'
+import { TenantRechargeCard } from './tenant-recharge-card'
 
 interface RechargeFormCardProps {
   topupInfo: TopupInfo | null
@@ -207,6 +208,9 @@ export function RechargeFormCard({
       }
       contentClassName='space-y-4 sm:space-y-6'
     >
+      {/* Tenant recharge (WeChat / Alipay via auth-service) — credits native quota. */}
+      <TenantRechargeCard />
+
       {/* Online Topup Section */}
       {hasAnyTopup ? (
         <div className='space-y-4 sm:space-y-6'>

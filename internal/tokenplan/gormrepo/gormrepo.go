@@ -3,7 +3,7 @@
 // 五张表（proposal §6.17–§6.20 + 待支付订单）：
 //   - token_plans              主站套餐定义（code 唯一，自然键 + seed 幂等基准）
 //   - tenant_token_plans       代理上架/定价（UNIQUE(tenant_id, plan_id)）
-//   - user_subscriptions       订阅实例（source_order_id 唯一 → 激活幂等）
+//   - tokenplan_subscriptions  订阅实例（source_order_id 唯一 → 激活幂等；改名避让原生 user_subscriptions）
 //   - subscription_usage_logs  套餐内计量日志（INDEX(subscription_id)）
 //   - pending_subscription_orders 待支付购买意图（order_id PK，支持异步回调激活）
 //
@@ -66,7 +66,13 @@ type listingRow struct {
 // TableName 固定表名。
 func (listingRow) TableName() string { return "tenant_token_plans" }
 
-// subRow 是 user_subscriptions 表的 GORM 模型。source_order_id 唯一 → 激活幂等。
+// subRow 是 tokenplan_subscriptions 表的 GORM 模型。source_order_id 唯一 → 激活幂等。
+//
+// 表名为 tokenplan_subscriptions（非 user_subscriptions）：new-api 原生 model.UserSubscription
+// 同样默认映射到 user_subscriptions，二者列结构不同会在 AutoMigrate 时相互污染（实测原生迁移后再
+// 迁移本表会触发 "ADD source_order_id ... NOT NULL UNIQUE" 失败 / MySQL 上原生插入撞空串唯一索引）。
+// Phase 2 目标③把 tokenplan 桥接成原生订阅：原生 user_subscriptions 是计量桶（独占该名），本表是
+// 租户维度的订阅台账（差价分润 + 后台监控），故必须改名避让。详见 internal/mtwire/subscription_bridge.go。
 type subRow struct {
 	ID             int64     `gorm:"column:id;primaryKey;autoIncrement"`
 	TenantID       int64     `gorm:"column:tenant_id;not null;index:idx_user_subs_tenant_user_status,priority:1"`
@@ -84,7 +90,7 @@ type subRow struct {
 }
 
 // TableName 固定表名。
-func (subRow) TableName() string { return "user_subscriptions" }
+func (subRow) TableName() string { return "tokenplan_subscriptions" }
 
 // usageRow 是 subscription_usage_logs 表的 GORM 模型。INDEX(subscription_id)。
 type usageRow struct {

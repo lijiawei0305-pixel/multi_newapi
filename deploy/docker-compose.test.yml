@@ -20,10 +20,36 @@ services:
       # —— 上游渠道凭据：仅引用服务器 .env 的同名变量，值不入库（compose 自动插值），供后续 relay 自测（5b）用 ——
       UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL}"
       UPSTREAM_API_KEY: "${UPSTREAM_API_KEY}"
+      # —— 目标③ 充值/支付：auth-service 地址 + 内网入账共享密钥（与 auth-service 同值）——
+      MT_AUTH_SERVICE_URL: "http://auth-service:8080"
+      MT_INTERNAL_SECRET: "${MT_INTERNAL_SECRET:-dev-internal-secret-change-me}"
     depends_on:
       - mysql
       - redis
     restart: on-failure       # 等待 mysql/redis 就绪期间由此兜底重启
+
+  # auth-service：独立支付网关（微信/支付宝下单 + 回调主站内网入账）。
+  # 仅回环暴露（不裸公网）；公网入口经宿主 nginx `^~ /auth/` 反代到 127.0.0.1:8180。
+  # 注：auth-service→app 入账走 compose 内部网 http://app:3000，不经公网。
+  auth-service:
+    build:
+      context: ..                       # 同一 Go module，复用仓库根
+      dockerfile: Dockerfile.authservice
+    ports:
+      - "127.0.0.1:8180:8080"           # 仅本机回环（与 app 的 3100 同策略）；nginx 反代 /auth/
+    environment:
+      AUTH_SERVER_ADDR: ":8080"
+      AUTH_MOCK: "true"                 # mock 模式：无真实商户凭据即可端到端跑通
+      # 主站内网入账端点（compose 内 app 服务名:3000，不经公网）+ 共享密钥（须与 app 的 MT_INTERNAL_SECRET 同值）。
+      AUTH_INTERNAL_CALLBACK_URL: "http://app:3000/api/internal/order/paid"
+      AUTH_INTERNAL_SHARED_SECRET: "${MT_INTERNAL_SECRET:-dev-internal-secret-change-me}"
+      AUTH_SIGN_SECRET: "${AUTH_SIGN_SECRET:-dev-pay-sign-secret-change-me}"
+      # 确认页/二维码 URL 的公网基址（经 nginx /auth/ 反代回此服务）。
+      AUTH_PUBLIC_BASE_URL: "${AUTH_PUBLIC_BASE_URL:-https://tokendream.wedreamhub.com}"
+      TZ: "Asia/Shanghai"
+    depends_on:
+      - app
+    restart: on-failure
 
   mysql:
     image: mysql:8.2

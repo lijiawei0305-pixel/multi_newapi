@@ -233,3 +233,39 @@ export async function completeOrder(
   const res = await api.post('/api/user/topup/complete', request)
   return res.data
 }
+
+// ============================================================================
+// Tenant wallet recharge (multi-tenant; WeChat / Alipay via auth-service)
+// ============================================================================
+
+export interface TenantRechargeRequest {
+  amount_usd: number
+  provider: 'wxpay' | 'alipay'
+}
+
+export type TenantRechargeResponse = ApiResponse<{
+  order_no: string
+  amount_usd: number
+  amount_cny: number
+  provider: string
+  pay: {
+    wxpay_qr?: string
+    alipay_url?: string
+  }
+}>
+
+/**
+ * Create a tenant wallet recharge order.
+ *
+ * Credits native quota ($1 = 500k) on payment. WeChat returns a QR payload,
+ * Alipay returns a redirect URL. Settlement happens out-of-band via the
+ * independent auth-service which calls back the main site's internal endpoint.
+ */
+export async function createTenantRecharge(
+  request: TenantRechargeRequest
+): Promise<TenantRechargeResponse> {
+  const res = await api.post('/api/tenant/wallet/recharge', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}

@@ -45,6 +45,15 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.GET("/token-plans", middleware.UserAuth(), app.HandleListTokenPlans)
 		tenantGroup.POST("/token-plans/:id/purchase", middleware.UserAuth(), app.HandlePurchase)
 		tenantGroup.GET("/subscriptions", middleware.UserAuth(), app.HandleListSubscriptions)
+		// 充值下单（目标③）：UserAuth + Host 租户；下单 → 调 auth-service → 返支付凭据。
+		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), app.HandleWalletRecharge)
+	}
+
+	// 内网入账（目标③）：auth-service 验签后回调，仅内网 + 共享密钥头校验。
+	// 安全：nginx 必须拒绝公网访问 /api/internal/*（见 deploy/nginx 配置）；此处不挂 UserAuth/TenantMiddleware。
+	internalGroup := router.Group("/api/internal")
+	{
+		internalGroup.POST("/order/paid", app.HandleInternalOrderPaid)
 	}
 
 	// 主站套餐目录管理（全局，非租户维度），复用 new-api AdminAuth。

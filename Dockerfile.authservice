@@ -1,0 +1,21 @@
+# auth-service 独立支付网关镜像（Phase 2 · 目标③）。
+# 与 new-api 同一 Go module，仅构建 ./auth-service/cmd/authservice 二进制。
+# 复用主 Dockerfile 的 Go 版本（golang:1.26.1-alpine）保持一致。
+FROM golang:1.26.1-alpine AS builder
+ENV GO111MODULE=on CGO_ENABLED=0
+ENV GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64}
+WORKDIR /build
+ADD go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -ldflags "-s -w" -o /authservice ./auth-service/cmd/authservice
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata
+WORKDIR /app
+COPY --from=builder /authservice /app/authservice
+# 默认配置随镜像；生产用挂载/环境变量覆盖敏感项（见 config.go applyEnvOverrides）。
+COPY auth-service/config.yaml /app/config.yaml
+ENV AUTH_CONFIG=/app/config.yaml
+EXPOSE 8080
+ENTRYPOINT ["/app/authservice"]
