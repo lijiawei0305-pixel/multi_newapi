@@ -55,6 +55,12 @@
 - **解决/规避**：部署命令显式 `--env-file /root/newapi-test/.env`：`docker compose -p newapi_test --env-file /root/newapi-test/.env -f deploy/docker-compose.test.yml up -d`。**已验证**：上游 env 注入、`/v1` 真实调用、双桶扣费全通。
 - **升级**：部署脚本固定带 `--env-file`；上游 Key 仅存服务器 `.env`(600)，仓库只引用 `${UPSTREAM_API_KEY}`，并在上传前 `grep` 确认无明文 Key（已纳入预上传检查）。
 
+### [已解决] 我们的表名与 new-api 原生表撞车（user_subscriptions）
+- **现象**：目标③ 桥接原生订阅时，我们的 tokenplan 订阅表与 new-api 原生 `model.UserSubscription` **都映射物理表 `user_subscriptions`**。原生先迁移后，我们 `AutoMigrate` 给它加 `source_order_id NOT NULL UNIQUE` → MySQL 报 `Cannot add a UNIQUE column` 或合出"被污染"的表（原生 INSERT 撞空串 unique 索引而失败）。前端/计费此前没炸，仅因从没真插过订阅（0 行）。
+- **根因**：复用原生计费=原生必须独占 `user_subscriptions`（`PreConsume/HasActive` 查它），我们的表不能同名。
+- **解决/规避**：我们的表 **改名 `user_subscriptions`→`tokenplan_subscriptions`**（`internal/tokenplan/gormrepo` `TableName()`）。**已有库的清理（W4）**：服务器上那张被污染的 `user_subscriptions`（0 原生数据）→ `DROP TABLE user_subscriptions` → 重启 app，原生 `InitDB` 重建干净表（已在测试栈执行验证：重建后无 `source_order_id` 列、原生订阅 INSERT 成功）。
+- **升级**：**新增任何 GORM 表前，先 grep new-api `model/` 确认表名不撞**（尤其 user/token/subscription/channel/log 等高频名）；与原生共存的功能优先复用原生表，不另建同名表。文档 `user_subscriptions`→`tokenplan_subscriptions` 待同步（proposal §6.19、internal/stats 注释，W5）。
+
 ### [已解决] `.gitignore` 裸目录名 glob 静默吞掉新增源文件
 - **现象**：新增买家路由 `web/default/src/routes/_authenticated/plans/index.tsx` 本地能构建进 bundle、页面正常，但 `.gitignore` 第 25 行裸写 `plans`（本意忽略根级脚本目录）会**匹配任意层级**名为 `plans` 的路径 → `git add` 静默跳过该文件，提交后路由会丢。前端 Worker 用 `git check-ignore -v` 发现。
 - **解决/规避**：裸 `plans` 锚定为 `/plans`（只忽略根级）；提交前 `git diff --cached --name-only | grep` 确认关键新文件已暂存。
