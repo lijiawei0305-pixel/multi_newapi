@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { SectionPageLayout } from '@/components/layout'
 import { Skeleton } from '@/components/ui/skeleton'
+import { RechargeQrDialog } from '@/features/wallet/components/dialogs/recharge-qr-dialog'
 import {
   getTenantSubscriptions,
   getTenantTokenPlans,
@@ -36,10 +37,18 @@ function extractPayUrl(data?: PurchaseResult): string | undefined {
   return data.pay_url || data.pay_link || data.payment_url || data.url
 }
 
+/** Pending WeChat QR state for a created purchase order (mirrors recharge). */
+interface PurchaseQrState {
+  orderNo?: string
+  qr: string
+  amountCny?: number
+}
+
 function TenantPlansContent() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [purchasingCode, setPurchasingCode] = useState<string | null>(null)
+  const [qrState, setQrState] = useState<PurchaseQrState | null>(null)
 
   const { data: plansData, isLoading: plansLoading } = useQuery({
     queryKey: ['tenant-token-plans'],
@@ -60,20 +69,40 @@ function TenantPlansContent() {
   })
 
   const purchaseMutation = useMutation({
-    mutationFn: (plan: TenantPlan) => purchaseTokenPlan(plan.id ?? plan.code),
+    // Default to WeChat (QR dialog); Alipay would redirect, same as recharge.
+    mutationFn: (plan: TenantPlan) =>
+      purchaseTokenPlan(plan.id ?? plan.code, 'wxpay'),
     onMutate: (plan) => setPurchasingCode(plan.code),
     onSettled: () => setPurchasingCode(null),
     onSuccess: (res) => {
       if (!res.success) return // global interceptor already toasted the error
-      const payUrl = extractPayUrl(res.data)
+      const data = res.data
+      queryClient.invalidateQueries({ queryKey: ['tenant-subscriptions'] })
+
+      // WeChat: pop a scannable QR for the auth-service mock pay page.
+      const wxQr = data?.pay?.wxpay_qr
+      if (wxQr) {
+        setQrState({
+          orderNo: data?.order_no,
+          qr: wxQr,
+          amountCny: data?.amount_cny,
+        })
+        return
+      }
+      // Alipay: redirect the browser to the gateway / mock confirm page.
+      const aliUrl = data?.pay?.alipay_url
+      if (aliUrl) {
+        window.location.href = aliUrl
+        return
+      }
+      // Fallback (legacy shape): open whatever pay URL is present in a new tab.
+      const payUrl = extractPayUrl(data)
       if (payUrl) {
         toast.success(t('Order created. Redirecting to payment...'))
-        // Real payment is not wired yet — surface the PayURL for the buyer.
         window.open(payUrl, '_blank', 'noopener,noreferrer')
       } else {
         toast.success(res.message || t('Order created successfully'))
       }
-      queryClient.invalidateQueries({ queryKey: ['tenant-subscriptions'] })
     },
   })
 
@@ -125,6 +154,16 @@ function TenantPlansContent() {
             isLoading={subsLoading}
           />
         </div>
+
+        <RechargeQrDialog
+          open={qrState !== null}
+          onOpenChange={(o) => {
+            if (!o) setQrState(null)
+          }}
+          qr={qrState?.qr ?? null}
+          orderNo={qrState?.orderNo}
+          amountCny={qrState?.amountCny}
+        />
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

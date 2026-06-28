@@ -65,6 +65,10 @@ type App struct {
 	// RechargeGateway 下单（落库 RCG 订单 + 调 auth-service）与内网入账（强幂等状态机）。
 	RechargeGateway *payment.Gateway
 	rechargeCfg     rechargeConfig
+	// authClient 复用同一 auth-service 客户端：tokenplan 套餐购买（SUB 订单）经 HandlePurchase 装配
+	// 直接调它产出 mock 支付页 URL（与 RCG 充值同形），不再返回占位 PayURL。回调链（确认→notify→
+	// /api/internal/order/paid→按 SUB 前缀分发→ActivatePaidTokenplanOrder）已就绪。
+	authClient *authServiceClient
 
 	// activateNativeSub 在激活事务内建原生 UserSubscription（由 subscription_bridge.go 使用，
 	// 默认 defaultActivateNativeSub，可注入桩便于单测）。
@@ -134,6 +138,7 @@ func New(db *gorm.DB) *App {
 		RedemptionRepo:  redemptionRepo,
 		RechargeGateway: rechargeGateway,
 		rechargeCfg:     rechargeCfg,
+		authClient:      authClient, // 复用同一客户端供 tokenplan 购买（SUB）下单
 	}
 	if app.activateNativeSub == nil {
 		app.activateNativeSub = app.defaultActivateNativeSub // 目标③桥接默认实现（subscription_bridge.go）

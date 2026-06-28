@@ -104,7 +104,9 @@ func (s *subOrderStore) create(ctx context.Context, row *subscriptionOrderRow) e
 // ---- subPayment：tokenplan.PaymentGateway 实现，取代 wire.go 的 stubPayment ----
 //
 // 下单 = 落一条真实 pending 订单（前缀 SUB），可被支付回调用 ActivatePaidTokenplanOrder 激活。
-// 真实支付平台下单/跳转仍属 Track 2（internal/payment）；本网关只持久化订单意图 + 返回占位支付页 URL。
+// 本网关只持久化订单意图 + 返回占位支付页 URL；真实 mock 支付页 URL 由 HTTP 装配层
+// （mtwire.HandlePurchase → authServiceClient.CreatePay → auth-service /auth/order）按 order_no
+// 取回并覆盖（与 RCG 充值同形），故下方 PayURL 仅作 authClient 未装配时的回退占位。
 type subPayment struct{ orders *subOrderStore }
 
 func newSubPayment(orders *subOrderStore) *subPayment { return &subPayment{orders: orders} }

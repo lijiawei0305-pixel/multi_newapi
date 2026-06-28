@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/internal/platform/appctx"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 	"github.com/QuantumNous/new-api/internal/tenant"
@@ -135,8 +136,21 @@ func (a *App) HandleListTokenPlans(c *gin.Context) {
 	respondOK(c, out)
 }
 
+// purchaseRequest 是 POST /api/tenant/token-plans/:id/purchase 入参（全部可选）。
+// provider 缺省 wxpay；device_id/real_name_id 为 Trial 限购维度（本阶段风控放行）。
+type purchaseRequest struct {
+	DeviceID   string `json:"device_id"`
+	RealNameID string `json:"real_name_id"`
+	Provider   string `json:"provider"` // wxpay | alipay（默认 wxpay）
+}
+
 // HandlePurchase POST /api/tenant/token-plans/:id/purchase —— 下单（返回支付凭据）。需 UserAuth。
-// 可选 JSON body：{"device_id","real_name_id"}（Trial 限购维度，本阶段风控放行）。
+//
+// 流程：校验套餐/上架/限购 → Purchase 落 SUB 待支付订单 + 购买快照 → 像 recharge 一样调
+// auth-service /auth/order 拿 mock 支付页 URL → 返回 snake_case DTO（与充值响应同形）：
+// {order_no, pay_url, amount_cny, plan_id, pay:{wxpay_qr|alipay_url}}。pay_url 与 pay.* 同值
+// （auth-service mock 支付页）：微信端渲染二维码、支付宝端跳转。用户确认 → notify →
+// /api/internal/order/paid → 按 SUB 前缀分发 → ActivatePaidTokenplanOrder（激活原生订阅，链路已就绪）。
 func (a *App) HandlePurchase(c *gin.Context) {
 	t := tenantFrom(c)
 	if t == nil {
@@ -148,13 +162,20 @@ func (a *App) HandlePurchase(c *gin.Context) {
 		respondErr(c, tokenplan.ErrPlanNotFound)
 		return
 	}
-	var body struct {
-		DeviceID   string `json:"device_id"`
-		RealNameID string `json:"real_name_id"`
-	}
+	var body purchaseRequest
 	_ = c.ShouldBindJSON(&body) // body 可选
 
-	ticket, err := a.Subscriptions.Purchase(reqCtx(c), tokenplan.PurchaseInput{
+	provider := payment.ProviderWxpay // 默认微信
+	if body.Provider != "" {
+		provider = payment.Provider(body.Provider)
+	}
+	if !provider.Valid() {
+		respondErr(c, payment.ErrOrderInvalid)
+		return
+	}
+
+	ctx := reqCtx(c)
+	ticket, err := a.Subscriptions.Purchase(ctx, tokenplan.PurchaseInput{
 		TenantID:   t.ID,
 		UserID:     int64(c.GetInt("id")),
 		PlanID:     planID,
@@ -165,7 +186,50 @@ func (a *App) HandlePurchase(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
-	respondOK(c, ticket)
+
+	payURL, err := a.subscriptionPayURL(ctx, ticket, provider)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+
+	pay := gin.H{}
+	switch provider {
+	case payment.ProviderWxpay:
+		pay["wxpay_qr"] = payURL // 前端渲染二维码
+	case payment.ProviderAlipay:
+		pay["alipay_url"] = payURL // 前端跳转
+	}
+	respondOK(c, gin.H{
+		"order_no":   ticket.OrderID,
+		"pay_url":    payURL,
+		"amount_cny": ticket.AmountCNY,
+		"plan_id":    ticket.PlanID,
+		"pay":        pay,
+	})
+}
+
+// subscriptionPayURL 为一笔已落库的 SUB 套餐订单向 auth-service 下单，取回 mock 支付页 URL，
+// 复用 RCG 充值同一客户端（authServiceClient.CreatePay → auth-service /auth/order）。
+// 金额仅人民币（amount_cny=零售价）：AmountUSD 传 0（套餐额度在激活时按 month_limit_usd 注入
+// 原生订阅桶，非充值额度，故下单不传美元额）。NotifyURL 与 recharge 同口径（mock 不实际使用）。
+// authClient 未装配（如单测直构 App）时回退占位 PayURL，保证可跑不 panic。
+func (a *App) subscriptionPayURL(ctx context.Context, ticket *tokenplan.PurchaseTicket, provider payment.Provider) (string, error) {
+	if a.authClient == nil {
+		return ticket.PayURL, nil
+	}
+	cred, err := a.authClient.CreatePay(ctx, payment.PayRequest{
+		Provider:   provider,
+		OrderNo:    ticket.OrderID,
+		AmountUSD:  0,
+		ActualPaid: ticket.AmountCNY,
+		Subject:    "套餐购买 #" + strconv.FormatInt(ticket.PlanID, 10),
+		NotifyURL:  a.rechargeCfg.notifyBaseURL + provider.NotifyPath(),
+	})
+	if err != nil {
+		return "", err
+	}
+	return cred.PayURL, nil
 }
 
 // HandleListSubscriptions GET /api/tenant/subscriptions —— 当前用户在本租户的订阅（含历史）。需 UserAuth。

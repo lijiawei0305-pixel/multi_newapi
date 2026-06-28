@@ -73,12 +73,28 @@ export interface TenantSubscription {
 }
 
 /**
- * Purchase response payload. Real payment is not wired yet, so the backend
- * returns a hosted PayURL / pay credentials; we surface whichever field is
- * present without assuming a single name.
+ * Purchase response payload (snake_case, mirrors the wallet recharge envelope).
+ * The backend creates a SUB order then asks the auth-service for a mock pay page:
+ * `pay_url` and `pay.*` carry the same hosted URL. WeChat surfaces it as a QR
+ * payload (`pay.wxpay_qr`), Alipay as a redirect URL (`pay.alipay_url`).
  */
 export interface PurchaseResult {
+  /** Hosted mock pay page (auth-service); same value as pay.wxpay_qr / pay.alipay_url. */
   pay_url?: string
+  /** SUB order number (matches the recharge `order_no` shape). */
+  order_no?: string
+  /** Retail price actually charged (¥). */
+  amount_cny?: number
+  /** Purchased plan id. */
+  plan_id?: number
+  /** Provider-specific pay credential. */
+  pay?: {
+    /** WeChat: QR payload (mock confirm page URL). */
+    wxpay_qr?: string
+    /** Alipay: redirect target. */
+    alipay_url?: string
+  }
+  // Legacy / alternative field names kept for tolerance.
   pay_link?: string
   payment_url?: string
   url?: string

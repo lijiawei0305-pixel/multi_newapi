@@ -41,12 +41,16 @@ export async function getTenantTokenPlans(): Promise<
 /**
  * Purchase a plan. `idOrCode` is the plan's numeric id when available,
  * otherwise its code — both are accepted by the `:id` path segment.
- * Returns a hosted PayURL / pay credentials (real payment not wired yet).
+ * `provider` (default wxpay) selects the auth-service mock pay page returned as
+ * `pay.wxpay_qr` (QR) or `pay.alipay_url` (redirect) — same shape as recharge.
  */
 export async function purchaseTokenPlan(
-  idOrCode: number | string
+  idOrCode: number | string,
+  provider: 'wxpay' | 'alipay' = 'wxpay'
 ): Promise<ApiResponse<PurchaseResult>> {
-  const res = await api.post(`/api/tenant/token-plans/${idOrCode}/purchase`)
+  const res = await api.post(`/api/tenant/token-plans/${idOrCode}/purchase`, {
+    provider,
+  })
   return res.data
 }
 
