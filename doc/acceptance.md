@@ -99,7 +99,7 @@
 #### [P1-TEN-01] 二级域名路由到租户 + 未开通提示
 - **功能判据**:`tokendream.wedreamhub.com` 渲染对应租户品牌;未知域名显示"站点未开通"(404)。
 - **技术判据**:`ResolveByHost` 缓存命中/穿透/未找到单测;Host→tenant Redis 缓存 + 失效 `#8`。
-- **关联门**:#4 #8 ｜ **状态**:🟡(单域名达成;`*.wedreamhub.com` 通配证书由 **P1-OPS-01** 收口)
+- **关联门**:#4 #8 ｜ **状态**:🟡(单域名 + **`*.wedreamhub.com` 通配 vhost 已通**:任意子域→后端按 Host 解析(已知→品牌,未知→`TENANT_NOT_FOUND` 站点未开通),测试栈 E2E;待用户加通配代理 DNS 经 CF 访问)
 
 #### [P1-SITE-01] 代理配站点基础信息 + 主题色限色板
 - **功能判据**:配置 Logo/Favicon/Hero/标题/公告/客服/页脚;切紫色主题生效;非色板色被拒。
@@ -229,17 +229,17 @@
 #### [P1-OPS-01] 域名/证书(8a)
 - **功能判据**:`*.wedreamhub.com` 通配 vhost + CF Origin CA(Full strict);主站 `www/admin/api` + 代理泛子域。
 - **技术判据**:证书有效期 + 链路 `Full strict` 校验;替换早期自签 `#10 #11`。
-- **关联门**:#10 #11 ｜ **状态**:⏳(收口 P1-TEN-01 通配)
+- **关联门**:#10 #11 ｜ **状态**:🟡(通配 vhost(`*.wedreamhub.com`→3100、`/auth/`→8180、`/api/internal/` 封禁) + **CF Origin CA 证书已签发并装好**(经 CF API 创建,issuer CloudFlare Origin CA,SAN `*.wedreamhub.com`+apex,2041,源站已出示,**strict-ready**);**待用户**:加通配代理 DNS + CF 切 Full(strict)(zone 级,须确认现网 api 也证书就绪或保持 Full 非 strict))
 
 #### [P1-OPS-02] 灰度切流(8b)
 - **功能判据**:测试栈验证 → 正式栈(独立于现网 `newapi_YFNf` 或择机替换)→ 小流量灰度。
 - **技术判据**:灰度可回退;现网零影响 `#11`。
-- **关联门**:#8 #11 ｜ **状态**:⏳
+- **关联门**:#8 #11 ｜ **状态**:🟡(**决策已定:当前栈(3100)作正式栈**,通配指它;现网 `newapi_YFNf`(api.) exact 匹配优先、天然隔离、改 DNS/CF 即时回退;小流量灰度(CF LB / nginx `split_clients`)片段见 `deploy/ops/go-live.md`,本期默认全量切+保留现网回退)
 
 #### [P1-OPS-03] 运维基建(8c)
 - **功能判据**:备份/回滚脚本、迁移版本化、监控/告警、`docker compose` 一键启停。
 - **技术判据**:迁移 up/down 演练 `#9`;回滚演练记录 `#11`。
-- **关联门**:#9 #11 ｜ **状态**:⏳
+- **关联门**:#9 #11 ｜ **状态**:🟡(**`deploy/ops/` 工具集已交付**:backup/restore/rollback/healthcheck/deploy.sh + lib.sh(`guard_not_prod` 红线)+ migrate-note/README/go-live;**healthcheck + backup 服务器实跑过**(全绿、DB16K+Redis+证书配置备份);deploy.sh=预检→tag→`:prev`→备份→tar-over-ssh→重建→轮询→失败自动回滚。迁移幂等无 down,回退靠备份+`:prev` 镜像)
 
 ## 1.8 一期交付物
 - ⬜ 一期接口文档([`api-contract.md`](api-contract.md) 对齐已实现端点)

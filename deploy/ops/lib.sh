@@ -39,8 +39,8 @@ BACKUP_DIR="${BACKUP_DIR:-/root/backups}"
 KEEP="${KEEP:-7}"                   # 各类备份各保留最近 N 份
 
 # ── 宿主 nginx vhost（宝塔）+ 证书目录（备份/上线手册引用）────────────────────────
-NGINX_VHOST="${NGINX_VHOST:-/www/server/panel/vhost/nginx/${HOST_HEADER}.conf}"
-NGINX_CERT_DIR="${NGINX_CERT_DIR:-/www/server/panel/vhost/cert/${HOST_HEADER}}"
+NGINX_VHOST="${NGINX_VHOST:-/www/server/panel/vhost/nginx/wildcard.wedreamhub.com.conf}"   # 通配上线 vhost（tokendream 专属已让位 .bak）
+NGINX_CERT_DIR="${NGINX_CERT_DIR:-/www/server/panel/vhost/cert/wildcard.wedreamhub.com}"   # 通配 CF Origin CA 证书目录
 
 # ── 告警 webhook（可选；非空则 healthcheck 失败时 POST，占位）──────────────────────
 ALERT_WEBHOOK="${ALERT_WEBHOOK:-}"

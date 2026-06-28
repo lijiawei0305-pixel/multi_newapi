@@ -58,8 +58,10 @@ TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 cp -a "$ENV_FILE"      "$TMPD/env"            2>/dev/null || warn "未找到 $ENV_FILE"
 cp -a "$COMPOSE_FILE"  "$TMPD/compose.yml"    2>/dev/null || warn "未找到 $COMPOSE_FILE"
 cp -a "$NGINX_VHOST"   "$TMPD/nginx.vhost.conf" 2>/dev/null || warn "未找到 $NGINX_VHOST（宝塔 nginx vhost）"
+cp -a "$NGINX_CERT_DIR" "$TMPD/nginx.cert"      2>/dev/null || warn "未找到 $NGINX_CERT_DIR（通配 CF Origin CA 证书目录）"
 tar czf "$CFG_OUT" -C "$TMPD" .
-ok "配置备份完成（$(du -h "$CFG_OUT" | cut -f1)）"
+ok "配置备份完成（$(du -h "$CFG_OUT" | cut -f1)）—— 含通配 vhost + CF Origin CA 证书"
+warn "config 备份内含证书私钥与 .env，仅存服务器 root 目录、勿入库/外传"
 
 # ── 4) 保留策略：各类各留最近 $KEEP 份 ────────────────────────────────────────
 prune_keep "$BACKUP_DIR/db-*.sql.gz"
