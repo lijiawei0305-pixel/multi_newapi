@@ -1,4 +1,5 @@
-// Package grouphook 提供「new-api 计费分组倍率解析 → 租户用户组倍率覆盖」的旁路挂钩点（包级函数变量）。
+// Package grouphook 提供「new-api 计费分组倍率解析 → 2D 倍率（层级 × 模型分组，含代理 per-tenant 覆盖）」
+// 的旁路挂钩点（包级函数变量）。
 //
 // 设计意图：new-api 计费路径（relay/helper.HandleGroupRatio）在解析「请求维度 groupRatio」时，
 // 不应 import 多租户增量装配层 mtwire / internal/tenant（会形成 import 环、污染原生计费包依赖）。
@@ -9,30 +10,23 @@
 // 绝不可阻断或破坏计费。实现侧必须自身兜底 panic/error，并在无覆盖时返回 (0, false)。
 package grouphook
 
-import "context"
-
-// TenantGroupRatioResolver 解析「某用户所属租户对某用户组（usingGroup）设定的倍率覆盖」。
-//
-//   - 返回 (ratio, true)：命中所属租户 tenant_groups[tenant_id, group] 的 enabled 覆盖，
-//     调用方用该 ratio 作为计费 groupRatio。
-//   - 返回 (_, false)：无租户（主站用户）/ 无覆盖 / 禁用 / 任何错误——调用方回退全局 GetGroupRatio。
-//   - nil（未装配，如单测 / 非多租户环境）：调用方一律回退全局倍率。
-//
-// 该解析点同时供「预扣」与「结算」复用（见 relay/helper.HandleGroupRatio），覆盖一处即两端一致。
-var TenantGroupRatioResolver func(ctx context.Context, userID int64, group string) (float64, bool)
-
-// ModelGroup2DResolver 解析「2D 倍率（层级 × 模型分组）」覆盖（见 doc/detailed-design.md §2.15）。
+// ModelGroup2DResolver 解析「2D 倍率（层级 × 模型分组，含代理 per-tenant 覆盖）」（见 doc/detailed-design.md §2.15）。
 //
 // 把计费倍率从一维升级为二维相乘：
 //
-//		最终 groupRatio = GroupRatio[userGroup(层级)] × ( usingGroup ∈ model_groups ? GroupRatio[usingGroup] : 1 )
+//		最终 groupRatio = GroupRatio[userGroup(层级)] × modelFactor
+//		modelFactor = usingGroup ∈ model_groups
+//		              ? ( 该用户所属租户对此模型分组有 enabled 覆盖 ? 覆盖值 : GroupRatio[usingGroup] )
+//		              : 1
 //
+//	  - userID：发起请求的用户 id（解析其 users.tenant_id → tenant_groups 覆盖；主站用户 / 0 → 无覆盖，用平台基准）；
 //	  - userGroup：用户所属层级（User.Group，如 default/vip/svip），倍率在原生 GroupRatio；
-//	  - usingGroup：本次请求所用 token 组；若它是「已登记的模型分组」，叠乘其 GroupRatio 作折扣系数，否则系数=1（仅层级）。
+//	  - usingGroup：本次请求所用 token 组；若它是「已登记的模型分组」，叠乘其折扣系数（代理租户可加价覆盖），否则系数=1（仅层级）；
 //	  - 返回 (ratio, true)：用该 ratio 作计费 groupRatio（装配且无异常时恒命中）；
-//	  - 返回 (_, false)：任何错误 / panic / 未装配——调用方回退原生 GetGroupGroupRatio/GetGroupRatio。
+//	  - 返回 (_, false)：任何错误 / panic / 未装配——调用方回退原生 GetGroupGroupRatio/GetGroupRatio；
 //	  - nil（未装配，如单测 / 平台未启用）：调用方一律回退原生倍率。
 //
-// 与 TenantGroupRatioResolver 同为「请求维度 groupRatio」旁路覆盖；预扣与结算共用其结果（覆盖一处即两端一致）。
+// 代理 per-tenant 覆盖只对模型分组生效（折扣系数侧），并受「组合下限」保护（覆盖值 ≥ 平台基准，只能加价）；
+// 校验在写入端（代理「我的用户组」端点）完成。本解析点同时供「预扣」与「结算」复用（覆盖一处即两端一致）。
 // 安全第一：实现侧自身兜底 panic，miss/错误一律回退，绝不阻断或破坏计费。
-var ModelGroup2DResolver func(userGroup, usingGroup string) (float64, bool)
+var ModelGroup2DResolver func(userID int64, userGroup, usingGroup string) (float64, bool)

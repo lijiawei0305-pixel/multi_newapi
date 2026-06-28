@@ -7,6 +7,7 @@ package mtwire
 // 货币口径：人民币字段后缀 *_cny、美元额度后缀 *_usd；额度单位换算 $1 = common.QuotaPerUnit。
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"strconv"
@@ -22,7 +23,6 @@ import (
 	"github.com/QuantumNous/new-api/internal/tokenplan"
 	"github.com/QuantumNous/new-api/internal/wallet"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 // maxRedemptionBatch 单次建码张数上限（防刷 / 限制批量插入规模）。
@@ -348,38 +348,52 @@ func (a *App) HandleRedeem(c *gin.Context) {
 }
 
 // ============================================================================
-// 5) 我的用户组倍率（存储 + 校验 + 展示；计费接线留作后续，见文件头与报告 TODO）
+// 5) 我的模型分组倍率（代理调本租户某模型分组的折扣系数；并入 2D 的 modelFactor，§2.15 Phase 2）
 // ============================================================================
+//
+// 代理只能调「已登记的模型分组」（IsModelGroup）的 per-tenant 覆盖倍率，存 tenant_groups[本租户, model_group]，
+// 由 resolveModelGroup2D 在计费时叠入 modelFactor（命中覆盖用覆盖值、否则平台基准）。
+// 组合下限（层级在两侧相同，化简后）：覆盖值必须 ≥ 主站 GetGroupRatio(model_group)（只能加价，代理赚加价差）。
 
-// groupOut 是用户组倍率行：ratio=代理设定倍率；floor=主站保护下限（GetGroupRatio，缺则 1.0）。
-type groupOut struct {
-	GroupName string  `json:"group_name"`
-	Ratio     float64 `json:"ratio"`
-	Floor     float64 `json:"floor"`
+// modelGroupRatioOut 是「我的模型分组倍率」行：
+//   - platform_ratio：主站基准 GetGroupRatio(model_group)（= 下限 floor）；
+//   - ratio：本租户当前生效倍率（有覆盖=覆盖值，无覆盖=平台基准）；
+//   - has_override：本租户是否已设覆盖。
+type modelGroupRatioOut struct {
+	GroupName     string  `json:"group_name"`
+	Ratio         float64 `json:"ratio"`
+	PlatformRatio float64 `json:"platform_ratio"`
+	Floor         float64 `json:"floor"`
+	HasOverride   bool    `json:"has_override"`
 }
 
-// HandleAgentListGroups GET /api/tenant/groups —— 本租户已配置的用户组倍率 + 各自保护下限。
+// HandleAgentListGroups GET /api/tenant/groups —— 本租户可调的模型分组倍率：
+// 列出每个「已登记模型分组」的主站基准（platform_ratio，= 下限 floor）+ 本租户当前覆盖（ratio/has_override）。
+// 仅列模型分组（层级由管理员/代理另设，不在此）。
 func (a *App) HandleAgentListGroups(c *gin.Context) {
 	tenantID := agentTenantID(c)
 	if tenantID <= 0 {
 		respondErr(c, errAgentForbidden)
 		return
 	}
-	groups, err := a.TenantRepo.ListGroups(reqCtx(c), tenantID)
-	if err != nil {
-		respondErr(c, err)
-		return
-	}
-	out := make([]groupOut, 0, len(groups))
-	for _, g := range groups {
-		out = append(out, groupOut{GroupName: g.GroupName, Ratio: g.Ratio, Floor: groupFloor(g.GroupName)})
+	ctx := reqCtx(c)
+	names := a.ModelGroupRepo.ListEnabled() // 已启用模型分组名（升序）
+	out := make([]modelGroupRatioOut, 0, len(names))
+	for _, name := range names {
+		base := modelGroupBaseline(name) // 主站基准 = 组合下限
+		row := modelGroupRatioOut{GroupName: name, Ratio: base, PlatformRatio: base, Floor: base}
+		if override, found, err := a.TenantRepo.LookupEnabledGroupRatio(ctx, tenantID, name); err == nil && found {
+			row.Ratio = override
+			row.HasOverride = true
+		}
+		out = append(out, row)
 	}
 	respondOK(c, out)
 }
 
-// HandleAgentSetGroupRatio PUT /api/tenant/groups/:group —— 设某用户组倍率。
-// 经 pricing.Guard.ValidateGroupRatio(ratio, floor) 校验（floor=主站 GetGroupRatio(group)，缺则 1.0），
-// 低于保护下限返回 RATIO_BELOW_FLOOR。
+// HandleAgentSetGroupRatio PUT /api/tenant/groups/:group —— 设本租户某模型分组的覆盖倍率。
+// 校验：① group 必须是已登记的模型分组（IsModelGroup），否则 AGENT_GROUP_NOT_MODEL；
+// ② ratio ≥ 主站 GetGroupRatio(group)（组合下限），低于返回 RATIO_BELOW_FLOOR（经 pricing.Guard）。
 func (a *App) HandleAgentSetGroupRatio(c *gin.Context) {
 	tenantID := agentTenantID(c)
 	if tenantID <= 0 {
@@ -391,6 +405,11 @@ func (a *App) HandleAgentSetGroupRatio(c *gin.Context) {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
+	// 仅允许调模型分组的折扣系数；层级名 / 未登记分组一律拒（其 modelFactor 恒为 1，调了无意义且语义混淆）。
+	if !a.ModelGroupRepo.IsModelGroup(group) {
+		respondErr(c, errAgentGroupNotModel)
+		return
+	}
 	var body struct {
 		Ratio float64 `json:"ratio"`
 	}
@@ -398,7 +417,7 @@ func (a *App) HandleAgentSetGroupRatio(c *gin.Context) {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
-	floor := groupFloor(group)
+	floor := modelGroupBaseline(group) // 组合下限 = 主站基准 GetGroupRatio(model_group)
 	if err := pricing.NewGuard().ValidateGroupRatio(body.Ratio, floor); err != nil {
 		respondErr(c, err) // RATIO_BELOW_FLOOR
 		return
@@ -407,20 +426,83 @@ func (a *App) HandleAgentSetGroupRatio(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
-	respondOK(c, groupOut{GroupName: group, Ratio: body.Ratio, Floor: floor})
+	respondOK(c, modelGroupRatioOut{
+		GroupName: group, Ratio: body.Ratio, PlatformRatio: floor, Floor: floor, HasOverride: true,
+	})
+}
+
+// ============================================================================
+// 6) 代理给下级用户设层级（default/vip；改 User.Group + 刷用户缓存，§2.15 Phase 2）
+// ============================================================================
+
+// allowedAgentTiers 是代理可分配给本租户下级用户的层级白名单（层级倍率在原生 GroupRatio）。
+// 高级层级（svip 等）仅管理员可分配；此处可按运营需要扩充。
+var allowedAgentTiers = map[string]struct{}{
+	"default": {},
+	"vip":     {},
+}
+
+// HandleAgentSetUserTier PUT /api/tenant/users/:id/tier —— 把本租户某下级用户的层级设为允许层级。
+// 入参 {tier}。校验：① tier ∈ allowedAgentTiers，否则 AGENT_TIER_INVALID；
+// ② 目标用户 users.tenant_id == 代理租户（越权防线），否则 AGENT_FORBIDDEN。
+// 落库后必失效用户缓存（否则 relay 仍读旧分组，见 RETRO「改分组须走 API」）。
+func (a *App) HandleAgentSetUserTier(c *gin.Context) {
+	tenantID := agentTenantID(c)
+	if tenantID <= 0 {
+		respondErr(c, errAgentForbidden)
+		return
+	}
+	targetID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || targetID <= 0 {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	var body struct {
+		Tier string `json:"tier"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	tier := strings.TrimSpace(body.Tier)
+	if _, ok := allowedAgentTiers[tier]; !ok {
+		respondErr(c, errAgentTierInvalid)
+		return
+	}
+	ctx := reqCtx(c)
+	// 越权防线：仅可改本租户名下用户（tenant_id 必须匹配；未知用户 → tenant_id=0 ≠ 本租户 → 拒）。
+	if a.userTenantID(ctx, targetID) != tenantID {
+		respondErr(c, errAgentForbidden)
+		return
+	}
+	if err := a.setUserGroup(ctx, targetID, tier); err != nil {
+		respondErr(c, err)
+		return
+	}
+	respondOK(c, gin.H{"id": targetID, "tier": tier})
+}
+
+// setUserGroup 把某用户的 User.Group 设为 group（轻量 Table 更新，保留字 group 由 gorm 方言加引号；
+// 不触碰 new-api 的 model.User struct），并失效用户缓存——下一次 GetUserCache 从 DB 重载新分组。
+// 必须刷缓存：直改 DB 不刷，relay 仍读旧分组（RETRO「改分组须走 API」）。复用 admin 改 group 的失效路径。
+func (a *App) setUserGroup(ctx context.Context, userID int64, group string) error {
+	if err := a.DB.WithContext(ctx).Table("users").
+		Where("id = ?", userID).Update("group", group).Error; err != nil {
+		return err
+	}
+	// 失效缓存（best-effort，不影响主流程；Redis 未启用时为空操作）。
+	_ = model.InvalidateUserCache(int(userID))
+	return nil
 }
 
 // ============================================================================
 // 辅助
 // ============================================================================
 
-// groupFloor 取某用户组的主站保护下限：GetGroupRatio 命中返回其值，未命中返回 1.0（其内部缺失即返回 1）。
-func groupFloor(group string) float64 {
-	floor := ratio_setting.GetGroupRatio(group)
-	if floor <= 0 {
-		return 1.0
-	}
-	return floor
+// modelGroupBaseline 取某模型分组的主站基准倍率（= 代理覆盖的组合下限）：经 groupRatioOf 包级 seam
+// （默认 ratio_setting.GetGroupRatio；未命中其内部返回 1）。单测可注入 seam 控制基准。
+func modelGroupBaseline(group string) float64 {
+	return groupRatioOf(group)
 }
 
 // randPrefix 返回服务端随机短前缀（8 hex 字符，满足 promotion 前缀 [a-z0-9-] 校验）。

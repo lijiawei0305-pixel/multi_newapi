@@ -31,10 +31,12 @@ const ginKeyAgentTenant = "mt_agent_tenant"
 
 // 代理端点错误码（沿用模块前缀约定）。
 var (
-	errAgentForbidden    = apperr.New("AGENT_FORBIDDEN", "无权访问该代理资源", http.StatusForbidden)
-	errAgentInputInvalid = apperr.New("AGENT_INPUT_INVALID", "代理入参非法", http.StatusBadRequest)
-	errAgentOwnerTaken   = apperr.New("AGENT_OWNER_TAKEN", "该用户已是其他租户的代理 owner", http.StatusConflict)
-	errAgentUserNotFound = apperr.New("AGENT_USER_NOT_FOUND", "owner 用户不存在", http.StatusBadRequest)
+	errAgentForbidden     = apperr.New("AGENT_FORBIDDEN", "无权访问该代理资源", http.StatusForbidden)
+	errAgentInputInvalid  = apperr.New("AGENT_INPUT_INVALID", "代理入参非法", http.StatusBadRequest)
+	errAgentOwnerTaken    = apperr.New("AGENT_OWNER_TAKEN", "该用户已是其他租户的代理 owner", http.StatusConflict)
+	errAgentUserNotFound  = apperr.New("AGENT_USER_NOT_FOUND", "owner 用户不存在", http.StatusBadRequest)
+	errAgentTierInvalid   = apperr.New("AGENT_TIER_INVALID", "不允许的用户层级", http.StatusBadRequest)
+	errAgentGroupNotModel = apperr.New("AGENT_GROUP_NOT_MODEL", "仅可调整模型分组的倍率", http.StatusBadRequest)
 )
 
 // ============================================================================

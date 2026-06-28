@@ -50,23 +50,16 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 		relayInfo.UsingGroup = autoGroup.(string)
 	}
 
-	// mt: 租户用户组倍率覆盖 —— 本函数是「请求维度 groupRatio」的单一解析点，预扣(ModelPriceHelper)
-	// 与结算(PostTextConsumeQuota 读 PriceData.GroupRatioInfo.GroupRatio)共用其结果，故覆盖一处即两端一致。
-	// 命中所属租户对该 usingGroup 的 enabled 覆盖即用租户倍率计费；未命中/无租户/出错/未装配一律
-	// 回退下方全局 GetGroupRatio（安全第一，绝不破坏计费）。
-	if grouphook.TenantGroupRatioResolver != nil {
-		if r, ok := grouphook.TenantGroupRatioResolver(ctx, int64(relayInfo.UserId), relayInfo.UsingGroup); ok {
-			groupRatioInfo.GroupRatio = r
-			return groupRatioInfo
-		}
-	}
-
-	// mt: 2D 倍率（层级 × 模型分组，§2.15）—— 平台级旁路覆盖。最终 groupRatio =
-	// GroupRatio[UserGroup(层级)] × (UsingGroup ∈ model_groups ? GroupRatio[UsingGroup] : 1)。
-	// 与上方租户覆盖同为「请求维度 groupRatio」单点，预扣与结算共用其结果。命中即返；
-	// 未装配 / miss / panic 一律回退下方原生 GetGroupGroupRatio/GetGroupRatio（安全第一，绝不破坏计费）。
+	// mt: 2D 倍率（层级 × 模型分组，含代理 per-tenant 覆盖，§2.15）—— 平台级旁路覆盖，
+	// 本函数是「请求维度 groupRatio」的单一解析点，预扣(ModelPriceHelper) 与结算(PostTextConsumeQuota
+	// 读 PriceData.GroupRatioInfo.GroupRatio)共用其结果，故覆盖一处即两端一致。最终 groupRatio =
+	// GroupRatio[UserGroup(层级)] × modelFactor，其中 modelFactor = UsingGroup ∈ model_groups
+	// ?（该用户所属租户对此模型分组有 enabled 覆盖 ? 覆盖值 : GroupRatio[UsingGroup]）: 1。
+	// 代理租户的 markup 覆盖（tenant_groups）已并入此处 modelFactor（只对模型分组生效、受组合下限保护），
+	// 故不再单设独立的租户覆盖钩子。命中即返；未装配 / miss / panic 一律回退下方原生
+	// GetGroupGroupRatio/GetGroupRatio（安全第一，绝不破坏计费）。
 	if grouphook.ModelGroup2DResolver != nil {
-		if r, ok := grouphook.ModelGroup2DResolver(relayInfo.UserGroup, relayInfo.UsingGroup); ok {
+		if r, ok := grouphook.ModelGroup2DResolver(int64(relayInfo.UserId), relayInfo.UserGroup, relayInfo.UsingGroup); ok {
 			groupRatioInfo.GroupRatio = r
 			return groupRatioInfo
 		}

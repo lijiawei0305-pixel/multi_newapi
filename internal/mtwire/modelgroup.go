@@ -46,15 +46,19 @@ func (a *App) InstallModelGroup2DHook() {
 	grouphook.ModelGroup2DResolver = a.resolveModelGroup2D
 }
 
-// resolveModelGroup2D 是 grouphook.ModelGroup2DResolver 实现：
+// resolveModelGroup2D 是 grouphook.ModelGroup2DResolver 实现（含代理 per-tenant 覆盖）：
 //
-//	tier   = GroupRatio[userGroup]                                   （层级倍率，原生真源）
-//	factor = IsModelGroup(usingGroup) ? GroupRatio[usingGroup] : 1   （模型分组折扣系数，未登记=1）
-//	return (tier * factor, true)
+//	tier        = GroupRatio[userGroup]                                   （层级倍率，原生真源）
+//	modelFactor = IsModelGroup(usingGroup)
+//	              ? ( 该用户所属租户对此模型分组有 enabled 覆盖 ? 覆盖值 : GroupRatio[usingGroup] )
+//	              : 1                                                      （模型分组折扣系数，未登记=1）
+//	return (tier * modelFactor, true)
 //
-// 边界天然安全：usingGroup 是层级名 / 非模型分组 → 系数 1，仅层级，不重复算。
+// 代理租户的 markup 覆盖（tenant_groups[tenant, model_group]）只在 usingGroup 是模型分组时叠入 modelFactor：
+// 命中覆盖用覆盖值（代理加价）、否则用平台基准；受写入端「组合下限」保护（覆盖值 ≥ 平台基准）。
+// 边界天然安全：usingGroup 是层级名 / 非模型分组 → 系数 1，仅层级，不重复算；主站用户 / userID=0 → 无覆盖，走基准。
 // 旁路安全：自带 panic 兜底；未装配（ModelGroupRepo=nil）/ 异常 → (0,false)，由计费侧回退原生倍率，绝不破坏计费。
-func (a *App) resolveModelGroup2D(userGroup, usingGroup string) (ratio float64, ok bool) {
+func (a *App) resolveModelGroup2D(userID int64, userGroup, usingGroup string) (ratio float64, ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			common.SysError("mtwire: resolveModelGroup2D panic recovered")
@@ -67,7 +71,11 @@ func (a *App) resolveModelGroup2D(userGroup, usingGroup string) (ratio float64, 
 	tier := groupRatioOf(userGroup)
 	factor := 1.0
 	if usingGroup != "" && a.ModelGroupRepo.IsModelGroup(usingGroup) {
-		factor = groupRatioOf(usingGroup)
+		factor = groupRatioOf(usingGroup) // 平台基准
+		// 代理 per-tenant 覆盖（仅模型分组）：命中即用覆盖值（写入端已保证 ≥ 基准，代理加价）。
+		if override, hit := a.resolveTenantGroupRatio(context.Background(), userID, usingGroup); hit {
+			factor = override
+		}
 	}
 	return tier * factor, true
 }

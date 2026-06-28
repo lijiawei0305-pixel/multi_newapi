@@ -26,10 +26,10 @@ func SetMtRouter(router *gin.Engine) {
 
 	app := mtwire.New(model.DB)
 
-	// 安装代理增量旁路钩子（消耗分润 / 注册归属 / 2D 倍率层级×模型分组）。所有节点都装（钩子由原生 service/controller/计费侧调用）。
+	// 安装代理增量旁路钩子（消耗分润 / 注册归属 / 2D 倍率层级×模型分组，含代理 per-tenant 覆盖）。
+	// 所有节点都装（钩子由原生 service/controller/计费侧调用）。租户用户组倍率覆盖已并入 2D 的 modelFactor
+	// （只对模型分组生效、受组合下限保护，见 §2.15 Phase 2），故不再单设独立钩子。
 	app.InstallHooks()
-	// 安装租户用户组倍率覆盖钩子（作用于 /v1 计费的 groupRatio 单一解析点）。所有节点都装。
-	app.InstallGroupRatioHook()
 
 	if common.IsMasterNode {
 		if err := app.Migrate(); err != nil {
@@ -70,8 +70,11 @@ func SetMtRouter(router *gin.Engine) {
 			agentSelf.GET("/promotion/channels", app.HandleAgentListChannels)
 			agentSelf.POST("/promotion/channels", app.HandleAgentCreateChannel)
 			agentSelf.GET("/users", app.HandleAgentListUsers)
+			// 代理给本租户下级用户设层级（default/vip）：改 User.Group + 刷用户缓存（§2.15 Phase 2）。
+			agentSelf.PUT("/users/:id/tier", app.HandleAgentSetUserTier)
 			agentSelf.POST("/redemptions", app.HandleAgentCreateRedemptions)
 			agentSelf.GET("/redemptions", app.HandleAgentListRedemptions)
+			// 我的模型分组倍率：列表（平台基准 + 本租户覆盖）/ 设覆盖（仅模型分组、≥ 平台基准）。
 			agentSelf.GET("/groups", app.HandleAgentListGroups)
 			agentSelf.PUT("/groups/:group", app.HandleAgentSetGroupRatio)
 		}
