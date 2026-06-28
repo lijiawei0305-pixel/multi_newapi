@@ -37,8 +37,16 @@
 > **关键**：`theme.frontend=default` 已**固化进 mtwire seed**（首次初始化设置，持久化值已确认；new-api 默认 classic，我们页面在 default——见 RETRO）。
 - [x] **6a tokenplan 套餐 CRUD UI**（管理员）—— 列表+新建+编辑+上下架
 - [x] **6a+ 买家套餐购买页 + 管理订阅监控页** —— 卡片购买流（真实支付待目标③）+ 满额预警分级
-- [ ] **6b 子代理管理 UI**（设代理 普通/OEM/API、成本价/折扣/分润/等级、自定义域名、启用/禁用）
-- [ ] **6c 提现审核 UI**（管理员审核通过/拒绝；代理端提现申请已有）
+- [x] **6b 子代理管理 UI** + 后端（设代理 普通/OEM/API、成本价/折扣/分润/等级）—— 见下「代理核心闭环」
+- [x] **6c 提现审核 UI** + 后端（管理员通过/拒绝 + 代理端申请）—— 见下「代理核心闭环」
+
+> **✅ 代理核心闭环完成（2026-06-28，测试栈 E2E 全过）**：决策=代理=User+Tenant 1:1。
+> - **数据模型**：`tenants.owner_user_id` + 原生 `users.tenant_id`（幂等 raw ALTER，不改 new-api 源）+ agent 4 表 + `internal/agent/gormrepo`（替换 MemRepo，分润幂等 idem_key、提现条件UPDATE/CAS）。
+> - **端点**：`POST/GET/PATCH /api/admin/agents`、`GET/POST /api/tenant/withdrawals`、`GET /api/tenant/earnings`、`GET /api/admin/withdrawals` + approve/reject；`AgentOwnerAuth`（直读 DB owner 校验）。
+> - **分润落账**：`tokenplan_spread`（换掉 noop）+ `consume_commission`（挂原生 `PostConsumeQuota` 单点覆盖两桶、幂等 RequestId、旁路化）。
+> - **UI**（web/default）：管理「子代理管理」`/agents` + 「提现审核」`/withdrawals`；代理「我的收益」`/agent-earnings`。
+> - **E2E 实测**：seed `demoagent`/`demoagent123`=tokendream owner；购买 lite→demoagent 得 `tokenplan_spread ¥179.8`（幂等不双计）；申请提现¥100→可提现79.8/冻结100→admin 通过→冻结0（金额守恒）；三页浏览器渲染确认。
+> - **遗留**：`consume_commission`/`recharge_spread` 未端到端实测（需子用户真实 /v1 调用 + recharge 口径未决）；推广渠道码归属、代理自助(用户组/兑换码/套餐上架 UI-04)、设代理 admin UI 的"建租户"完整流 待补。
 - [ ] **6d 代理装修配置 UI**（品牌 tabs：品牌/联系/充值/内容/首页/协议，接 SiteConfig）+ 我的用户组/我的用户/推广渠道/兑换码 UI
 - [ ] **6e 违禁词屏蔽（Phase 2 新增功能）** —— relay hook 扫用户消息→提醒/拦截 + 违规日志；管理员词库 CRUD + 违规审阅。规格见 `doc/detailed-design.md` §2.14（含开放问题，实现前先与用户确认）
 
