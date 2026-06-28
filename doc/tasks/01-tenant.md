@@ -7,18 +7,18 @@
 
 ## A. 数据模型与迁移
 - [ ] `tenants` 表（+`tokenplan_enabled`）+ `tenant_domains` 表迁移 ｜ ✅ 迁移跑通，含索引 `idx(slug)`、`idx(domain)`
-- [ ] 保留 slug 词表（`www/api/admin/root/dashboard/static/cdn/status/support`）落配置 ｜ ✅ 单测可读取
+- [x] 保留 slug 词表（`www/api/admin/root/dashboard/static/cdn/status/support`）落配置 ｜ ✅ 单测可读取
 
 ## B. 接口与领域逻辑
 - [ ] `port.go`：`TenantResolver/TenantService/SlugValidator/TenantScoper` 接口定义 ｜ ✅ `go build` 通过
-- [ ] `SlugValidator.Validate`（保留词 + 格式）纯函数实现 ｜ ✅ 表驱动单测：保留词/非法字符/合法 全覆盖
+- [x] `SlugValidator.Validate`（保留词 + 格式）纯函数实现 ｜ ✅ 表驱动单测：保留词/非法字符/合法 全覆盖
 - [ ] `TenantScoper.Scope` 注入 `tenant_id` 条件 ｜ ✅ 单测：生成 SQL 含 `tenant_id=?`
 
 ## C. 服务与解析
 - [ ] `TenantRepo`（GORM）CRUD + slug 唯一约束 ｜ ✅ 集成测：重复 slug 入库报唯一冲突
-- [ ] `TenantService.Create`（建租户 + 自动写二级域名记录）｜ ✅ 测试：创建后 `tenant_domains` 有 `<slug>.wedreamhub.com`
-- [ ] `ResolveByHost`（查 `tenant_domains`/`slug`，Redis 缓存 + 失效）｜ ✅ 单测（mock cache/repo）：命中/穿透/未找到三分支；未找到返回 `TENANT_NOT_FOUND`
-- [ ] `SetStatus` 状态机（active/suspended/deleted）｜ ✅ 单测：非法迁移被拒
+- [x] `TenantService.Create`（建租户 + 自动写二级域名记录）｜ ✅ 测试：创建后 `tenant_domains` 有 `<slug>.wedreamhub.com`
+- [x] `ResolveByHost`（查 `tenant_domains`/`slug`，Redis 缓存 + 失效）｜ ✅ 单测（mock cache/repo）：命中/穿透/未找到三分支；未找到返回 `TENANT_NOT_FOUND`
+- [x] `SetStatus` 状态机（active/suspended/deleted）｜ ✅ 单测：非法迁移被拒
 - [ ] 本地开发支持 Header/query 模拟 Host ｜ ✅ 带 `X-Debug-Host` 能解析到指定租户
 
 ## D. 接入与验收

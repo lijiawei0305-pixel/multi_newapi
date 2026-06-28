@@ -10,13 +10,13 @@
 - [ ] 主站全局保护配置（`group_floor_ratio`、最低成本价、`min_margin_ratio`）落表/配置 ｜ ✅ 可读取
 
 ## B. 纯逻辑（零 mock，TDD 优先）
-- [ ] `port.go`：`PricingService`、`PricingGuard` 接口 ｜ ✅ `go build` 通过
-- [ ] `ValidateGroupRatio(ratio, floor)` ｜ ✅ 表驱动：等于放行、低于拦截 `RATIO_BELOW_FLOOR`
-- [ ] `ValidateRetailPrice(retail, cost, minMargin)`（`retail >= cost*(1+minMargin)`）｜ ✅ 表驱动：边界放行、低于/负利润拦截 `PRICE_BELOW_PROTECTION`
+- [x] `port.go`：`PricingService`、`PricingGuard` 接口 ｜ ✅ `go build` 通过
+- [x] `ValidateGroupRatio(ratio, floor)` ｜ ✅ 表驱动：等于放行、低于拦截 `RATIO_BELOW_FLOOR`
+- [x] `ValidateRetailPrice(retail, cost, minMargin)`（`retail >= cost*(1+minMargin)`）｜ ✅ 表驱动：边界放行、低于/负利润拦截 `PRICE_BELOW_PROTECTION`
 
 ## C. 服务
-- [ ] `GroupRatio(tenant, group)`（无分组专属则回退模型默认倍率）｜ ✅ 单测：覆盖/回退两路径
-- [ ] `ModelPrice(tenant, model)`（含 `min_floor_price`）｜ ✅ 单测：低于 floor 被拦截
+- [x] `GroupRatio(tenant, group)`（无分组专属则回退模型默认倍率）｜ ✅ 单测：覆盖/回退两路径
+- [x] `ModelPrice(tenant, model)`（含 `min_floor_price`）｜ ✅ 单测：低于 floor 被拦截
 
 ## D. 验收
 - [ ] 被 Agent/TokenPlan/Wallet 调用的保护线校验生效 ｜ ✅ 集成测：代理改价/改倍率击穿保护线被拒

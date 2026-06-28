@@ -7,12 +7,12 @@
 
 ## A. 代码基线
 - [ ] Fork `calciumion/new-api` 源码进本项目仓库（Go 后端 + React 前端）｜ ✅ `docker build` 可产出自定义镜像，`/api/status` 返回 success
-- [ ] 建 `/internal` 领域分包骨架（对齐 detailed-design §5：tenant/identity/agent/pricing/billing/wallet/tokenplan/payment/promotion/siteconfig/relay/stats/risk/platform）｜ ✅ `go build ./...` 通过
+- [x] 建 `/internal` 领域分包骨架（对齐 detailed-design §5：tenant/identity/agent/pricing/billing/wallet/tokenplan/payment/promotion/siteconfig/relay/stats/risk/platform）｜ ✅ `go build ./...` 通过
 - [ ] 每个领域包放占位 `port.go`（接口）+ `*_test.go`（骨架）｜ ✅ `go vet ./...`、`go test ./...` 全绿（空实现允许 skip）
 
 ## B. platform 横切包
-- [ ] `platform/errors`：统一 `AppError{Code,Msg,HTTP}` + Gin 错误中间件 ｜ ✅ 单测：错误码→HTTP 映射正确
-- [ ] `platform/ctx`：`Principal{UserID,TenantID,Role}` 注入/读取 ｜ ✅ 单测：上下文存取一致
+- [x] `platform/errors`：统一 `AppError{Code,Msg,HTTP}` + Gin 错误中间件 ｜ ✅ 单测：错误码→HTTP 映射正确
+- [x] `platform/ctx`：`Principal{UserID,TenantID,Role}` 注入/读取 ｜ ✅ 单测：上下文存取一致
 - [ ] `platform/txn`：`WithTx(ctx, fn)` 事务包装（GORM）｜ ✅ 单测：提交/回滚行为正确
 - [ ] `platform/cache`：Redis 封装（get/set/del/incr）｜ ✅ 集成测：连 `redis://redis` 读写通过
 - [ ] `platform/db`：GORM 初始化 + `scopeByTenant(db, tid)` ｜ ✅ 单测：scope 自动注入 `tenant_id` 条件
