@@ -16,11 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import { agentContextQueryOptions } from '@/lib/agent-context'
 import { Redemptions } from '@/features/redemptions'
 
-// Visible to all authenticated users; the backend scopes redemption codes to
-// the calling owner (agent) and pre-deducts from the agent's own quota.
+// Agent self-service: accessible only to the agent owner of the current Host's
+// tenant. Non-owners (normal users, or agents on the main site / another
+// agent's site) are redirected before the backend rejects with AGENT_FORBIDDEN.
 export const Route = createFileRoute('/_authenticated/redemptions/')({
+  beforeLoad: async ({ context }) => {
+    const isAgentOwner = await context.queryClient.fetchQuery(
+      agentContextQueryOptions
+    )
+    if (!isAgentOwner) {
+      throw redirect({ to: '/403' })
+    }
+  },
   component: Redemptions,
 })

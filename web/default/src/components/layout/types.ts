@@ -34,6 +34,13 @@ type BaseNavItem = {
    * `useSidebarView`). Route-level guards still enforce access independently.
    */
   requiredRole?: number
+  /**
+   * When true, the item is shown only to the agent owner of the current Host's
+   * tenant (see `agentContextQueryOptions`). Non-owners (normal users, agents
+   * on the main site or someone else's agent site) never see it. Route-level
+   * `beforeLoad` guards enforce the same gate independently.
+   */
+  agentOwnerOnly?: boolean
 }
 
 /**
@@ -75,6 +82,12 @@ export type NavGroup = {
   id?: string
   title: string
   items: NavItem[]
+  /**
+   * When true, the entire group is shown only to the agent owner of the
+   * current Host's tenant (see `useSidebarView`). Used for the "Agent
+   * Self-Service" group.
+   */
+  agentOwnerOnly?: boolean
 }
 
 /**

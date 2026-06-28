@@ -127,6 +127,7 @@ export function useSidebarData(): SidebarData {
             title: t('My Earnings'),
             url: '/agent-earnings',
             icon: Coins,
+            agentOwnerOnly: true,
           },
           {
             title: t('Profile'),
@@ -138,6 +139,7 @@ export function useSidebarData(): SidebarData {
       {
         id: 'agent',
         title: t('Agent Self-Service'),
+        agentOwnerOnly: true,
         items: [
           {
             title: t('Plan Listings'),

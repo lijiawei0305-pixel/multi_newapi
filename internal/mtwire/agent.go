@@ -307,6 +307,33 @@ func agentTenantID(c *gin.Context) int64 {
 	return 0
 }
 
+// isAgentOwner 复用 AgentOwnerAuth 的**权威**判定（Host 解析出的租户 owner_user_id == 当前 session
+// 用户 id；直读 DB 绕过解析缓存），但以布尔返回而非中止请求。无租户（主站/未知 Host）/ 未登录 /
+// 非 owner / 直读失败一律 false（绝不抛错）。供前端门控信号端点（HandleAgentContext）使用。
+func (a *App) isAgentOwner(c *gin.Context) bool {
+	t := tenantFrom(c)
+	if t == nil {
+		return false // 主站 / 未知 Host：无租户即非代理 owner
+	}
+	userID := int64(c.GetInt("id"))
+	if userID <= 0 {
+		return false // 未登录
+	}
+	owner, err := a.TenantRepo.OwnerUserID(c.Request.Context(), t.ID)
+	if err != nil {
+		return false // 租户不存在 / 查询失败：保守判 false
+	}
+	return owner == userID
+}
+
+// HandleAgentContext GET /api/tenant/agent-context —— 代理身份门控信号。**仅 UserAuth**（不挂
+// AgentOwnerAuth），任何登录用户可调；返回当前用户是否为「当前 Host 所指租户」的代理 owner。
+// 前端据此隐藏代理自助菜单 + 在路由 beforeLoad 拦截直敲 URL，避免普通用户/别站代理触发
+// AGENT_FORBIDDEN。永远 200：无租户/未登录/非 owner → is_agent_owner=false（不 abort）。
+func (a *App) HandleAgentContext(c *gin.Context) {
+	respondOK(c, gin.H{"is_agent_owner": a.isAgentOwner(c)})
+}
+
 // ============================================================================
 // DTO（snake_case，对齐 doc/api-contract.md §2.7 与前端 Worker）
 // ============================================================================

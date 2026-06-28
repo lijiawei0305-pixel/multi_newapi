@@ -54,6 +54,10 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), app.HandleWalletRecharge)
 		// 用户兑换码（P1-UI-04）：UserAuth + Host 租户（不强制 owner）；单赢家 CAS → 原生 quota 入账。
 		tenantGroup.POST("/redeem", middleware.UserAuth(), app.HandleRedeem)
+		// 代理身份门控信号：UserAuth + Host 租户（**不挂 AgentOwnerAuth**，任何登录用户可调）。
+		// 返回 {is_agent_owner}（权威判断 = Host 租户 owner == 当前用户），供前端隐藏代理自助菜单 +
+		// 路由 beforeLoad 拦截，避免普通用户/别站代理触发 AGENT_FORBIDDEN。
+		tenantGroup.GET("/agent-context", middleware.UserAuth(), app.HandleAgentContext)
 		// 代理自助（owner 维度）：UserAuth + AgentOwnerAuth（权威校验 Host 租户 owner == 当前用户）。
 		agentSelf := tenantGroup.Group("", middleware.UserAuth(), app.AgentOwnerAuth())
 		{

@@ -16,11 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import { agentContextQueryOptions } from '@/lib/agent-context'
 import { AgentEarnings } from '@/features/agent-earnings'
 
-// Visible to all authenticated users; the backend scopes earnings/withdrawals
-// to the calling owner and rejects non-agent callers.
+// Agent self-service ("My Earnings"): accessible only to the agent owner of the
+// current Host's tenant. Non-owners (normal users, or agents on the main site /
+// another agent's site) are redirected before the backend rejects withdrawals
+// /earnings with AGENT_FORBIDDEN.
 export const Route = createFileRoute('/_authenticated/agent-earnings/')({
+  beforeLoad: async ({ context }) => {
+    const isAgentOwner = await context.queryClient.fetchQuery(
+      agentContextQueryOptions
+    )
+    if (!isAgentOwner) {
+      throw redirect({ to: '/403' })
+    }
+  },
   component: AgentEarnings,
 })
