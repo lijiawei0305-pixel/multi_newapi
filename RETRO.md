@@ -37,6 +37,12 @@
 - **根因**：`depends_on` 只保证启动顺序、不等就绪；mysql 首次初始化需 ~15s。
 - **解决/规避**：app 侧 `gorm.Open`+`Ping` 重试 30×2s；compose `restart: on-failure` 兜底；root 用 `--default-authentication-plugin=mysql_native_password` 规避非 TLS 公钥交换。**已验证**：重试后连上→迁移→seed→listening。
 
+### [已解决] Cloudflare 代理域名报 521（源站无 443）
+- **现象**：`tokendream.wedreamhub.com`（CF 橙云代理）经 CF 访问报 `error code: 521`，但源站 `curl -H Host:... http://127.0.0.1/healthz` 正常。
+- **根因**：CF 该域 SSL 模式为 **Full**，CF→源站走 **443**，而宝塔 nginx 只监听 80（现网 `api.wedreamhub.com` 也是 80-only，应为 DNS-only 或 Flexible）→ CF 连源站 443 被拒 → 521。
+- **解决/规避**：源站侧自治修复——给 `tokendream` vhost 加 `listen 443 ssl` + **自签证书**（CF Full 不校验源站证书），同时保留 80（兼容 Flexible）。无需改 CF 面板。**已验证**：CF 全链路 healthz/品牌/钱包均 200。
+- **升级**：测试栈单域名用自签即可；正式上线 `*.wedreamhub.com` 通配建议用 CF Origin CA 证书（Full strict）或宝塔 Let's Encrypt。`scripts/` 可加 vhost 模板。
+
 ---
 
 ## 二、构建与依赖
