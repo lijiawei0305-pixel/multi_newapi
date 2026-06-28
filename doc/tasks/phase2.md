@@ -60,7 +60,7 @@
 - [ ] **7d′ 真实凭据**：填 `config.yaml` wxpay/alipay 证书 + `mock:false` + 接真实 V3 SDK（`wechatpay-go`/`smartwalle/alipay`）；沙箱→小额真单验收
 - [ ] **7b 真实分模型定价**：原生 model_ratio 本就生效；待校准我们套餐桶与分组倍率/成本保护线口径
 - [ ] **7c 多档风控**：真实 Redis 风控（RPM/并发/IP）+ Trial 三维限购 + 满额分级告警
-- [ ] **遗留接线**：①购买响应转 snake_case(现 PascalCase OrderID) ②tokenplan 购买走 auth-service mock(现占位 PayURL，买家页未端到端) ③代理差价/分润落账(现 noopEarnings，待注入 agent.EarningSink) ④RCG 'paid'卡单对账兜底
+- [x] **遗留接线 ①②③ 完成**：①购买响应 snake_case ✅ ②tokenplan 购买走 auth-service mock(全链路 E2E) ✅ ③代理差价/分润落账(`tokenplan_spread`+`consume_commission` 真实 /v1 E2E) ✅。**剩 ④** RCG/SUB 'paid'卡单对账兜底
 
 ## 4. 目标④：正式上线（**最后**，灰度）
 - [ ] **8a 域名/证书**：`*.wedreamhub.com` 通配 vhost + CF Origin CA 证书（Full strict）；主站 `www/admin/api` + 代理泛子域
