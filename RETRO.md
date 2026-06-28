@@ -77,6 +77,12 @@
 - **解决/规避**：服务器 `find /root/newapi-test -name '._*' -delete`；后续 Mac 打包加 **`COPYFILE_DISABLE=1 tar ...`**（或 `--no-mac-metadata`）避免生成。
 - **升级**：上传命令固定带 `COPYFILE_DISABLE=1`，纳入部署脚本。
 
+### [未解决] fork 内 `POST /api/channel/` 建渠道 panic（/v1 无渠道，relay 不可用）
+- **现象**：测试栈用 admin 调 `POST /api/channel/`（`{name,type:1,key,base_url,models,group}`）返回 `new_api_panic: nil pointer dereference`，渠道未建。fork 当前 **0 渠道** → `/v1` 中继无法工作（原生 relay 按渠道池分发）。
+- **影响**：阻断 ①**用户组倍率→计费的真实 /v1 cost E2E**（grouphook 已 wired+单测+installed、数据路径已确认 chanuser1→tenant1 + `tenant_groups[1,default]=1.5`，但无渠道无法发真实调用验证 cost 反映倍率）；② `consume_commission` 的真实 /v1 E2E 同样受阻；③ 这是 acceptance **P1-BASE-02 渠道池**的核心，本就待做。
+- **根因**：未定（疑似建渠道入参缺某字段触发 new-api 内部 nil deref，或 fork 渠道配置/设置初始化缺失）。**未深挖**（避免 new-api 内部 panic 调试 rabbit hole）。
+- **规避/下一步**：作为 **P1-BASE-02（渠道池+真实模型价）** 单独处理——查 `controller/channel.go AddChannel` 的必填字段/nil 源，或经新版前端「渠道」页建渠道对比正确 payload。渠道通后即可补 用户组倍率/consume_commission 的 /v1 cost E2E。
+
 ---
 
 ## 二、构建与依赖
