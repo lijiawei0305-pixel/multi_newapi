@@ -67,6 +67,12 @@
 - **解决/规避**：质量门降级为 `go build` + `go vet` + `gofmt -l` + `go test -race -cover`（均内置、离线可用）；集成阶段在服务器/CI 安装 `golangci-lint` 补强。
 - **升级**：暂不升级；待集成阶段加 CI 后再固化为门禁。
 
+### [已解决] Phase 2 · A 全量 fork：合并 new-api 基座的要点
+- **现象/任务**：把仓库变成 `QuantumNous/new-api` fork，并入我们的 `internal/`。
+- **要点/坑**：① new-api **无 `internal/` 目录**，我们的不冲突，直接铺入并 rename 模块前缀 `newapi-mt/internal → github.com/QuantumNous/new-api/internal`（77 文件）。② new-api 用 `gorm v1.25.2`/`gin v1.9.1`（低于我们曾用的 v1.31/v1.12），但我们 `internal/` 仅用 gorm 基础 API、不 import gin，故向下兼容（已 `go build ./internal/...` 验证）。③ **本地无法整库编译**：根 `main.go` `//go:embed web/default/dist`，dist 未构建则 build 失败——`go mod tidy`/整库构建一律在服务器 Dockerfile 内（bun 构建前端 dist 后）完成。④ new-api 前端 **bun** 构建（default+classic 双前端），实测很快（整镜像 ~分钟级，319MB）。
+- **解决/规避**：在分支 `phase2-newapi-fork` 做（main 留 Slices 1–4）；机械合并交 Worker、服务器 Docker 构建+部署交 Master；fork 基座已在测试栈跑通。
+- **升级**：Phase 2 后续 5a/6a 在此 fork 上做；正式栈关系/前端切换见 `doc/tasks/phase2.md`。
+
 ### [已解决] 后端逻辑层先行、不先 fork new-api
 - **现象**：prompt.md Wave 0 写"先 fork new-api"，但实际先把 14 个新模块按独立 Go 包 + 接口 mock 实现并单测，未先 fork。
 - **根因**：详设采用"消费者定义接口 + 增量为主"，新模块逻辑层不依赖 new-api 源码即可 100% 单测；先 fork 反而拖慢、引入编译噪声。

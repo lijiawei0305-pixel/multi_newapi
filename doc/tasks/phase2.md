@@ -20,7 +20,9 @@
 
 ## 1. 目标①：正式 merge new-api 基座（基础，**先做**）
 
-> **关键决策（见文末「决策点」）**：merge 方式 A/B/C 未定，决定后细化。
+> **决策已定：A 全量 fork**（new-api 整库作基座 + 我们的 `internal/` 增量 wire 进去 + 前端切 new-api 新版前端）。在分支 `phase2-newapi-fork` 进行（main 保留 Slices 1–4）。
+> **✅ Stage 0 完成（2026-06-28）**：仓库已变成 new-api fork —— new-api 源码作基座、我们 14 模块 `internal/` 并入同一模块（`github.com/QuantumNous/new-api/internal`，77 文件 rename、`go build ./internal/...` 绿）、`cmd/`+薄 web 移除、go.mod 采用 new-api、compose 改 new-api env。**已在测试栈构建+运行**：`/api/status` success、新版前端 200（origin + CF `https://tokendream.wedreamhub.com`）。提交 `fd17844`（2268 files）。
+> **下一步（5a/6a 并行）**：5a 把多租户+身份 wire 进 new-api `router.SetRouter`；6a 在 new-api 新版前端加 tokenplan 套餐 CRUD UI。
 - [ ] **5a 用户/会话/角色**：接 new-api users + session + casbin；替换 dev-login；保留多租户 `tenant_id` 维度与 Host 解析
 - [ ] **5b 渠道池 + 模型价**：接 new-api channels/abilities + 模型价表；relay 走真实渠道分发（替换单一上游直连）；分组倍率接 pricing
 - [ ] **5c 支付回调**：接 new-api 支付（或独立 auth-service）/pay/、/auth/ 回调；幂等入账 → wallet.Credit / tokenplan 激活
