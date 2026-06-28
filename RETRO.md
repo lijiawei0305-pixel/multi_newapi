@@ -85,6 +85,12 @@
 - **验证**：/v1 真实调 gpt-5.4-mini 通；用户组倍率 override 3.0 → 计费 **3.02×**（消费日志 `group_ratio:3` vs 关闭后 `group_ratio:1`）；consume_commission demoagent 得 ¥0.0085（`consume:wallet`）；双桶（admin=订阅桶 `billing_source:subscription`/chanuser1=钱包桶 `wallet`）日志确认。
 - **升级**：①建渠道/改价的正确 payload 记此（嵌套 `channel`、base_url 去 /v1、ModelRatio 配价）；②**新增 relay 旁路钩子必须确认挂在文本结算 `PostTextConsumeQuota`，不是 `PostConsumeQuota`**。
 
+### [已解决] 通配 443 vhost 劫持「只 listen 80」的现网 vhost 的 HTTPS（差点静默打挂现网 api）
+- **现象**：加 `*.wedreamhub.com` 通配 443 vhost(→3100) 后，现网 `api.wedreamhub.com` 经 CF 的 HTTPS **被劫持到我们新栈 3100**（`/api/tenant/current` 返我们的 `TENANT_NOT_FOUND`、`/api/status` start_time = 新栈）。差点以为"现网未受影响"（curl 不带正确 SNI 时 200 误判）。
+- **根因**：宝塔 api vhost **只 `listen 80`**；CF SSL=Full → 经 **443** 回源；api:443 无精确匹配 → 落到通配 vhost → 转 3100。nginx **精确 server_name 优先于通配**，但前提是存在精确的 443 server。
+- **解决**：新增**精确 `server_name api.wedreamhub.com; listen 443 ssl` vhost → 现网 3000**（`deploy/nginx/api-443-to-origin.wedreamhub.com.conf`，证书复用通配 Origin CA、`Host 127.0.0.1` 镜像现网反代）。验证（**必须带正确 SNI**，`curl --resolve` 或经 CF）：api→3000(start_time 现网)、tokendream/子域→3100。
+- **升级**：**加通配 443 vhost 后，必须为所有"只 listen 80"的现网精确域名补一条精确 443 vhost 指回其后端**，并用 `curl --resolve <域名>:443:IP`（带 SNI）逐一核验路由——`curl -H Host` 不设 SNI 会误判。属 C1「不碰现网」红线的隐性陷阱。
+
 ---
 
 ## 二、构建与依赖
