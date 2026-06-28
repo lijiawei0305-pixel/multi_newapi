@@ -1,0 +1,405 @@
+package tokenplan
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"newapi-mt/internal/platform/apperr"
+)
+
+// epoch 是测试基准时刻。
+var epoch = time.Date(2026, 6, 28, 0, 0, 0, 0, time.UTC)
+
+// newSubService 组装订阅服务及其依赖（空 repo + 假时钟）。
+func newSubService(clock Clock) (SubscriptionService, *MemRepo, *fakePayment, *fakeRisk, *fakeEarnings) {
+	repo := NewMemRepo()
+	pay := newFakePayment()
+	risk := &fakeRisk{}
+	earn := newFakeEarnings()
+	svc := NewSubscriptionService(repo, repo, pay, risk, earn, clock)
+	return svc, repo, pay, risk, earn
+}
+
+// activeSub 直接经 repo 落一个 active 订阅（绕过购买流程，供计量/桶用例）。
+func activeSub(repo *MemRepo, clock Clock, userID, tenantID int64, monthLimit float64, validDays int) *Subscription {
+	now := clock.Now()
+	sub := &Subscription{
+		TenantID:      tenantID,
+		UserID:        userID,
+		PlanID:        1,
+		MonthLimitUSD: monthLimit,
+		Status:        SubActive,
+		StartAt:       now,
+		ExpireAt:      now.AddDate(0, 0, validDays),
+		SourceOrderID: "seed-" + itoa(int(userID)),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	_, _ = repo.ActivateFromOrder(context.Background(), sub)
+	return sub
+}
+
+// ---- Purchase ----
+
+func TestPurchaseSuccess(t *testing.T) {
+	ctx := context.Background()
+	clock := newFakeClock(epoch)
+	svc, repo, pay, risk, _ := newSubService(clock)
+	plan := seedPlanInto(repo, basePlanInput())
+	_ = NewRetailService(repo, &fakeGuard{}).SetListing(ctx, 7, plan.ID, true, 250)
+
+	ticket, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID, DeviceID: "dev1"})
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+	if ticket.OrderID == "" || ticket.AmountCNY != 250 {
+		t.Fatalf("ticket wrong: %+v", ticket)
+	}
+	if risk.calls != 1 || risk.last.DeviceID != "dev1" {
+		t.Fatalf("risk not consulted with device: %+v", risk)
+	}
+	// 下单金额=代理零售价，类型=subscription。
+	o, _ := pay.lastOrder()
+	if o.Type != OrderTypeSubscription || o.AmountCNY != 250 {
+		t.Fatalf("order wrong: %+v", o)
+	}
+	// 暂存购买意图，供激活还原。
+	pp, err := repo.GetPendingPurchase(ctx, ticket.OrderID)
+	if err != nil || pp.AgentCostPrice != plan.AgentCostPrice || pp.MonthLimitUSD != plan.MonthLimitUSD {
+		t.Fatalf("pending purchase wrong: %+v err=%v", pp, err)
+	}
+}
+
+func TestPurchasePlanNotListed(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _, _, _ := newSubService(newFakeClock(epoch))
+	plan := seedPlanInto(repo, basePlanInput()) // 存在但未上架
+	if _, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID}); apperr.CodeOf(err) != CodePlanNotListed {
+		t.Fatalf("want PLAN_NOT_LISTED, got %v", err)
+	}
+}
+
+func TestPurchaseListingDisabled(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _, _, _ := newSubService(newFakeClock(epoch))
+	plan := seedPlanInto(repo, basePlanInput())
+	_ = NewRetailService(repo, &fakeGuard{}).SetListing(ctx, 7, plan.ID, false, 250) // 退出
+	if _, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID}); apperr.CodeOf(err) != CodePlanNotListed {
+		t.Fatalf("withdrawn listing want PLAN_NOT_LISTED, got %v", err)
+	}
+}
+
+func TestPurchasePlanDisabled(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _, _, _ := newSubService(newFakeClock(epoch))
+	in := basePlanInput()
+	in.Status = PlanDisabled
+	plan := seedPlanInto(repo, in)
+	if _, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID}); apperr.CodeOf(err) != CodePlanDisabled {
+		t.Fatalf("want PLAN_DISABLED, got %v", err)
+	}
+}
+
+func TestPurchasePlanNotFound(t *testing.T) {
+	svc, _, _, _, _ := newSubService(newFakeClock(epoch))
+	if _, err := svc.Purchase(context.Background(), PurchaseInput{TenantID: 7, UserID: 11, PlanID: 999}); apperr.CodeOf(err) != CodePlanNotFound {
+		t.Fatalf("want PLAN_NOT_FOUND, got %v", err)
+	}
+}
+
+func TestPurchaseLimitExceeded(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, pay, risk, _ := newSubService(newFakeClock(epoch))
+	risk.deny = true
+	plan := seedPlanInto(repo, basePlanInput())
+	_ = NewRetailService(repo, &fakeGuard{}).SetListing(ctx, 7, plan.ID, true, 250)
+
+	if _, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID}); apperr.CodeOf(err) != CodePurchaseLimitExceeded {
+		t.Fatalf("want PURCHASE_LIMIT_EXCEEDED, got %v", err)
+	}
+	// 限购拦截后不得下单。
+	if _, ok := pay.lastOrder(); ok {
+		t.Fatal("must not create order when purchase limit exceeded")
+	}
+}
+
+func TestPurchasePaymentError(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, pay, _, _ := newSubService(newFakeClock(epoch))
+	pay.err = apperr.New("PAY_DOWN", "x", 502)
+	plan := seedPlanInto(repo, basePlanInput())
+	_ = NewRetailService(repo, &fakeGuard{}).SetListing(ctx, 7, plan.ID, true, 250)
+	if _, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID}); apperr.CodeOf(err) != "PAY_DOWN" {
+		t.Fatalf("payment error must propagate, got %v", err)
+	}
+}
+
+// ---- ActivateFromPayment ----
+
+// purchaseAndActivate 跑一遍购买，返回订单号，供激活用例复用。
+func purchaseAndActivate(t *testing.T, ctx context.Context, svc SubscriptionService, repo *MemRepo, retail float64) string {
+	t.Helper()
+	plan := seedPlanInto(repo, basePlanInput()) // AgentCostPrice=200
+	_ = NewRetailService(repo, &fakeGuard{}).SetListing(ctx, 7, plan.ID, true, retail)
+	ticket, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID})
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+	return ticket.OrderID
+}
+
+func TestActivateFromPaymentSuccess(t *testing.T) {
+	ctx := context.Background()
+	clock := newFakeClock(epoch)
+	svc, repo, _, _, earn := newSubService(clock)
+	order := purchaseAndActivate(t, ctx, svc, repo, 279) // spread = 279-200 = 79
+
+	sub, err := svc.ActivateFromPayment(ctx, order)
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	if sub.Status != SubActive || sub.UsedUSD != 0 {
+		t.Fatalf("activated sub wrong: %+v", sub)
+	}
+	if !sub.ExpireAt.Equal(epoch.AddDate(0, 0, 30)) {
+		t.Fatalf("expire_at=%v want +30d", sub.ExpireAt)
+	}
+	// tokenplan_spread 收益入账一次。
+	if earn.callCount() != 1 || earn.count() != 1 {
+		t.Fatalf("want exactly 1 earning, calls=%d entries=%d", earn.callCount(), earn.count())
+	}
+	e, _ := earn.last()
+	if e.SourceType != EarningTokenplanSpread || e.Amount != 79 || e.SourceID != order {
+		t.Fatalf("earning wrong: %+v", e)
+	}
+}
+
+func TestActivateIdempotentSequential(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _, _, earn := newSubService(newFakeClock(epoch))
+	order := purchaseAndActivate(t, ctx, svc, repo, 279)
+
+	s1, _ := svc.ActivateFromPayment(ctx, order)
+	s2, _ := svc.ActivateFromPayment(ctx, order)
+	s3, _ := svc.ActivateFromPayment(ctx, order)
+	if s1.ID != s2.ID || s2.ID != s3.ID {
+		t.Fatalf("idempotent activation must return same instance: %d %d %d", s1.ID, s2.ID, s3.ID)
+	}
+	if earn.callCount() != 1 {
+		t.Fatalf("earning must be emitted exactly once across re-activations, got %d", earn.callCount())
+	}
+}
+
+func TestActivateZeroSpreadNoEarning(t *testing.T) {
+	// 零售价 == 进货价 → 差价 0 → 不产生收益。需保护线==进货价方可压价到成本。
+	ctx := context.Background()
+	svc, repo, _, _, earn := newSubService(newFakeClock(epoch))
+	in := basePlanInput()
+	in.AgentCostPrice = 200
+	in.MinPrice = 200 // 保护线==进货价，允许零售价压到成本价
+	plan := seedPlanInto(repo, in)
+	if err := NewRetailService(repo, &fakeGuard{}).SetListing(ctx, 7, plan.ID, true, 200); err != nil {
+		t.Fatalf("SetListing: %v", err)
+	}
+	ticket, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID})
+	if err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+	if _, err := svc.ActivateFromPayment(ctx, ticket.OrderID); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	if earn.callCount() != 0 {
+		t.Fatalf("zero spread must not emit earning, got %d", earn.callCount())
+	}
+}
+
+func TestActivateOrderNotFound(t *testing.T) {
+	svc, _, _, _, _ := newSubService(newFakeClock(epoch))
+	if _, err := svc.ActivateFromPayment(context.Background(), "ghost"); apperr.CodeOf(err) != CodeSubscriptionNotFound {
+		t.Fatalf("want SUBSCRIPTION_NOT_FOUND, got %v", err)
+	}
+}
+
+// TestActivateIdempotentConcurrent 是激活幂等的并发用例：同 orderID 并发激活只建 1 实例、1 收益。
+func TestActivateIdempotentConcurrent(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _, _, earn := newSubService(newFakeClock(epoch))
+	order := purchaseAndActivate(t, ctx, svc, repo, 279)
+
+	const workers = 200
+	var (
+		wg   sync.WaitGroup
+		gate = make(chan struct{})
+		ids  = make([]int64, workers)
+		errc int64
+	)
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			<-gate
+			s, err := svc.ActivateFromPayment(ctx, order)
+			if err != nil {
+				atomic.AddInt64(&errc, 1)
+				return
+			}
+			ids[idx] = s.ID
+		}(i)
+	}
+	close(gate)
+	wg.Wait()
+
+	if errc != 0 {
+		t.Fatalf("no activation should error, got %d", errc)
+	}
+	// 全部返回同一实例 ID。
+	for i := 1; i < workers; i++ {
+		if ids[i] != ids[0] {
+			t.Fatalf("instance divergence: ids[%d]=%d != ids[0]=%d", i, ids[i], ids[0])
+		}
+	}
+	if earn.callCount() != 1 {
+		t.Fatalf("exactly 1 earning across concurrent activations, got %d", earn.callCount())
+	}
+	// 该用户只有 1 个 active 实例。
+	if a, _ := repo.GetActiveByUser(ctx, 11, epoch); a == nil || a.ID != ids[0] {
+		t.Fatalf("active sub mismatch: %+v", a)
+	}
+}
+
+// ---- GetActive / HasActive / lazy expiry ----
+
+func TestGetActiveAndHasActive(t *testing.T) {
+	ctx := context.Background()
+	clock := newFakeClock(epoch)
+	svc, repo, _, _, _ := newSubService(clock)
+
+	if _, err := svc.GetActive(ctx, 11); apperr.CodeOf(err) != CodeSubscriptionNotFound {
+		t.Fatalf("no sub: want SUBSCRIPTION_NOT_FOUND, got %v", err)
+	}
+	if has, _ := svc.HasActive(ctx, 11); has {
+		t.Fatal("HasActive must be false with no sub")
+	}
+
+	sub := activeSub(repo, clock, 11, 7, 100, 30)
+	got, err := svc.GetActive(ctx, 11)
+	if err != nil || got.ID != sub.ID {
+		t.Fatalf("GetActive: %+v err=%v", got, err)
+	}
+	if has, _ := svc.HasActive(ctx, 11); !has {
+		t.Fatal("HasActive must be true with active sub")
+	}
+}
+
+func TestGetActiveLazyExpiry(t *testing.T) {
+	ctx := context.Background()
+	clock := newFakeClock(epoch)
+	svc, repo, _, _, _ := newSubService(clock)
+	sub := activeSub(repo, clock, 11, 7, 100, 30)
+
+	clock.advance(31 * 24 * time.Hour) // 越过 30 天有效期
+	if _, err := svc.GetActive(ctx, 11); apperr.CodeOf(err) != CodeSubscriptionNotFound {
+		t.Fatalf("expired sub must not be active, got %v", err)
+	}
+	if has, _ := svc.HasActive(ctx, 11); has {
+		t.Fatal("HasActive must be false after expiry")
+	}
+	// 惰性翻态已落库。
+	got, _ := repo.GetByID(ctx, sub.ID)
+	if got.Status != SubExpired {
+		t.Fatalf("lazy expiry must persist expired, got %s", got.Status)
+	}
+}
+
+// ---- Meter ----
+
+func TestMeterSuccess(t *testing.T) {
+	ctx := context.Background()
+	clock := newFakeClock(epoch)
+	svc, repo, _, _, _ := newSubService(clock)
+	sub := activeSub(repo, clock, 11, 7, 100, 30)
+
+	if err := svc.Meter(ctx, sub.ID, 30); err != nil {
+		t.Fatalf("Meter: %v", err)
+	}
+	got, _ := repo.GetByID(ctx, sub.ID)
+	if got.UsedUSD != 30 || got.Status != SubActive {
+		t.Fatalf("after meter: used=%v status=%s", got.UsedUSD, got.Status)
+	}
+	// 计量日志落一条。
+	if logs := repo.UsageLogs(sub.ID); len(logs) != 1 || logs[0].UpstreamCostUSD != 30 {
+		t.Fatalf("usage log wrong: %+v", logs)
+	}
+}
+
+func TestMeterExactFillThenExhaust(t *testing.T) {
+	ctx := context.Background()
+	clock := newFakeClock(epoch)
+	svc, repo, _, _, _ := newSubService(clock)
+	sub := activeSub(repo, clock, 11, 7, 100, 30)
+
+	if err := svc.Meter(ctx, sub.ID, 100); err != nil { // 恰好用满
+		t.Fatalf("exact fill must pass: %v", err)
+	}
+	// 再扣任意正额 → 超额拒绝并置 exhausted。
+	if err := svc.Meter(ctx, sub.ID, 0.01); apperr.CodeOf(err) != CodeSubscriptionExhausted {
+		t.Fatalf("want SUBSCRIPTION_EXHAUSTED, got %v", err)
+	}
+	got, _ := repo.GetByID(ctx, sub.ID)
+	if got.Status != SubExhausted || got.UsedUSD != 100 {
+		t.Fatalf("exhausted state wrong: used=%v status=%s", got.UsedUSD, got.Status)
+	}
+}
+
+func TestMeterOverLimitRejectedWhole(t *testing.T) {
+	// 单笔超额：整笔拒绝、used 不变、置 exhausted（§6.2 0 行语义）。
+	ctx := context.Background()
+	clock := newFakeClock(epoch)
+	svc, repo, _, _, _ := newSubService(clock)
+	sub := activeSub(repo, clock, 11, 7, 100, 30)
+	_ = svc.Meter(ctx, sub.ID, 99.5)
+
+	if err := svc.Meter(ctx, sub.ID, 1); apperr.CodeOf(err) != CodeSubscriptionExhausted {
+		t.Fatalf("want SUBSCRIPTION_EXHAUSTED, got %v", err)
+	}
+	got, _ := repo.GetByID(ctx, sub.ID)
+	if got.UsedUSD != 99.5 { // 不部分扣减
+		t.Fatalf("over-limit charge must be rejected whole, used=%v", got.UsedUSD)
+	}
+}
+
+func TestMeterExpiredLazy(t *testing.T) {
+	ctx := context.Background()
+	clock := newFakeClock(epoch)
+	svc, repo, _, _, _ := newSubService(clock)
+	sub := activeSub(repo, clock, 11, 7, 100, 30)
+
+	clock.advance(31 * 24 * time.Hour)
+	if err := svc.Meter(ctx, sub.ID, 1); apperr.CodeOf(err) != CodeSubscriptionExpired {
+		t.Fatalf("want SUBSCRIPTION_EXPIRED, got %v", err)
+	}
+	got, _ := repo.GetByID(ctx, sub.ID)
+	if got.Status != SubExpired {
+		t.Fatalf("meter must lazily expire, status=%s", got.Status)
+	}
+}
+
+func TestMeterNotFound(t *testing.T) {
+	svc, _, _, _, _ := newSubService(newFakeClock(epoch))
+	if err := svc.Meter(context.Background(), 12345, 1); apperr.CodeOf(err) != CodeSubscriptionNotFound {
+		t.Fatalf("want SUBSCRIPTION_NOT_FOUND, got %v", err)
+	}
+}
+
+func TestMeterRejectsBadCost(t *testing.T) {
+	ctx := context.Background()
+	clock := newFakeClock(epoch)
+	svc, repo, _, _, _ := newSubService(clock)
+	sub := activeSub(repo, clock, 11, 7, 100, 30)
+	if err := svc.Meter(ctx, sub.ID, -1); apperr.CodeOf(err) != CodeAmountInvalid {
+		t.Fatalf("negative cost want TOKENPLAN_AMOUNT_INVALID, got %v", err)
+	}
+}
