@@ -34,7 +34,17 @@ _（暂无条目）_
 
 > Go 编译、Node 前端构建、版本不兼容、依赖拉取、缓存等构建侧的坑。
 
-_（暂无条目）_
+### [已解决] golangci-lint 未装于 Mac，质量门降级
+- **现象**：Mac 本机无 `golangci-lint`，prompt.md 约定的 Go 静态检查门无法原样执行。
+- **根因**：本机未安装，且为保持 Worker 离线、零外部依赖（纯标准库单测），不临时安装。
+- **解决/规避**：质量门降级为 `go build` + `go vet` + `gofmt -l` + `go test -race -cover`（均内置、离线可用）；集成阶段在服务器/CI 安装 `golangci-lint` 补强。
+- **升级**：暂不升级；待集成阶段加 CI 后再固化为门禁。
+
+### [已解决] 后端逻辑层先行、不先 fork new-api
+- **现象**：prompt.md Wave 0 写"先 fork new-api"，但实际先把 14 个新模块按独立 Go 包 + 接口 mock 实现并单测，未先 fork。
+- **根因**：详设采用"消费者定义接口 + 增量为主"，新模块逻辑层不依赖 new-api 源码即可 100% 单测；先 fork 反而拖慢、引入编译噪声。
+- **解决/规避**：逻辑层 standalone 先行（已全绿），new-api fork 合并下沉到集成阶段（GORM/Redis/handler/装配一起做）。
+- **升级**：已写入 progress.md「集成层待办」；基线源 = `github.com/QuantumNous/new-api`（见 CLAUDE.md）。
 
 ---
 
@@ -42,7 +52,23 @@ _（暂无条目）_
 
 > 多租户识别、计费扣费、用户组倍率、成本保护、收益分润、渠道中继、认证隔离等业务 Bug。
 
-_（暂无条目）_
+### [已解决] relay 编排顺序：详设与任务书不一致（模型权限 vs 风控先后）
+- **现象**：detailed-design §2.11 文字写"鉴权→租户→**模型权限→风控**→…"，而 `tasks/11-relay.md` 写"…→**风控→模型**→…"，Worker 实现按任务书（风控先）。
+- **根因**：两份文档措辞不一致。
+- **解决/规避**：统一为 **风控先于模型权限**（先做便宜的状态/限流拦截，再查模型权限），已据此修订 detailed-design §2.11/§3.1；risk 模块内部顺序为 状态→IP→RPM（限流置末，避免对已拒请求计数）。
+- **升级**：已统一文档；编排顺序写入 api-contract.md 调用链说明。
+
+### [待确认] tokenplan 种子缺 agent_cost_price / min_price
+- **现象**：proposal §8.2 套餐表只给 售价/原价/月限额/成本估算，缺**代理成本价**与**零售保护线**两列，而 tokenplan 计费/保护线需要。
+- **根因**：需求表未含该两列。
+- **解决/规避**：Worker 按默认派生 `agent_cost = base×0.8`、`min_price = agent_cost×1.1`（seed.go 常量，主站后台可覆盖），先跑通。
+- **升级**：`[待确认]` —— 需用户给真实代理成本价/保护线口径；对应 progress.md 待确认 #5/#6 同批确认。
+
+### [已解决] RETAIL_BELOW_MIN 错误码映射与"不吞码"原则的张力
+- **现象**：tokenplan.SetListing 把 pricing 守卫返回的 `PRICE_BELOW_PROTECTION` **映射**为本域 `RETAIL_BELOW_MIN`，与 §6.4"跨模块错误原样上浮、不吞码"略有张力。
+- **根因**：同一保护线被不同域消费，前端希望拿到域内稳定码（tokenplan 页显示"低于套餐保护价"）。
+- **解决/规避**：刻意取舍——域边界做一次语义映射（保留原错误为 cause，可 errors.Is 解包），并在 api-contract.md 错误码表标注映射关系。
+- **升级**：约定"跨域映射须保留 cause 且在契约表登记"，已记入 api-contract.md。
 
 ---
 
@@ -50,4 +76,14 @@ _（暂无条目）_
 
 > Git / CI / 文档维护 / 与 AI 协作（vibe coding）过程中反复出现的困难与规避方式。
 
-_（暂无条目）_
+### [已解决] 错误码前缀不统一 + 详设错误码列表不全
+- **现象**：detailed-design §2.8 写 `SIGN_INVALID`/`ORDER_ALREADY_PAID`（无前缀），但各模块实现统一用带前缀码（`PAY_SIGN_INVALID`、`RATIO_BELOW_FLOOR`…）；多个 Worker 还各自补了同命名空间码（`SLUG_INVALID`、`STATS_CROSS_TENANT`、`WALLET_AMOUNT_INVALID`、`AGENT_TYPE_INVALID` 等）。
+- **根因**：详设的错误码枚举不完整，且"前缀约定"未硬性写明，多 Agent 并行各自取舍。
+- **解决/规避**：统一约定**错误码必须带模块前缀**；以 `doc/api-contract.md` 的「错误码注册表」作为唯一事实源，前端按此对接。
+- **升级**：建议升级为 CLAUDE.md 硬约束（错误码命名规范）；待错误码表稳定后固化。
+
+### [已解决-规避] 消费者定义接口导致跨模块值类型分歧，需组装层适配器
+- **现象**：并行 Worker 各自在本包定义消费者接口及其值类型 —— `wallet.EarningEntry` ≠ `agent.EarningEntry`，`relay.CallContext` ≠ `risk.CallContext`，各模块各有 `PricingGuard`/`EarningSink`/`PaymentGateway`。编译期零耦合，但无法直接互调。
+- **根因**：这是"消费者定义接口（依赖倒置）"模式的固有代价 —— 换来的是每个模块可 mock 依赖独立单测（14 模块平均 ~98.7% 覆盖率正源于此）。
+- **解决/规避**：在 `cmd/main` 写**薄适配器**对齐类型（如 `Reference→agent.SourceID` 做幂等键、USD↔¥ 单位换算、`tokenplan.SubscriptionQuotaFactory`→`billing.SubscriptionSourceFactory`）。
+- **升级**：已在 progress.md「组装层 TODO」与 api-contract.md「装配映射」登记；集成阶段统一实现，不在各模块内耦合。

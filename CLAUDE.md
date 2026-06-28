@@ -11,7 +11,7 @@
 
 ## 项目定位
 
-基于 **New API**（One API 衍生）二次开发的**多租户代理分销平台**，对标 **TOKEN HUB v1.0**。
+基于 **New API**（基线仓库 [`github.com/QuantumNous/new-api`](https://github.com/QuantumNous/new-api)，One API 衍生；Docker 镜像 `calciumion/new-api`）二次开发的**多租户代理分销平台**，对标 **TOKEN HUB v1.0**。
 
 - **架构**：单套后端 + 多租户隔离 + 统一 API 网关。**不是**给每个代理部署一套独立 New API。
 - **主站**：统一管控上游渠道、模型、支付、计费、风控、系统配置与管理员能力。
@@ -39,6 +39,7 @@
 | 详细设计（跨模块） | 写代码前看模块边界 / Go 接口契约 / 数据流时序 / 单测策略 | [`doc/detailed-design.md`](doc/detailed-design.md) | 全模块 |
 | 任务与进度（开发跟踪） | 认领任务 / 看构建顺序 / 勾选进度 / 查模块 MET 与验收标准 | [`doc/tasks/progress.md`](doc/tasks/progress.md) | 14 模块 |
 | 自动化开发起始 Prompt | 启动 Master-Worker 全自动开发 / 查质量门与部署规范 | [`doc/prompt.md`](doc/prompt.md) | 全流程 |
+| API 契约（前后端对齐） | 前端对接 / 加改端点 / 查错误码注册表 / 对象字段 | [`doc/api-contract.md`](doc/api-contract.md) | proposal §10 §13 |
 | 代理 · 租户管理 | 改代理类型 / 等级 / 钱包 / 推广 / 兑换码 / 站点配置 | [`doc/agent-tenant.md`](doc/agent-tenant.md) | §3 §10.1 §10.2 |
 | 域名 · SSL | 改 wildcard / 自定义域名绑定 / HTTPS 证书 | [`doc/domains-ssl.md`](doc/domains-ssl.md) | §6 |
 | 渠道 · 模型 · 中继转发 | 改上游渠道 / 模型映射 / 统一网关 / 限流风控 / 调用入口 | [`doc/relay-channels.md`](doc/relay-channels.md) | §2 §10.7 |

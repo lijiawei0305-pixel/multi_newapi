@@ -1,6 +1,6 @@
 # 🚦 RelayGateway 中继网关 — 最小可执行任务（MET）
 
-> **职责**：`/v1/*` 入口编排 —— 鉴权→租户→模型权限→风控→**桶路由**→转发→扣费→日志。自身不含业务规则，纯编排。
+> **职责**：`/v1/*` 入口编排 —— 鉴权→租户→风控→模型权限→**桶路由**→转发→扣费→日志（风控先于模型权限）。自身不含业务规则，纯编排。
 > **依赖**：`Authenticator`、`AccessGuard`、`RiskEngine`、`ModelPermission`、`BillingService`、`UpstreamPool`（全为接口）｜ **被依赖**：终端用户/API 代理调用
 > **设计参考**：[detailed-design.md](../detailed-design.md) §2.11/§3.1 ｜ [proposal.md](../proposal.md) §10.7
 > **复用**：上游转发复用 new-api `UpstreamPool`，入口前置租户识别与桶路由。
