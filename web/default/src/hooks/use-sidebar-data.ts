@@ -26,6 +26,7 @@ import {
   LayoutDashboard,
   ListTodo,
   MessageSquare,
+  Package,
   Radio,
   ServerCog,
   Settings,
@@ -142,6 +143,11 @@ export function useSidebarData(): SidebarData {
             title: t('Subscriptions'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('Token Plans'),
+            url: '/token-plans',
+            icon: Package,
           },
           {
             title: t('System Info'),
