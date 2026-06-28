@@ -3,7 +3,7 @@ package payment
 import (
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 func TestProviderValidAndNotifyPath(t *testing.T) {

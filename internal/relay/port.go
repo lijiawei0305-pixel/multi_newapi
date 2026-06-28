@@ -3,7 +3,7 @@ package relay
 import (
 	"context"
 
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 // ---- 错误码（relay 命名空间，apperr.Code）----

@@ -1,42 +1,71 @@
-# secrets / keys — 严禁入库
+.idea
+.vscode
+.zed
+.history
+upload
+*.exe
+*.db
+build
+*.db-journal
+logs
+web/default/dist
+web/classic/dist
+web/node_modules
+web/dist
+.env
+one-api
+new-api
+/__debug_bin*
+.DS_Store
+tiktoken_cache
+.eslintcache
+.gocache
+.gomodcache/
+.cache
+plans
+.claude
+.cursor
+
+electron/node_modules
+electron/dist
+data/
+.gomodcache/
+.gocache-temp
+.gopath
+.test
+token_estimator_test.go
+skills-lock.json
+.playwright-mcp
+
+# Local-only live probes and scratch test workspaces.
+.local-tests/
+service/relayconvert/chat_responses_live_local_test.go
+service/openaicompat/chat_responses_live_local_test.go
+
+# ============================================================
+# newapi628 multi-tenant additions (merged onto new-api base)
+# ============================================================
+# secrets / keys — 严禁入库 (W4: 私钥/证书/凭据绝不入库)
 *.pem
 *.key
 *_ed25519
 *_rsa
 id_*
-.env
+config.yaml
 .env.*
 !.env.example
-config.yaml
 
-# go build
-/newapi-mt
-/bin/
-/dist/
+# go test / coverage artifacts (new-api base only has exact `.test`)
 *.test
 *.out
 /vendor/
 
-# node / frontend
-node_modules/
-/web/dist/
-/web/build/
-
-# runtime data
+# runtime data (our compose volumes) + log glob (base only has `logs` dir)
 mysql_data/
-/data/
-/logs/
 *.log
 
-# os / editor
-.DS_Store
-.idea/
-.vscode/
+# editor / scratch / local debug tooling
 *.swp
-
-# scratch
 /scratchpad/
-
-# playwright-cli skill (本机本项目调试用, 不入库)
-/.claude/skills/playwright-cli/
 /.playwright/
+node_modules/

@@ -1,26 +1,29 @@
-# 集成自测编排（Slice 1 租户管道）。部署时用项目名隔离：
+# 集成自测编排（Phase 2 · new-api fork）。部署时用项目名隔离：
 #   docker compose -p newapi_test -f deploy/docker-compose.test.yml up -d --build
 # 不写 container_name / 外部网络：靠 -p 前缀隔离，默认网络自动创建。
+# app 直接构建仓库根的 new-api Dockerfile（多阶段：bun 构建 web/default+classic → go build 内嵌）。
 services:
   app:
     build:
-      context: ..            # 上下文为仓库根（Dockerfile 在根）
+      context: ..            # 上下文为仓库根（new-api Dockerfile 在根）
       dockerfile: Dockerfile
     ports:
       - "127.0.0.1:3100:3000" # 仅本机回环暴露，避免裸公网
     environment:
-      SQL_DSN: "root:testpass123@tcp(mysql:3306)/new-api-test?charset=utf8mb4&parseTime=true&loc=Local"
+      # —— new-api 期望的变量 ——
+      SQL_DSN: "root:testpass123@tcp(mysql:3306)/new-api-test"
+      REDIS_CONN_STRING: "redis://redis"
+      # 测试用会话密钥：随机串，可被外部同名 env 覆盖；仅供测试，勿用于生产。
+      SESSION_SECRET: "${SESSION_SECRET:-4329de40911e7a8bd58004757bfb8c976d72579113fdd7ba}"
+      TZ: "Asia/Shanghai"
       PORT: "3000"
-      WEB_DIST: "/web/dist"
-      # 上游渠道凭据：**仅引用**服务器 .env 的同名变量，值不入库（compose 自动插值）。
+      # —— 上游渠道凭据：仅引用服务器 .env 的同名变量，值不入库（compose 自动插值），供后续 relay 自测（5b）用 ——
       UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL}"
       UPSTREAM_API_KEY: "${UPSTREAM_API_KEY}"
-      # 模型默认价占位（USD/百万 token，可选覆盖）：缺省 in=1.25 / out=10。
-      MODEL_PRICE_IN_PER_1M: "${MODEL_PRICE_IN_PER_1M:-1.25}"
-      MODEL_PRICE_OUT_PER_1M: "${MODEL_PRICE_OUT_PER_1M:-10}"
     depends_on:
       - mysql
-    restart: on-failure       # app 内已对 mysql 未就绪重试；耗尽后由此兜底重启
+      - redis
+    restart: on-failure       # 等待 mysql/redis 就绪期间由此兜底重启
 
   mysql:
     image: mysql:8.2
@@ -33,7 +36,7 @@ services:
       - mysql_test_data:/var/lib/mysql
 
   redis:
-    image: redis:latest       # 预留给后续 Slice（缓存/限流），本 Slice 未使用
+    image: redis:latest       # new-api 经 REDIS_CONN_STRING=redis://redis 使用（无密码，仅测试）
 
 volumes:
   mysql_test_data:

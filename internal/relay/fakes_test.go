@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 // recorder 记录跨 mock 的调用顺序，用于断言编排次序与短路（鉴权→…→扣费）。并发安全，支撑 -race。

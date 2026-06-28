@@ -1,0 +1,12 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - listitem [ref=e6]:
+        - img "newapi628" [ref=e8]: "N"
+      - generic [ref=e9]: newapi628
+    - button "控制台" [ref=e10] [cursor=pointer]:
+      - generic [ref=e11]: 控制台
+  - main [ref=e12]:
+    - generic [ref=e14]:
+      - img [ref=e17]
+      - generic [ref=e21]: 正在识别站点…

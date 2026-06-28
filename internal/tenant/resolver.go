@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 type hostResolver struct {

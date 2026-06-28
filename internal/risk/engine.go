@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 // Engine 是 RiskEngine 的实现。KVCache 为必需依赖（限流/限购计数）；

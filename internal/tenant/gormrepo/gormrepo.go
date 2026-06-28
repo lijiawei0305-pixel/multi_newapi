@@ -13,7 +13,7 @@ import (
 	driver "github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 
-	"newapi-mt/internal/tenant"
+	"github.com/QuantumNous/new-api/internal/tenant"
 )
 
 // mysqlDupErrNo 是 MySQL "Duplicate entry" 的错误号（唯一键冲突）。

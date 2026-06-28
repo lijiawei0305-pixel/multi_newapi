@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 func TestPlanStatusValid(t *testing.T) {

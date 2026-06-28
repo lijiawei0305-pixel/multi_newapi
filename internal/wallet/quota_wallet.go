@@ -3,8 +3,8 @@ package wallet
 import (
 	"context"
 
-	"newapi-mt/internal/platform/appctx"
-	"newapi-mt/internal/platform/quota"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/quota"
 )
 
 // quotaFactory 是 WalletQuotaFactory 的实现，为每个 Principal 绑定一个钱包桶。

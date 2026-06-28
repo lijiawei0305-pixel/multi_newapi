@@ -3,7 +3,7 @@ package billing
 import (
 	"context"
 
-	"newapi-mt/internal/platform/quota"
+	"github.com/QuantumNous/new-api/internal/platform/quota"
 )
 
 // defaultMultiplier 是计费倍率默认值 x1（上游成本价直计，不叠分组倍率，见 §7 默认假设 #2）。

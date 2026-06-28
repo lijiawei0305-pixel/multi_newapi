@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 func TestServiceGroupRatio(t *testing.T) {

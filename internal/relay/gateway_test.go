@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"newapi-mt/internal/platform/appctx"
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // harness 聚合一套「全成功」mock 与据其装配的 Gateway，单测按需把某个依赖改为失败。

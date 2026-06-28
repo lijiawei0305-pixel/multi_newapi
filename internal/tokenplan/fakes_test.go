@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // fakeClock 是可注入的假时钟（并发安全），支持设定与推进时间，便于到期/计量用例。

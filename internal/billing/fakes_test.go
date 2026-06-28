@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"newapi-mt/internal/platform/quota"
+	"github.com/QuantumNous/new-api/internal/platform/quota"
 )
 
 // recorder 记录跨 mock 的调用顺序，用于断言「扣费 → 日志 → 分润」编排次序。

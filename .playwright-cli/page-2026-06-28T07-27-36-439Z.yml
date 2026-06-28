@@ -1,0 +1,185 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]:
+        - listitem [ref=e6]:
+          - img "TokenDream" [ref=e27]: T
+        - generic [ref=e9]: TokenDream
+      - generic [ref=e10]:
+        - navigation [ref=e11]:
+          - link "主页" [ref=e12] [cursor=pointer]:
+            - /url: "#/"
+          - link "套餐" [ref=e13] [cursor=pointer]:
+            - /url: "#/plans"
+          - link "钱包" [ref=e14] [cursor=pointer]:
+            - /url: "#/wallet"
+        - button "控制台" [ref=e15] [cursor=pointer]:
+          - generic [ref=e16]: 控制台
+    - main [ref=e17]:
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - generic [ref=e30]:
+            - generic [ref=e31]:
+              - generic [ref=e32]: 🛒
+              - heading "选购套餐" [level=4] [ref=e33]
+            - text: 独立月度额度，购买即享；划线价为原价，限时超值。
+          - generic [ref=e34]:
+            - generic [ref=e36]:
+              - heading "Trial 引流体验包" [level=5] [ref=e38]
+              - generic [ref=e39]:
+                - generic [ref=e40]:
+                  - generic [ref=e41]: ¥6.90
+                  - generic [ref=e42]: "-99%"
+                - generic [ref=e43]:
+                  - generic [ref=e44]: ¥1,020
+                  - text: 原价
+              - generic [ref=e45]:
+                - generic [ref=e46]:
+                  - generic [ref=e47]: 月度额度
+                  - generic [ref=e48]: $80.00 USD
+                - generic [ref=e49]:
+                  - generic [ref=e50]: 计费倍率
+                  - generic [ref=e51]: x1
+                - generic [ref=e52]:
+                  - generic [ref=e53]: 有效期
+                  - generic [ref=e54]: 30 天
+              - button "购买" [ref=e55] [cursor=pointer]:
+                - generic [ref=e56]: 购买
+            - generic [ref=e58]:
+              - heading "Mini" [level=5] [ref=e60]
+              - generic [ref=e61]:
+                - generic [ref=e62]:
+                  - generic [ref=e63]: ¥119
+                  - generic [ref=e64]: "-91%"
+                - generic [ref=e65]:
+                  - generic [ref=e66]: ¥1,360
+                  - text: 原价
+              - generic [ref=e67]:
+                - generic [ref=e68]:
+                  - generic [ref=e69]: 月度额度
+                  - generic [ref=e70]: $220.00 USD
+                - generic [ref=e71]:
+                  - generic [ref=e72]: 计费倍率
+                  - generic [ref=e73]: x1
+                - generic [ref=e74]:
+                  - generic [ref=e75]: 有效期
+                  - generic [ref=e76]: 30 天
+              - button "购买" [ref=e77] [cursor=pointer]:
+                - generic [ref=e78]: 购买
+            - generic [ref=e80]:
+              - heading "Solo" [level=5] [ref=e82]
+              - generic [ref=e83]:
+                - generic [ref=e84]:
+                  - generic [ref=e85]: ¥279
+                  - generic [ref=e86]: "-92%"
+                - generic [ref=e87]:
+                  - generic [ref=e88]: ¥3,400
+                  - text: 原价
+              - generic [ref=e89]:
+                - generic [ref=e90]:
+                  - generic [ref=e91]: 月度额度
+                  - generic [ref=e92]: $560.00 USD
+                - generic [ref=e93]:
+                  - generic [ref=e94]: 计费倍率
+                  - generic [ref=e95]: x1
+                - generic [ref=e96]:
+                  - generic [ref=e97]: 有效期
+                  - generic [ref=e98]: 30 天
+              - button "购买" [ref=e99] [cursor=pointer]:
+                - generic [ref=e100]: 购买
+            - generic [ref=e102]:
+              - heading "Lite" [level=5] [ref=e104]
+              - generic [ref=e105]:
+                - generic [ref=e106]:
+                  - generic [ref=e107]: ¥899
+                  - generic [ref=e108]: "-94%"
+                - generic [ref=e109]:
+                  - generic [ref=e110]: ¥13,892
+                  - text: 原价
+              - generic [ref=e111]:
+                - generic [ref=e112]:
+                  - generic [ref=e113]: 月度额度
+                  - generic [ref=e114]: $2,200.00 USD
+                - generic [ref=e115]:
+                  - generic [ref=e116]: 计费倍率
+                  - generic [ref=e117]: x1
+                - generic [ref=e118]:
+                  - generic [ref=e119]: 有效期
+                  - generic [ref=e120]: 30 天
+              - button "购买" [ref=e121] [cursor=pointer]:
+                - generic [ref=e122]: 购买
+            - generic [ref=e124]:
+              - generic [ref=e125]: 推荐
+              - heading "Pro" [level=5] [ref=e127]
+              - generic [ref=e128]:
+                - generic [ref=e129]:
+                  - generic [ref=e130]: ¥2,699
+                  - generic [ref=e131]: "-94%"
+                - generic [ref=e132]:
+                  - generic [ref=e133]: ¥45,975
+                  - text: 原价
+              - generic [ref=e134]:
+                - generic [ref=e135]:
+                  - generic [ref=e136]: 月度额度
+                  - generic [ref=e137]: $7,200.00 USD
+                - generic [ref=e138]:
+                  - generic [ref=e139]: 计费倍率
+                  - generic [ref=e140]: x1
+                - generic [ref=e141]:
+                  - generic [ref=e142]: 有效期
+                  - generic [ref=e143]: 30 天
+              - button "购买" [ref=e144] [cursor=pointer]:
+                - generic [ref=e145]: 购买
+            - generic [ref=e147]:
+              - heading "Max" [level=5] [ref=e149]
+              - generic [ref=e150]:
+                - generic [ref=e151]:
+                  - generic [ref=e152]: ¥8,999
+                  - generic [ref=e153]: "-94%"
+                - generic [ref=e154]:
+                  - generic [ref=e155]: ¥160,000
+                  - text: 原价
+              - generic [ref=e156]:
+                - generic [ref=e157]:
+                  - generic [ref=e158]: 月度额度
+                  - generic [ref=e159]: $25,000.00 USD
+                - generic [ref=e160]:
+                  - generic [ref=e161]: 计费倍率
+                  - generic [ref=e162]: x1
+                - generic [ref=e163]:
+                  - generic [ref=e164]: 有效期
+                  - generic [ref=e165]: 30 天
+              - button "购买" [ref=e166] [cursor=pointer]:
+                - generic [ref=e167]: 购买
+        - generic [ref=e168]:
+          - generic [ref=e169]:
+            - generic [ref=e170]:
+              - generic [ref=e171]: 📦
+              - heading "我的套餐" [level=4] [ref=e172]
+            - text: 独立计量；用尽 / 到期请重购，不自动扣钱包。
+          - generic [ref=e175]:
+            - generic [ref=e176]:
+              - heading "trial" [level=5] [ref=e177]
+              - generic [ref=e178]: 使用中
+            - generic [ref=e180]:
+              - progressbar "0%" [ref=e181]
+              - generic [ref=e183]:
+                - generic [ref=e184]:
+                  - text: 已用
+                  - generic [ref=e185]: $0.00
+                  - text: / $80.00 USD
+                - generic [ref=e186]: 0%
+            - generic [ref=e187]:
+              - generic [ref=e188]:
+                - text: 剩余
+                - generic [ref=e189]: $80.00
+              - generic [ref=e190]: 到期 2026-07-28
+  - generic [ref=e191]:
+    - alert "success type":
+      - generic [ref=e192]:
+        - img "tick_circle" [ref=e193]:
+          - img [ref=e194]
+        - generic [ref=e196]: 演示登录成功
+        - button "close" [ref=e198] [cursor=pointer]:
+          - img "close" [ref=e200]:
+            - img [ref=e201]

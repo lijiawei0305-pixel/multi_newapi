@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // failReader 是永远报错的熵源，用于覆盖渠道码生成失败分支。

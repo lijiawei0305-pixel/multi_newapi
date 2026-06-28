@@ -3,7 +3,7 @@ package pricing
 import (
 	"net/http"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // guard 是 PricingGuard 的纯函数实现（无状态、无依赖）。

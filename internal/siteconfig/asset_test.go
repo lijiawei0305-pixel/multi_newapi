@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 func TestAssetUpload(t *testing.T) {

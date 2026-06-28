@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"newapi-mt/internal/platform/appctx"
-	"newapi-mt/internal/platform/quota"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/quota"
 )
 
 // --- 对外接口（detailed-design §2.6 的 Go 签名）---

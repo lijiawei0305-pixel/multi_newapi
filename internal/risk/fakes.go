@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 // systemClock 是默认的真实时钟。

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // stubGuard 是 PricingGuard 的测试假实现：ratio < floor 时以 blockCode 拒绝（模拟击穿保护线）。

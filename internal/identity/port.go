@@ -3,7 +3,7 @@ package identity
 import (
 	"context"
 
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 // ---- 对外接口（detailed-design §2.2）----

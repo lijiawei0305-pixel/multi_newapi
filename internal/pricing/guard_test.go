@@ -3,7 +3,7 @@ package pricing
 import (
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 func TestValidateGroupRatio(t *testing.T) {

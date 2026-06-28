@@ -3,7 +3,7 @@ package stats
 import (
 	"context"
 
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 // DefaultAlertThreshold 是满额预警默认阈值：used_usd/month_limit ≥ 0.8（80%）即预警。

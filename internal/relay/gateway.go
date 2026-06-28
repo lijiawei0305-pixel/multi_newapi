@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // Gateway 是 /v1/* 中继编排器：鉴权 → 租户活跃 → 风控 → 模型权限 → 转发 → 扣费 → 返回。

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"newapi-mt/internal/platform/appctx"
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // spyRepo 仅覆盖 resolver 用到的 GetTenantByDomain，并记录调用次数；

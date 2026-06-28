@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"newapi-mt/internal/platform/appctx"
-	"newapi-mt/internal/platform/apperr"
-	"newapi-mt/internal/platform/quota"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/quota"
 )
 
 func walletFor(t *testing.T, repo WalletRepo, tenantID, userID int64) quota.Source {

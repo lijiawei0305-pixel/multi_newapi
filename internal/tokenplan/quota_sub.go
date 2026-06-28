@@ -3,8 +3,8 @@ package tokenplan
 import (
 	"context"
 
-	"newapi-mt/internal/platform/appctx"
-	"newapi-mt/internal/platform/quota"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/quota"
 )
 
 // quotaFactory 是 SubscriptionQuotaFactory 的实现，为某 Principal/用户绑定其 active 套餐桶。

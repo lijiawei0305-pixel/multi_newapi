@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // newGateway 组装一个用 StubPaySDK + 两个 fakeSink 的网关，供下单/回调用例复用。

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
-	"newapi-mt/internal/platform/quota"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/quota"
 )
 
 func TestNewQuotaRouterImplementsContract(t *testing.T) {

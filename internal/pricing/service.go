@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // service 是 PricingService 的实现，依赖 PricingRepo（由 main 注入）。

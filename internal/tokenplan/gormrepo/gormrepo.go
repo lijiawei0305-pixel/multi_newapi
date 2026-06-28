@@ -24,7 +24,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"newapi-mt/internal/tokenplan"
+	"github.com/QuantumNous/new-api/internal/tokenplan"
 )
 
 // planRow 是 token_plans 表的 GORM 模型。code 唯一索引（自然键，seed 幂等基准）。

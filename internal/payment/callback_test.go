@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // seedOrder 直接在 repo 预置一个 created 订单，返回其 order_no。

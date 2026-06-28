@@ -3,7 +3,7 @@ package billing
 import (
 	"context"
 
-	"newapi-mt/internal/platform/quota"
+	"github.com/QuantumNous/new-api/internal/platform/quota"
 )
 
 // quotaRouter 是 quota.Router 的实现：双桶路由（钱包桶 / 套餐桶）。

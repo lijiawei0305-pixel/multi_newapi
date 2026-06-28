@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 func TestMemTokenStorePutFind(t *testing.T) {

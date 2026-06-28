@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"newapi-mt/internal/platform/appctx"
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // HashToken 返回 raw 令牌的 hex(sha256)，作为 TokenStore 的反查键。

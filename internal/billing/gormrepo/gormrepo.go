@@ -14,7 +14,7 @@ import (
 
 	"gorm.io/gorm"
 
-	"newapi-mt/internal/billing"
+	"github.com/QuantumNous/new-api/internal/billing"
 )
 
 // 计费日志状态字面值。

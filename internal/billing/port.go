@@ -3,7 +3,7 @@ package billing
 import (
 	"context"
 
-	"newapi-mt/internal/platform/quota"
+	"github.com/QuantumNous/new-api/internal/platform/quota"
 )
 
 // ---- 错误码（apperr.Code 命名空间：QUOTA / SUBSCRIPTION / MODEL）----

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // epoch 是测试基准时刻。

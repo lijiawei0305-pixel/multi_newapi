@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 // contextWithTenant 构造携带 Principal(tenant,user) 的 ctx，供需要租户上下文的用例复用。

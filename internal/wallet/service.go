@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 // walletService 是 WalletService 的实现。依赖以接口注入，便于单测（mock Pricing/Earning/Repo）。

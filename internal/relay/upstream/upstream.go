@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"newapi-mt/internal/relay"
+	"github.com/QuantumNous/new-api/internal/relay"
 )
 
 // 编译期断言：*Pool 满足 relay.UpstreamPool 契约（可直接注入 RelayGateway 或被 cmd handler 调用）。

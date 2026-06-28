@@ -17,7 +17,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"newapi-mt/internal/wallet"
+	"github.com/QuantumNous/new-api/internal/wallet"
 )
 
 // balanceRow 是 user_balances 表的 GORM 模型，复合主键 (tenant_id, user_id) 即多租户隔离根。

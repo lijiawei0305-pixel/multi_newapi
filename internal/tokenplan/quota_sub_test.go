@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"newapi-mt/internal/platform/appctx"
-	"newapi-mt/internal/platform/apperr"
-	"newapi-mt/internal/platform/quota"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/quota"
 )
 
 func TestSubscriptionQuotaChargeSuccess(t *testing.T) {

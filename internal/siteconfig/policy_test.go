@@ -3,7 +3,7 @@ package siteconfig
 import (
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 func TestValidatePatch(t *testing.T) {

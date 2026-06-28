@@ -16,8 +16,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"newapi-mt/internal/identity"
-	"newapi-mt/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/identity"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
 // userRow 是 tenant_users 表的 GORM 模型。(tenant_id, username) 唯一，保证租户内用户名唯一。

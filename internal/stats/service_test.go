@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"newapi-mt/internal/platform/appctx"
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // ---- 测试用 erroring 假实现（内存假实现总是成功，故错误传播用专门的失败桩）----

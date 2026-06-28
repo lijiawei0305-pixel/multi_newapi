@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 func TestMemRepo_CreateAndGet(t *testing.T) {

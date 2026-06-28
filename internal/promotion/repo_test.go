@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 func TestMemRepo_CreateAndGetByCode(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"newapi-mt/internal/platform/appctx"
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/appctx"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 func TestHashTokenDeterministicAndDistinct(t *testing.T) {

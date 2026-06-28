@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 func TestRechargeSpread(t *testing.T) {

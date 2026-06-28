@@ -3,7 +3,7 @@ package promotion
 import (
 	"net/http"
 
-	"newapi-mt/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // 本模块错误码命名空间（detailed-design §2.9 / §6.4）。
