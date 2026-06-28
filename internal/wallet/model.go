@@ -81,6 +81,10 @@ type RedemptionCode struct {
 	CreatedAt    time.Time
 }
 
+// RedeemableError 是 redeemableError 的导出包装，供跨包仓储（gormrepo.RedeemCode）复用同一
+// 兑换状态机判定（used/invalid/expired），避免在仓储层重复实现状态逻辑。
+func (c *RedemptionCode) RedeemableError(now time.Time) error { return c.redeemableError(now) }
+
 // redeemableError 按状态机判定该码当前能否兑换，返回精确错误码：
 //
 //	used                     -> REDEEM_CODE_USED

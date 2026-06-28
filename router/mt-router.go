@@ -50,12 +50,24 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.GET("/subscriptions", middleware.UserAuth(), app.HandleListSubscriptions)
 		// 充值下单（目标③）：UserAuth + Host 租户；下单 → 调 auth-service → 返支付凭据。
 		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), app.HandleWalletRecharge)
+		// 用户兑换码（P1-UI-04）：UserAuth + Host 租户（不强制 owner）；单赢家 CAS → 原生 quota 入账。
+		tenantGroup.POST("/redeem", middleware.UserAuth(), app.HandleRedeem)
 		// 代理自助（owner 维度）：UserAuth + AgentOwnerAuth（权威校验 Host 租户 owner == 当前用户）。
 		agentSelf := tenantGroup.Group("", middleware.UserAuth(), app.AgentOwnerAuth())
 		{
 			agentSelf.POST("/withdrawals", app.HandleAgentRequestWithdrawal)
 			agentSelf.GET("/withdrawals", app.HandleAgentListWithdrawals)
 			agentSelf.GET("/earnings", app.HandleAgentListEarnings)
+			// P1-UI-04 代理自助分销：套餐上架改价 / 推广渠道 / 我的用户 / 兑换码（建/列） / 用户组倍率。
+			agentSelf.GET("/token-plans/listings", app.HandleAgentListPlanListings)
+			agentSelf.PUT("/token-plans/listings/:planId", app.HandleAgentSetPlanListing)
+			agentSelf.GET("/promotion/channels", app.HandleAgentListChannels)
+			agentSelf.POST("/promotion/channels", app.HandleAgentCreateChannel)
+			agentSelf.GET("/users", app.HandleAgentListUsers)
+			agentSelf.POST("/redemptions", app.HandleAgentCreateRedemptions)
+			agentSelf.GET("/redemptions", app.HandleAgentListRedemptions)
+			agentSelf.GET("/groups", app.HandleAgentListGroups)
+			agentSelf.PUT("/groups/:group", app.HandleAgentSetGroupRatio)
 		}
 	}
 

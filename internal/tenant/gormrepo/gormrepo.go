@@ -61,7 +61,7 @@ func New(db *gorm.DB) *Repo { return &Repo{db: db} }
 // AutoMigrate 建/补 tenants 与 tenant_domains 表结构（含唯一/普通索引）。
 // 由 cmd/server 在启动时调用；本包不持有迁移时机决策。
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&tenantRow{}, &domainRow{})
+	return db.AutoMigrate(&tenantRow{}, &domainRow{}, &groupRow{})
 }
 
 // CreateTenant 入库租户并回填 ID/时间戳；slug 冲突翻译为 tenant.ErrSlugDuplicate。

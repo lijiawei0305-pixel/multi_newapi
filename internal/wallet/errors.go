@@ -22,6 +22,9 @@ const (
 	CodeRedeemCodeUsed       = "REDEEM_CODE_USED"
 	CodeRechargeOrderInvalid = "RECHARGE_ORDER_INVALID"
 	CodeAmountInvalid        = "WALLET_AMOUNT_INVALID"
+	// CodeInsufficientQuota —— 代理建兑换码时，从其原生 users.quota 预扣额度不足。
+	// 与 CodeQuotaInsufficient（钱包/billing 桶不足）区分：本码用于原生 quota 预扣口径。
+	CodeInsufficientQuota = "INSUFFICIENT_QUOTA"
 )
 
 var (
@@ -35,4 +38,6 @@ var (
 	ErrRechargeOrderInvalid = apperr.New(CodeRechargeOrderInvalid, "充值/入账参数非法", http.StatusBadRequest)
 	// ErrAmountInvalid 金额非法（负数 / NaN / Inf）。
 	ErrAmountInvalid = apperr.New(CodeAmountInvalid, "金额非法", http.StatusBadRequest)
+	// ErrInsufficientQuota 代理建兑换码时原生 quota 预扣不足（条件扣减 0 行受影响）。
+	ErrInsufficientQuota = apperr.New(CodeInsufficientQuota, "额度不足，无法生成兑换码", http.StatusPaymentRequired)
 )

@@ -1,10 +1,16 @@
-// Package gormrepo 用真实 GORM(MySQL) 实现 wallet.WalletRepo（user_balances + redemption_codes 两表）。
+// Package gormrepo 用真实 GORM(MySQL) 实现 wallet.WalletRepo（user_balances + agent_redemption_codes 两表）。
 //
 // 关键不变量（detailed-design §6.2）：
 //   - ChargeBalance 用条件 UPDATE（WHERE balance_usd >= cost）在 DB 层保证「零透支」，
 //     0 行受影响即余额不足 -> ErrQuotaInsufficient；新余额在同一事务内回读。
-//   - UseRedemption 用 CAS（WHERE status='enabled'）原子翻牌，RowsAffected 决定 ok，杜绝重复兑换。
+//   - UseRedemption / RedeemCode 用 CAS（WHERE status='enabled'）原子翻牌，RowsAffected 决定 ok，杜绝重复兑换。
 //   - AddBalance 用 upsert（ON DUPLICATE KEY UPDATE balance_usd=balance_usd+?）原子累加。
+//
+// 兑换码改造为「原生 quota 口径」（P1-UI-04）：代理建码经 CreateCodesWithDeduction 在同一事务内
+// 从代理 owner 原生 users.quota **条件扣减**（不足拒 ErrInsufficientQuota）+ 批量建码；用户兑换经
+// RedeemCode 单赢家 CAS 返回面额，由 mtwire 调原生 IncreaseUserQuota 入账（本仓储不碰 new-api model）。
+//
+// 表名 agent_redemption_codes（租户维度）：刻意区别于 new-api 原生 redemptions 表，避免撞名。
 //
 // 金额列用 decimal(20,8) 精确存储；接口仍以 float64 进出（driver 扫描兼容）。
 package gormrepo
@@ -32,7 +38,7 @@ type balanceRow struct {
 // TableName 固定表名。
 func (balanceRow) TableName() string { return "user_balances" }
 
-// redemptionRow 是 redemption_codes 表的 GORM 模型。(tenant_id, code) 唯一（租户内码唯一）。
+// redemptionRow 是 agent_redemption_codes 表的 GORM 模型。(tenant_id, code) 唯一（租户内码唯一）。
 // ExpireAt/UsedAt 用 *time.Time：nil=NULL，规避 MySQL 零值日期('0000-00-00')写入报错。
 type redemptionRow struct {
 	ID           int64      `gorm:"column:id;primaryKey;autoIncrement"`
@@ -46,19 +52,20 @@ type redemptionRow struct {
 	CreatedAt    time.Time  `gorm:"column:created_at"`
 }
 
-// TableName 固定表名。
-func (redemptionRow) TableName() string { return "redemption_codes" }
+// TableName 固定表名（租户维度兑换码，区别于 new-api 原生 redemptions 表）。
+func (redemptionRow) TableName() string { return "agent_redemption_codes" }
 
 // Repo 是 wallet.WalletRepo 的 GORM 实现，并附带 seed 辅助方法。
 type Repo struct {
-	db *gorm.DB
+	db  *gorm.DB
+	now func() time.Time
 }
 
 // 编译期断言：*Repo 满足 wallet.WalletRepo 契约。
 var _ wallet.WalletRepo = (*Repo)(nil)
 
 // New 用已建立连接的 *gorm.DB 构造仓储。
-func New(db *gorm.DB) *Repo { return &Repo{db: db} }
+func New(db *gorm.DB) *Repo { return &Repo{db: db, now: time.Now} }
 
 // AutoMigrate 建/补 user_balances 与 redemption_codes 表结构。
 func AutoMigrate(db *gorm.DB) error {
@@ -176,6 +183,107 @@ func (r *Repo) EnsureRedemption(ctx context.Context, c *wallet.RedemptionCode) e
 	return r.db.WithContext(ctx).
 		Clauses(clause.OnConflict{DoNothing: true}).
 		Create(&row).Error
+}
+
+// ---- 原生 quota 口径兑换码（P1-UI-04 代理自助分销） ----
+
+// CreateCodesWithDeduction 在单一事务内：① 从代理 owner 原生 users.quota **条件扣减**
+// totalQuotaUnits（WHERE id=? AND quota>=?，0 行受影响即不足 -> ErrInsufficientQuota，不透支）；
+// ② 批量插入 codes（回填 ID/TenantID/CreatedAt）。扣减与建码原子化：任一失败整体回滚。
+//
+// 仅以 raw Table("users") 触原生表（不 import new-api model，避免 upstream 耦合）；额度单位换算
+// （amount_usd × QuotaPerUnit）与缓存失效由 mtwire 负责。
+func (r *Repo) CreateCodesWithDeduction(ctx context.Context, tenantID, ownerUserID int64, totalQuotaUnits int64, codes []*wallet.RedemptionCode) error {
+	if totalQuotaUnits <= 0 || len(codes) == 0 {
+		return wallet.ErrAmountInvalid
+	}
+	now := r.now()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Table("users").
+			Where("id = ? AND quota >= ?", ownerUserID, totalQuotaUnits).
+			UpdateColumn("quota", gorm.Expr("quota - ?", totalQuotaUnits))
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return wallet.ErrInsufficientQuota // 余额不足 / owner 不存在：拒绝且不动库
+		}
+		rows := make([]redemptionRow, len(codes))
+		for i, c := range codes {
+			rows[i] = redemptionRow{
+				TenantID:  tenantID,
+				Code:      c.Code,
+				AmountUSD: c.AmountUSD,
+				Status:    string(statusOrDefault(c.Status)),
+				CreatedAt: now,
+			}
+			if !c.ExpireAt.IsZero() {
+				t := c.ExpireAt
+				rows[i].ExpireAt = &t
+			}
+		}
+		if err := tx.Create(&rows).Error; err != nil {
+			return err
+		}
+		for i := range rows {
+			codes[i].ID = rows[i].ID
+			codes[i].TenantID = tenantID
+			codes[i].Status = wallet.RedemptionStatus(rows[i].Status)
+			codes[i].CreatedAt = rows[i].CreatedAt
+		}
+		return nil
+	})
+}
+
+// RedeemCode 用户兑换：查码（按 tenant+code）→ 状态机校验 → 单赢家 CAS（WHERE status='enabled'
+// AND tenant_id=?）翻 used 并记录使用者。返回该码面额 amount_usd 供调用方入账原生 quota。
+//
+//	不存在/禁用/过期            -> wallet.ErrRedeemCodeInvalid
+//	已用（含并发竞态败者）       -> wallet.ErrRedeemCodeUsed
+//
+// CAS 是单赢家闸门：并发兑换同一码仅一人 RowsAffected==1。本方法不碰 quota，入账由 mtwire 调
+// 原生 IncreaseUserQuota（与充值入账一致）。跨租户：tenant 不匹配则查码即 invalid（越权防线）。
+func (r *Repo) RedeemCode(ctx context.Context, tenantID int64, code string, userID int64, now time.Time) (float64, error) {
+	var row redemptionRow
+	err := r.db.WithContext(ctx).Take(&row, "tenant_id = ? AND code = ?", tenantID, code).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, wallet.ErrRedeemCodeInvalid
+		}
+		return 0, err
+	}
+	if e := toRedemption(&row).RedeemableError(now); e != nil {
+		return 0, e // used / invalid（含过期、禁用）—— 快速失败，省一次 CAS
+	}
+	res := r.db.WithContext(ctx).Model(&redemptionRow{}).
+		Where("id = ? AND tenant_id = ? AND status = ?", row.ID, tenantID, string(wallet.RedemptionEnabled)).
+		Updates(map[string]interface{}{
+			"status":          string(wallet.RedemptionUsed),
+			"used_by_user_id": userID,
+			"used_at":         now,
+		})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return 0, wallet.ErrRedeemCodeUsed // 并发竞态败者
+	}
+	return row.AmountUSD, nil
+}
+
+// ListCodesByTenant 列出某租户的全部兑换码（按 id 倒序）。
+// 强制 WHERE tenant_id=? —— 代理自助列表的越权防线（scopeByTenant）。
+func (r *Repo) ListCodesByTenant(ctx context.Context, tenantID int64) ([]wallet.RedemptionCode, error) {
+	var rows []redemptionRow
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ?", tenantID).Order("id desc").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]wallet.RedemptionCode, 0, len(rows))
+	for i := range rows {
+		out = append(out, *toRedemption(&rows[i]))
+	}
+	return out, nil
 }
 
 // statusOrDefault 空状态回退 enabled。

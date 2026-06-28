@@ -23,10 +23,13 @@ import (
 	"github.com/QuantumNous/new-api/internal/payment"
 	paymentrepo "github.com/QuantumNous/new-api/internal/payment/gormrepo"
 	"github.com/QuantumNous/new-api/internal/pricing"
+	"github.com/QuantumNous/new-api/internal/promotion"
+	promotionrepo "github.com/QuantumNous/new-api/internal/promotion/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
 	tprepo "github.com/QuantumNous/new-api/internal/tokenplan/gormrepo"
+	walletrepo "github.com/QuantumNous/new-api/internal/wallet/gormrepo"
 )
 
 // App 持有装配好的多租户增量服务（全部构建于 new-api 的共享 *gorm.DB 之上）。
@@ -50,6 +53,13 @@ type App struct {
 	AgentService  agent.AgentService
 	Withdrawals   agent.WithdrawalService
 	AgentEarnings agent.EarningSink // 真实收益入账口（写 agent_earning_logs，幂等），注入 tokenplan + consume hook
+
+	// --- 代理自助分销（P1-UI-04）---
+	// PromotionRepo 持有具体类型（列表用非接口方法 ListChannelsByTenant）；Promotion 复用其领域服务（建渠道码）。
+	PromotionRepo *promotionrepo.Repo
+	Promotion     promotion.PromotionService
+	// RedemptionRepo 兑换码仓储（原生 quota 口径）：建码预扣 + 单赢家兑换 + 按租户列表。
+	RedemptionRepo *walletrepo.Repo
 
 	// --- payment/recharge 模块（目标③）---
 	// RechargeGateway 下单（落库 RCG 订单 + 调 auth-service）与内网入账（强幂等状态机）。
@@ -75,6 +85,11 @@ func New(db *gorm.DB) *App {
 	agentSvc := agent.NewService(ar, guard)
 	withdrawals := agent.NewWithdrawalService(ar)
 	agentEarnings := agent.NewEarningSink(ar) // 真实入账：写 agent_earning_logs（幂等）+ 累加钱包
+
+	// 代理自助分销（P1-UI-04）：推广渠道仓储 + 领域服务（建码 <prefix>_<rand>）；兑换码仓储（原生 quota 口径）。
+	promoRepo := promotionrepo.New(db)
+	promoSvc := promotion.NewService(promoRepo)
+	redemptionRepo := walletrepo.New(db)
 
 	// tokenplan：GORM 仓储（同时满足 PlanRepo + SubscriptionRepo）+ 纯函数成本守卫。
 	tp := tprepo.New(db)
@@ -114,6 +129,9 @@ func New(db *gorm.DB) *App {
 		AgentService:    agentSvc,
 		Withdrawals:     withdrawals,
 		AgentEarnings:   agentEarnings,
+		PromotionRepo:   promoRepo,
+		Promotion:       promoSvc,
+		RedemptionRepo:  redemptionRepo,
 		RechargeGateway: rechargeGateway,
 		rechargeCfg:     rechargeCfg,
 	}
@@ -136,6 +154,12 @@ func (a *App) Migrate() error {
 		return err
 	}
 	if err := agentrepo.AutoMigrate(a.DB); err != nil { // agent_profiles/agent_wallets/agent_earning_logs/agent_withdrawals
+		return err
+	}
+	if err := promotionrepo.AutoMigrate(a.DB); err != nil { // agent_promotion_channels/agent_promotion_attributions（P1-UI-04）
+		return err
+	}
+	if err := walletrepo.AutoMigrate(a.DB); err != nil { // user_balances/agent_redemption_codes（兑换码原生 quota 口径）
 		return err
 	}
 	if err := paymentrepo.AutoMigrate(a.DB); err != nil { // payment_orders（Track 2 充值订单）
