@@ -34,3 +34,26 @@
 ## F. 部署联调
 - [ ] 用自定义镜像替换 `newapi_YFNf/docker-compose.yml` 的 `calciumion/new-api:${VERSION}` ｜ ✅ 替换后栈 healthy、站点可登录
 - [ ] 输出一键启动/回滚说明（含镜像 tag、迁移、备份）｜ ✅ 按文档可重新拉起
+
+---
+
+## G. 集成阶段（纵切打通）执行计划 ★
+
+> **new-api 基座事实（已浅克隆核实）**：module `github.com/QuantumNous/new-api`，Go 1.25.1，gin + GORM + gin-sessions，`//go:embed web/default/dist`（前端构建产物内嵌）。结构：`router/`(api/relay/dashboard 路由) · `controller/`(handler) · `model/`(GORM 模型 + DB) · `middleware/`(auth/distributor/cache) · `relay/`(上游转发) · `common/database.go`(DB 初始化) · `service/` · `dto/` · `setting/`。
+>
+> **合并方式（增量为主）**：本仓库演进为 new-api fork —— new-api 源码作基座，`internal/*` 14 模块作增量层，经 `cmd/main`/适配器 wire 进 new-api 的 router/middleware；租户识别接 `middleware/distributor.go` 一侧；扣费/中继复用 `relay/`。统一 `go.mod`。
+>
+> **硬约束**：本地无 Docker/DB（已核实）→ **迁移/GORM/运行/E2E 一律在服务器独立测试栈**（compose project `newapi_test`、端口 `127.0.0.1:3100`、DB `new-api-test`、独立 redis；**不碰现网 `newapi_YFNf`/3000**）。Mac 仅 `go build` 编译校验。
+
+**纵切顺序**（每切 = GORM repo + 迁移 + handler + 装配 + 测试栈 E2E）：
+- [ ] **Slice 1 · 租户管道**：GORM `TenantRepo` + `tenants/tenant_domains` 迁移 + 按 Host 解析的 `GET /api/tenant/current` → 测试栈跑通 → curl/playwright 冒烟（证明 Mac 代码→服务器构建→DB→端点→浏览器 全链路）
+- [ ] **Slice 2 · 身份与钱包**：Identity 鉴权中间件 + Wallet GORM + 充值/余额端点
+- [ ] **Slice 3 · tokenplan**：套餐 CRUD/购买/计量 + 购买页对接 `api-contract.md`
+- [ ] **Slice 4 · 中继计费**：`/v1/*` 接 relay + 双桶扣费 + 日志
+- [ ] 组装层适配器（见 progress.md「组装层 TODO」与 `api-contract.md` §4）
+
+**测试栈部署步骤**（服务器，经 `ssh newapi628`）：
+- [ ] `rsync -az -e 'ssh -p 5522' --exclude .git --exclude scratchpad ./ newapi628:/root/newapi-test/`
+- [ ] `ssh newapi628 'cd /root/newapi-test && docker build -t newapi-mt:test .'`
+- [ ] `docker compose -p newapi_test up -d`（端口 3100、DB `new-api-test`、独立 redis）→ 迁移 → `curl 127.0.0.1:3100/api/status`
+- [ ] playwright-cli 冒烟（对照 `api-contract.md`）
