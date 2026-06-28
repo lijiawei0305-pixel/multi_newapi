@@ -243,10 +243,10 @@
 
 ## 1.8 一期交付物
 - ⬜ 一期接口文档([`api-contract.md`](api-contract.md) 对齐已实现端点)
-- ⬜ 正式栈部署 + 备份/回滚说明 + 监控告警说明
-- ⬜ 演示账号与步骤(主流程 + 管理/代理自助演示脚本)
-- ⬜ 真实支付对账报告 + 灰度 24h「无资损 / 无越权」报告
-- ⬜ stub→真实 替换核对清单(dev-login/固定价/stub 支付/自签证书 全部替真)
+- ✅ 正式栈部署 + 备份/回滚说明 + 监控告警说明 —— `deploy/ops/`(backup/restore/rollback/healthcheck/deploy + go-live.md)+ cron(备份每日/巡检每5min)，healthcheck/backup 实跑过
+- ✅ 演示账号与步骤(主流程 + 管理/代理自助演示脚本) —— `deploy/demo/demo.sh`(8 步自动化 E2E，服务器实跑 EXIT=0)+ `deploy/demo/README.md`(三视角浏览器走查；管理员口令经 env 不入库)
+- 🟡 真实支付对账报告 + 灰度 24h 报告 —— `deploy/ops/reconcile.sh`(15 项对账，**全 PASS**，代理钱包守恒 residual=0)已交付并实跑；**真实支付对账**待真实微信/支付宝凭据、**灰度 24h 报告**待正式放量观察
+- 🟡 stub→真实 替换核对清单 —— dev-login→new-api 真实 session ✅、固定价→new-api model_ratio+渠道池 ✅、自签证书→CF Origin CA(Full strict) ✅；**stub 支付→真实**待凭据(现 auth-service mock 全链路通)
 
 ## 1.9 一期总验收门(Definition of Done · 可上线运营)
 一期判定"达成"需同时满足:① 核心 MVP(1.2)+ tokenplan(1.3)全部由基座/支付/UI 收口为 ✅;② **new-api 基座融合完成**(5a/5b/5d),stub 替换核对清单全部替真;③ **真实支付可收款且账目正确**(重复回调不重复入账,差价/分润正确落账);④ **管理端(套餐/子代理/提现)+ 代理自助(用户组/用户/推广/兑换码/上架)可独立操作**;⑤ Part 0 门 **#1–#11** 全绿,**#4 真实隔离 + #6 真实支付幂等**在正式栈过;⑥ **`*.wedreamhub.com` 通配 + HTTPS 合规**,小流量灰度 **24h 无资损 / 无越权**;⑦ 3 标杆(P1-RLY-01 / P1-TP-04 / P1-TP-05)+ 真实支付在正式域名可复现;⑧ **D1/D2/D3/D5 已锁**;⑨ 一期交付物齐备。
