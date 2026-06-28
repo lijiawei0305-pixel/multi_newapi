@@ -109,7 +109,7 @@
 #### [P1-PRC-01] 代理配用户分组倍率,不低于保护线
 - **功能判据**:代理设分组倍率;低于主站 floor 被拒并提示。
 - **技术判据**:`PricingGuard` 全表驱动、零 mock、**100% 分支**(等于保护线放行/低于拦截/负利润拦截)`#2`。
-- **关联门**:#2 ｜ **状态**:🟡(用户组倍率 UI + floor 校验 E2E 过(1.5 过/0.1 拒 `RATIO_BELOW_FLOOR`);**倍率已接进 /v1 计费**(grouphook 叶子包覆盖 `HandleGroupRatio` 单点、预扣+结算共用、安全回退;wired+单测+installed,数据路径确认);**真实 /v1 cost E2E 待渠道配置**(fork 建渠道 panic,见 RETRO/P1-BASE-02);真实分模型定价见 二期 **P2-BILL-02**)
+- **关联门**:#2 ｜ **状态**:🟡(用户组倍率 UI + floor 校验 E2E 过;**倍率真正作用于 /v1 计费 已 E2E 证明**:override 3.0 → 同 prompt 计费 **3.02×**(消费日志 `group_ratio:3` vs 关闭后 `group_ratio:1`);grouphook 覆盖 `HandleGroupRatio` 单点+安全回退;真实分模型定价见 二期 **P2-BILL-02**)
 
 #### [P1-PRM-01] 推广渠道/兑换码 + 注册归属
 - **功能判据**:兑换 `WELCOME10` 余额 +10;再兑返 `REDEEM_CODE_USED`;经渠道链接注册归属正确代理。
@@ -129,7 +129,7 @@
 #### [P1-AGT-01] 消耗分润入代理 + 提现 + 审核
 - **功能判据**:用户消耗后代理收益增加;代理提现冻结,管理员通过(线下打款)/拒绝(解冻)。
 - **技术判据**:`AddEarning` 幂等 + 余额累加;提现状态机迁移合法性 + 冻结/解冻金额守恒断言 `#6`。
-- **关联门**:#2 #6 ｜ **状态**:🟡(逻辑+`tokenplan_spread` 分润落账+提现+审核 **测试栈 E2E 全过**:demoagent 购 lite 得¥179.8 幂等不双计、提现冻结/审核金额守恒;`consume_commission` 已挂原生 PostConsume 未 E2E;正式栈落账 P1-PAY-02)
+- **关联门**:#2 #6 ｜ **状态**:🟡(逻辑+`tokenplan_spread` 分润落账+提现+审核 **测试栈 E2E 全过**:demoagent 购 lite 得¥179.8 幂等不双计、提现冻结/审核金额守恒;`consume_commission` **/v1 真实调用 E2E 过**(chanuser1 调用 → demoagent 得 `consume:wallet ¥0.0085`，挂 `PostTextConsumeQuota`、幂等 RequestId);正式栈落账 P1-PAY-02)
 
 #### [P1-STT-01] 管理员看全局 / 代理看本站 / 跨租户拦截
 - **功能判据**:管理员看全站统计;代理只看本租户;user 调 admin 接口返 403。
@@ -183,7 +183,7 @@
 #### [P1-BASE-02] 渠道池 + 真实模型价(5b)
 - **功能判据**:relay 走 new-api channels/abilities 多渠道分发(替换单一上游直连);分组倍率接 pricing。
 - **技术判据**:渠道故障转移 E2E `#8`;分组倍率经 `PricingGuard` 保护线 `#2`。
-- **关联门**:#2 #8 ｜ **状态**:⏳(增强 P1-RLY-01 真实上游)
+- **关联门**:#2 #8 ｜ **状态**:🟡(**/v1 真实中继跑通**(测试栈建 codex 渠道→gpt-5.4-mini 真实应答、按租户/桶扣费、消费日志全)；建渠道正确 payload + base_url + ModelRatio 见 RETRO;**多渠道故障转移/分组倍率全量**待补)
 
 #### [P1-BASE-03] 前端基座切换(5d)
 - **功能判据**:切 new-api 新版前端,按 [`uiux.md`](uiux.md) 加多租户换肤 + tokenplan 页。

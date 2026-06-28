@@ -77,11 +77,13 @@
 - **解决/规避**：服务器 `find /root/newapi-test -name '._*' -delete`；后续 Mac 打包加 **`COPYFILE_DISABLE=1 tar ...`**（或 `--no-mac-metadata`）避免生成。
 - **升级**：上传命令固定带 `COPYFILE_DISABLE=1`，纳入部署脚本。
 
-### [未解决] fork 内 `POST /api/channel/` 建渠道 panic（/v1 无渠道，relay 不可用）
-- **现象**：测试栈用 admin 调 `POST /api/channel/`（`{name,type:1,key,base_url,models,group}`）返回 `new_api_panic: nil pointer dereference`，渠道未建。fork 当前 **0 渠道** → `/v1` 中继无法工作（原生 relay 按渠道池分发）。
-- **影响**：阻断 ①**用户组倍率→计费的真实 /v1 cost E2E**（grouphook 已 wired+单测+installed、数据路径已确认 chanuser1→tenant1 + `tenant_groups[1,default]=1.5`，但无渠道无法发真实调用验证 cost 反映倍率）；② `consume_commission` 的真实 /v1 E2E 同样受阻；③ 这是 acceptance **P1-BASE-02 渠道池**的核心，本就待做。
-- **根因**：未定（疑似建渠道入参缺某字段触发 new-api 内部 nil deref，或 fork 渠道配置/设置初始化缺失）。**未深挖**（避免 new-api 内部 panic 调试 rabbit hole）。
-- **规避/下一步**：作为 **P1-BASE-02（渠道池+真实模型价）** 单独处理——查 `controller/channel.go AddChannel` 的必填字段/nil 源，或经新版前端「渠道」页建渠道对比正确 payload。渠道通后即可补 用户组倍率/consume_commission 的 /v1 cost E2E。
+### [已解决] P1-BASE-02 渠道/relay 跑通 —— 4 个连环坑（建渠道 panic / 双 /v1 / 模型价 / 钩子挂错函数）
+- **① 建渠道 panic**：`POST /api/channel/` 用扁平 payload(`{name,type,key,...}`)→ `AddChannelRequest.Channel`(嵌套 `*model.Channel`,`json:"channel"`) 为 nil → `validateChannel(nil)` 在 `ValidateSettings`(model/channel.go:942) nil deref。**非 fork bug**。**修**：payload 必须 `{"mode":"single","channel":{...}}`（新版前端就是这么发的）。
+- **② base_url 双 `/v1`**：channel base 填 `…codexapis.com/v1`，new-api 自动追加 `/v1/chat/completions` → `/v1/v1/...` Invalid URL。**修**：base_url 只到域名根 `https://www.codexapis.com`（去 /v1）。
+- **③ 模型价未配**：`模型 gpt-5.4-mini 的价格未配置`。**修**：`PUT /api/option {key:"ModelRatio",value:"{\"gpt-5.4-mini\":1}"}`（保留计费，**不用自用模式**，否则不扣费无法验倍率）。
+- **④ consume_commission 不触发**：钩子挂 `service/quota.go PostConsumeQuota`，但**文本中继结算实际走 `service/text_quota.go PostTextConsumeQuota`**（前者文本路径根本不调）。**修**：在 `PostTextConsumeQuota` 的 `RecordConsumeLog` 后也挂钩（幂等键 RequestId，两处共存不双计）。
+- **验证**：/v1 真实调 gpt-5.4-mini 通；用户组倍率 override 3.0 → 计费 **3.02×**（消费日志 `group_ratio:3` vs 关闭后 `group_ratio:1`）；consume_commission demoagent 得 ¥0.0085（`consume:wallet`）；双桶（admin=订阅桶 `billing_source:subscription`/chanuser1=钱包桶 `wallet`）日志确认。
+- **升级**：①建渠道/改价的正确 payload 记此（嵌套 `channel`、base_url 去 /v1、ModelRatio 配价）；②**新增 relay 旁路钩子必须确认挂在文本结算 `PostTextConsumeQuota`，不是 `PostConsumeQuota`**。
 
 ---
 
