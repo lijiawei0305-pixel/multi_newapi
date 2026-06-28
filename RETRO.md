@@ -26,7 +26,16 @@
 
 > Docker / Docker Compose / Nginx / MySQL / 网络 / 环境变量 / 证书等部署侧的坑。
 
-_（暂无条目）_
+### [已解决] 本机 rsync 在沙箱 PATH 下不可用 → 用 tar-over-ssh 上传
+- **现象**：`rsync ... root@server:/root/newapi-test/` 报 `rsync: command not found`（虽然 `command -v rsync` 能查到 /usr/bin/rsync，但直接调用在沙箱 exec 下失败）。
+- **根因**：沙箱化 Bash 的 PATH/exec 与登录 shell 不一致，rsync 不稳定。
+- **解决/规避**：改用 `tar czf - --exclude=... -C <repo> . | ssh newapi628 'tar xzf - -C /root/newapi-test'`，零额外依赖、稳定可用。tar 的 macOS xattr 告警（`LIBARCHIVE.xattr.com.apple.*`）无害可忽略。
+- **升级**：已写入部署脚本约定（`scripts/preflight.sh` 之后用 tar-over-ssh）；后续 Slice 部署沿用。
+
+### [已解决] mysql:8.2 首启未就绪 → app 连接重试
+- **现象**：app 启动时 mysql 容器尚在初始化，`dial tcp ...:3306: connection refused`（约 7 次）。
+- **根因**：`depends_on` 只保证启动顺序、不等就绪；mysql 首次初始化需 ~15s。
+- **解决/规避**：app 侧 `gorm.Open`+`Ping` 重试 30×2s；compose `restart: on-failure` 兜底；root 用 `--default-authentication-plugin=mysql_native_password` 规避非 TLS 公钥交换。**已验证**：重试后连上→迁移→seed→listening。
 
 ---
 
@@ -69,6 +78,12 @@ _（暂无条目）_
 - **根因**：同一保护线被不同域消费，前端希望拿到域内稳定码（tokenplan 页显示"低于套餐保护价"）。
 - **解决/规避**：刻意取舍——域边界做一次语义映射（保留原错误为 cause，可 errors.Is 解包），并在 api-contract.md 错误码表标注映射关系。
 - **升级**：约定"跨域映射须保留 cause 且在契约表登记"，已记入 api-contract.md。
+
+### [已解决-临时] Slice 1 用 cmd 层临时 `site_configs` 表服务品牌字段
+- **现象**：`GET /api/tenant/current` 要返回 `site_name/logo_url/theme_color/footer_text`，但 `tenant.Tenant` 实体只有 slug/status，这些品牌字段归属 **SiteConfig** 模块。
+- **根因**：Slice 1 只接了 tenant 模块的 GORM repo，SiteConfig 模块的 GORM repo 尚未接入。
+- **解决/规避**：cmd/server 装配层临时建了个小 `site_configs` 表 + demo seed，先跑通管道。
+- **升级**：`[待 Slice 2/3]` 接 SiteConfig 模块真实 GORM repo，`/api/tenant/current` 改为 join `tenant + tenant_site_configs`；临时表届时移除。
 
 ---
 

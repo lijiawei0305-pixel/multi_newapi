@@ -45,7 +45,8 @@
 > **Wave 2 完成（2026-06-28）**：新增共享契约 `platform/quota`（QuotaSource/Router/Receipt）；3 个 Worker 并行完成 agent/billing/wallet（接口+领域逻辑+单测，含 `-race` 并发不透支/幂等/兑换码单赢家）。Master 已独立复跑质量门全绿。
 > **组装层 TODO（记录，留待集成）**：`wallet.EarningEntry` 与 `agent.EarningEntry` 字段不同，`cmd/main` 需薄适配器映射（`Reference→agent.SourceID` 非空做幂等键）并处理 USD↔¥ 单位；billing 的 `WalletSourceFactory/SubscriptionSourceFactory` 在 main 注入 wallet/tokenplan 的桶实现。
 > **Wave 3+4 完成（2026-06-28）**：relay/promotion/siteconfig/stats + payment/tokenplan/risk 全部逻辑层完成并验收。tokenplan 实现 month_limit 原子计量（500 goroutine 不击穿）、激活幂等、Trial 三维限购单赢家、回调幂等。**至此 14 个后端模块逻辑层全部跑绿。**
-> **下一步（集成层）**：fork `QuantumNous/new-api` → 迁移 + GORM/Redis 真实实现 → Gin handler + `cmd/main` 装配 → 部署独立测试栈 → playwright-cli 浏览器 E2E。前端由另一 CC 按 `doc/api-contract.md` 并行开发。问题记 `RETRO.md`。
+> **★ Slice 1 完成（2026-06-28）· 集成纵切打通**：Master 调度 后端 Worker(gin+GORM tenant)+前端 Worker(React/Semi 品牌页)，过**预上传 gate**(`scripts/preflight.sh`)→ tar 上传服务器 → 构建镜像 → `newapi_test` 栈(127.0.0.1:3100, DB `new-api-test`, 独立 redis, **不碰现网**) → 真实 MySQL→GORM→解析→`/api/tenant/current` → **playwright-cli 浏览器冒烟全过**（demo 租户品牌渲染 ✓、未知域名 404 站点未开通 ✓）。**Mac 代码→服务器构建→DB→端点→浏览器 全链路打通。** 提交 `637526a`。
+> **下一步**：Slice 2（身份鉴权中间件 + Wallet GORM + 充值/余额端点 + 对应前端页），沿用 Master-Worker + preflight gate + 测试栈 E2E。问题持续记 `RETRO.md`。
 
 ---
 
