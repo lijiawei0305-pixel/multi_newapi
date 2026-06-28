@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,8 +29,11 @@ import (
 	idstore "newapi-mt/internal/identity/gormstore"
 	"newapi-mt/internal/platform/appctx"
 	"newapi-mt/internal/platform/apperr"
+	"newapi-mt/internal/pricing"
 	"newapi-mt/internal/tenant"
 	"newapi-mt/internal/tenant/gormrepo"
+	"newapi-mt/internal/tokenplan"
+	tprepo "newapi-mt/internal/tokenplan/gormrepo"
 	"newapi-mt/internal/wallet"
 	walletrepo "newapi-mt/internal/wallet/gormrepo"
 )
@@ -108,6 +112,51 @@ type noopEarningSink struct{}
 
 func (noopEarningSink) AddEarning(ctx context.Context, e wallet.EarningEntry) error { return nil }
 
+// --- Slice 3 tokenplan 最小适配桩（SubscriptionService 的依赖；Slice 4 接真实模块）---
+
+// tokenplanPayment 是 tokenplan.PaymentGateway 的测试栈桩：下单即生成订单号，
+// 并由 purchase handler 立即 ActivateFromPayment（同步视为已支付）。
+// Slice 4 接真实 payment 模块（二维码/跳转 + 异步回调按 order_no 幂等激活）。
+type tokenplanPayment struct{}
+
+func (tokenplanPayment) CreateOrder(_ context.Context, in tokenplan.OrderInput) (*tokenplan.PayOrder, error) {
+	orderNo := fmt.Sprintf("sub_%d_%d_%d", in.TenantID, in.UserID, time.Now().UnixNano())
+	return &tokenplan.PayOrder{OrderID: orderNo, PayURL: "stub://pay/" + orderNo}, nil
+}
+
+// tokenplanRisk 是 tokenplan.RiskEngine 的简化实现：仅 Trial 限购，按 **user 维度**查
+// user_subscriptions——已有 active/exhausted/expired 的 trial 订阅 ≥1 即 PURCHASE_LIMIT_EXCEEDED。
+// 实名维 ∪ 设备维限购 + Redis 频控 / 异常调用风控顺延 Slice 4（接 risk 模块）。
+type tokenplanRisk struct{ db *gorm.DB }
+
+func (r tokenplanRisk) CheckPurchaseLimit(ctx context.Context, in tokenplan.PurchaseLimitCheck) error {
+	if in.PlanCode != "trial" {
+		return nil // 一期仅对 Trial 限购，其余档不限
+	}
+	var count int64
+	err := r.db.WithContext(ctx).
+		Table("user_subscriptions AS us").
+		Joins("JOIN token_plans AS p ON p.id = us.plan_id").
+		Where("us.user_id = ? AND p.code = ? AND us.status IN ?",
+			in.UserID, "trial", []string{
+				string(tokenplan.SubActive), string(tokenplan.SubExhausted), string(tokenplan.SubExpired),
+			}).
+		Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if count >= 1 {
+		return tokenplan.ErrPurchaseLimitExceeded
+	}
+	return nil
+}
+
+// tokenplanEarnings 是 tokenplan.EarningSink 的 noop 实现：丢弃 tokenplan_spread 收益。
+// Slice 4 接真实 agent 模块（写 agent_earning_logs + 增代理可提现余额）。
+type tokenplanEarnings struct{}
+
+func (tokenplanEarnings) AddEarning(_ context.Context, _ tokenplan.EarningEntry) error { return nil }
+
 func main() {
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
@@ -138,6 +187,9 @@ func main() {
 	if err := walletrepo.AutoMigrate(db); err != nil {
 		log.Fatalf("[server] migrate wallet tables: %v", err)
 	}
+	if err := tprepo.AutoMigrate(db); err != nil {
+		log.Fatalf("[server] migrate tokenplan tables: %v", err)
+	}
 
 	repo := gormrepo.New(db)
 	svc := tenant.NewService(repo, tenant.NewSlugValidator())
@@ -145,11 +197,21 @@ func main() {
 
 	store := idstore.New(db)
 	authn := identity.NewAuthenticator(store)
+	// RequireAdmin / RequireTenantOwner 仅看 Principal，不需要 TenantStatusChecker，故传 nil；
+	// RequireTenantActive（需 checker）本切未用。
+	guard := identity.NewAccessGuard(nil)
 
 	wRepo := walletrepo.New(db)
 	wSvc := wallet.NewService(wRepo, fixedRatioPricing{}, noopEarningSink{})
 
-	if err := seedAll(context.Background(), db, svc, repo, store, wRepo); err != nil {
+	// tokenplan 装配：catalog/retail/subscription；retail 用真实 pricing.NewGuard()，
+	// payment/risk/earnings 为本切桩（见上）；clock=nil 回退真实时钟。
+	tpRepo := tprepo.New(db)
+	catalog := tokenplan.NewCatalog(tpRepo)
+	retailSvc := tokenplan.NewRetailService(tpRepo, pricing.NewGuard())
+	subSvc := tokenplan.NewSubscriptionService(tpRepo, tpRepo, tokenplanPayment{}, tokenplanRisk{db: db}, tokenplanEarnings{}, nil)
+
+	if err := seedAll(context.Background(), db, svc, repo, store, wRepo, tpRepo); err != nil {
 		log.Fatalf("[server] seed: %v", err)
 	}
 
@@ -161,6 +223,11 @@ func main() {
 		store:    store,
 		wRepo:    wRepo,
 		wSvc:     wSvc,
+		tpRepo:   tpRepo,
+		catalog:  catalog,
+		retail:   retailSvc,
+		subSvc:   subSvc,
+		guard:    guard,
 	})
 	log.Printf("[server] listening on :%s (web_dist=%s)", port, webDist)
 	if err := r.Run(":" + port); err != nil {
@@ -196,8 +263,20 @@ func openDB(dsn string) (*gorm.DB, error) {
 	return nil, fmt.Errorf("mysql unreachable after %d attempts: %w", maxAttempts, lastErr)
 }
 
-// seedAll 幂等地建立全部演示租户及其演示用户/钱包/兑换码。已存在则仅补缺，不覆盖人工改动。
-func seedAll(ctx context.Context, db *gorm.DB, svc tenant.TenantService, repo tenant.TenantRepo, store *idstore.Store, wRepo *walletrepo.Repo) error {
+// seededPlan 是 seed 后回填了主键的套餐摘要（供建租户上架记录）。
+type seededPlan struct {
+	id        int64
+	code      string
+	basePrice float64
+}
+
+// seedAll 幂等地建立全部演示数据：6 档主站套餐 + 每租户（用户/钱包/兑换码 + admin/agent 角色用户 +
+// 6 档上架记录）。已存在则仅补缺，不覆盖人工改动。
+func seedAll(ctx context.Context, db *gorm.DB, svc tenant.TenantService, repo tenant.TenantRepo, store *idstore.Store, wRepo *walletrepo.Repo, tpRepo *tprepo.Repo) error {
+	plans, err := seedPlans(ctx, tpRepo)
+	if err != nil {
+		return err
+	}
 	for _, spec := range tenantSeeds() {
 		tid, err := ensureTenant(ctx, svc, repo, db, spec)
 		if err != nil {
@@ -206,6 +285,66 @@ func seedAll(ctx context.Context, db *gorm.DB, svc tenant.TenantService, repo te
 		if err := seedIdentityWallet(ctx, store, wRepo, tid, spec); err != nil {
 			return err
 		}
+		if err := seedTenantRoles(ctx, store, tid, spec.slug); err != nil {
+			return err
+		}
+		if err := seedTenantListings(ctx, tpRepo, tid, spec.slug, plans); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// seedPlans 幂等地写入 proposal §8.2 的 6 档主站套餐（按 code 去重），返回回填主键的摘要。
+func seedPlans(ctx context.Context, tpRepo *tprepo.Repo) ([]seededPlan, error) {
+	out := make([]seededPlan, 0, 6)
+	for _, p := range tokenplan.SeedPlans() {
+		pp := p
+		id, err := tpRepo.EnsurePlan(ctx, &pp)
+		if err != nil {
+			return nil, fmt.Errorf("seed plan %s: %w", p.Code, err)
+		}
+		out = append(out, seededPlan{id: id, code: p.Code, basePrice: p.BasePrice})
+		log.Printf("[seed] plan code=%s id=%d base=%.2f¥ month_limit=%.0fUSD", p.Code, id, p.BasePrice, p.MonthLimitUSD)
+	}
+	return out, nil
+}
+
+// seedTenantListings 幂等地为某租户把 6 档套餐全部上架（enabled，零售价=主站基准价）。
+func seedTenantListings(ctx context.Context, tpRepo *tprepo.Repo, tid int64, slug string, plans []seededPlan) error {
+	for _, p := range plans {
+		if err := tpRepo.EnsureListing(ctx, tid, p.id, true, p.basePrice); err != nil {
+			return fmt.Errorf("seed listing tenant=%s plan=%s: %w", slug, p.code, err)
+		}
+	}
+	log.Printf("[seed] tenant=%s(id=%d) listed %d token-plans (retail=base)", slug, tid, len(plans))
+	return nil
+}
+
+// seedTenantRoles 幂等地为某租户建 admin / agent 角色用户（各带 seed Token，dev-login 可登），便于 E2E 切角色。
+func seedTenantRoles(ctx context.Context, store *idstore.Store, tid int64, slug string) error {
+	roles := []struct {
+		username string
+		token    string
+		role     appctx.Role
+	}{
+		{"admin@" + slug, "sk-td-admin-" + slug, appctx.RoleAdmin},
+		{"agent@" + slug, "sk-td-agent-" + slug, appctx.RoleAgentOwner},
+	}
+	for _, rr := range roles {
+		u, err := store.EnsureUser(ctx, &idstore.User{
+			TenantID:  tid,
+			Username:  rr.username,
+			Role:      rr.role,
+			SeedToken: rr.token,
+		})
+		if err != nil {
+			return fmt.Errorf("seed role user %s: %w", rr.username, err)
+		}
+		if err := store.EnsureToken(ctx, tid, u.ID, "default", rr.token); err != nil {
+			return fmt.Errorf("seed role token %s: %w", rr.username, err)
+		}
+		log.Printf("[seed] tenant=%s(id=%d) user=%s(id=%d, role=%s) token=%q", slug, tid, rr.username, u.ID, rr.role, rr.token)
 	}
 	return nil
 }
@@ -287,6 +426,12 @@ type routerDeps struct {
 	store    *idstore.Store
 	wRepo    wallet.WalletRepo
 	wSvc     wallet.WalletService
+	// Slice 3 tokenplan
+	tpRepo  *tprepo.Repo
+	catalog tokenplan.PlanCatalog
+	retail  tokenplan.PlanRetailService
+	subSvc  tokenplan.SubscriptionService
+	guard   identity.AccessGuard
 }
 
 // buildRouter 装配路由：健康检查、租户中间件 + /api（公开/鉴权两组）、静态资源（SPA fallback）。
@@ -311,6 +456,17 @@ func buildRouter(d routerDeps) *gin.Engine {
 	authed.GET("/tenant/wallet", walletBalanceHandler(d.wRepo))
 	authed.POST("/tenant/wallet/redeem", walletRedeemHandler(d.wSvc, d.wRepo))
 	authed.POST("/tenant/wallet/recharge", walletRechargeHandler())
+
+	// tokenplan 套餐（api-contract §2.4）。角色守卫在 handler 内（admin/agent_owner）。
+	authed.GET("/tenant/token-plans", tenantTokenPlansHandler(d.retail))                  // 🅤 本租户上架套餐
+	authed.POST("/tenant/token-plans/:id/purchase", purchaseHandler(d.subSvc, d.catalog)) // 🅤 购买+激活
+	authed.GET("/tenant/subscriptions", subscriptionsHandler(d.tpRepo, d.catalog))        // 🅤 我的套餐
+	authed.GET("/tenant/token-plans/manage", agentListPlansHandler(d.retail, d.guard))    // 🅖 代理上架视图
+	authed.PATCH("/tenant/token-plans/manage", agentSetListingHandler(d.retail, d.guard)) // 🅖 上架/改价
+	authed.GET("/admin/token-plans", adminListPlansHandler(d.catalog, d.guard))           // 🅐 套餐列表
+	authed.GET("/admin/token-plans/:id", adminGetPlanHandler(d.catalog, d.guard))         // 🅐 单套餐
+	authed.POST("/admin/token-plans", adminCreatePlanHandler(d.catalog, d.guard))         // 🅐 新建
+	authed.PATCH("/admin/token-plans/:id", adminUpdatePlanHandler(d.catalog, d.guard))    // 🅐 改价/改档
 
 	registerStatic(r, d.webDist)
 	return r
@@ -508,6 +664,458 @@ func walletRechargeHandler() gin.HandlerFunc {
 			},
 		})
 	}
+}
+
+// ---- tokenplan handlers（api-contract §2.4）----
+
+// tenantTokenPlansHandler 返回本租户「已上架且启用」的套餐列表（零售价 + 营销字段，见 §3 Plan）。
+func tenantTokenPlansHandler(retail tokenplan.PlanRetailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, ok := principalFrom(c)
+		if !ok {
+			writeErr(c, errUnauthorized())
+			return
+		}
+		views, err := retail.ListForTenant(c.Request.Context(), p.TenantID)
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		out := make([]gin.H, 0, len(views))
+		for _, v := range views {
+			if !(v.Listed && v.Enabled) {
+				continue // 仅向用户展示本租户已上架启用的套餐
+			}
+			out = append(out, planCardView(v.Plan, v.RetailPrice))
+		}
+		c.JSON(http.StatusOK, gin.H{"data": out})
+	}
+}
+
+// purchaseHandler 购买套餐：限购校验 → stub 支付 → 立即激活 30 天订阅 → 返回订阅。
+// 失败码：PLAN_NOT_FOUND / PLAN_DISABLED / PLAN_NOT_LISTED / PURCHASE_LIMIT_EXCEEDED。
+func purchaseHandler(subSvc tokenplan.SubscriptionService, catalog tokenplan.PlanCatalog) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, ok := principalFrom(c)
+		if !ok {
+			writeErr(c, errUnauthorized())
+			return
+		}
+		planID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil || planID <= 0 {
+			writeErr(c, tokenplan.ErrPlanNotFound)
+			return
+		}
+		// 设备/实名维度本切未启用（Slice 4 接 risk+Redis）；如前端透传则带上供未来风控。
+		var body struct {
+			DeviceID   string `json:"device_id"`
+			RealNameID string `json:"real_name_id"`
+		}
+		_ = c.ShouldBindJSON(&body)
+
+		ticket, err := subSvc.Purchase(c.Request.Context(), tokenplan.PurchaseInput{
+			TenantID:   p.TenantID,
+			UserID:     p.UserID,
+			PlanID:     planID,
+			DeviceID:   body.DeviceID,
+			RealNameID: body.RealNameID,
+		})
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		// stub 支付：下单即视为已支付，立即按 order_no 幂等激活订阅。
+		sub, err := subSvc.ActivateFromPayment(c.Request.Context(), ticket.OrderID)
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		planCode, validDays := "", 0
+		if pl, e := catalog.Get(c.Request.Context(), planID); e == nil {
+			planCode, validDays = pl.Code, pl.ValidDays
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"order_no":        ticket.OrderID,
+			"plan_code":       planCode,
+			"month_limit_usd": sub.MonthLimitUSD,
+			"valid_days":      validDays,
+			"pay":             gin.H{"method": "stub", "status": "paid", "qr": ""},
+			"subscription":    subscriptionView(sub, planCode),
+		})
+	}
+}
+
+// subscriptionsHandler 返回当前用户在本租户的全部套餐（含历史 exhausted/expired；惰性过期已落库）。
+func subscriptionsHandler(tpRepo *tprepo.Repo, catalog tokenplan.PlanCatalog) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, ok := principalFrom(c)
+		if !ok {
+			writeErr(c, errUnauthorized())
+			return
+		}
+		subs, err := tpRepo.ListSubscriptionsByUser(c.Request.Context(), p.TenantID, p.UserID, time.Now())
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		codeByID, err := planCodeMap(c.Request.Context(), catalog)
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		out := make([]gin.H, 0, len(subs))
+		for i := range subs {
+			out = append(out, subscriptionView(&subs[i], codeByID[subs[i].PlanID]))
+		}
+		c.JSON(http.StatusOK, gin.H{"data": out})
+	}
+}
+
+// agentListPlansHandler（🅖）返回代理可上架套餐与当前定价（含保护线/进货价，供改价参考）。
+func agentListPlansHandler(retail tokenplan.PlanRetailService, guard identity.AccessGuard) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, ok := requireTenantOwner(c, guard)
+		if !ok {
+			return
+		}
+		views, err := retail.ListForTenant(c.Request.Context(), p.TenantID)
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		out := make([]gin.H, 0, len(views))
+		for _, v := range views {
+			out = append(out, gin.H{
+				"id":                   v.Plan.ID,
+				"code":                 v.Plan.Code,
+				"name":                 v.Plan.Name,
+				"base_price_cny":       v.Plan.BasePrice,
+				"anchor_price_cny":     v.Plan.AnchorPrice,
+				"min_price_cny":        v.Plan.MinPrice,
+				"agent_cost_price_cny": v.Plan.AgentCostPrice,
+				"month_limit_usd":      v.Plan.MonthLimitUSD,
+				"valid_days":           v.Plan.ValidDays,
+				"sort":                 v.Plan.Sort,
+				"listed":               v.Listed,
+				"enabled":              v.Enabled,
+				"retail_price_cny":     v.RetailPrice,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"data": out})
+	}
+}
+
+// agentSetListingHandler（🅖）上架/退出 + 改价；retail<min_price → RETAIL_BELOW_MIN。
+func agentSetListingHandler(retail tokenplan.PlanRetailService, guard identity.AccessGuard) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p, ok := requireTenantOwner(c, guard)
+		if !ok {
+			return
+		}
+		var body struct {
+			PlanID      int64   `json:"plan_id"`
+			Enabled     bool    `json:"enabled"`
+			RetailPrice float64 `json:"retail_price"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil || body.PlanID <= 0 {
+			writeErr(c, tokenplan.ErrPlanNotFound)
+			return
+		}
+		if err := retail.SetListing(c.Request.Context(), p.TenantID, body.PlanID, body.Enabled, body.RetailPrice); err != nil {
+			writeErr(c, err) // RETAIL_BELOW_MIN / PLAN_DISABLED / PLAN_NOT_FOUND
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"plan_id":          body.PlanID,
+			"enabled":          body.Enabled,
+			"retail_price_cny": body.RetailPrice,
+		})
+	}
+}
+
+// adminListPlansHandler（🅐）返回全部套餐（全字段，含成本价/保护线）。
+func adminListPlansHandler(catalog tokenplan.PlanCatalog, guard identity.AccessGuard) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := requireAdmin(c, guard); !ok {
+			return
+		}
+		plans, err := catalog.List(c.Request.Context())
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		out := make([]gin.H, 0, len(plans))
+		for i := range plans {
+			out = append(out, adminPlanView(plans[i]))
+		}
+		c.JSON(http.StatusOK, gin.H{"data": out})
+	}
+}
+
+// adminGetPlanHandler（🅐）读取单个套餐。
+func adminGetPlanHandler(catalog tokenplan.PlanCatalog, guard identity.AccessGuard) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := requireAdmin(c, guard); !ok {
+			return
+		}
+		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeErr(c, tokenplan.ErrPlanNotFound)
+			return
+		}
+		pl, err := catalog.Get(c.Request.Context(), id)
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, adminPlanView(*pl))
+	}
+}
+
+// adminCreatePlanHandler（🅐）新建套餐（缺省 multiplier=1/valid_days=30/status=enabled）；非法 → PLAN_INPUT_INVALID。
+func adminCreatePlanHandler(catalog tokenplan.PlanCatalog, guard identity.AccessGuard) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := requireAdmin(c, guard); !ok {
+			return
+		}
+		var req planReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			writeErr(c, tokenplan.ErrPlanInputInvalid)
+			return
+		}
+		in := req.applyTo(tokenplan.PlanInput{Multiplier: 1.0, ValidDays: 30, Status: tokenplan.PlanEnabled})
+		pl, err := catalog.Create(c.Request.Context(), in)
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, adminPlanView(*pl))
+	}
+}
+
+// adminUpdatePlanHandler（🅐）改价/改档：在既有套餐上叠加 body 提供的字段（PATCH 语义）后全量更新。
+func adminUpdatePlanHandler(catalog tokenplan.PlanCatalog, guard identity.AccessGuard) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := requireAdmin(c, guard); !ok {
+			return
+		}
+		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil || id <= 0 {
+			writeErr(c, tokenplan.ErrPlanNotFound)
+			return
+		}
+		cur, err := catalog.Get(c.Request.Context(), id)
+		if err != nil {
+			writeErr(c, err) // PLAN_NOT_FOUND
+			return
+		}
+		var req planReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			writeErr(c, tokenplan.ErrPlanInputInvalid)
+			return
+		}
+		in := req.applyTo(planInputFromPlan(cur))
+		if err := catalog.Update(c.Request.Context(), id, in); err != nil {
+			writeErr(c, err) // PLAN_INPUT_INVALID / PLAN_NOT_FOUND
+			return
+		}
+		updated, err := catalog.Get(c.Request.Context(), id)
+		if err != nil {
+			writeErr(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, adminPlanView(*updated))
+	}
+}
+
+// ---- tokenplan handler 辅助 ----
+
+// requireAdmin 取 Principal 并施加 RequireAdmin；失败已写错误并返回 ok=false。
+func requireAdmin(c *gin.Context, guard identity.AccessGuard) (*appctx.Principal, bool) {
+	p, ok := principalFrom(c)
+	if !ok {
+		writeErr(c, errUnauthorized())
+		return nil, false
+	}
+	if err := guard.RequireAdmin(p); err != nil {
+		writeErr(c, err)
+		return nil, false
+	}
+	return p, true
+}
+
+// requireTenantOwner 取 Principal 并施加 RequireTenantOwner（按其自身租户）；失败已写错误并返回 ok=false。
+func requireTenantOwner(c *gin.Context, guard identity.AccessGuard) (*appctx.Principal, bool) {
+	p, ok := principalFrom(c)
+	if !ok {
+		writeErr(c, errUnauthorized())
+		return nil, false
+	}
+	if err := guard.RequireTenantOwner(p, p.TenantID); err != nil {
+		writeErr(c, err)
+		return nil, false
+	}
+	return p, true
+}
+
+// planCardView 是用户购买页卡片（§3 Plan）：含零售价 + 营销字段。
+func planCardView(p tokenplan.Plan, retail float64) gin.H {
+	return gin.H{
+		"id":               p.ID,
+		"code":             p.Code,
+		"name":             p.Name,
+		"base_price_cny":   p.BasePrice,
+		"anchor_price_cny": p.AnchorPrice,
+		"discount_label":   p.DiscountLabel,
+		"retail_price_cny": retail,
+		"month_limit_usd":  p.MonthLimitUSD,
+		"multiplier":       p.Multiplier,
+		"valid_days":       p.ValidDays,
+		"is_recommended":   p.IsRecommended,
+		"badge":            p.Badge,
+		"sort":             p.Sort,
+	}
+}
+
+// adminPlanView 是管理员视角的套餐全字段（含成本/保护线/时间戳）。
+func adminPlanView(p tokenplan.Plan) gin.H {
+	return gin.H{
+		"id":                    p.ID,
+		"code":                  p.Code,
+		"name":                  p.Name,
+		"base_price_cny":        p.BasePrice,
+		"anchor_price_cny":      p.AnchorPrice,
+		"discount_label":        p.DiscountLabel,
+		"multiplier":            p.Multiplier,
+		"month_limit_usd":       p.MonthLimitUSD,
+		"valid_days":            p.ValidDays,
+		"upstream_cost_est_cny": p.UpstreamCostEst,
+		"agent_cost_price_cny":  p.AgentCostPrice,
+		"min_price_cny":         p.MinPrice,
+		"is_recommended":        p.IsRecommended,
+		"badge":                 p.Badge,
+		"sort":                  p.Sort,
+		"status":                p.Status,
+		"created_at":            p.CreatedAt,
+		"updated_at":            p.UpdatedAt,
+	}
+}
+
+// subscriptionView 是「我的套餐」单项（§3 Subscription）。
+func subscriptionView(s *tokenplan.Subscription, planCode string) gin.H {
+	return gin.H{
+		"id":              s.ID,
+		"plan_code":       planCode,
+		"month_limit_usd": s.MonthLimitUSD,
+		"used_usd":        s.UsedUSD,
+		"remaining_usd":   s.RemainingUSD(),
+		"status":          s.Status,
+		"start_at":        s.StartAt,
+		"expire_at":       s.ExpireAt,
+	}
+}
+
+// planCodeMap 返回 plan_id -> code 映射（订阅列表回显套餐代码用）。
+func planCodeMap(ctx context.Context, catalog tokenplan.PlanCatalog) (map[int64]string, error) {
+	plans, err := catalog.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[int64]string, len(plans))
+	for _, p := range plans {
+		m[p.ID] = p.Code
+	}
+	return m, nil
+}
+
+// planInputFromPlan 把既有套餐物化为可叠加的入参基线（PATCH 用）。
+func planInputFromPlan(p *tokenplan.Plan) tokenplan.PlanInput {
+	return tokenplan.PlanInput{
+		Code:            p.Code,
+		Name:            p.Name,
+		BasePrice:       p.BasePrice,
+		AnchorPrice:     p.AnchorPrice,
+		DiscountLabel:   p.DiscountLabel,
+		Multiplier:      p.Multiplier,
+		MonthLimitUSD:   p.MonthLimitUSD,
+		ValidDays:       p.ValidDays,
+		UpstreamCostEst: p.UpstreamCostEst,
+		AgentCostPrice:  p.AgentCostPrice,
+		MinPrice:        p.MinPrice,
+		IsRecommended:   p.IsRecommended,
+		Badge:           p.Badge,
+		Sort:            p.Sort,
+		Status:          p.Status,
+	}
+}
+
+// planReq 是 admin 套餐创建/更新的请求 DTO；全部指针字段以支持 PATCH 仅叠加传入项。
+type planReq struct {
+	Code            *string  `json:"code"`
+	Name            *string  `json:"name"`
+	BasePrice       *float64 `json:"base_price_cny"`
+	AnchorPrice     *float64 `json:"anchor_price_cny"`
+	DiscountLabel   *string  `json:"discount_label"`
+	Multiplier      *float64 `json:"multiplier"`
+	MonthLimitUSD   *float64 `json:"month_limit_usd"`
+	ValidDays       *int     `json:"valid_days"`
+	UpstreamCostEst *float64 `json:"upstream_cost_est_cny"`
+	AgentCostPrice  *float64 `json:"agent_cost_price_cny"`
+	MinPrice        *float64 `json:"min_price_cny"`
+	IsRecommended   *bool    `json:"is_recommended"`
+	Badge           *string  `json:"badge"`
+	Sort            *int     `json:"sort"`
+	Status          *string  `json:"status"`
+}
+
+// applyTo 把请求中显式提供的字段叠加到基线入参上（nil 表示不变）。
+func (r planReq) applyTo(in tokenplan.PlanInput) tokenplan.PlanInput {
+	if r.Code != nil {
+		in.Code = *r.Code
+	}
+	if r.Name != nil {
+		in.Name = *r.Name
+	}
+	if r.BasePrice != nil {
+		in.BasePrice = *r.BasePrice
+	}
+	if r.AnchorPrice != nil {
+		in.AnchorPrice = *r.AnchorPrice
+	}
+	if r.DiscountLabel != nil {
+		in.DiscountLabel = *r.DiscountLabel
+	}
+	if r.Multiplier != nil {
+		in.Multiplier = *r.Multiplier
+	}
+	if r.MonthLimitUSD != nil {
+		in.MonthLimitUSD = *r.MonthLimitUSD
+	}
+	if r.ValidDays != nil {
+		in.ValidDays = *r.ValidDays
+	}
+	if r.UpstreamCostEst != nil {
+		in.UpstreamCostEst = *r.UpstreamCostEst
+	}
+	if r.AgentCostPrice != nil {
+		in.AgentCostPrice = *r.AgentCostPrice
+	}
+	if r.MinPrice != nil {
+		in.MinPrice = *r.MinPrice
+	}
+	if r.IsRecommended != nil {
+		in.IsRecommended = *r.IsRecommended
+	}
+	if r.Badge != nil {
+		in.Badge = *r.Badge
+	}
+	if r.Sort != nil {
+		in.Sort = *r.Sort
+	}
+	if r.Status != nil {
+		in.Status = tokenplan.PlanStatus(*r.Status)
+	}
+	return in
 }
 
 // tenantFromCtx 读取租户中间件解析出的租户。

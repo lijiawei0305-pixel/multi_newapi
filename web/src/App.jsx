@@ -3,6 +3,7 @@ import { Layout } from '@douyinfe/semi-ui';
 import TopBar from './components/TopBar.jsx';
 import BrandHome from './pages/BrandHome.jsx';
 import Wallet from './pages/Wallet.jsx';
+import Plans from './pages/Plans.jsx';
 import { apiFetch } from './lib/api.js';
 import { DEFAULT_BRAND } from './lib/brand.js';
 
@@ -13,6 +14,7 @@ const { Content } = Layout;
 function parseHash() {
   const h = (window.location.hash || '').replace(/^#/, '');
   if (h === '/wallet' || h.startsWith('/wallet')) return 'wallet';
+  if (h === '/plans' || h.startsWith('/plans')) return 'plans';
   return 'home';
 }
 
@@ -57,9 +59,12 @@ export default function App() {
     <Layout style={{ minHeight: '100vh', background: '#f8fafc' }}>
       <TopBar brand={brand} route={route} />
       <Content style={{ padding: 24, display: 'flex', justifyContent: 'center' }}>
-        <div style={{ width: '100%', maxWidth: 720 }}>
+        {/* 套餐页用卡片网格，需更宽容器；其余页保持 720 单栏 */}
+        <div style={{ width: '100%', maxWidth: route === 'plans' ? 1080 : 720 }}>
           {route === 'wallet' ? (
             <Wallet brand={brand} />
+          ) : route === 'plans' ? (
+            <Plans brand={brand} />
           ) : (
             <BrandHome state={tenantState} />
           )}
