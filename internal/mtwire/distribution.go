@@ -177,6 +177,7 @@ type tenantUserOut struct {
 	Quota       int64  `json:"quota"`
 	UsedQuota   int64  `json:"used_quota"`
 	Status      int    `json:"status"`
+	Group       string `json:"group"`
 	CreatedAt   string `json:"created_at"`
 }
 
@@ -195,12 +196,13 @@ func (a *App) HandleAgentListUsers(c *gin.Context) {
 		Quota       int64
 		UsedQuota   int64
 		Status      int
+		Group       string
 		CreatedAt   int64
 	}
 	// 排除软删除用户（raw Table 查询不会自动套用 gorm 软删除 scope）。
 	if err := a.DB.WithContext(reqCtx(c)).Table("users").
 		Where("tenant_id = ? AND deleted_at IS NULL", tenantID).
-		Select("id, username, display_name, quota, used_quota, status, created_at").
+		Select("id, username, display_name, quota, used_quota, status, `group`, created_at").
 		Order("id desc").Find(&rows).Error; err != nil {
 		respondErr(c, err)
 		return
@@ -214,6 +216,7 @@ func (a *App) HandleAgentListUsers(c *gin.Context) {
 			Quota:       r.Quota,
 			UsedQuota:   r.UsedQuota,
 			Status:      r.Status,
+			Group:       r.Group,
 			CreatedAt:   isoUTC(unixToTime(r.CreatedAt)),
 		})
 	}

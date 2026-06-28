@@ -18,18 +18,24 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 // ============================================================================
-// Agent self-service: user-group multipliers.
+// Agent self-service: model-group multipliers.
 //   GET /api/tenant/groups
 //   PUT /api/tenant/groups/:group { ratio }
-// `ratio` is the billing multiplier for the group; the backend rejects a value
-// below the group's `floor`. Wiring the multiplier into billing is a follow-up.
+// Each row is a model group. The agent's `ratio` may only be set at or above
+// the main-site baseline (`platform_ratio` = `floor`) — i.e. mark up only, to
+// earn the spread. The backend rejects values below the floor.
 // ============================================================================
 
 export interface TenantGroup {
   group_name: string
+  /** Tenant's current effective multiplier (the override, or the baseline). */
   ratio: number
-  /** Lowest ratio the agent may set for this group. */
+  /** Main-site baseline multiplier; equals `floor`. */
+  platform_ratio: number
+  /** Lowest multiplier the agent may set for this group (= platform_ratio). */
   floor: number
+  /** Whether this tenant has set an override above the baseline. */
+  has_override: boolean
 }
 
 export interface UpdateGroupPayload {

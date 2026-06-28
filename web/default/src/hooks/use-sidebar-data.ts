@@ -163,7 +163,7 @@ export function useSidebarData(): SidebarData {
             icon: UsersRound,
           },
           {
-            title: t('My User Groups'),
+            title: t('Model Group Multipliers'),
             url: '/my-groups',
             icon: Percent,
           },

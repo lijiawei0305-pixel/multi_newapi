@@ -17,12 +17,33 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
-import type { ApiResponse, TenantUser } from './types'
+import type {
+  ApiResponse,
+  SetUserTierPayload,
+  SetUserTierResult,
+  TenantUser,
+} from './types'
 
 // Auth is carried by new-api's shared axios instance (session cookie +
-// New-Api-User header); the backend scopes the listing to the caller.
+// New-Api-User header); the backend scopes every response to the caller.
 
 export async function getTenantUsers(): Promise<ApiResponse<TenantUser[]>> {
   const res = await api.get('/api/tenant/users')
+  return res.data
+}
+
+/**
+ * PUT /api/tenant/users/:id/tier — set a downstream user's membership tier.
+ * `skipErrorHandler` lets us surface the stable error `code`
+ * (AGENT_TIER_INVALID / AGENT_FORBIDDEN) as a localized toast instead of the
+ * global interceptor's raw backend message.
+ */
+export async function setTenantUserTier(
+  id: number,
+  payload: SetUserTierPayload
+): Promise<ApiResponse<SetUserTierResult>> {
+  const res = await api.put(`/api/tenant/users/${id}/tier`, payload, {
+    skipErrorHandler: true,
+  })
   return res.data
 }

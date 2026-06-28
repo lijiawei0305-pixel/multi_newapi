@@ -121,6 +121,25 @@ api.interceptors.response.use(
 )
 
 // ============================================================================
+// Error Helpers
+// ============================================================================
+
+/**
+ * Extract the stable business error `code` from a rejected API call. Backend
+ * control-plane errors are returned as non-2xx with body
+ * `{ success:false, message, code }`. Callers that pass `skipErrorHandler:true`
+ * use this to map the code to a localized message instead of the raw backend
+ * `message` shown by the global interceptor.
+ */
+export function getApiErrorCode(err: unknown): string | undefined {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { code?: string } | undefined
+    return data?.code
+  }
+  return undefined
+}
+
+// ============================================================================
 // Common Headers Utility
 // ============================================================================
 

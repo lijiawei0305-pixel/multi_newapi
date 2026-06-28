@@ -21,6 +21,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { SectionPageLayout } from '@/components/layout'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -31,19 +32,22 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { getApiErrorCode } from '@/lib/api'
 import { getTenantGroups, updateTenantGroup } from './api'
 import type { TenantGroup } from './types'
 
-/** Editable row: local draft of the group ratio, saved per row. */
+/** Editable row: local draft of the model-group multiplier, saved per row. */
 function GroupRow({ row, onSaved }: { row: TenantGroup; onSaved: () => void }) {
   const { t } = useTranslation()
   const [ratio, setRatio] = useState<number>(Number(row.ratio ?? 0))
   const [saving, setSaving] = useState(false)
 
-  const floor = Number(row.floor ?? 0)
-  const belowFloor = ratio < floor
+  const floor = Number(row.floor ?? row.platform_ratio ?? 0)
+  const platform = Number(row.platform_ratio ?? floor)
+  const belowFloor = Number.isFinite(ratio) && ratio < floor
 
   const handleSave = async () => {
+    // Front-end floor guard: only mark up at or above the platform baseline.
     if (belowFloor) {
       toast.error(t('Ratio must not be lower than {{floor}}', { floor }))
       return
@@ -55,8 +59,16 @@ function GroupRow({ row, onSaved }: { row: TenantGroup; onSaved: () => void }) {
         toast.success(t('Saved'))
         onSaved()
       }
-    } catch {
-      toast.error(t('Request failed'))
+    } catch (err) {
+      // Back-end backstop for the same floor rule + non-model groups.
+      const code = getApiErrorCode(err)
+      if (code === 'RATIO_BELOW_FLOOR') {
+        toast.error(t('Ratio is below the platform baseline'))
+      } else if (code === 'AGENT_GROUP_NOT_MODEL') {
+        toast.error(t('Only model-group multipliers can be adjusted'))
+      } else {
+        toast.error(t('Request failed'))
+      }
     } finally {
       setSaving(false)
     }
@@ -65,11 +77,13 @@ function GroupRow({ row, onSaved }: { row: TenantGroup; onSaved: () => void }) {
   return (
     <TableRow data-testid={`group-row-${row.group_name}`}>
       <TableCell className='font-medium'>{row.group_name}</TableCell>
+      <TableCell className='tabular-nums'>{platform}</TableCell>
+      <TableCell className='tabular-nums'>{floor}</TableCell>
       <TableCell>
         <Input
           type='number'
           step='0.01'
-          min={0}
+          min={floor}
           className='h-8 w-28'
           value={Number.isFinite(ratio) ? ratio : ''}
           aria-invalid={belowFloor}
@@ -84,7 +98,13 @@ function GroupRow({ row, onSaved }: { row: TenantGroup; onSaved: () => void }) {
           </p>
         )}
       </TableCell>
-      <TableCell className='tabular-nums'>{floor}</TableCell>
+      <TableCell>
+        {row.has_override ? (
+          <Badge variant='default'>{t('Overridden')}</Badge>
+        ) : (
+          <Badge variant='secondary'>{t('Baseline')}</Badge>
+        )}
+      </TableCell>
       <TableCell className='text-right'>
         <Button
           size='sm'
@@ -119,13 +139,13 @@ export function MyGroups() {
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>
-        {t('My User Groups (Multipliers)')}
+        {t('Model Group Multipliers')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='flex flex-col gap-4' data-testid='groups-page'>
           <p className='text-muted-foreground text-sm'>
             {t(
-              'Set the billing multiplier per group; it must not be lower than the floor. Wiring the multiplier into billing is a follow-up.'
+              'You can only set a multiplier at or above the platform baseline (mark up to earn the spread).'
             )}
           </p>
           <div className='overflow-hidden rounded-lg border'>
@@ -133,8 +153,10 @@ export function MyGroups() {
               <TableHeader>
                 <TableRow>
                   <TableHead>{t('Group')}</TableHead>
-                  <TableHead>{t('Ratio')}</TableHead>
+                  <TableHead>{t('Platform Baseline')}</TableHead>
                   <TableHead>{t('Floor')}</TableHead>
+                  <TableHead>{t('Your Ratio')}</TableHead>
+                  <TableHead>{t('Status')}</TableHead>
                   <TableHead className='text-right'>{t('Actions')}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -142,7 +164,7 @@ export function MyGroups() {
                 {isLoading ? (
                   <TableRow>
                     <TableCell
-                      colSpan={4}
+                      colSpan={6}
                       className='text-muted-foreground text-center'
                     >
                       {t('Loading...')}
@@ -151,7 +173,7 @@ export function MyGroups() {
                 ) : rows.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={4}
+                      colSpan={6}
                       className='text-muted-foreground text-center'
                     >
                       {t('No groups yet')}

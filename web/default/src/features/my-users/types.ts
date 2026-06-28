@@ -18,11 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 // ============================================================================
-// Agent self-service: my downstream users (read-only).
-//   GET /api/tenant/users
-// The backend scopes the listing to users owned by the calling agent.
+// Agent self-service: my downstream users.
+//   GET  /api/tenant/users               — list (scoped to the calling agent)
+//   PUT  /api/tenant/users/:id/tier      — set a user's membership tier
 // `quota` / `used_quota` are raw quota (500000 = $1); displayed in USD.
 // ============================================================================
+
+/** Membership tier an agent may assign to one of its downstream users. */
+export type UserTier = 'default' | 'vip'
 
 export interface TenantUser {
   id: number
@@ -32,6 +35,22 @@ export interface TenantUser {
   used_quota: number
   status: number | string
   created_at?: number | string
+  /**
+   * Current tier (native user `group`). The list endpoint does not yet return
+   * it; kept optional so the Tier column reflects it if/when the backend adds
+   * it, while freshly-set tiers are tracked optimistically in the page.
+   */
+  group?: string
+}
+
+export interface SetUserTierPayload {
+  tier: UserTier
+}
+
+/** PUT /api/tenant/users/:id/tier success payload. */
+export interface SetUserTierResult {
+  id: number
+  tier: string
 }
 
 /** Unified new-api control-plane envelope: `{ success, message, data }`. */

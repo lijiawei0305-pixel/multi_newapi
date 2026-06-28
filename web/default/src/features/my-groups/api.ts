@@ -27,13 +27,20 @@ export async function getTenantGroups(): Promise<ApiResponse<TenantGroup[]>> {
   return res.data
 }
 
+/**
+ * PUT /api/tenant/groups/:group — set this tenant's override multiplier.
+ * `skipErrorHandler` lets us surface the stable error `code`
+ * (RATIO_BELOW_FLOOR / AGENT_GROUP_NOT_MODEL) as a localized toast instead of
+ * the global interceptor's raw backend message.
+ */
 export async function updateTenantGroup(
   group: string,
   payload: UpdateGroupPayload
 ): Promise<ApiResponse<TenantGroup>> {
   const res = await api.put(
     `/api/tenant/groups/${encodeURIComponent(group)}`,
-    payload
+    payload,
+    { skipErrorHandler: true }
   )
   return res.data
 }
