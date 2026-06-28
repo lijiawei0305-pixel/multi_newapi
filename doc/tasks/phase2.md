@@ -29,8 +29,14 @@
 - [ ] **5d 前端基座**：决策后——切 new-api 新版前端（按 uiux 加多租户换肤+tokenplan 页）或续用我们的薄前端
 
 ## 2. 目标②：管理端 / 代理端 UI（**可并行**，后端端点已就绪）
-> **✅ 5a/6a 完成（2026-06-28）**：5a 把多租户+tokenplan 路由 wire 进 new-api（`model.DB`+`UserAuth`/`AdminAuth`），admin `/api/admin/token-plans` 经真实鉴权返回 6 档（snake_case 已对齐）；6a 在 new-api **新版前端(default 主题)** 加「套餐管理」CRUD 页。**E2E 全过**：登录 `admin`→侧栏「套餐管理」→渲染 6 档套餐（截图确认）。**关键**：必须 `theme.frontend=default`（new-api 默认 classic，我们的页面在 default）——见 RETRO。
-- [x] **6a tokenplan 套餐 CRUD UI**（管理员：售价/原价/月限额/成本价/保护线/排序/状态）—— 列表+新建+编辑+上下架已通；订阅监控/满额预警待补
+> **✅ 5a/6a + 补6a 完成（2026-06-28）**：5a 多租户+tokenplan 路由 wire 进 new-api（`model.DB`+`UserAuth`/`AdminAuth`）；6a 在 new-api **新版前端(default 主题)** 加三页，全 E2E 通过（截图确认）：
+> - **管理「套餐管理」**：`/token-plans`，CRUD 6 档（售价/原价/月限额/成本/保护线/排序/状态）。
+> - **买家「套餐购买」**：`/plans`，6 套餐卡片（零售价/原价划线/折扣角标/推荐高亮/月限额）+「我的订阅」用量进度。
+> - **管理「订阅监控」**：`/subscription-monitor`，订阅表+用量+满额预警分级(warn/critical/exhausted)。
+> 后端配套：buyer/admin 端点 snake_case DTO（含 `id`）、`GET /api/admin/subscriptions`(按租户)、tokenplan `ListSubscriptionsByTenant`。
+> **关键**：`theme.frontend=default` 已**固化进 mtwire seed**（首次初始化设置，持久化值已确认；new-api 默认 classic，我们页面在 default——见 RETRO）。
+- [x] **6a tokenplan 套餐 CRUD UI**（管理员）—— 列表+新建+编辑+上下架
+- [x] **6a+ 买家套餐购买页 + 管理订阅监控页** —— 卡片购买流（真实支付待目标③）+ 满额预警分级
 - [ ] **6b 子代理管理 UI**（设代理 普通/OEM/API、成本价/折扣/分润/等级、自定义域名、启用/禁用）
 - [ ] **6c 提现审核 UI**（管理员审核通过/拒绝；代理端提现申请已有）
 - [ ] **6d 代理装修配置 UI**（品牌 tabs：品牌/联系/充值/内容/首页/协议，接 SiteConfig）+ 我的用户组/我的用户/推广渠道/兑换码 UI
