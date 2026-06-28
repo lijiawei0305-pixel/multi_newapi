@@ -54,6 +54,7 @@ import { Route as AuthenticatedPlansIndexRouteImport } from './routes/_authentic
 import { Route as AuthenticatedMyUsersIndexRouteImport } from './routes/_authenticated/my-users/index'
 import { Route as AuthenticatedMyGroupsIndexRouteImport } from './routes/_authenticated/my-groups/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
+import { Route as AuthenticatedModelGroupsIndexRouteImport } from './routes/_authenticated/model-groups/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
@@ -321,6 +322,12 @@ const AuthenticatedModelsIndexRoute =
     path: '/models/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedModelGroupsIndexRoute =
+  AuthenticatedModelGroupsIndexRouteImport.update({
+    id: '/model-groups/',
+    path: '/model-groups/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
   id: '/keys/',
   path: '/keys/',
@@ -512,6 +519,7 @@ export interface FileRoutesByFullPath {
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
+  '/model-groups/': typeof AuthenticatedModelGroupsIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
   '/my-groups/': typeof AuthenticatedMyGroupsIndexRoute
   '/my-users/': typeof AuthenticatedMyUsersIndexRoute
@@ -582,6 +590,7 @@ export interface FileRoutesByTo {
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
+  '/model-groups': typeof AuthenticatedModelGroupsIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
   '/my-groups': typeof AuthenticatedMyGroupsIndexRoute
   '/my-users': typeof AuthenticatedMyUsersIndexRoute
@@ -656,6 +665,7 @@ export interface FileRoutesById {
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
+  '/_authenticated/model-groups/': typeof AuthenticatedModelGroupsIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
   '/_authenticated/my-groups/': typeof AuthenticatedMyGroupsIndexRoute
   '/_authenticated/my-users/': typeof AuthenticatedMyUsersIndexRoute
@@ -729,6 +739,7 @@ export interface FileRouteTypes {
     | '/channels/'
     | '/dashboard/'
     | '/keys/'
+    | '/model-groups/'
     | '/models/'
     | '/my-groups/'
     | '/my-users/'
@@ -799,6 +810,7 @@ export interface FileRouteTypes {
     | '/channels'
     | '/dashboard'
     | '/keys'
+    | '/model-groups'
     | '/models'
     | '/my-groups'
     | '/my-users'
@@ -872,6 +884,7 @@ export interface FileRouteTypes {
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/keys/'
+    | '/_authenticated/model-groups/'
     | '/_authenticated/models/'
     | '/_authenticated/my-groups/'
     | '/_authenticated/my-users/'
@@ -1245,6 +1258,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedModelsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/model-groups/': {
+      id: '/_authenticated/model-groups/'
+      path: '/model-groups'
+      fullPath: '/model-groups/'
+      preLoaderRoute: typeof AuthenticatedModelGroupsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/keys/': {
       id: '/_authenticated/keys/'
       path: '/keys'
@@ -1527,6 +1547,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
+  AuthenticatedModelGroupsIndexRoute: typeof AuthenticatedModelGroupsIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
   AuthenticatedMyGroupsIndexRoute: typeof AuthenticatedMyGroupsIndexRoute
   AuthenticatedMyUsersIndexRoute: typeof AuthenticatedMyUsersIndexRoute
@@ -1561,6 +1582,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
+  AuthenticatedModelGroupsIndexRoute: AuthenticatedModelGroupsIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
   AuthenticatedMyGroupsIndexRoute: AuthenticatedMyGroupsIndexRoute,
   AuthenticatedMyUsersIndexRoute: AuthenticatedMyUsersIndexRoute,

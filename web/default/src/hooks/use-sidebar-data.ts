@@ -27,6 +27,7 @@ import {
   Gift,
   HandCoins,
   Key,
+  Layers,
   LayoutDashboard,
   ListTodo,
   Megaphone,
@@ -181,6 +182,11 @@ export function useSidebarData(): SidebarData {
             title: t('Models'),
             url: '/models/metadata',
             icon: Box,
+          },
+          {
+            title: t('Model Group Management'),
+            url: '/model-groups',
+            icon: Layers,
           },
           {
             title: t('Users'),
