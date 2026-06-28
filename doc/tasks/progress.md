@@ -52,6 +52,8 @@
 >
 > **🎯 集成里程碑**：tenant→identity→wallet→tokenplan→relay 全链路在测试栈 `https://tokendream.wedreamhub.com` 上以真实 GORM/MySQL/Redis/上游 跑通；核心差异化（tokenplan 套餐桶 vs 钱包桶 独立计量）以真实模型验证。**Master-Worker + 预上传 gate + tar 上传 + 后台构建 + playwright E2E** 全流程成熟。
 > **下一步（可选方向）**：① 把复用的 new-api 基座（用户体系/渠道池/真实模型价表/支付回调）正式 merge，替换各 stub；② 管理端/代理端 UI（套餐 CRUD、子代理、提现审核）；③ 预扣计费 + 多档风控 + 真实支付；④ 正式栈灰度（`*.wedreamhub.com` 通配 + Origin CA 证书）。问题持续记 `RETRO.md`。
+>
+> **Phase 2（已确认 4 大目标）详细计划见 [phase2.md](phase2.md)**：4 目标 → 可执行 slices（5a–8c）+ 依赖排期 + 待替换 stub 清单 + 开工前决策点。
 
 ---
 

@@ -1,0 +1,59 @@
+# 📋 Phase 2 计划 — 产品化（用户确认的 4 大目标）
+
+> **承接**：Phase 1 已完成 14 模块逻辑层 + 4 个集成纵切（tenant/identity/wallet/tokenplan/relay 在测试栈 `tokendream.wedreamhub.com` 真实跑通）。
+> **本阶段**：把"集成纵切的 stub/薄实现"替换为生产级，并补管理端 UI、计费硬化、正式上线。
+> **方式不变**：Master-Worker（前/后端 Worker）+ 预上传 gate(`scripts/preflight.sh`) + tar 上传 + 后台构建 + playwright E2E + 测试栈隔离（不碰现网）。问题记 `RETRO.md`。
+
+---
+
+## 0. 待替换的 Phase 1 stub/薄实现（清单）
+| 现状（Phase 1） | 目标（Phase 2） |
+| --- | --- |
+| `dev-login`（明文 Token 假登录） | 真实用户体系：注册/登录/会话（复用 new-api users + casbin 角色） |
+| 固定模型价（`MODEL_PRICE_*` 占位） | 真实分模型定价 + 上游渠道池（多渠道/分组倍率） |
+| 支付 stub（下单即激活/recharge 假订单） | 真实支付回调（微信/支付宝）→ 幂等入账/激活 |
+| 薄 `cmd/server` + 薄 React（brand/wallet/plans/playground） | new-api 基座（含 users/channels/relay/新版前端） + 我们的增量层 |
+| 自签证书（CF Full） | `*.wedreamhub.com` 通配 + CF Origin CA（Full strict） |
+| seed 演示数据（demo/payg/tokendream） | 真实开站流程（管理员设代理→开站→配置） |
+
+---
+
+## 1. 目标①：正式 merge new-api 基座（基础，**先做**）
+
+> **关键决策（见文末「决策点」）**：merge 方式 A/B/C 未定，决定后细化。
+- [ ] **5a 用户/会话/角色**：接 new-api users + session + casbin；替换 dev-login；保留多租户 `tenant_id` 维度与 Host 解析
+- [ ] **5b 渠道池 + 模型价**：接 new-api channels/abilities + 模型价表；relay 走真实渠道分发（替换单一上游直连）；分组倍率接 pricing
+- [ ] **5c 支付回调**：接 new-api 支付（或独立 auth-service）/pay/、/auth/ 回调；幂等入账 → wallet.Credit / tokenplan 激活
+- [ ] **5d 前端基座**：决策后——切 new-api 新版前端（按 uiux 加多租户换肤+tokenplan 页）或续用我们的薄前端
+
+## 2. 目标②：管理端 / 代理端 UI（**可并行**，后端端点已就绪）
+- [ ] **6a tokenplan 套餐 CRUD UI**（管理员：售价/原价/月限额/成本价/保护线/排序/状态）+ 订阅监控/满额预警
+- [ ] **6b 子代理管理 UI**（设代理 普通/OEM/API、成本价/折扣/分润/等级、自定义域名、启用/禁用）
+- [ ] **6c 提现审核 UI**（管理员审核通过/拒绝；代理端提现申请已有）
+- [ ] **6d 代理装修配置 UI**（品牌 tabs：品牌/联系/充值/内容/首页/协议，接 SiteConfig）+ 我的用户组/我的用户/推广渠道/兑换码 UI
+
+## 3. 目标③：计费硬化（依赖①的渠道池/支付）
+- [ ] **7a 预扣**：高额请求转发前按预算预扣，扣不动即拒（防后付费欠费滥用）；流式调用按增量结算
+- [ ] **7b 真实分模型定价**：按 model 精确单价 + 分组倍率 + 成本保护线（pricing 全量接入）
+- [ ] **7c 多档风控**：真实 Redis 风控（RPM/并发/IP 指纹）+ Trial 三维限购(用户∪实名∪设备) + 满额分级告警
+- [ ] **7d 真实支付激活**：tokenplan 购买走真实支付回调激活（替换同步 stub）；充值真实入账 + 代理差价/分润落账
+
+## 4. 目标④：正式上线（**最后**，灰度）
+- [ ] **8a 域名/证书**：`*.wedreamhub.com` 通配 vhost + CF Origin CA 证书（Full strict）；主站 `www/admin/api` + 代理泛子域
+- [ ] **8b 灰度切流**：测试栈验证 → 正式栈（独立于现网 `newapi_YFNf` 或择机替换）→ 小流量灰度
+- [ ] **8c 运维**：备份/回滚脚本、迁移版本化、监控/告警、`docker compose` 一键启停
+
+---
+
+## 排期建议（依赖关系）
+```
+① new-api 基座(5a→5b→5c)  ─┬─→ ③ 计费硬化(7a-7d 依赖渠道池/支付)
+                            └─→ ④ 正式上线(8a-8c 最后)
+② 管理端 UI(6a-6d) ── 可与①并行（端点已就绪，先接现有薄前端或随①切基座）
+```
+**建议起点**：①-5a（用户/会话/角色）—— 它解开"真实登录"，是 ②③④ 的前提；或并行先做 ②-6a（套餐 CRUD UI，纯前端接已就绪端点，快速可见）。
+
+## 决策点（开工前需定）
+1. **new-api merge 方式**：A 全量 fork 作基座（复用最大、重构大、前端切 new-api 新版前端）｜ B 增量替换 stub（保留现架构、按需移植 new-api 能力）｜ C 混合（后端渐进并入 new-api 服务，前端先续用我们的薄前端按 uiux 建，择机再切）。
+2. **正式栈关系**：新建独立正式栈，还是择机替换现网 `newapi_YFNf`（`api.wedreamhub.com`）。
+3. **起步顺序**：先 ①-5a 打地基，还是并行先出 ②-6a 管理 UI。
