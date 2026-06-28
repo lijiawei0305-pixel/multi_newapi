@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/internal/platform/agenthook"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -476,4 +477,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
 	})
+
+	// mt: 代理消耗分润 —— 文本中继结算走本函数（PostTextConsumeQuota），故在此挂钩。
+	// best-effort、幂等键=RequestId（与 PostConsumeQuota 的钩子靠 RequestId 去重，绝不双计）。
+	if agenthook.ConsumeCommission != nil && summary.Quota > 0 {
+		agenthook.ConsumeCommission(int64(relayInfo.UserId), int64(summary.Quota), relayInfo.RequestId, relayInfo.BillingSource)
+	}
 }
