@@ -55,6 +55,17 @@
 - **解决/规避**：部署命令显式 `--env-file /root/newapi-test/.env`：`docker compose -p newapi_test --env-file /root/newapi-test/.env -f deploy/docker-compose.test.yml up -d`。**已验证**：上游 env 注入、`/v1` 真实调用、双桶扣费全通。
 - **升级**：部署脚本固定带 `--env-file`；上游 Key 仅存服务器 `.env`(600)，仓库只引用 `${UPSTREAM_API_KEY}`，并在上传前 `grep` 确认无明文 Key（已纳入预上传检查）。
 
+### [已解决] new-api 内嵌双前端：我们的页面在 default 主题，但默认服务 classic
+- **现象**：5a/6a 都对，admin API 返回 6 档套餐，但 `https://tokendream...` 左侧栏**无「套餐管理」**、`/token-plans` 空白。排查良久（怀疑构建缓存/路由/sidebar 过滤），`docker build --no-cache` 重建也不出。
+- **根因**：new-api **同时内嵌两套前端** `web/default`(新版 shadcn/TanStack) + `web/classic`(经典 Semi-UI)，`main.go` 按系统选项 **`theme.frontend`** 选择服务哪个，**默认 `classic`**（`common/constants.go`、`setting/system_setting/theme.go`）。我们所有 Phase 2 前端工作都在 `web/default`——但线上服务的是 classic（它没有 token-plans），所以页面/菜单永远不出现。前端 Worker 本地 `bun run build` + grep `web/default/dist` 证明 token-plans **确实在 default 产物里**（`tp-admin-page` 在 `async/3674*.js`）→ 锁定是"服务的主题不对"，非代码 bug。
+- **解决/规避**：`PUT /api/option {key:"theme.frontend",value:"default"}`（admin cookie + `New-Api-User` 头；值仅 default/classic）→ 立即生效、无需重建（两套 dist 已内嵌）。playwright 验证：登录后侧栏「套餐管理」✅、`/token-plans` 渲染 6 档套餐 ✅。
+- **升级**：**部署后必须把 `theme.frontend` 设为 `default`**（否则服务经典前端、看不到我们的页面）——已记为部署步骤；可在 `mtwire` seed 里幂等设置以免 fresh DB 回退 classic。改前端找不到效果时，**先确认服务的是哪套主题**。
+
+### [已解决] macOS tar 带进 `._*` AppleDouble 垃圾文件
+- **现象**：`tar -C mac . | ssh 'tar x'` 上传后，服务器 `src/routes/.../` 出现 `._index.tsx` 等垃圾文件（macOS 扩展属性/资源叉），可能干扰前端路由扫描/构建。
+- **解决/规避**：服务器 `find /root/newapi-test -name '._*' -delete`；后续 Mac 打包加 **`COPYFILE_DISABLE=1 tar ...`**（或 `--no-mac-metadata`）避免生成。
+- **升级**：上传命令固定带 `COPYFILE_DISABLE=1`，纳入部署脚本。
+
 ---
 
 ## 二、构建与依赖
