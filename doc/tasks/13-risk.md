@@ -6,10 +6,10 @@
 > **一期范围**：基础风控（状态/RPM/IP/并发）+ Trial 限购 + 满额告警标记；规则引擎顺延。
 
 ## A. 接口与逻辑
-- [ ] `port.go`：`RiskEngine` ｜ ✅ `go build` 通过
-- [ ] `CheckCall`（租户/用户/Token 状态 + RPM 限流 + IP allowlist + 并发）｜ ✅ 单测（mock 时钟+KV）：超限 `RATE_LIMITED/IP_NOT_ALLOWED/STATUS_FORBIDDEN`
-- [ ] `CheckPurchaseLimit`（Trial = 用户∪实名∪设备 各 1 次）｜ ✅ 单测：三维去重；**并发购买只过 1 次**
-- [ ] `NoteUsage`（`used/limit` 逼近阈值打标，避免重复告警）｜ ✅ 单测：阈值触发一次
+- [x] `port.go`：`RiskEngine` ｜ ✅ `go build` 通过
+- [x] `CheckCall`（租户/用户/Token 状态 + RPM 限流 + IP allowlist + 并发）｜ ✅ 单测（mock 时钟+KV）：超限 `RATE_LIMITED/IP_NOT_ALLOWED/STATUS_FORBIDDEN`
+- [x] `CheckPurchaseLimit`（Trial = 用户∪实名∪设备 各 1 次）｜ ✅ 单测：三维去重；**并发购买只过 1 次**
+- [x] `NoteUsage`（`used/limit` 逼近阈值打标，避免重复告警）｜ ✅ 单测：阈值触发一次
 
 ## B. 接入
 - [ ] RelayGateway 调用前置 `CheckCall` ｜ ✅ 集成：异常调用被拦
@@ -17,4 +17,4 @@
 
 ## C. 验收
 - [ ] Trial 引流款防刷生效（呼应 proposal §2.4 防巨亏）｜ ✅ E2E：同设备/实名二次购买 Trial 失败
-- [ ] RPM/并发限流在压测下生效 ｜ ✅ 限流计数正确
+- [x] RPM/并发限流在压测下生效 ｜ ✅ 限流计数正确

@@ -15,7 +15,7 @@
 - 🟡 **Wave 1 · 基础层**：[01-tenant](01-tenant.md) ＋ [02-identity](02-identity.md) ＋ [04-pricing](04-pricing.md) — ✅ 接口+领域逻辑+单测（`go test -race` 绿，覆盖率 98/100/100%）；⏳ 迁移 · GORM repo · handler · 集成
 - 🟡 **Wave 2 · 领域核心**：[03-agent](03-agent.md) ＋ [05-billing](05-billing.md) ＋ [06-wallet](06-wallet.md) — ✅ 接口+领域逻辑+单测（99/100/98%，含 `-race` 并发不透支与幂等）；⏳ 迁移 · GORM · handler · 集成
 - 🟡 **Wave 3 · 入口（核心 MVP 收口）**：[11-relay](11-relay.md) ＋ [09-promotion](09-promotion.md) ＋ [10-siteconfig](10-siteconfig.md) ＋ [12-stats](12-stats.md) — ✅ 接口+领域逻辑+单测（100/100/98.9/100%）；⏳ Gin handler · 迁移 · GORM · E2E　← 核心 MVP 逻辑层已就绪
-- [ ] **Wave 4 · tokenplan 批次**：[08-payment](08-payment.md) ＋ [07-tokenplan](07-tokenplan.md) ＋ [13-risk](13-risk.md)（限购/满额）　← 方案 A 第二批 ≈+1.5–2 天
+- 🟡 **Wave 4 · tokenplan 批次**：[08-payment](08-payment.md) ＋ [07-tokenplan](07-tokenplan.md) ＋ [13-risk](13-risk.md)（限购/满额）— ✅ 接口+领域逻辑+单测（payment 99.2 / tokenplan 95.5 / risk 97.3%，含 Meter 并发不击穿/激活幂等/回调幂等/限购单赢家）；⏳ 迁移·GORM·auth-service·handler·E2E
 
 ---
 
@@ -30,20 +30,22 @@
 | 🟡 | 🧑‍💼 Agent 代理体系 | [03-agent](03-agent.md) | pricing | 接口+逻辑+单测 ✓ 99%；迁移·GORM·handler ⏳ |
 | 🟡 | 🧮 Billing & Quota | [05-billing](05-billing.md) | pricing, agent | 双桶路由+计费+单测 ✓ 100%；迁移·txn·E2E ⏳ |
 | 🟡 | 👛 Wallet & Recharge | [06-wallet](06-wallet.md) | pricing, agent, payment | 充值/兑换/WalletQuota+并发 ✓ 98%；迁移·GORM·handler ⏳ |
-| - [ ] | 🎟️ TokenPlan 套餐 ★ | [07-tokenplan](07-tokenplan.md) | pricing, payment, risk, agent | 核心增量，SubscriptionQuota |
-| - [ ] | 💳 Payment 支付回调 | [08-payment](08-payment.md) | — (被 wallet/tokenplan 注入) | auth-service 新增 |
+| 🟡 | 🎟️ TokenPlan 套餐 ★ | [07-tokenplan](07-tokenplan.md) | pricing, payment, risk, agent | 核心逻辑+计量+幂等+单测 ✓ 95.5%；迁移·GORM·handler·E2E ⏳ |
+| 🟡 | 💳 Payment 支付回调 | [08-payment](08-payment.md) | — (被 wallet/tokenplan 注入) | 下单+回调幂等+分发+单测 ✓ 99.2%；真实SDK·auth-service·迁移 ⏳ |
 | 🟡 | 📣 Promotion 推广归属 | [09-promotion](09-promotion.md) | tenant | 渠道+归属+单测 ✓ 100%；迁移·GORM·handler ⏳ |
 | 🟡 | 🎨 SiteConfig 装修 | [10-siteconfig](10-siteconfig.md) | tenant | 校验+装修+上传安全+单测 ✓ 99%；迁移·Blob·handler·前端 ⏳ |
 | 🟡 | 🚦 RelayGateway 中继 | [11-relay](11-relay.md) | identity, billing, risk | 接口+编排+全mock单测 ✓ 100%；handler·UpstreamPool·E2E ⏳ |
 | 🟡 | 📊 Stats 统计看板 | [12-stats](12-stats.md) | billing, tokenplan | 聚合+满额预警+隔离+单测 ✓ 100%；迁移·GORM·handler ⏳ |
-| - [ ] | 🛡️ RiskControl 风控 | [13-risk](13-risk.md) | infra | 限购/限流/告警 |
+| 🟡 | 🛡️ RiskControl 风控 | [13-risk](13-risk.md) | infra | 限流+Trial三维限购+告警+单测 ✓ 97.3%；真实Redis·接入·E2E ⏳ |
 
-进度：**0 / 14 模块全量完成**；🟡 **11 模块核心就绪**（infra · tenant · identity · pricing · agent · billing · wallet · relay · promotion · siteconfig · stats）—— 接口+领域逻辑+单测完成，`go test -race -cover` 全绿（平均 ~99%），待补迁移/GORM/handler/集成。剩 Wave 4：payment · tokenplan · risk。
+进度：🟢 **14/14 模块逻辑层完成**（Wave 0–4 全绿）—— 全部 `go test -race -cover` 通过，平均覆盖率 **~98.7%**（apperr/appctx/pricing/identity/billing/promotion/relay/stats 100%，payment 99.2，agent 99.2，siteconfig 98.9，tenant/wallet 98，risk 97.3，tokenplan 95.5）。
+> ⏳ **集成层待办（统一收尾）**：① fork `QuantumNous/new-api` 合并基座；② 迁移 + GORM 真实 Repo + Redis；③ Gin handler + `cmd/main` 装配（含组装层适配器）；④ 部署独立测试栈 + E2E；⑤ 前端对接 `doc/api-contract.md`。完成后 🟡 → ✅。
 
 > **本轮进展（2026-06-28，Wave 0–1 启动）**：Master-Worker 自动化已跑通首批 —— Wave 0 引导（Go module + `platform` 包 + 13 包骨架 + git）已提交 `7f1f7a2`；3 个 Worker 子 Agent 并行完成 tenant/identity/pricing 的接口+领域逻辑+单测（TDD，纯标准库，依赖倒置可独立单测）。Master 已独立复跑质量门（gofmt/build/vet/test-race）全绿后才更新本看板。
 > **Wave 2 完成（2026-06-28）**：新增共享契约 `platform/quota`（QuotaSource/Router/Receipt）；3 个 Worker 并行完成 agent/billing/wallet（接口+领域逻辑+单测，含 `-race` 并发不透支/幂等/兑换码单赢家）。Master 已独立复跑质量门全绿。
 > **组装层 TODO（记录，留待集成）**：`wallet.EarningEntry` 与 `agent.EarningEntry` 字段不同，`cmd/main` 需薄适配器映射（`Reference→agent.SourceID` 非空做幂等键）并处理 USD↔¥ 单位；billing 的 `WalletSourceFactory/SubscriptionSourceFactory` 在 main 注入 wallet/tokenplan 的桶实现。
-> **下一步**：Wave 3（relay/promotion/siteconfig/stats）；之后 Wave 4（payment/tokenplan/risk）。逻辑层全绿后统一做 Wave 0 集成（fork new-api + 迁移 + GORM/Redis + 部署独立测试栈）把 🟡 收尾为 ✅。
+> **Wave 3+4 完成（2026-06-28）**：relay/promotion/siteconfig/stats + payment/tokenplan/risk 全部逻辑层完成并验收。tokenplan 实现 month_limit 原子计量（500 goroutine 不击穿）、激活幂等、Trial 三维限购单赢家、回调幂等。**至此 14 个后端模块逻辑层全部跑绿。**
+> **下一步（集成层）**：fork `QuantumNous/new-api` → 迁移 + GORM/Redis 真实实现 → Gin handler + `cmd/main` 装配 → 部署独立测试栈 → playwright-cli 浏览器 E2E。前端由另一 CC 按 `doc/api-contract.md` 并行开发。问题记 `RETRO.md`。
 
 ---
 

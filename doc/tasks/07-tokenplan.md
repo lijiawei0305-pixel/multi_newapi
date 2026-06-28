@@ -9,14 +9,14 @@
 - [ ] `token_plans`（含 `anchor_price/discount_label/month_limit_usd/agent_cost_price/min_price/is_recommended/badge/sort`）迁移 ｜ ✅ 迁移跑通
 - [ ] `tenant_token_plans`（`enabled/retail_price`，`UNIQUE(tenant_id,plan_id)`）迁移 ｜ ✅ 唯一约束生效
 - [ ] `user_subscriptions`（`used_usd/status/expire_at/source_order_id`）+ `subscription_usage_logs` 迁移 ｜ ✅ 迁移跑通，索引齐全
-- [ ] 种子数据：Trial/Mini/Solo/Lite/Pro/Max 六档（按 proposal §8.2）｜ ✅ `SELECT` 出 6 行
+- [x] 种子数据：Trial/Mini/Solo/Lite/Pro/Max 六档（按 proposal §8.2）｜ ✅ `SELECT` 出 6 行
 
 ## B. 接口与领域逻辑
-- [ ] `port.go`：`PlanCatalog`、`PlanRetailService`、`SubscriptionService`、`SubscriptionQuotaFactory` ｜ ✅ `go build` 通过
-- [ ] `SetListing`（上架/退出 + 改零售价，经 `PricingGuard` 校验 `retail>=min_price`）｜ ✅ 单测（mock Guard）：低于保护线 `RETAIL_BELOW_MIN`
-- [ ] 订阅状态机 `active→exhausted/expired/refunded`（到期惰性 + 定时双校验）｜ ✅ 单测：迁移合法性
-- [ ] `Meter`（条件 UPDATE 原子 `used_usd+=`，超额置 exhausted）｜ ✅ **并发测**：N goroutine 累加不击穿 month_limit
-- [ ] `ActivateFromPayment`（幂等创建 active 实例 + `tokenplan_spread` 收益）｜ ✅ 单测：同 orderID 多次只建 1 实例
+- [x] `port.go`：`PlanCatalog`、`PlanRetailService`、`SubscriptionService`、`SubscriptionQuotaFactory` ｜ ✅ `go build` 通过
+- [x] `SetListing`（上架/退出 + 改零售价，经 `PricingGuard` 校验 `retail>=min_price`）｜ ✅ 单测（mock Guard）：低于保护线 `RETAIL_BELOW_MIN`
+- [x] 订阅状态机 `active→exhausted/expired/refunded`（到期惰性 + 定时双校验）｜ ✅ 单测：迁移合法性
+- [x] `Meter`（条件 UPDATE 原子 `used_usd+=`，超额置 exhausted）｜ ✅ **并发测**：N goroutine 累加不击穿 month_limit
+- [x] `ActivateFromPayment`（幂等创建 active 实例 + `tokenplan_spread` 收益）｜ ✅ 单测：同 orderID 多次只建 1 实例
 
 ## C. 服务与 API
 - [ ] 管理员套餐 CRUD `/api/admin/token-plans` ｜ ✅ 接口测：增删改查

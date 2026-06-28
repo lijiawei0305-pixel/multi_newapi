@@ -7,13 +7,13 @@
 
 ## A. 数据模型与迁移
 - [ ] 支付订单表（`order_no` 唯一约束做幂等，`type=recharge|subscription`，绑 `tenant_id/user_id`）｜ ✅ 迁移跑通；重复 order_no 入库冲突
-- [ ] 订单状态机 `created→paid→credited / failed` ｜ ✅ 单测：迁移合法性
+- [x] 订单状态机 `created→paid→credited / failed` ｜ ✅ 单测：迁移合法性
 
 ## B. 接口与逻辑
-- [ ] `port.go`：`PaymentGateway`、`CallbackHandler`、`OrderSink` ｜ ✅ `go build`；Payment 不 import Wallet/TokenPlan
-- [ ] `CreateOrder`（微信/支付宝下单，回填 notify_url）｜ ✅ 单测（mock SDK）：订单落库
-- [ ] `HandleWxpay/HandleAlipay`（验签 → 幂等 → `OnPaid` 分发）｜ ✅ 单测：错签 `SIGN_INVALID`；重复回调不重复入账
-- [ ] `OnPaid` 按 `type` 分发到 Wallet.Credit 或 TokenPlan.ActivateFromPayment ｜ ✅ 单测（mock Sink）：分发目标正确
+- [x] `port.go`：`PaymentGateway`、`CallbackHandler`、`OrderSink` ｜ ✅ `go build`；Payment 不 import Wallet/TokenPlan
+- [x] `CreateOrder`（微信/支付宝下单，回填 notify_url）｜ ✅ 单测（mock SDK）：订单落库
+- [x] `HandleWxpay/HandleAlipay`（验签 → 幂等 → `OnPaid` 分发）｜ ✅ 单测：错签 `SIGN_INVALID`；重复回调不重复入账
+- [x] `OnPaid` 按 `type` 分发到 Wallet.Credit 或 TokenPlan.ActivateFromPayment ｜ ✅ 单测（mock Sink）：分发目标正确
 
 ## C. 部署与配置
 - [ ] auth-service 容器 + config.yaml（wxpay/alipay 证书，参考 proposal §12.1）｜ ✅ 容器 healthy
@@ -23,4 +23,4 @@
 ## D. 验收
 - [ ] 微信回调 `/pay/wxpay/notify` 正确入账 ｜ ✅ 沙箱/真实支付到账
 - [ ] 支付宝回调 `/auth/alipay/notify` 正确入账 ｜ ✅ 到账
-- [ ] 重复/伪造回调被幂等/验签拦截 ｜ ✅ 测试红→绿
+- [x] 重复/伪造回调被幂等/验签拦截 ｜ ✅ 测试红→绿
