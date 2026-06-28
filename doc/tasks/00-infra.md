@@ -49,8 +49,8 @@
 - [x] **Slice 1 · 租户管道**：GORM `TenantRepo` + `tenants/tenant_domains` 迁移 + 按 Host 解析的 `GET /api/tenant/current` → 测试栈跑通 → curl/playwright 冒烟（证明 Mac 代码→服务器构建→DB→端点→浏览器 全链路）
 - [x] **Slice 2 · 身份与钱包**：Identity 鉴权中间件 + Wallet GORM + 充值/余额端点
 - [x] **Slice 3 · tokenplan**：套餐 CRUD/购买/计量 + 购买页对接 `api-contract.md`
-- [ ] **Slice 4 · 中继计费**：`/v1/*` 接 relay + 双桶扣费 + 日志
-- [ ] 组装层适配器（见 progress.md「组装层 TODO」与 `api-contract.md` §4）
+- [x] **Slice 4 · 中继计费**：`/v1/*` 接 relay + 双桶扣费 + 日志
+- [x] 组装层适配器（见 progress.md「组装层 TODO」与 `api-contract.md` §4）
 
 **测试栈部署步骤**（服务器，经 `ssh newapi628`）：
 - [x] `rsync -az -e 'ssh -p 5522' --exclude .git --exclude scratchpad ./ newapi628:/root/newapi-test/`

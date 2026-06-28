@@ -49,6 +49,12 @@
 - **解决/规避**：重连后 `docker compose ps`/`docker images`/`docker logs` 核实——镜像已重建、容器已 healthy、seed 已跑。**构建实际完成**。
 - **升级**：后续长构建可改 `ssh newapi628 'cd ... && nohup docker compose ... up -d --build > /tmp/build.log 2>&1 &'` 后轮询 `build.log`，避免 ssh 断流误判；或先 `docker compose build` 再 `up -d`。
 
+### [已解决] compose 未加载 `.env`（上游 Key 注入为空）
+- **现象**：app 启动 compose 警告 `The "UPSTREAM_API_KEY" variable is not set. Defaulting to a blank string.`，上游调用因无 Key 失败。
+- **根因**：`docker compose -f deploy/docker-compose.test.yml ...` 默认从 **compose 文件所在目录**（`deploy/`）找 `.env`，而我把 `.env` 放在了项目根 `/root/newapi-test/.env`（cwd），未被加载。
+- **解决/规避**：部署命令显式 `--env-file /root/newapi-test/.env`：`docker compose -p newapi_test --env-file /root/newapi-test/.env -f deploy/docker-compose.test.yml up -d`。**已验证**：上游 env 注入、`/v1` 真实调用、双桶扣费全通。
+- **升级**：部署脚本固定带 `--env-file`；上游 Key 仅存服务器 `.env`(600)，仓库只引用 `${UPSTREAM_API_KEY}`，并在上传前 `grep` 确认无明文 Key（已纳入预上传检查）。
+
 ---
 
 ## 二、构建与依赖

@@ -48,7 +48,10 @@
 > **★ Slice 1 完成（2026-06-28）· 集成纵切打通**：Master 调度 后端 Worker(gin+GORM tenant)+前端 Worker(React/Semi 品牌页)，过**预上传 gate**(`scripts/preflight.sh`)→ tar 上传服务器 → 构建镜像 → `newapi_test` 栈(127.0.0.1:3100, DB `new-api-test`, 独立 redis, **不碰现网**) → 真实 MySQL→GORM→解析→`/api/tenant/current` → **playwright-cli 浏览器冒烟全过**（demo 租户品牌渲染 ✓、未知域名 404 站点未开通 ✓）。**Mac 代码→服务器构建→DB→端点→浏览器 全链路打通。** 提交 `637526a`。
 > **★ Slice 2 完成（2026-06-28）· 身份与钱包 + 真实域名**：① 接入真实域名 **`https://tokendream.wedreamhub.com`**（CF 代理，源站宝塔 nginx vhost → 测试栈 3100，CF Full 用源站自签 443，详见 RETRO）；② 后端 Worker：identity 鉴权中间件（Bearer/Cookie→Principal）+ Wallet GORM（余额/兑换/充值-stub）+ dev-login + seed `tokendream` 租户/用户/钱包/兑换码；前端 Worker：hash 路由 + 钱包页（uiux §3.3）。③ **浏览器 E2E 全过（真实域名）**：TokenDream 品牌渲染 ✓、登录 ✓、余额 $110 ✓、兑换 WELCOME10→+10 ✓、再兑 `REDEEM_CODE_USED` ✓、未登录 401 ✓、充值 stub ✓、紫色主题换肤 ✓。提交 `637526a`/`d8fb903`。
 > **★ Slice 3 完成（2026-06-28）· tokenplan 套餐**（核心增量）：后端 Worker：tokenplan GORM（4+1 表，原子 Meter/幂等激活）+ 9 端点（套餐列表/购买/我的套餐/管理员 CRUD/代理上架改价）+ seed 6 档套餐 + admin/agent 角色用户 + stub 支付（同步激活）+ Trial 限购（user 维）；前端 Worker：购买页（6 营销卡片，uiux §4.1）+ 我的套餐（进度条）。**浏览器 E2E 全过（真实域名）**：6 档卡片营销渲染 ✓（Trial ¥6.90/-99%/$80…Max ¥8999/$25000，Pro 推荐角标+描边）、购买 Mini 激活 ✓、我的套餐显示 trial+mini ✓、Trial 再购 `PURCHASE_LIMIT_EXCEEDED` ✓、user 调 admin 403 ✓。提交 `c9082f2`。
-> **下一步**：Slice 4（中继计费 `/v1/*` 接 relay + 双桶扣费 + 日志；tokenplan 计量经 SubscriptionQuota 真实消耗；接真实支付回调激活）。沿用 Master-Worker + preflight gate + 测试栈 E2E。问题持续记 `RETRO.md`。
+> **★★ Slice 4 完成（2026-06-28）· 中继计费 + 真实上游 —— 4 个纵切全部打通！**：后端 Worker：真实 UpstreamPool（转发 `codexapis.com/v1`，Key 仅存服务器 `.env`）+ `POST /v1/chat/completions` 接 **billing.QuotaRouter 双桶路由**（有 active 套餐→tokenplan 套餐桶 Meter / 否则 wallet 钱包桶，**独立计量不回退**）+ 计费日志落库 + `GET /api/tenant/billing-logs`；前端 Worker：Playground（模型/提示词/发送 + 用量 + 计费日志 + 双桶账号切换）。**E2E 全过（真实域名 + 真实模型 gpt-5.4-mini）**：套餐桶(demo@td)扣 $0.0039 used↑、钱包桶(payg)余额 50→49.996、`X-TD-Bucket` 头正确、浏览器 Playground 实时回复+用量 ✓。提交 `3473184`。
+>
+> **🎯 集成里程碑**：tenant→identity→wallet→tokenplan→relay 全链路在测试栈 `https://tokendream.wedreamhub.com` 上以真实 GORM/MySQL/Redis/上游 跑通；核心差异化（tokenplan 套餐桶 vs 钱包桶 独立计量）以真实模型验证。**Master-Worker + 预上传 gate + tar 上传 + 后台构建 + playwright E2E** 全流程成熟。
+> **下一步（可选方向）**：① 把复用的 new-api 基座（用户体系/渠道池/真实模型价表/支付回调）正式 merge，替换各 stub；② 管理端/代理端 UI（套餐 CRUD、子代理、提现审核）；③ 预扣计费 + 多档风控 + 真实支付；④ 正式栈灰度（`*.wedreamhub.com` 通配 + Origin CA 证书）。问题持续记 `RETRO.md`。
 
 ---
 
