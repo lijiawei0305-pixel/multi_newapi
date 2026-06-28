@@ -9,10 +9,10 @@
 - [ ] `agent_promotion_channels`（`prefix/channel_code/signup_url/registered_count`）迁移 ｜ ✅ 迁移跑通
 
 ## B. 接口与逻辑
-- [ ] `port.go`：`PromotionService` ｜ ✅ `go build` 通过
-- [ ] `CreateChannel`（名称 + 前缀，前缀唯一）｜ ✅ 单测：重复前缀 `CHANNEL_PREFIX_DUP`
-- [ ] 生成链接 `/sign-up?channel=<prefix>_<rand>` ｜ ✅ 单测：格式正确、可解析回 channel_code
-- [ ] `AttributeOnSignup`（注册时绑 tenant+channel，计数+1）｜ ✅ 单测：归属落库、计数递增
+- [x] `port.go`：`PromotionService` ｜ ✅ `go build` 通过
+- [x] `CreateChannel`（名称 + 前缀，前缀唯一）｜ ✅ 单测：重复前缀 `CHANNEL_PREFIX_DUP`
+- [x] 生成链接 `/sign-up?channel=<prefix>_<rand>` ｜ ✅ 单测：格式正确、可解析回 channel_code
+- [x] `AttributeOnSignup`（注册时绑 tenant+channel，计数+1）｜ ✅ 单测：归属落库、计数递增
 
 ## C. 服务与验收
 - [ ] 渠道列表/创建接口 ｜ ✅ 接口测

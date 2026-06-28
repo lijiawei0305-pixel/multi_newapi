@@ -7,14 +7,14 @@
 
 ## A. 数据模型与迁移
 - [ ] `tenant_site_configs` 全字段迁移（含二期预留字段）｜ ✅ 迁移跑通
-- [ ] 主站默认配置 + 预设色板（8–12 色）落表/配置 ｜ ✅ 可读取
+- [x] 主站默认配置 + 预设色板（8–12 色）落表/配置 ｜ ✅ 可读取
 
 ## B. 接口与逻辑
-- [ ] `port.go`：`SiteConfigService`、`AssetService` ｜ ✅ `go build` 通过
-- [ ] `Get`（未配置回退主站默认值）｜ ✅ 单测：回退逻辑正确
-- [ ] `Patch`（主题色限色板；`home_mode` 一期仅 default/config；custom_html 锁定）｜ ✅ 单测：越界值 `THEME_NOT_IN_PALETTE/HOME_MODE_LOCKED`
-- [ ] `Upload`（限 jpg/png/webp、≤2MB、绑 tenant_id、自动重命名）｜ ✅ 表驱动单测：SVG/HTML/超大 被拒 `ASSET_TYPE_FORBIDDEN/ASSET_TOO_LARGE`
-- [ ] `Takedown`（管理员下架违规图片）｜ ✅ 单测：下架后不可访问
+- [x] `port.go`：`SiteConfigService`、`AssetService` ｜ ✅ `go build` 通过
+- [x] `Get`（未配置回退主站默认值）｜ ✅ 单测：回退逻辑正确
+- [x] `Patch`（主题色限色板；`home_mode` 一期仅 default/config；custom_html 锁定）｜ ✅ 单测：越界值 `THEME_NOT_IN_PALETTE/HOME_MODE_LOCKED`
+- [x] `Upload`（限 jpg/png/webp、≤2MB、绑 tenant_id、自动重命名）｜ ✅ 表驱动单测：SVG/HTML/超大 被拒 `ASSET_TYPE_FORBIDDEN/ASSET_TOO_LARGE`
+- [x] `Takedown`（管理员下架违规图片）｜ ✅ 单测：下架后不可访问
 
 ## C. 服务与 API
 - [ ] 代理站基础设置接口（站点名/Logo/Favicon/Hero/标题/公告/客服/页脚）｜ ✅ 接口测：保存生效
@@ -22,4 +22,4 @@
 
 ## D. 验收
 - [ ] 一期前端按 config 读取（即使是 new-api 默认皮肤）｜ ✅ 改 config 后页面取值变化
-- [ ] 上传安全限制生效 ｜ ✅ 非法文件被拒
+- [x] 上传安全限制生效 ｜ ✅ 非法文件被拒
