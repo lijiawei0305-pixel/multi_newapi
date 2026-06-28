@@ -517,7 +517,12 @@ type ViolationSink interface {             // 违规事件记录 + 管理端查�
 
 **Phase 1（先做，本次）**：平台级 2D —— model_groups 表+repo、2D 钩子+计费接线、模型分组登记同步 UserUsableGroups、**后台「模型分组管理」UI**（增删/设倍率/绑渠道）、claude-kiro（现 kiro 渠道改组名）+ openai-plus（现 gpt 渠道）跑通、不同层级×模型分组 日志核对倍率=相乘。
 
-**Phase 2（后叠）**：代理参与 —— 代理给自己用户设层级（扩「我的用户」）、代理调本租户模型分组倍率（扩 grouphook per-tenant 覆盖）、**按组合下限**：代理每个 (层级×模型分组) ≥ 主站同组合基准（扩 [[pricing-guard]]）、协调 grouphook 与 2D 优先级。
+**Phase 2（✅ 已完成）**：代理参与。
+- **计费组合**：`resolveModelGroup2D(userID, userGroup, usingGroup)` 把 per-tenant 覆盖叠入 modelFactor：`modelFactor = IsModelGroup(UsingGroup) ? ( tenant_groups[userTenant, UsingGroup] 命中 ? 覆盖值 : GetGroupRatio(UsingGroup) ) : 1`，`最终 = GetGroupRatio(UserGroup) × modelFactor`。**移除**了独立的 `TenantGroupRatioResolver` 早返块（租户覆盖只对模型分组生效、并入 2D）。
+- **下限化简**：层级在主站/代理两侧相同，故「(层级×模型分组) ≥ 主站同组合」化简为 `tenant 覆盖 ≥ GetGroupRatio(model_group)`（写时 [[pricing-guard]] 校验，低于返 `RATIO_BELOW_FLOOR`）。
+- **代理端点**（AgentOwnerAuth）：`PUT /api/tenant/users/:id/tier`（设层级 default/vip，仅本租户用户、刷用户缓存）；`GET/PUT /api/tenant/groups[/:group]`（模型分组倍率，返 `{group_name,ratio,platform_ratio,floor,has_override}`、PUT 校验 floor）。
+- **前端**：「我的用户」加层级列+设层级；「我的用户组」→「模型分组倍率」（主站基准/下限/本租户倍率，前端 floor 校验+后端兜底）。
+- **实测**：代理设 claude-kiro=0.4 → default(tenant)×=0.4、vip(tenant)×=0.32；主站用户不受租户覆盖（×=平台基准）；floor 拒 0.2；越权(非本租户/非允许层级)拒；UI 下限拦截。
 
 **单测策略**：2D 相乘（含 default×1、层级名作 usingGroup 不重复算、未登记模型分组系数=1）；模型分组 CRUD 同步 GroupRatio/UserUsableGroups；钩子未装配/panic 回退全局；预扣与结算同值。
 
