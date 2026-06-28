@@ -145,6 +145,12 @@
 - **解决/规避**：cmd/server 装配层临时建了个小 `site_configs` 表 + demo seed，先跑通管道。
 - **升级**：`[待 Slice 2/3]` 接 SiteConfig 模块真实 GORM repo，`/api/tenant/current` 改为 join `tenant + tenant_site_configs`；临时表届时移除。
 
+### [已解决] 前端菜单可见性必须镜像后端鉴权范围（代理自助露给了所有登录用户）
+- **现象**：「代理自助」菜单（套餐上架/推广/兑换码/我的用户/用户组 + 我的收益）对**所有登录用户**可见（前端只 gate 了"登录"）。普通用户、代理在主站/别人站点进去就撞后端 `AGENT_FORBIDDEN`「无权访问该代理资源」401。
+- **根因**：自助端点后端是 `AgentOwnerAuth`（Host 租户 owner==当前用户）守的，但**前端菜单/路由没有对应这个范围**——可见性与鉴权脱节。
+- **解决**：加只读信号 `GET /api/tenant/agent-context`(UserAuth)→`{is_agent_owner}`（直读 Host 租户 owner）；侧栏加 `agentOwnerOnly` 维度按它过滤（loading 期 fail-closed 隐藏）；自助路由加 `beforeLoad`→非 owner `redirect /403`。实测：普通用户 0 项菜单 + 直接 URL 跳 403；代理在自己站 6 项。
+- **升级**：**凡是后端按特殊范围(owner/角色/租户)守的功能，前端菜单与路由守卫必须用对应的后端信号同范围门控**，不能只判"登录"；可见性脱离鉴权 = 用户撞 403 的糟糕体验。
+
 ---
 
 ## 四、工具链与协作
