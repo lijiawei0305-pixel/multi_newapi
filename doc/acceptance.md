@@ -183,7 +183,7 @@
 #### [P1-BASE-02] 渠道池 + 真实模型价(5b)
 - **功能判据**:relay 走 new-api channels/abilities 多渠道分发(替换单一上游直连);分组倍率接 pricing。
 - **技术判据**:渠道故障转移 E2E `#8`;分组倍率经 `PricingGuard` 保护线 `#2`。
-- **关联门**:#2 #8 ｜ **状态**:🟡(**/v1 真实中继跑通**(测试栈建 codex 渠道→gpt-5.4-mini 真实应答、按租户/桶扣费、消费日志全)；建渠道正确 payload + base_url + ModelRatio 见 RETRO;**多渠道故障转移/分组倍率全量**待补)
+- **关联门**:#2 #8 ｜ **状态**:🟡(**/v1 真实中继 + 多渠道 + 故障转移 + 分组倍率全量 测试栈 E2E 全过**：2 渠道(codex/codex2)，破坏渠道1→自动重试渠道2(`use_channel=["1","2"]`)；全局档位 `{default:1,vip:0.8,svip:0.6}` + 租户覆盖(grouphook)+回退(vip 调用→无租户覆盖→全局 0.8)均作用于计费；建渠道 payload/base_url/ModelRatio/RetryTimes 见 RETRO。**剩**：渠道权重/自动禁用策略、abilities 全量、正式上游)
 
 #### [P1-BASE-03] 前端基座切换(5d)
 - **功能判据**:切 new-api 新版前端,按 [`uiux.md`](uiux.md) 加多租户换肤 + tokenplan 页。
