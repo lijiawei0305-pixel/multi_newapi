@@ -2,6 +2,7 @@ package mtwire
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -167,5 +168,56 @@ func TestResolveModelGroup2D_PanicRecover(t *testing.T) {
 	groupRatioOf = func(string) float64 { panic("boom") }
 	if r, ok := app.resolveModelGroup2D(0, "vip", "claude-kiro"); ok || r != 0 {
 		t.Fatalf("panic recover = (%v,%v), want (0,false)", r, ok)
+	}
+}
+
+// seedChannel 在 sqlite 插一条 channels 行（id,name,group）。group 为保留字，按 sqlite 双引号引用。
+func seedChannel(t *testing.T, app *App, id int64, name, group string) {
+	t.Helper()
+	if err := app.DB.Exec(`INSERT INTO channels (id, name, "group") VALUES (?, ?, ?)`, id, name, group).Error; err != nil {
+		t.Fatalf("seed channel %d: %v", id, err)
+	}
+}
+
+// TestServingChannelsByGroup 验证「服务渠道」反推：渠道↔模型分组多对一，按 channels.group（逗号分隔、含空白）归集。
+// 同时验证 channelGroupColumn 的 sqlite 引号正确（否则查询报错 → 空 map → 断言失败）。
+func TestServingChannelsByGroup(t *testing.T) {
+	ctx := context.Background()
+	app := newModelGroup2DApp(t)
+	if err := app.DB.Exec(`CREATE TABLE channels (id INTEGER PRIMARY KEY, name TEXT, "group" TEXT)`).Error; err != nil {
+		t.Fatalf("create channels: %v", err)
+	}
+	seedChannel(t, app, 1, "codex", "openai-plus")
+	seedChannel(t, app, 2, "codex2", "openai-plus,default") // 一个渠道服务多个分组
+	seedChannel(t, app, 3, "kiro", "claude-kiro")
+	seedChannel(t, app, 4, "misc", "default")                    // 不服务任何被查分组
+	seedChannel(t, app, 5, "spaced", "openai-plus, claude-kiro") // 逗号后带空格，应被 TrimSpace 命中
+
+	got := app.servingChannelsByGroup(ctx, []string{"openai-plus", "claude-kiro"})
+
+	wantOpenai := []servingChannel{{ID: 1, Name: "codex"}, {ID: 2, Name: "codex2"}, {ID: 5, Name: "spaced"}}
+	wantKiro := []servingChannel{{ID: 3, Name: "kiro"}, {ID: 5, Name: "spaced"}}
+	if !reflect.DeepEqual(got["openai-plus"], wantOpenai) {
+		t.Fatalf("openai-plus serving = %+v, want %+v", got["openai-plus"], wantOpenai)
+	}
+	if !reflect.DeepEqual(got["claude-kiro"], wantKiro) {
+		t.Fatalf("claude-kiro serving = %+v, want %+v", got["claude-kiro"], wantKiro)
+	}
+	// 未被查询的 default 不出现在结果里。
+	if _, ok := got["default"]; ok {
+		t.Fatalf("unqueried group 'default' must not appear: %+v", got)
+	}
+}
+
+// TestServingChannelsByGroup_Empty 验证无分组名 / channels 表缺失时安全给空（不 panic）。
+func TestServingChannelsByGroup_Empty(t *testing.T) {
+	ctx := context.Background()
+	app := newModelGroup2DApp(t)
+	if got := app.servingChannelsByGroup(ctx, nil); len(got) != 0 {
+		t.Fatalf("nil names = %v, want empty", got)
+	}
+	// channels 表不存在 → 查询出错 → 给空（展示字段非关键路径）。
+	if got := app.servingChannelsByGroup(ctx, []string{"openai-plus"}); len(got) != 0 {
+		t.Fatalf("missing channels table = %v, want empty", got)
 	}
 }

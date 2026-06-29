@@ -28,7 +28,6 @@ export function getModelGroupFormSchema(t: TFunction) {
   return z.object({
     name: z.string().min(1, t('Please enter a group name')),
     ratio: z.coerce.number().min(0, t('Please enter a valid ratio')),
-    channel_id: z.coerce.number().int().min(0),
     description: z.string(),
     enabled: z.boolean(),
     sort: z.coerce.number().int(),
@@ -42,7 +41,6 @@ export type ModelGroupFormValues = z.infer<
 export const MODEL_GROUP_FORM_DEFAULTS: ModelGroupFormValues = {
   name: '',
   ratio: 1,
-  channel_id: 0,
   description: '',
   enabled: true,
   sort: 0,
@@ -52,35 +50,31 @@ export function modelGroupToFormValues(g: ModelGroup): ModelGroupFormValues {
   return {
     name: g.name || '',
     ratio: Number(g.ratio ?? 1),
-    channel_id: Number(g.channel_id || 0),
     description: g.description || '',
     enabled: g.enabled ?? true,
     sort: Number(g.sort || 0),
   }
 }
 
-/** Create body — omit channel_id when none is bound (0). */
+/** Create body — channel binding is set on the channel side, not here. */
 export function formValuesToCreatePayload(
   values: ModelGroupFormValues
 ): ModelGroupPayload {
-  const channelId = Number(values.channel_id || 0)
   return {
     name: values.name.trim(),
     ratio: Number(values.ratio || 0),
-    ...(channelId > 0 ? { channel_id: channelId } : {}),
     description: values.description.trim(),
     enabled: values.enabled,
     sort: Number(values.sort || 0),
   }
 }
 
-/** Update body — name is immutable; channel_id is always sent (0 = unbind). */
+/** Update body — name is immutable; channel binding is set on the channel side. */
 export function formValuesToUpdatePayload(
   values: ModelGroupFormValues
 ): ModelGroupUpdatePayload {
   return {
     ratio: Number(values.ratio || 0),
-    channel_id: Number(values.channel_id || 0),
     description: values.description.trim(),
     enabled: values.enabled,
     sort: Number(values.sort || 0),

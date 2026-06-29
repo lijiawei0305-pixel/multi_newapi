@@ -60,28 +60,6 @@ export async function deleteModelGroup(
   return res.data
 }
 
-// ============================================================================
-// Channel dropdown — reuse the existing admin channel listing
-// (GET /api/channel/?p=0&page_size=100) and project to id + name.
-// ============================================================================
-
-/** Minimal channel shape consumed by the bound-channel dropdown. */
-export interface ChannelOption {
-  id: number
-  name: string
-}
-
-interface ChannelListResponse {
-  success: boolean
-  message?: string
-  data?: { items?: Array<{ id: number; name: string }> }
-}
-
-export async function getChannelOptions(): Promise<ChannelOption[]> {
-  const res = await api.get('/api/channel/', {
-    params: { p: 0, page_size: 100 },
-  })
-  const body = res.data as ChannelListResponse
-  const items = body?.data?.items ?? []
-  return items.map((c) => ({ id: c.id, name: c.name }))
-}
+// Note: there is no channel-binding dropdown here. Channel ↔ model-group binding
+// is configured on the channel side (a channel's "model group" field); this page
+// only displays the derived, read-only `serving_channels` list.

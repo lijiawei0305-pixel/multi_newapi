@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
+import { BadgeListCell } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import { ratioText } from '../lib'
@@ -63,20 +64,26 @@ export function useModelGroupsColumns(): ColumnDef<ModelGroup>[] {
         size: 90,
       },
       {
-        accessorFn: (row) => row.channel_name,
-        id: 'channel_name',
-        header: t('Bound Channel'),
-        cell: ({ row }) =>
-          row.original.channel_name ? (
-            <StatusBadge
-              label={row.original.channel_name}
-              variant='info'
-              copyable={false}
-            />
-          ) : (
-            <span className='text-muted-foreground'>-</span>
-          ),
-        size: 160,
+        // Read-only «Serving Channels»: all channels whose group field contains
+        // this group name (channel ↔ group is many-to-one). Binding is set on the
+        // channel side; this column is derived and never editable here.
+        accessorFn: (row) => row.serving_channels?.length ?? 0,
+        id: 'serving_channels',
+        header: t('Serving Channels'),
+        enableSorting: false,
+        cell: ({ row }) => (
+          <BadgeListCell
+            items={(row.original.serving_channels ?? []).map((c) => (
+              <StatusBadge
+                key={c.id}
+                label={c.name}
+                autoColor={c.name}
+                size='sm'
+              />
+            ))}
+          />
+        ),
+        size: 200,
       },
       {
         accessorFn: (row) => row.description,

@@ -22,13 +22,24 @@ For commercial licensing, please contact support@quantumnous.com
 //
 // A model group (e.g. claude-kiro=0.3, openai-plus=0.5) is the second
 // dimension of the 2D billing ratio: final ratio = user-tier ratio ×
-// model-group ratio. It is defined by name + ratio + an optional bound
-// upstream channel, and users may pick one when creating an API key.
+// model-group ratio. It is defined by name + ratio, and users may pick one
+// when creating an API key.
+//
+// Channel ↔ model-group is many-to-one: a group can be served by multiple
+// channels. The binding lives on the channel side (a channel's "model group"
+// field, channels.group). `serving_channels` is derived (read-only) from that
+// and shown here; it is never edited on this page.
 //
 // Backed by GET/POST/PUT/DELETE /api/admin/model-groups[/:name]. Auth is the
 // shared AdminAuth carried by new-api's axios instance (session cookie +
 // New-Api-User header), identical to every other admin page.
 // ============================================================================
+
+/** One upstream channel that serves this model group (read-only, server-derived). */
+export interface ServingChannel {
+  id: number
+  name: string
+}
 
 /** One row of the admin model-group table. */
 export interface ModelGroup {
@@ -36,10 +47,11 @@ export interface ModelGroup {
   name: string
   /** 模型分组倍率 — multiplied with the user-tier ratio (e.g. 0.3). */
   ratio: number
-  /** Bound upstream channel id; 0 / unset means no specific channel. */
-  channel_id: number
-  /** Resolved channel name for display (server-side join). */
-  channel_name: string
+  /**
+   * Channels serving this group — derived from each channel's group field
+   * (all channels whose `group` contains this group name). Read-only.
+   */
+  serving_channels: ServingChannel[]
   description: string
   enabled: boolean
   sort: number
@@ -55,11 +67,10 @@ export interface ApiResponse<T = unknown> {
   data?: T
 }
 
-/** Create body for POST /api/admin/model-groups. */
+/** Create body for POST /api/admin/model-groups. No channel binding here — it is set on the channel side. */
 export interface ModelGroupPayload {
   name: string
   ratio: number
-  channel_id?: number
   description?: string
   enabled?: boolean
   sort?: number

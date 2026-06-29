@@ -36,9 +36,11 @@ var (
 
 // ModelGroup 是模型分组登记的领域视图。注意：**不含 ratio**——倍率真源是原生 GroupRatio。
 type ModelGroup struct {
-	ID          int64
-	Name        string
-	ChannelID   *int64 // 可空：绑定的 new-api 渠道 id（channels.id）
+	ID   int64
+	Name string
+	// Deprecated: 绑定真源已迁到渠道侧（channels.group 含本分组名，多对一）。HTTP 层不再读写本字段，
+	// 「服务渠道」由 mtwire 反推。列保留以免破坏迁移；仓储仍支持读写（向后兼容）。
+	ChannelID   *int64
 	Description string
 	Enabled     bool
 	Sort        int
@@ -48,6 +50,7 @@ type ModelGroup struct {
 
 // ModelGroupUpdate 是局部更新入参（按非 nil 字段更新）。ratio 不在本表，由调用方另写 GroupRatio。
 type ModelGroupUpdate struct {
+	// Deprecated: 见 ModelGroup.ChannelID。HTTP 层不再传此字段；保留仅为向后兼容。
 	ChannelID   *int64
 	Description *string
 	Enabled     *bool
@@ -57,8 +60,9 @@ type ModelGroupUpdate struct {
 // modelGroupRow 是 model_groups 表的 GORM 模型。name 唯一；**无 ratio 列**（真源是 GroupRatio）。
 // 表名 model_groups：已 grep 确认不撞 new-api 原生 model/。
 type modelGroupRow struct {
-	ID          int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	Name        string    `gorm:"column:name;type:varchar(64);not null;uniqueIndex:idx_model_groups_name"`
+	ID   int64  `gorm:"column:id;primaryKey;autoIncrement"`
+	Name string `gorm:"column:name;type:varchar(64);not null;uniqueIndex:idx_model_groups_name"`
+	// Deprecated: 绑定迁到渠道侧（channels.group）。列保留避免破坏迁移；不再由 HTTP 层写入。
 	ChannelID   *int64    `gorm:"column:channel_id"`
 	Description string    `gorm:"column:description;type:varchar(255);not null;default:''"`
 	Enabled     bool      `gorm:"column:enabled;not null;default:true"`

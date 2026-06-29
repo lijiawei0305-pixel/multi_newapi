@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/modelgroup"
@@ -105,40 +106,46 @@ func (a *App) resolveModelGroup2D(userID int64, userGroup, usingGroup string) (r
 // 后台「模型分组管理」API（/api/admin/model-groups，AdminAuth）
 // ============================================================================
 
-// modelGroupOut 是模型分组管理列表/详情 DTO。ratio 取自当前 GetGroupRatio（真源），非本表列。
-type modelGroupOut struct {
-	ID          int64   `json:"id"`
-	Name        string  `json:"name"`
-	Ratio       float64 `json:"ratio"`
-	ChannelID   *int64  `json:"channel_id"`
-	ChannelName string  `json:"channel_name,omitempty"`
-	Description string  `json:"description"`
-	Enabled     bool    `json:"enabled"`
-	Sort        int     `json:"sort"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+// servingChannel 是「服务渠道」只读视图：某模型分组被哪个 new-api 渠道服务（id+名）。
+type servingChannel struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
-// modelGroupCreateIn 是 POST 入参。enabled 缺省 true。
+// modelGroupOut 是模型分组管理列表/详情 DTO。ratio 取自当前 GetGroupRatio（真源），非本表列。
+//
+// serving_channels：只读「服务渠道」列表，反向推导自渠道侧——所有「channels.group 含本分组名」的渠道。
+// 渠道↔模型分组是多对一（一个分组可被多个渠道服务），绑定真源在渠道的「模型分组」字段，本表不再持有 channel_id。
+type modelGroupOut struct {
+	ID              int64            `json:"id"`
+	Name            string           `json:"name"`
+	Ratio           float64          `json:"ratio"`
+	ServingChannels []servingChannel `json:"serving_channels"`
+	Description     string           `json:"description"`
+	Enabled         bool             `json:"enabled"`
+	Sort            int              `json:"sort"`
+	CreatedAt       string           `json:"created_at"`
+	UpdatedAt       string           `json:"updated_at"`
+}
+
+// modelGroupCreateIn 是 POST 入参。enabled 缺省 true。绑定不在此设——由渠道侧 channels.group 决定。
 type modelGroupCreateIn struct {
 	Name        string  `json:"name"`
 	Ratio       float64 `json:"ratio"`
-	ChannelID   *int64  `json:"channel_id"`
 	Description string  `json:"description"`
 	Enabled     *bool   `json:"enabled"`
 	Sort        int     `json:"sort"`
 }
 
-// modelGroupUpdateIn 是 PUT 局部更新入参（指针字段，仅传则改）。
+// modelGroupUpdateIn 是 PUT 局部更新入参（指针字段，仅传则改）。无 channel_id：绑定由渠道侧决定。
 type modelGroupUpdateIn struct {
 	Ratio       *float64 `json:"ratio"`
-	ChannelID   *int64   `json:"channel_id"`
 	Description *string  `json:"description"`
 	Enabled     *bool    `json:"enabled"`
 	Sort        *int     `json:"sort"`
 }
 
-// HandleAdminListModelGroups GET /api/admin/model-groups —— 列出全部模型分组（含当前倍率 + 绑定渠道）。需 AdminAuth。
+// HandleAdminListModelGroups GET /api/admin/model-groups —— 列出全部模型分组（含当前倍率 + 服务渠道）。需 AdminAuth。
 func (a *App) HandleAdminListModelGroups(c *gin.Context) {
 	ctx := reqCtx(c)
 	rows, err := a.ModelGroupRepo.List(ctx)
@@ -146,10 +153,10 @@ func (a *App) HandleAdminListModelGroups(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
-	chNames := a.channelNamesByIDs(ctx, modelGroupChannelIDs(rows))
+	serving := a.servingChannelsByGroup(ctx, modelGroupNames(rows))
 	out := make([]modelGroupOut, 0, len(rows))
 	for _, m := range rows {
-		out = append(out, toModelGroupOut(m, channelNameOf(m.ChannelID, chNames)))
+		out = append(out, toModelGroupOut(m, serving[m.Name]))
 	}
 	respondOK(c, out)
 }
@@ -176,7 +183,6 @@ func (a *App) HandleAdminCreateModelGroup(c *gin.Context) {
 	ctx := reqCtx(c)
 	mg, err := a.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{
 		Name:        name,
-		ChannelID:   in.ChannelID,
 		Description: in.Description,
 		Enabled:     enabled,
 		Sort:        in.Sort,
@@ -189,7 +195,8 @@ func (a *App) HandleAdminCreateModelGroup(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
-	respondOK(c, toModelGroupOut(*mg, ""))
+	// 新建后服务渠道由渠道侧决定（前端创建成功即刷新列表回查），响应给空列表即可。
+	respondOK(c, toModelGroupOut(*mg, nil))
 }
 
 // HandleAdminUpdateModelGroup PUT /api/admin/model-groups/:name —— 改 ratio/描述/启用/渠道/排序 + 同步真源。需 AdminAuth。
@@ -209,9 +216,8 @@ func (a *App) HandleAdminUpdateModelGroup(c *gin.Context) {
 		return
 	}
 	ctx := reqCtx(c)
-	// ① 更新 model_groups 元数据（channel/description/enabled/sort）。
+	// ① 更新 model_groups 元数据（description/enabled/sort）。绑定不在此改——由渠道侧 channels.group 决定。
 	if err := a.ModelGroupRepo.Update(ctx, name, modelgroup.ModelGroupUpdate{
-		ChannelID:   in.ChannelID,
 		Description: in.Description,
 		Enabled:     in.Enabled,
 		Sort:        in.Sort,
@@ -309,19 +315,21 @@ func (a *App) removeUserUsableGroup(name string) error {
 // 辅助
 // ============================================================================
 
-// toModelGroupOut 映射 DTO；ratio 取当前 GetGroupRatio（真源）。
-func toModelGroupOut(m modelgroup.ModelGroup, chName string) modelGroupOut {
+// toModelGroupOut 映射 DTO；ratio 取当前 GetGroupRatio（真源）。serving 为反推的服务渠道（nil→空列表，保证 JSON 出 []）。
+func toModelGroupOut(m modelgroup.ModelGroup, serving []servingChannel) modelGroupOut {
+	if serving == nil {
+		serving = []servingChannel{}
+	}
 	return modelGroupOut{
-		ID:          m.ID,
-		Name:        m.Name,
-		Ratio:       ratio_setting.GetGroupRatio(m.Name),
-		ChannelID:   m.ChannelID,
-		ChannelName: chName,
-		Description: m.Description,
-		Enabled:     m.Enabled,
-		Sort:        m.Sort,
-		CreatedAt:   isoUTC(m.CreatedAt),
-		UpdatedAt:   isoUTC(m.UpdatedAt),
+		ID:              m.ID,
+		Name:            m.Name,
+		Ratio:           ratio_setting.GetGroupRatio(m.Name),
+		ServingChannels: serving,
+		Description:     m.Description,
+		Enabled:         m.Enabled,
+		Sort:            m.Sort,
+		CreatedAt:       isoUTC(m.CreatedAt),
+		UpdatedAt:       isoUTC(m.UpdatedAt),
 	}
 }
 
@@ -337,50 +345,62 @@ func translateModelGroupErr(err error) error {
 	}
 }
 
-// modelGroupChannelIDs 提取去重后的非空 channel_id 集（供批量回查渠道名）。
-func modelGroupChannelIDs(rows []modelgroup.ModelGroup) []int64 {
-	seen := make(map[int64]struct{}, len(rows))
-	ids := make([]int64, 0, len(rows))
+// modelGroupNames 提取登记表里的全部分组名（供批量反推服务渠道）。
+func modelGroupNames(rows []modelgroup.ModelGroup) []string {
+	names := make([]string, 0, len(rows))
 	for _, m := range rows {
-		if m.ChannelID == nil {
-			continue
-		}
-		id := *m.ChannelID
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
+		names = append(names, m.Name)
 	}
-	return ids
+	return names
 }
 
-// channelNameOf 取渠道名（无绑定 / 未命中给空）。
-func channelNameOf(channelID *int64, names map[int64]string) string {
-	if channelID == nil {
-		return ""
-	}
-	return names[*channelID]
-}
-
-// channelNamesByIDs 批量回查 new-api channels 表的 id→name（只读、单次 IN，避免 N+1）。
-// 走共享 *gorm.DB 原始查询，不引入 new-api model 包耦合；失败/缺失一律给空（渠道名非关键字段）。
-func (a *App) channelNamesByIDs(ctx context.Context, ids []int64) map[int64]string {
-	out := make(map[int64]string, len(ids))
-	if len(ids) == 0 {
+// servingChannelsByGroup 反向推导每个模型分组的「服务渠道」：所有「channels.group（逗号分隔）含该分组名」的渠道。
+//
+// 绑定真源在渠道侧（渠道的「模型分组」字段 channels.group），渠道↔模型分组是多对一——一个分组可被多个渠道服务，
+// 故本表 model_groups 不再持有单一 channel_id。这里单次全量扫 channels(id,name,group) 后在内存按分组名归集
+// （渠道量级小，避免 N+1 / 每组一次 LIKE），并对每个 group 段去空白（比 MySQL FIND_IN_SET 更稳健，兼容 "a, b" 写法）。
+// 只读、失败给空（服务渠道是展示字段，非计费关键路径）。channels 表无软删列，故无需排除 deleted。
+func (a *App) servingChannelsByGroup(ctx context.Context, groupNames []string) map[string][]servingChannel {
+	out := make(map[string][]servingChannel, len(groupNames))
+	if len(groupNames) == 0 {
 		return out
 	}
-	var rows []struct {
-		ID   int64
-		Name string
+	want := make(map[string]struct{}, len(groupNames))
+	for _, n := range groupNames {
+		want[n] = struct{}{}
 	}
+	var rows []struct {
+		ID    int64
+		Name  string
+		Group string `gorm:"column:group"`
+	}
+	// SELECT id, name, `group`（group 为 SQL 保留字，按方言加引号）；按 id 升序输出稳定。
 	if err := a.DB.WithContext(ctx).
-		Table("channels").Select("id, name").
-		Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		Table("channels").
+		Select("id, name, " + channelGroupColumn(a.DB)).
+		Order("id asc").
+		Find(&rows).Error; err != nil {
 		return out
 	}
 	for _, r := range rows {
-		out[r.ID] = r.Name
+		for _, g := range strings.Split(r.Group, ",") {
+			g = strings.TrimSpace(g)
+			if g == "" {
+				continue
+			}
+			if _, ok := want[g]; ok {
+				out[g] = append(out[g], servingChannel{ID: r.ID, Name: r.Name})
+			}
+		}
 	}
 	return out
+}
+
+// channelGroupColumn 返回按数据库方言正确加引号的 channels.group 列名（group 为 SQL 保留字）。
+// 与 new-api model 包 initCol 保持一致：MySQL 用反引号、其余（sqlite/postgres）用双引号。
+func channelGroupColumn(db *gorm.DB) string {
+	if db != nil && db.Dialector != nil && db.Dialector.Name() == "mysql" {
+		return "`group`"
+	}
+	return `"group"`
 }

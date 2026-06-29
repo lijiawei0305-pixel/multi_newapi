@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useQuery } from '@tanstack/react-query'
 import { Link2, Sliders } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -34,10 +33,6 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
 import {
   Sheet,
   SheetClose,
@@ -57,7 +52,7 @@ import {
   sideDrawerHeaderClassName,
   sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
-import { createModelGroup, getChannelOptions, updateModelGroup } from '../api'
+import { createModelGroup, updateModelGroup } from '../api'
 import {
   MODEL_GROUP_FORM_DEFAULTS,
   formValuesToCreatePayload,
@@ -94,13 +89,6 @@ export function ModelGroupMutateDrawer({
   const isEdit = !!currentRow?.id
   const { triggerRefresh } = useModelGroups()
   const [isSubmitting, setIsSubmitting] = useState(false)
-
-  // Upstream channels — for the optional binding dropdown.
-  const { data: channels } = useQuery({
-    queryKey: ['admin-channels-for-model-group'],
-    queryFn: getChannelOptions,
-    enabled: open,
-  })
 
   const schema = getModelGroupFormSchema(t)
   const form = useForm<ModelGroupFormValues>({
@@ -229,38 +217,11 @@ export function ModelGroupMutateDrawer({
                 {t('Binding & Display')}
               </h3>
 
-              <FormField
-                control={form.control}
-                name='channel_id'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Bound Channel')}</FormLabel>
-                    <FormControl>
-                      <NativeSelect
-                        value={field.value ? String(field.value) : ''}
-                        onChange={(e) =>
-                          field.onChange(Number(e.target.value) || 0)
-                        }
-                      >
-                        <NativeSelectOption value=''>
-                          {t('No specific channel')}
-                        </NativeSelectOption>
-                        {(channels || []).map((c) => (
-                          <NativeSelectOption key={c.id} value={String(c.id)}>
-                            {c.name}
-                          </NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'Bind this group to a specific upstream channel (optional).'
-                      )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Binding is configured in Channel Management: put this group name into the channel Model Group field.'
                 )}
-              />
+              </p>
 
               <FormField
                 control={form.control}
