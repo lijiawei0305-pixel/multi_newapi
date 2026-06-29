@@ -501,7 +501,8 @@ type ViolationSink interface {             // 违规事件记录 + 管理端查�
 
 **两个维度**
 - **层级（tier）** = 用户的 `User.Group`（`default`/`vip`/`svip`…），**管理员或代理分配**，用户**不可自选**（沿用 [[user-usable-groups-default-only]]：UserUsableGroups 不含层级）。倍率存 new-api 原生 `GroupRatio`（default=1、vip=0.8、svip=0.6）。
-- **模型分组（model group）** = token 的组（`claude-kiro`/`openai-plus`…），= 名字+倍率+绑定渠道（new-api 原生 `channel.group` 绑定），**用户建 Key 时自选**（须在 `UserUsableGroups` 内）。倍率亦存 `GroupRatio`；用一个**模型分组登记表 `model_groups`** 标记「哪些 group 是模型分组」+ 元数据（描述/绑定渠道/启用）。
+- **模型分组（model group）** = token 的组（`claude-kiro`/`openai-plus`…），= 名字+倍率+描述，**用户建 Key 时自选**（须在 `UserUsableGroups` 内）。倍率亦存 `GroupRatio`；用一个**模型分组登记表 `model_groups`** 标记「哪些 group 是模型分组」+ 元数据（描述/启用/排序）。
+  - **渠道↔模型分组绑定是多对一，真源在渠道侧 `channel.group`**：一个模型分组可被**多个渠道**服务（凡 `channel.group` 含本分组名即服务本分组）。`model_groups` **不持有** channel 绑定（旧 `channel_id` 列已弃用、保留不写）；管理页「服务渠道」列只读，由后端 `GET /api/admin/model-groups` 反向推导 `serving_channels`（扫 `channels.group` 桶分配），绑定只在「渠道管理」给渠道的「模型分组」字段设。
 
 **核心算法**（计费单点 `relay/helper.HandleGroupRatio`，预扣+结算共用）：
 ```
