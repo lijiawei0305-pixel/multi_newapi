@@ -196,6 +196,13 @@
 - **解决**：`middleware/gzip.go` 加 `case "zstd"`（`klauspost/compress/zstd`，已是依赖，转直接）。部署后 codex 全部模型经 `/v1/responses` 实测 PONG ✅。
 - **教训**：①`invalid JSON request body` 类错误**先查 `Content-Encoding`**（gzip/br/**zstd**/deflate）——服务端是否解得了客户端的压缩方式。②抓不到包时（docker 端口转发路径），**起本地日志服务器 + 把客户端 base_url 指过去**是抓真实请求(头+体)最干净的办法。③现代客户端(codex)默认 zstd 压请求体，LLM 网关务必支持解压 zstd。
 
+### [已解决] 改模型分组名要全栈一起改（分组名=路由键），否则模型广场空
+- **现象**：在「系统设置→分组定价」把分组改名（claude-kiro→claude），模型广场里分组显示出来了但**0 个模型**。
+- **根因**：分组名是**路由键**，散落 6 处——`GroupRatio`(倍率)、`UserUsableGroups`(可选分组)、**`channels.group`(路由真源)**、`abilities`、`model_groups`、`tokens.group`。「分组定价」页**只改 GroupRatio+UserUsableGroups**，没动渠道侧 → 新名无渠道(无模型)、旧名变孤儿(不可选)。还顺带把 default/vip/svip 三个层级从 GroupRatio 删了 → 2D 层级计费废。
+- **解决**：改名要上述 **6 处一起改**（一条 SQL 事务）；层级倍率(default/vip/svip)必须留在 GroupRatio。
+- **供应商（模型广场按 OpenAI/Anthropic 分组）**：`vendors` 表存供应商(name 唯一+lobehub 图标名)，**`models` 表的 `vendor_id`** 关联模型；模型必须**登记进 models 表并设 vendor_id** 才会在广场归到供应商下（models 表空则广场无供应商分组）。
+- **升级**：①「分组定价」里只改倍率**值**是安全的；改分组**名**必须走全栈 SQL（6 处）。②删渠道前想清楚——**同上游 key 的另一渠道可直接补上同样的模型**（改 `channels.models`+`abilities`+重启），不必重加渠道/重填 key（codex刀 id1 被删后，用同 key 的 codex刀pro id2 补全了 gpt 模型）。③改库后必 `docker restart` app 重载 abilities/options/models 缓存。
+
 ---
 
 ## 四、工具链与协作
