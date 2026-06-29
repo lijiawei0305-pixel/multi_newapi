@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Children,
+  Fragment,
   isValidElement,
   useState,
   type ReactElement,
@@ -62,8 +63,14 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
   let actions: ReactNode = null
   let content: ReactNode = null
   let breadcrumb: ReactNode = null
+  // Non-slot children (e.g. page-level <Dialog>/<Sheet> overlays rendered as
+  // direct children) are rendered as-is instead of being silently dropped.
+  // These typically portal to <body>, so their position in the tree has no
+  // layout impact; dropping them was a foot-gun that left such dialogs unable
+  // to mount (their `open` state had no rendered component to drive).
+  const extras: ReactNode[] = []
 
-  Children.forEach(props.children, (node) => {
+  Children.forEach(props.children, (node, index) => {
     if (!isValidElement(node)) return
     const child = node as ReactElement<SlotProps>
     if (child.type === SectionPageLayoutTitle) title = child.props.children
@@ -73,6 +80,7 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
       content = child.props.children
     else if (child.type === SectionPageLayoutBreadcrumb)
       breadcrumb = child.props.children
+    else extras.push(<Fragment key={index}>{child}</Fragment>)
   })
 
   return (
@@ -110,6 +118,8 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
           ref={setFooterContainer}
           className='bg-background shrink-0 border-t px-3 py-2.5 empty:hidden sm:px-4 sm:py-3'
         />
+
+        {extras}
       </Main>
     </PageFooterProvider>
   )
