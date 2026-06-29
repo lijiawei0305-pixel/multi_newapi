@@ -187,7 +187,7 @@
 - **真根因**：gpt-5.5 没配 ModelRatio → new-api 转发前拦 `400 model_price_error`。**两个端点报的是同一个错**（复现确认）——与 Codex 无关。现网栈压根没 gpt-5.5 渠道，所以 Cherry"能通"是连了别的已配价模型/直连上游。
 - **解决**：经 `PUT /api/option/`（会刷内存缓存，**别直接改 DB**）合并写入 ModelRatio/CompletionRatio。
 - **计费换算（关键）**：new-api 约定 `ModelRatio=1 ↔ $2/1M`（QuotaPerUnit 默认 500000：1M tokens × ratio × groupRatio / 500000 = $）；2D 下 **groupRatio 会再乘模型价**。要让客户实付价=P（如 openai-plus 组 ×0.5、目标 gpt-5.5 输入$2/输出$12）：`ModelRatio = P_输入÷2÷groupRatio = 2÷2÷0.5 = 2`、`CompletionRatio = P_输出÷P_输入 = 12÷2 = 6`。实测扣费 $0.008954 = 图价，验证准确。
-- **升级**：①加新模型/渠道后必到「系统设置→分组与模型定价」配 ModelRatio(+CompletionRatio)，否则 `model_price_error`。②定"客户实付价"时记得**先除以该模型分组的 groupRatio**再换算 ModelRatio。③调试上游调用先复现**两个端点**对比——同错=非端点问题。
+- **升级**：①加新模型/渠道后必到「系统设置→分组与模型定价」配 ModelRatio(+CompletionRatio)，否则 `model_price_error`。②定"客户实付价"时记得**先除以该模型分组的 groupRatio**再换算 ModelRatio。③调试上游调用先复现**两个端点**对比——同错=非端点问题。④**按次价 ModelPrice 也乘 groupRatio**（price.go:136 `modelPrice×QuotaPerUnit×GroupRatio`，图像模型再乘 ImagePriceRatio）：要客户实付 $0.062/次、组×0.5 → ModelPrice=0.124。⑤**改渠道 models 别用 GET+PUT**：`GET /api/channel/:id` 不返回 key（返回空），PUT 回去会抹掉上游 key。安全做法：直接改库 `channels.models` + 删 `abilities` 对应行，再 `docker restart` app 重载路由（abilities 表才是路由真源）；改完务必复验「保留的模型仍 200 + 删掉的模型 model_not_found」。
 
 ---
 
