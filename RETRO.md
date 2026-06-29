@@ -170,6 +170,18 @@
 - **升级**：**代理 owner 自身一律 tenant_id=0（平台基准）；代理覆盖只对其名下用户生效。** 建Key下拉只列模型分组、显 2D 有效扣费倍率。
 - **坑3 · 渠道编辑「分组」字段沿用原生"用户组"语义**：原生文案"可以访问此渠道的用户组" + 下拉列**全部分组**（含层级），但 2D 下渠道分组=**模型分组**（路由用），不是用户组/层级。修（仅前端 channel-mutate-drawer）：文案改"此渠道服务的模型分组"、标签→「模型分组」；下拉数据源从 `getGroups`(全部) 换 `getModelGroups`(`GET /api/admin/model-groups`)只列已登记模型分组。**升级：凡 new-api 原生 UI 里"分组/用户组"的文案与下拉，2D 下都要审一遍——区分"层级(计费)"和"模型分组(路由)"。**（遗留：tag 批量编辑/表格筛选仍用全量分组、其它语言文案未改，属后续。）
 
+### [已解决] 弹窗打不开的真根因是「插槽式布局丢弃非slot子节点」（不是 Dialog 组件！耗了 3 次尝试）
+- **现象**：代理「设置层级」+ 提现/充值/推广渠道新建等**所有弹窗点了不打开**（无 `[role=dialog]`、无 console 报错）。误以为是 base-ui `Dialog` 组件 bug，改动画(`data-open:animate-in`→`data-starting-style`)无效、部署后仍不开。
+- **真根因**：`components/layout/components/section-page-layout.tsx` 是**插槽式复合组件**——`Children.forEach` 只渲染 `.Title/.Actions/.Content/.Breadcrumb` 这些插槽，**其它直接子节点被静默丢弃**。坏页把弹窗当 `<SectionPageLayout>` 的**裸直接子节点**渲染（与 `.Content` 平级）→ 整个弹窗子树被过滤、**从不挂载** → 受控 `open` 无组件可驱动。正确写法见 wallet(弹窗放 `</SectionPageLayout>` 外 Fragment)/tenant-plans(放 `.Content` 内)。"Sheet 能开/Dialog 不能"是巧合(能开的恰好渲染在插槽内；兑换码的 Sheet 同样被丢弃)。
+- **解决**：让 `SectionPageLayout` 把非 slot 子节点也渲染出来（收集到 `extras` 数组、`<Main>` 末尾 Fragment 渲染）。一处修复修好 4 页全部弹窗。**本地 dev+prod playwright 实测弹窗能开**后才部署。
+- **教训**：①弹窗"点了没反应、无报错" → **先查它是否被父布局/插槽组件丢弃**（DOM 里有没有挂载），别一头扎进弹窗组件本身。②难查的运行期 bug 用**本地 dev server + playwright 最小复现**对照（裸组件 vs 真实页），比纯静态分析/反复部署快得多。③我误判过一次(动画)、提交了无效 fix(0c0f0d3)——运行期问题必须运行期验证。
+
+### [已解决] LLM/Codex 大请求体 413（nginx client_max_body_size）
+- **现象**：用户在 Codex 配代理站 base_url+key 调 `/v1/responses` → `413 Request Entity Too Large`（nginx 返），账户有钱、非计费问题。
+- **根因**：nginx.conf http 级 `client_max_body_size 50m`，通配 vhost 继承；Codex 带大代码上下文/文件，请求体 >50MB（实测 60MB→413、2MB→通过）。CF 免费版上限 100MB，故落在 50–100MB。
+- **解决**：通配 + api-443 vhost **server 块内**加 `client_max_body_size 200m`（实测 60MB→401 通过）。**坑：`sed '/server_name/a'` 误匹配注释里的 "server_name" 导致重复指令 + 插到 server 块外 → nginx -t 失败**；改用精确匹配 `^[[:space:]]*server_name .*;$`（行首缩进+分号，排除注释）。仓库 `deploy/nginx/` 副本同步。
+- **升级**：LLM 网关 vhost 必设较大 `client_max_body_size`(≥CF 上限)；改 nginx 用 sed 插入务必精确匹配、避开注释，且 `nginx -t` 过了才 reload。
+
 ---
 
 ## 四、工具链与协作
