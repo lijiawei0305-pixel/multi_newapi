@@ -168,6 +168,7 @@
 - **坑2 · 代理 owner 的 tenant_id 错落注册租户（甚至别人的店）**：owner 在某租户域名下注册→`users.tenant_id` 是那家；建代理只设 `tenants.owner_user_id`，**没改 owner 自身 tenant_id**。结果 owner 自用错按那家租户的覆盖计费（agentdemo owner 落在 tokendream，自用走了 tokendream 的 0.5）。用户确认 **Option B（owner 自用按主站基准/进货价）**。修：`HandleAdminCreateAgent` 设 **owner.tenant_id=0**（+ 一次性 `UPDATE users JOIN tenants` 修存量）。效果：owner 自用走平台基准×自身层级、不受任何代理覆盖；只有其名下用户(tenant_id=该店)享代理加价。
 - **测试启示**：验代理覆盖**要用真正属于该租户的用户**（在代理域名下注册→tenant_id=该店），别用 owner 账号（owner=平台基准）。
 - **升级**：**代理 owner 自身一律 tenant_id=0（平台基准）；代理覆盖只对其名下用户生效。** 建Key下拉只列模型分组、显 2D 有效扣费倍率。
+- **坑3 · 渠道编辑「分组」字段沿用原生"用户组"语义**：原生文案"可以访问此渠道的用户组" + 下拉列**全部分组**（含层级），但 2D 下渠道分组=**模型分组**（路由用），不是用户组/层级。修（仅前端 channel-mutate-drawer）：文案改"此渠道服务的模型分组"、标签→「模型分组」；下拉数据源从 `getGroups`(全部) 换 `getModelGroups`(`GET /api/admin/model-groups`)只列已登记模型分组。**升级：凡 new-api 原生 UI 里"分组/用户组"的文案与下拉，2D 下都要审一遍——区分"层级(计费)"和"模型分组(路由)"。**（遗留：tag 批量编辑/表格筛选仍用全量分组、其它语言文案未改，属后续。）
 
 ---
 
