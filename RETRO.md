@@ -163,6 +163,12 @@
 - **关键交互（Phase 2 必处理）**：`HandleGroupRatio` 优先级 = ①租户覆盖 `TenantGroupRatioResolver`（命中即返）→ ②2D → ③原生兜底。所以**代理租户对某组的 markup 覆盖会抢在 2D 前生效**：chanuser1 在 tokendream（tenant_groups 有 default=1.5）→ default token 走 markup=1.5、claude-kiro token 走 2D=0.3（无该组覆盖）。Phase 1 此交互"覆盖优先、按组各管各"已知且可接受；**Phase 2 代理参与时要把 markup 与 2D 组合（按组合下限保护）并重定优先级**。
 - **调试坑**：① `tenant_groups` 列名是 **`group_name` 不是 `group`**（`SELECT \`group\`` 静默返空，配合 `CONCAT` 遇 NULL 返空更难发现）——查多租户分组覆盖用 `group_name` 或 `SELECT *\G`。② mtwire `New()` 预热模型分组缓存早于 `Migrate()` 建表，启动有一条 `Table doesn't exist` 报错但无害（迁移后重载）；Phase 2 可调 New/Migrate 顺序消除。
 
+### [已解决] 2D 上线后两个 UX/数据坑：建Key下拉露层级 + 代理 owner 落错租户
+- **坑1 · 建Key分组下拉露 default/vip**：`GetUserGroups`(self/groups) 默认显示**全部可用分组**（含层级 default + 用户自身 group 如 vip）+ **原生倍率**（不含租户覆盖）。2D 下用户建 Key **只该选模型分组**、且应看**实际扣费倍率**。修：新增 `grouphook.ModelGroupDropdownResolver`（mtwire 注入），`GetUserGroups` 据此**只保留模型分组**（IsModelGroup）、倍率改 **2D 有效值**（层级×模型分组覆盖）。钩子未装配则维持原生。
+- **坑2 · 代理 owner 的 tenant_id 错落注册租户（甚至别人的店）**：owner 在某租户域名下注册→`users.tenant_id` 是那家；建代理只设 `tenants.owner_user_id`，**没改 owner 自身 tenant_id**。结果 owner 自用错按那家租户的覆盖计费（agentdemo owner 落在 tokendream，自用走了 tokendream 的 0.5）。用户确认 **Option B（owner 自用按主站基准/进货价）**。修：`HandleAdminCreateAgent` 设 **owner.tenant_id=0**（+ 一次性 `UPDATE users JOIN tenants` 修存量）。效果：owner 自用走平台基准×自身层级、不受任何代理覆盖；只有其名下用户(tenant_id=该店)享代理加价。
+- **测试启示**：验代理覆盖**要用真正属于该租户的用户**（在代理域名下注册→tenant_id=该店），别用 owner 账号（owner=平台基准）。
+- **升级**：**代理 owner 自身一律 tenant_id=0（平台基准）；代理覆盖只对其名下用户生效。** 建Key下拉只列模型分组、显 2D 有效扣费倍率。
+
 ---
 
 ## 四、工具链与协作
