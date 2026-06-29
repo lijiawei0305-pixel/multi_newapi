@@ -189,6 +189,13 @@
 - **计费换算（关键）**：new-api 约定 `ModelRatio=1 ↔ $2/1M`（QuotaPerUnit 默认 500000：1M tokens × ratio × groupRatio / 500000 = $）；2D 下 **groupRatio 会再乘模型价**。要让客户实付价=P（如 openai-plus 组 ×0.5、目标 gpt-5.5 输入$2/输出$12）：`ModelRatio = P_输入÷2÷groupRatio = 2÷2÷0.5 = 2`、`CompletionRatio = P_输出÷P_输入 = 12÷2 = 6`。实测扣费 $0.008954 = 图价，验证准确。
 - **升级**：①加新模型/渠道后必到「系统设置→分组与模型定价」配 ModelRatio(+CompletionRatio)，否则 `model_price_error`。②定"客户实付价"时记得**先除以该模型分组的 groupRatio**再换算 ModelRatio。③调试上游调用先复现**两个端点**对比——同错=非端点问题。④**按次价 ModelPrice 也乘 groupRatio**（price.go:136 `modelPrice×QuotaPerUnit×GroupRatio`，图像模型再乘 ImagePriceRatio）：要客户实付 $0.062/次、组×0.5 → ModelPrice=0.124。⑤**改渠道 models 别用 GET+PUT**：`GET /api/channel/:id` 不返回 key（返回空），PUT 回去会抹掉上游 key。安全做法：直接改库 `channels.models` + 删 `abilities` 对应行，再 `docker restart` app 重载路由（abilities 表才是路由真源）；改完务必复验「保留的模型仍 200 + 删掉的模型 model_not_found」。
 
+### [已解决] codex 用 zstd 压缩请求体 → new-api 不解 → `invalid JSON request body`（挖了很久）
+- **现象**：codex 调任何模型都 `400 Invalid request: invalid JSON request body`（`middleware/distributor.go:217` 的 `gjson.ValidBytes` 失败），但我直接 curl 简单 body 200、Cherry 也"能用"。
+- **逐步排除**：不是大小（直连 50KB→200、200KB 是上游慢超时非解析错）、不是 gzip（gzip body 直连→200，说明 new-api 本就解 gzip）、不是 nginx（仿造 codex 式 body 经 nginx→200）。
+- **真根因（靠本地抓包确认）**：起本地 HTTP 日志服务器、把 codex `base_url` 临时指过去，抓到 codex 请求头 **`Content-Encoding: zstd`**——codex 用 **zstd** 压缩请求体。`middleware/gzip.go` 的 `DecompressRequestMiddleware` 只解 `gzip`/`br`、**没有 zstd 分支** → 分发层读到原始 zstd 字节 → `gjson.ValidBytes` 失败。CF/nginx 不解请求体 zstd。
+- **解决**：`middleware/gzip.go` 加 `case "zstd"`（`klauspost/compress/zstd`，已是依赖，转直接）。部署后 codex 全部模型经 `/v1/responses` 实测 PONG ✅。
+- **教训**：①`invalid JSON request body` 类错误**先查 `Content-Encoding`**（gzip/br/**zstd**/deflate）——服务端是否解得了客户端的压缩方式。②抓不到包时（docker 端口转发路径），**起本地日志服务器 + 把客户端 base_url 指过去**是抓真实请求(头+体)最干净的办法。③现代客户端(codex)默认 zstd 压请求体，LLM 网关务必支持解压 zstd。
+
 ---
 
 ## 四、工具链与协作
