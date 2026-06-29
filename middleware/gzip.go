@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/andybalholm/brotli"
 	"github.com/gin-gonic/gin"
+	"github.com/klauspost/compress/zstd"
 )
 
 type readCloser struct {
@@ -52,6 +53,22 @@ func DecompressRequestMiddleware() gin.HandlerFunc {
 				Reader: gzipReader,
 				closeFn: func() error {
 					_ = gzipReader.Close()
+					return origBody.Close()
+				},
+			})
+			c.Request.Header.Del("Content-Encoding")
+		case "zstd":
+			// codex/部分客户端用 zstd 压缩请求体；new-api 需解压，否则分发层 gjson 校验失败报 "invalid JSON request body"。
+			zstdReader, err := zstd.NewReader(origBody)
+			if err != nil {
+				_ = origBody.Close()
+				c.AbortWithStatus(http.StatusBadRequest)
+				return
+			}
+			c.Request.Body = wrapMaxBytes(&readCloser{
+				Reader: zstdReader,
+				closeFn: func() error {
+					zstdReader.Close()
 					return origBody.Close()
 				},
 			})
