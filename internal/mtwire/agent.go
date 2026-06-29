@@ -462,6 +462,13 @@ func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
+	// owner 自身落「主站基准」(tenant_id=0)：代理 owner 自用按进货价/平台基准，**不落任何代理店**
+	// （他设的模型分组加价只对其名下用户生效；见 doc/detailed-design.md §2.15，用户确认 Option B）。
+	// 否则 owner 若仍带注册时的 tenant_id（甚至别人的店），自用会错按那家的覆盖计费。
+	if err := a.DB.WithContext(ctx).Table("users").Where("id = ?", in.OwnerUserID).Update("tenant_id", 0).Error; err != nil {
+		respondErr(c, err)
+		return
+	}
 	if err := a.AgentService.SetAgentType(ctx, t.ID, at, params); err != nil {
 		respondErr(c, err)
 		return
