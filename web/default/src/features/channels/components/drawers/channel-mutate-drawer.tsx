@@ -125,7 +125,7 @@ import {
   getAllModels,
   getChannel,
   getChannelKey,
-  getGroups,
+  getModelGroups,
   getPrefillGroups,
   refreshCodexCredential,
 } from '../../api'
@@ -529,10 +529,12 @@ export function ChannelMutateDrawer({
     enabled: isEditing && Boolean(channelId),
   })
 
-  // Fetch available groups
-  const { data: groupsData, isLoading: isLoadingGroups } = useQuery({
-    queryKey: ['groups'],
-    queryFn: getGroups,
+  // Fetch registered model groups. The channel "Model Group" field is scoped
+  // to these (the model set this channel serves / routes to); user tiers like
+  // default/vip/svip are intentionally excluded so they can't be selected here.
+  const { data: modelGroupsData, isLoading: isLoadingGroups } = useQuery({
+    queryKey: ['admin-model-groups'],
+    queryFn: getModelGroups,
   })
 
   // Fetch all available models
@@ -660,15 +662,18 @@ export function ChannelMutateDrawer({
     [prefillGroupsData]
   )
 
-  // Transform groups to multi-select options
+  // Transform enabled model groups to multi-select options. Only registered,
+  // enabled model groups are offered; already-selected values (e.g. legacy
+  // tier groups) still render as removable chips via MultiSelect's fallback.
   const groupOptions = useMemo(() => {
-    if (!groupsData?.data) return []
-    const allGroups = new Set([...groupsData.data, ...(currentGroups || [])])
-    return [...allGroups].map((group) => ({
+    const names = (modelGroupsData?.data ?? [])
+      .filter((group) => group.enabled)
+      .map((group) => group.name)
+    return [...new Set(names)].map((group) => ({
       value: group,
       label: group,
     }))
-  }, [groupsData, currentGroups])
+  }, [modelGroupsData])
 
   // Parse current models as array
   const currentModelsArray = useMemo(
@@ -3058,7 +3063,7 @@ export function ChannelMutateDrawer({
                               render={({ field }) => (
                                 <FormItem className='space-y-3'>
                                   <div className='space-y-1'>
-                                    <FormLabel>{t('Groups *')}</FormLabel>
+                                    <FormLabel>{t('Model Group')} *</FormLabel>
                                     <FormDescription>
                                       {t(FIELD_DESCRIPTIONS.GROUP)}
                                     </FormDescription>

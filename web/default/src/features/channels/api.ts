@@ -619,9 +619,20 @@ export async function getOllamaVersion(
 // ============================================================================
 
 /**
- * Get all available groups (re-exported from users API for convenience)
+ * Get all available groups (re-exported from users API for convenience).
+ * NOTE: this returns ALL billing groups, including user tiers
+ * (default/vip/svip). For the channel "Model Group" field use
+ * {@link getModelGroups} instead, which is scoped to routing model groups.
  */
 export const getGroups = getUserGroups
+
+/**
+ * Get registered model groups (admin: GET /api/admin/model-groups).
+ * Re-exported from the model-groups feature so the channel editor can scope
+ * its group field to model groups that actually route traffic, excluding
+ * user tiers (default/vip/svip).
+ */
+export { getModelGroups } from '@/features/model-groups/api'
 
 // ============================================================================
 // Prefill Groups (Model Groups)
