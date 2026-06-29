@@ -44,6 +44,27 @@ var groupRatioOf = ratio_setting.GetGroupRatio
 // 由 SetMtRouter 在所有节点调用一次；未调用（如单测）时钩子为 nil，计费侧全程走原生倍率。
 func (a *App) InstallModelGroup2DHook() {
 	grouphook.ModelGroup2DResolver = a.resolveModelGroup2D
+	grouphook.ModelGroupDropdownResolver = a.resolveModelGroupDropdown
+}
+
+// resolveModelGroupDropdown 是 grouphook.ModelGroupDropdownResolver 实现：仅「已登记模型分组」返
+// (2D 有效扣费倍率, true)，否则 (0, false)。建 Key 下拉据此**只显示模型分组**（排除层级/default），
+// 倍率为含代理租户覆盖的实际扣费值（= resolveModelGroup2D 的 层级×模型分组覆盖）。panic→(0,false)。
+func (a *App) resolveModelGroupDropdown(userID int64, userGroup, group string) (ratio float64, isModelGroup bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			common.SysError("mtwire: resolveModelGroupDropdown panic recovered")
+			ratio, isModelGroup = 0, false
+		}
+	}()
+	if a.ModelGroupRepo == nil || group == "" || !a.ModelGroupRepo.IsModelGroup(group) {
+		return 0, false
+	}
+	eff, ok := a.resolveModelGroup2D(userID, userGroup, group)
+	if !ok {
+		return 0, false
+	}
+	return eff, true
 }
 
 // resolveModelGroup2D 是 grouphook.ModelGroup2DResolver 实现（含代理 per-tenant 覆盖）：

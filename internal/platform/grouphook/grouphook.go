@@ -30,3 +30,10 @@ package grouphook
 // 校验在写入端（代理「我的用户组」端点）完成。本解析点同时供「预扣」与「结算」复用（覆盖一处即两端一致）。
 // 安全第一：实现侧自身兜底 panic，miss/错误一律回退，绝不阻断或破坏计费。
 var ModelGroup2DResolver func(userID int64, userGroup, usingGroup string) (float64, bool)
+
+// ModelGroupDropdownResolver —— 建 Key「可选分组下拉」用（controller.GetUserGroups）。
+// 返回 (该分组对该用户的 2D 有效扣费倍率, 是否模型分组)。isModelGroup=false 表示是层级/default
+// 等「非模型分组」，调用方应从下拉中**排除**（用户建 Key 只选模型分组；层级由管理员/代理分配，不可自选）。
+// 倍率为 2D 有效值（含代理 per-tenant 覆盖）= 该用户该分组的实际扣费倍率（层级 × 模型分组覆盖）。
+// nil（未装配）：调用方维持原生行为（显示全部可用分组 + 原生倍率）。
+var ModelGroupDropdownResolver func(userID int64, userGroup, group string) (ratio float64, isModelGroup bool)
