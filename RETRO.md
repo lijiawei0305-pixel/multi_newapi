@@ -182,6 +182,13 @@
 - **解决**：通配 + api-443 vhost **server 块内**加 `client_max_body_size 200m`（实测 60MB→401 通过）。**坑：`sed '/server_name/a'` 误匹配注释里的 "server_name" 导致重复指令 + 插到 server 块外 → nginx -t 失败**；改用精确匹配 `^[[:space:]]*server_name .*;$`（行首缩进+分号，排除注释）。仓库 `deploy/nginx/` 副本同步。
 - **升级**：LLM 网关 vhost 必设较大 `client_max_body_size`(≥CF 上限)；改 nginx 用 sed 插入务必精确匹配、避开注释，且 `nginx -t` 过了才 reload。
 
+### [已解决] 新模型没配价 → `model_price_error`（与端点/Codex 无关）
+- **现象**：Codex(`/v1/responses`) 调 gpt-5.5 失败，user 以为是端点/Codex 问题、以为 Cherry(`/v1/chat/completions`) 能通是端点差异。
+- **真根因**：gpt-5.5 没配 ModelRatio → new-api 转发前拦 `400 model_price_error`。**两个端点报的是同一个错**（复现确认）——与 Codex 无关。现网栈压根没 gpt-5.5 渠道，所以 Cherry"能通"是连了别的已配价模型/直连上游。
+- **解决**：经 `PUT /api/option/`（会刷内存缓存，**别直接改 DB**）合并写入 ModelRatio/CompletionRatio。
+- **计费换算（关键）**：new-api 约定 `ModelRatio=1 ↔ $2/1M`（QuotaPerUnit 默认 500000：1M tokens × ratio × groupRatio / 500000 = $）；2D 下 **groupRatio 会再乘模型价**。要让客户实付价=P（如 openai-plus 组 ×0.5、目标 gpt-5.5 输入$2/输出$12）：`ModelRatio = P_输入÷2÷groupRatio = 2÷2÷0.5 = 2`、`CompletionRatio = P_输出÷P_输入 = 12÷2 = 6`。实测扣费 $0.008954 = 图价，验证准确。
+- **升级**：①加新模型/渠道后必到「系统设置→分组与模型定价」配 ModelRatio(+CompletionRatio)，否则 `model_price_error`。②定"客户实付价"时记得**先除以该模型分组的 groupRatio**再换算 ModelRatio。③调试上游调用先复现**两个端点**对比——同错=非端点问题。
+
 ---
 
 ## 四、工具链与协作
