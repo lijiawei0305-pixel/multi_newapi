@@ -143,7 +143,8 @@ export function RechargeFormCard({
   // channel is enabled under the WeChat/Alipay tabs. The recharge methods
   // endpoint returns exactly the enabled && configured set — no PayMethods entry
   // required. The parent owns this one fetch and hands it to TenantRechargeCard.
-  const { methods: configuredOfficial } = useRechargeMethods()
+  const { methods: configuredOfficial, loading: officialLoading } =
+    useRechargeMethods()
   const officialProviders = useMemo<RechargeProvider[]>(
     () => configuredOfficial ?? [],
     [configuredOfficial]
@@ -409,7 +410,9 @@ export function RechargeFormCard({
                       )
                     })}
                   </div>
-                ) : hasWaffoPaymentMethods || hasOfficialPaymentMethods ? null : (
+                ) : hasWaffoPaymentMethods ||
+                  hasOfficialPaymentMethods ||
+                  officialLoading ? null : (
                   <Alert>
                     <AlertDescription>
                       {t(

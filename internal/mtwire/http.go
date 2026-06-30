@@ -175,6 +175,12 @@ func (a *App) HandlePurchase(c *gin.Context) {
 	}
 
 	ctx := reqCtx(c)
+	// 与充值入口（HandleWalletRecharge）对齐：下单前先校验该渠道 enabled && configured，
+	// 未配置直接返回 PROVIDER_DISABLED，避免先落库再到 CreatePay 失败、遗留孤儿 SUB 订单。
+	if err := a.ensureProviderUsable(ctx, provider); err != nil {
+		respondErr(c, err)
+		return
+	}
 	ticket, err := a.Subscriptions.Purchase(ctx, tokenplan.PurchaseInput{
 		TenantID:   t.ID,
 		UserID:     int64(c.GetInt("id")),
