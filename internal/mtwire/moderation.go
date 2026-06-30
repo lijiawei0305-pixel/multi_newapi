@@ -67,19 +67,21 @@ func extractUserMessages(request dto.Request) []moderation.Message {
 }
 
 func userMessagesFromChat(messages []dto.Message) []moderation.Message {
-	var out []moderation.Message
-	for i := range messages {
-		m := messages[i]
-		if m.Role != "user" {
+	// 只扫「最后一条用户消息」（本轮新输入）：多轮对话每次重发全部历史，历史消息已在各自轮次
+	// 扫过；再整段扫会因旧消息里的违禁词反复误拦本轮无辜输入（如打"你好"却命中历史里的旧词）。
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role != "user" {
 			continue
 		}
-		for _, mc := range m.ParseContent() {
+		var out []moderation.Message
+		for _, mc := range messages[i].ParseContent() {
 			if mc.Type == dto.ContentTypeText && strings.TrimSpace(mc.Text) != "" {
 				out = append(out, moderation.Message{Role: "user", Text: mc.Text})
 			}
 		}
+		return out
 	}
-	return out
+	return nil
 }
 
 // userMessagesFromResponsesInput 解析 /responses 的 input（json.RawMessage）：
@@ -102,18 +104,20 @@ func userMessagesFromResponsesInput(input json.RawMessage) []moderation.Message 
 	if json.Unmarshal(input, &items) != nil {
 		return nil
 	}
-	var out []moderation.Message
-	for _, it := range items {
-		if it.Role != "user" {
+	// 只扫最后一条 role=="user" 项（本轮新输入），不重扫历史（理由同 userMessagesFromChat）。
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Role != "user" {
 			continue
 		}
-		for _, t := range responsesContentTexts(it.Content) {
+		var out []moderation.Message
+		for _, t := range responsesContentTexts(items[i].Content) {
 			if strings.TrimSpace(t) != "" {
 				out = append(out, moderation.Message{Role: "user", Text: t})
 			}
 		}
+		return out
 	}
-	return out
+	return nil
 }
 
 func responsesContentTexts(raw json.RawMessage) []string {
