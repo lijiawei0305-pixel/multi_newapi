@@ -94,6 +94,7 @@ func (a *App) InstallHooks() {
 	agenthook.AttributeRegistration = a.attributeRegistration
 	a.InstallModelGroup2DHook()
 	agenthook.ScanUserInput = a.scanUserInputHook // 6e 违禁词：/v1 转发前扫描用户输入
+	agenthook.CheckCall = a.checkCallHook         // 7c 风控：/v1 转发前 RPM 限流 + 租户状态
 }
 
 // attributeRegistration 是 agenthook.AttributeRegistration 实现：把新用户归属到对应代理（租户）。

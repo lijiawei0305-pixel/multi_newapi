@@ -17,6 +17,8 @@ services:
       SESSION_SECRET: "${SESSION_SECRET:-4329de40911e7a8bd58004757bfb8c976d72579113fdd7ba}"
       TZ: "Asia/Shanghai"
       PORT: "3000"
+      # —— 7c 多档风控：调用前 RPM 限流默认阈值（每分钟每用户，0=关闭）。压测后设 60=合理常用值（≈1 req/s/用户）。——
+      RISK_DEFAULT_RPM: "60"
       # —— 上游渠道凭据：仅引用服务器 .env 的同名变量，值不入库（compose 自动插值），供后续 relay 自测（5b）用 ——
       UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL}"
       UPSTREAM_API_KEY: "${UPSTREAM_API_KEY}"

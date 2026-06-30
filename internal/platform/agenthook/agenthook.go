@@ -31,3 +31,9 @@ var AttributeRegistration func(ctx context.Context, host, channelCode string, us
 // 命中 block 级 → 返回非 nil 错误（原生 relay 据此拦截返回）；remind 级 → 返回 nil（实现侧已记录违规）。
 // 实现内部自身兜底 panic/error，扫描/记录失败绝不阻断请求。nil = 未装配。
 var ScanUserInput func(ctx context.Context, userID, tokenID int64, model string, request dto.Request) *types.NewAPIError
+
+// CheckCall 在 /v1 转发前被调用，做「调用前风控」（7c，§2.13）：RPM 限流 / IP allowlist / 主体状态。
+// 命中 → 返回非 nil（原生 relay 据此拦截，429 限流 / 403 IP·状态）；放行 → 返回 nil。
+// clientIP/requestID 由 relay 从 gin 上下文取出后传入（本包不 import gin，保持原生依赖洁净）。
+// best-effort：实现内部兜底 panic/error，绝不误杀正常请求。nil = 未装配。
+var CheckCall func(ctx context.Context, userID, tokenID int64, model, clientIP, requestID string) *types.NewAPIError

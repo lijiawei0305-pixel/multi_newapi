@@ -143,6 +143,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}
 
+	// 多租户调用前风控（7c · §2.13）：转发前 RPM 限流（+ 租户状态）。命中拦截（429 限流 / 403 IP·状态）。nil = 未装配。
+	if agenthook.CheckCall != nil {
+		if e := agenthook.CheckCall(c, int64(c.GetInt("id")), int64(c.GetInt("token_id")), relayInfo.OriginModelName, c.ClientIP(), ""); e != nil {
+			newAPIError = e
+			return
+		}
+	}
+
 	// 多租户违禁词审核（6e · §2.14）：转发前扫用户输入；命中 block 拦截、remind 仅记录。nil = 未装配。
 	if agenthook.ScanUserInput != nil {
 		if e := agenthook.ScanUserInput(c, int64(c.GetInt("id")), int64(c.GetInt("token_id")), relayInfo.OriginModelName, request); e != nil {

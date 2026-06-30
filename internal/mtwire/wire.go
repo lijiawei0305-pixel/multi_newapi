@@ -18,6 +18,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agent"
 	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
 	"github.com/QuantumNous/new-api/internal/modelgroup"
@@ -28,6 +29,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/pricing"
 	"github.com/QuantumNous/new-api/internal/promotion"
 	promotionrepo "github.com/QuantumNous/new-api/internal/promotion/gormrepo"
+	"github.com/QuantumNous/new-api/internal/risk"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
@@ -74,6 +76,11 @@ type App struct {
 	ModerationRepo *moderationrepo.Repo
 	Moderator      moderation.Moderator
 
+	// --- risk 模块（多档风控，7c · §2.13）---
+	// RiskEngine 调用前风控（本轮 RPM 限流 + 租户状态），由 checkCallHook 经 agenthook.CheckCall 在 /v1 调用。
+	// nil = Redis 未启用 → 风控旁路（CheckCall 直接放行，限流需共享计数）。
+	RiskEngine risk.RiskEngine
+
 	// --- payment/recharge 模块（目标③）---
 	// RechargeGateway 下单（落库 RCG 订单 + 调 auth-service）与内网入账（强幂等状态机）。
 	RechargeGateway *payment.Gateway
@@ -116,6 +123,17 @@ func New(db *gorm.DB) *App {
 	// moderation（6e）：违禁词仓储（2 表）+ 服务（AC 匹配 + 租户合并）。
 	modRepo := moderationrepo.New(db)
 	moderator := moderation.NewService(modRepo, moderation.NewMatcher())
+
+	// risk（7c）：调用前风控引擎。RPM 固定窗口限流需共享计数 → 仅 Redis 启用时装配；
+	// 否则置 nil（checkCallHook 旁路放行）。RPM 默认阈值来自 env RISK_DEFAULT_RPM（0=不限）。
+	var riskEngine risk.RiskEngine
+	if common.RedisEnabled && common.RDB != nil {
+		riskEngine = risk.NewEngine(
+			risk.NewRedisKVCache(common.RDB),
+			risk.WithStatusChecker(tenantStatusChecker{db: db}),
+			risk.WithConfig(risk.Config{DefaultRPM: common.GetEnvOrDefault("RISK_DEFAULT_RPM", 0)}),
+		)
+	}
 
 	// tokenplan：GORM 仓储（同时满足 PlanRepo + SubscriptionRepo）+ 纯函数成本守卫。
 	tp := tprepo.New(db)
@@ -161,6 +179,7 @@ func New(db *gorm.DB) *App {
 		ModelGroupRepo:  mgRepo,
 		ModerationRepo:  modRepo,
 		Moderator:       moderator,
+		RiskEngine:      riskEngine,
 		RechargeGateway: rechargeGateway,
 		rechargeCfg:     rechargeCfg,
 		authClient:      authClient, // 复用同一客户端供 tokenplan 购买（SUB）下单
