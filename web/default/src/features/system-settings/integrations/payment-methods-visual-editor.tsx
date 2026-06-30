@@ -45,9 +45,11 @@ type PaymentMethodsVisualEditorProps = {
 
 const PAYMENT_TYPE_ICON_NAMES: Record<string, string> = {
   alipay: 'SiAlipay',
+  alipay_official: 'SiAlipay',
   stripe: 'SiStripe',
   waffo_pancake: 'LuCreditCard',
   wxpay: 'SiWechat',
+  wxpay_official: 'SiWechat',
 }
 
 function getDefaultIconName(type: string) {

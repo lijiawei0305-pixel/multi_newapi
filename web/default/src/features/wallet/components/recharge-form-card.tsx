@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Gift, ExternalLink, Loader2, Receipt, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatNumber } from '@/lib/format'
@@ -50,6 +50,17 @@ import type {
 } from '../types'
 import { CreemProductsSection } from './creem-products-section'
 import { TenantRechargeCard } from './tenant-recharge-card'
+import type { RechargeProvider } from '../hooks/use-tenant-recharge'
+
+/**
+ * PayMethods `type` keys that route to the official in-process WeChat/Alipay
+ * SDK flow (handled by TenantRechargeCard) instead of the Epay form. Distinct
+ * from Epay's own `wxpay` / `alipay` so the two never collide.
+ */
+const OFFICIAL_TYPE_TO_PROVIDER: Record<string, RechargeProvider> = {
+  wxpay_official: 'wxpay',
+  alipay_official: 'alipay',
+}
 
 interface RechargeFormCardProps {
   topupInfo: TopupInfo | null
@@ -125,14 +136,35 @@ export function RechargeFormCard({
     }
   }
 
+  // Official WeChat/Alipay entries the admin added as PayMethods (distinct
+  // types). They route to the in-process SDK flow via TenantRechargeCard, so
+  // they're surfaced there and excluded from the Epay button grid below.
+  const officialProviders = useMemo<RechargeProvider[]>(() => {
+    const methods = topupInfo?.pay_methods
+    if (!Array.isArray(methods)) return []
+    const seen = new Set<RechargeProvider>()
+    for (const m of methods) {
+      const provider = OFFICIAL_TYPE_TO_PROVIDER[m.type]
+      if (provider) seen.add(provider)
+    }
+    return [...seen]
+  }, [topupInfo?.pay_methods])
+
+  // Epay/standard PayMethods = everything that is NOT an official-SDK type.
+  const epayPayMethods = useMemo<PaymentMethod[]>(() => {
+    const methods = topupInfo?.pay_methods
+    if (!Array.isArray(methods)) return []
+    return methods.filter((m) => !OFFICIAL_TYPE_TO_PROVIDER[m.type])
+  }, [topupInfo?.pay_methods])
+
   const hasConfigurableTopup =
     topupInfo?.enable_online_topup ||
     topupInfo?.enable_stripe_topup ||
     enableWaffoTopup ||
     enableWaffoPancakeTopup
   const hasAnyTopup = hasConfigurableTopup || enableCreemTopup
-  const hasStandardPaymentMethods =
-    Array.isArray(topupInfo?.pay_methods) && topupInfo.pay_methods.length > 0
+  const hasStandardPaymentMethods = epayPayMethods.length > 0
+  const hasOfficialPaymentMethods = officialProviders.length > 0
   const hasWaffoPaymentMethods =
     Array.isArray(waffoPayMethods) && waffoPayMethods.length > 0
   const minTopup = getMinTopupAmount(topupInfo)
@@ -208,8 +240,10 @@ export function RechargeFormCard({
       }
       contentClassName='space-y-4 sm:space-y-6'
     >
-      {/* Tenant recharge (WeChat / Alipay via auth-service) — credits native quota. */}
-      <TenantRechargeCard />
+      {/* Official WeChat / Alipay (in-process real SDK) — credits native quota.
+          Shown only for providers the admin surfaced as PayMethods entries
+          (wxpay_official / alipay_official) and that are enabled && configured. */}
+      <TenantRechargeCard allowedProviders={officialProviders} />
 
       {/* Online Topup Section */}
       {hasAnyTopup ? (
@@ -314,7 +348,7 @@ export function RechargeFormCard({
                 </Label>
                 {hasStandardPaymentMethods ? (
                   <div className='grid grid-cols-2 gap-1.5 sm:gap-3 lg:grid-cols-3'>
-                    {topupInfo?.pay_methods?.map((method) => {
+                    {epayPayMethods.map((method) => {
                       const minTopup = method.min_topup || 0
                       const disabled = minTopup > topupAmount
                       const disabledReason = disabled
@@ -375,7 +409,7 @@ export function RechargeFormCard({
                       )
                     })}
                   </div>
-                ) : hasWaffoPaymentMethods ? null : (
+                ) : hasWaffoPaymentMethods || hasOfficialPaymentMethods ? null : (
                   <Alert>
                     <AlertDescription>
                       {t(

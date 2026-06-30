@@ -60,7 +60,9 @@ export function getStatusConfig(status: TopupStatus): StatusConfig {
 export const PAYMENT_METHOD_NAMES: Record<string, string> = {
   stripe: 'Stripe',
   alipay: 'Alipay',
+  alipay_official: 'Official Alipay',
   wxpay: 'WeChat Pay',
+  wxpay_official: 'Official WeChat Pay',
   waffo: 'Waffo',
 }
 

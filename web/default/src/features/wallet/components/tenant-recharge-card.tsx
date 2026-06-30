@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -32,31 +32,58 @@ import {
 import { useRechargeMethods } from '../hooks/use-recharge-methods'
 import { RechargeQrDialog } from './dialogs/recharge-qr-dialog'
 
+type TenantRechargeCardProps = {
+  /**
+   * Official providers the admin surfaced as buyer payment methods, derived
+   * from PayMethods entries of type `wxpay_official` / `alipay_official`. When
+   * provided, the card shows only these intersected with the enabled &&
+   * configured set from the methods endpoint. When omitted, every configured
+   * channel shows (kept for backward compatibility / standalone use).
+   */
+  allowedProviders?: RechargeProvider[]
+}
+
 /**
- * TenantRechargeCard is the multi-tenant recharge section (WeChat / Alipay).
+ * TenantRechargeCard is the multi-tenant recharge section (official WeChat /
+ * Alipay, in-process real SDK).
  *
  * Amount is in USD ($1 minimum, credited as native quota at $1 = 500k). WeChat
- * shows a QR modal; Alipay redirects. Distinct from the native epay/Stripe flow
- * — it calls POST /api/tenant/wallet/recharge and settles via the auth-service.
+ * shows a QR modal; Alipay redirects. Distinct from the Epay/Stripe flow — it
+ * calls POST /api/tenant/wallet/recharge and settles in-process via the real
+ * WeChat/Alipay SDK (notify verify / active query).
  */
-export function TenantRechargeCard() {
+export function TenantRechargeCard({
+  allowedProviders,
+}: TenantRechargeCardProps = {}) {
   const { t } = useTranslation()
   const [amount, setAmount] = useState<string>(String(MIN_RECHARGE_USD))
   const [provider, setProvider] = useState<RechargeProvider>('wxpay')
   const { submitting, qrState, submit, closeQr } = useTenantRecharge()
   const { methods } = useRechargeMethods()
 
+  // Visible = configured (methods endpoint) ∩ admin-surfaced (allowedProviders).
+  const available = useMemo(
+    () =>
+      methods === null
+        ? null
+        : methods.filter(
+            (m) =>
+              allowedProviders === undefined || allowedProviders.includes(m)
+          ),
+    [methods, allowedProviders]
+  )
+
   // Keep the selected provider within the available set (default = first).
   useEffect(() => {
-    if (methods && methods.length > 0 && !methods.includes(provider)) {
-      setProvider(methods[0])
+    if (available && available.length > 0 && !available.includes(provider)) {
+      setProvider(available[0])
     }
-  }, [methods, provider])
+  }, [available, provider])
 
   // Wait until availability is known to avoid a flash of all buttons.
-  if (methods === null) return null
-  // No enabled && configured channel → hide the whole card.
-  if (methods.length === 0) return null
+  if (available === null) return null
+  // No enabled && configured (and admin-surfaced) channel → hide the whole card.
+  if (available.length === 0) return null
 
   const amountNum = parseFloat(amount) || 0
   const belowMin = amountNum < MIN_RECHARGE_USD
@@ -110,8 +137,10 @@ export function TenantRechargeCard() {
       </div>
 
       <div className='flex gap-2'>
-        {methods.includes('wxpay') && providerButton('wxpay', t('WeChat Pay'))}
-        {methods.includes('alipay') && providerButton('alipay', t('Alipay'))}
+        {available.includes('wxpay') &&
+          providerButton('wxpay', t('WeChat Pay'))}
+        {available.includes('alipay') &&
+          providerButton('alipay', t('Alipay'))}
       </div>
 
       <Button

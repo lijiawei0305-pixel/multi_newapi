@@ -96,14 +96,18 @@ export function getPaymentIcon(
   }
 
   switch (paymentType) {
+    // alipay_official = official in-process Alipay SDK flow (vs Epay alipay).
     case PAYMENT_TYPES.ALIPAY:
+    case 'alipay_official':
       return (
         <SiAlipay
           className={className}
           style={{ color: PAYMENT_ICON_COLORS[PAYMENT_TYPES.ALIPAY] }}
         />
       )
+    // wxpay_official = official in-process WeChat SDK flow (vs Epay wxpay).
     case PAYMENT_TYPES.WECHAT:
+    case 'wxpay_official':
       return (
         <SiWechat
           className={className}
