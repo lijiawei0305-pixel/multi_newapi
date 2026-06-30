@@ -47,7 +47,7 @@
 > - **UI**（web/default）：管理「子代理管理」`/agents` + 「提现审核」`/withdrawals`；代理「我的收益」`/agent-earnings`。
 > - **E2E 实测**：seed `demoagent`/`demoagent123`=tokendream owner；购买 lite→demoagent 得 `tokenplan_spread ¥179.8`（幂等不双计）；申请提现¥100→可提现79.8/冻结100→admin 通过→冻结0（金额守恒）；三页浏览器渲染确认。
 > - **遗留**：`consume_commission`/`recharge_spread` 未端到端实测（需子用户真实 /v1 调用 + recharge 口径未决）；推广渠道码归属、代理自助(用户组/兑换码/套餐上架 UI-04)、设代理 admin UI 的"建租户"完整流 待补。
-- [x] **6d 代理自助分销（P1-UI-04，测试栈 E2E 全过）**：套餐上架改价(保护线)/推广渠道/兑换码(代理 quota 预扣+用户兑换单赢家)/我的用户/用户组倍率(floor 校验) 5 页 + 端点（新表 `agent_promotion_channels`/`agent_redemption_codes`/`tenant_groups`，全 `AgentOwnerAuth`+scopeByTenant）。遗留：用户组倍率作用于 /v1 计费的接线、注册经渠道码归属、代理装修配置 UI（品牌 tabs→二期 P2-UI-01）
+- [x] **6d 代理自助分销（P1-UI-04，测试栈 E2E 全过）**：套餐上架改价(保护线)/推广渠道/兑换码(代理 quota 预扣+用户兑换单赢家)/我的用户/用户组倍率(floor 校验) 5 页 + 端点（新表 `agent_promotion_channels`/`agent_redemption_codes`/`tenant_groups`，全 `AgentOwnerAuth`+scopeByTenant）。遗留（2026-06-30 复核）：用户组倍率作用于 /v1 计费 ✅ 已接（2D 解析器 relay 生效）、注册经渠道码归属 ✅ 已接（AttributeRegistration hook）；**真缺**：recharge_spread 充值差价分润（缺 agent 成本价/加价率字段、口径未决）、代理装修配置 UI（siteconfig 后端在、缺端点+前端页→二期 P2-UI-01）
 - [ ] **6e 违禁词屏蔽（Phase 2 新增功能）** —— relay hook 扫用户消息→提醒/拦截 + 违规日志；管理员词库 CRUD + 违规审阅。规格见 `doc/detailed-design.md` §2.14（含开放问题，实现前先与用户确认）
 
 ## 3. 目标③：计费硬化（**架构已定：复用 new-api 原生计费 + 桥接我们的套餐**）
@@ -59,8 +59,8 @@
 - [x] **7d 支付基建(mock)**：auth-service 微信/支付宝下单+回调 + 充值→原生quota + tokenplan购买→激活原生订阅，**强幂等全通**
 - [ ] **7d′ 真实凭据**：填 `config.yaml` wxpay/alipay 证书 + `mock:false` + 接真实 V3 SDK（`wechatpay-go`/`smartwalle/alipay`）；沙箱→小额真单验收
 - [ ] **7b 真实分模型定价**：原生 model_ratio 本就生效；待校准我们套餐桶与分组倍率/成本保护线口径
-- [ ] **7c 多档风控**：真实 Redis 风控（RPM/并发/IP）+ Trial 三维限购 + 满额分级告警
-- [x] **遗留接线 ①②③ 完成**：①购买响应 snake_case ✅ ②tokenplan 购买走 auth-service mock(全链路 E2E) ✅ ③代理差价/分润落账(`tokenplan_spread`+`consume_commission` 真实 /v1 E2E) ✅。**剩 ④** RCG/SUB 'paid'卡单对账兜底
+- [ ] 🟡 **7c 多档风控（核心已上线）**：✅ 真实 Redis RPM 限流接 relay（`RISK_DEFAULT_RPM`、超限 429、压测原子无超发，提交 cd1cf95）+ 租户状态校验；**待补**：并发/IP allowlist 完整接线、Trial 三维限购、满额分级告警
+- [x] **遗留接线 ①②③④ 完成**：①购买响应 snake_case ✅ ②tokenplan 购买走 auth-service mock(全链路 E2E) ✅ ③代理差价/分润落账(`tokenplan_spread`+`consume_commission` 真实 /v1 E2E) ✅ ④ **RCG/SUB 'paid'卡单对账兜底** ✅：`ReconcileStuckPaid`(扫 RCG paid→重跑 OnPaid 幂等→credited)+`ReconcileStuckSubscriptions`(扫 SUB pending→查 auth-service `/auth/order/status`→已付补激活)；`StartReconcileLoop` 5min 定时扫(master-only)，线上日志确认在跑；TDD 全测，提交 35c5098/c6f8e39/bd25efa/69d2136
 
 ## 4. 目标④：正式上线（**最后**，灰度）
 - [ ] **8a 域名/证书**：`*.wedreamhub.com` 通配 vhost + CF Origin CA 证书（Full strict）；主站 `www/admin/api` + 代理泛子域
