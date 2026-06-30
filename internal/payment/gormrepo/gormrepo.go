@@ -115,6 +115,21 @@ func (r *Repo) CompareAndSetStatus(ctx context.Context, orderNo string, from, to
 	return false, nil
 }
 
+// ListByStatus 返回处于 status 且 updated_at 早于 before 的订单（对账兜底扫描用）。
+func (r *Repo) ListByStatus(ctx context.Context, status payment.OrderStatus, before time.Time) ([]*payment.PayOrder, error) {
+	var rows []orderRow
+	if err := r.db.WithContext(ctx).
+		Where("status = ? AND updated_at < ?", string(status), before).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*payment.PayOrder, 0, len(rows))
+	for i := range rows {
+		out = append(out, toPayOrder(&rows[i]))
+	}
+	return out, nil
+}
+
 // toRow 把领域订单映射为表行。
 func toRow(o *payment.PayOrder) *orderRow {
 	return &orderRow{

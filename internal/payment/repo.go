@@ -70,3 +70,17 @@ func (r *MemRepo) CompareAndSetStatus(_ context.Context, orderNo string, from, t
 	o.UpdatedAt = r.now()
 	return true, nil
 }
+
+// ListByStatus 返回处于 status 且 UpdatedAt 早于 before 的订单快照拷贝（对账兜底扫描用）。
+func (r *MemRepo) ListByStatus(_ context.Context, status OrderStatus, before time.Time) ([]*PayOrder, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*PayOrder
+	for _, o := range r.orders {
+		if o.Status == status && o.UpdatedAt.Before(before) {
+			cp := *o
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}

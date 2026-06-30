@@ -1,6 +1,9 @@
 package payment
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // --- 对外接口（detailed-design §2.8 的 Go 签名）---
 
@@ -52,4 +55,7 @@ type OrderRepo interface {
 	//   ok=false 当前状态非 from（已被并发推进 / 已终态）→ 调用方据此幂等短路。
 	// 订单不存在返回 ErrOrderNotFound。
 	CompareAndSetStatus(ctx context.Context, orderNo string, from, to OrderStatus) (ok bool, err error)
+	// ListByStatus 返回处于 status 且 UpdatedAt 早于 before 的订单（对账兜底扫描用）。
+	// before 过滤掉刚占位、可能仍在入账的在途订单，避免与正常回调竞态。
+	ListByStatus(ctx context.Context, status OrderStatus, before time.Time) ([]*PayOrder, error)
 }
