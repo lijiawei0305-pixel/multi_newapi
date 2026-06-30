@@ -28,7 +28,9 @@ tiktoken_cache
 
 electron/node_modules
 electron/dist
-data/
+# 仅忽略仓库根的运行时 data 目录；裸 data/ 会匹配任意层级、误吞 src/**/data/ 源码
+# （曾吞 web/default/src/features/usage-logs/data/schema.ts，致 typecheck 失败）。同 /plans 锚定修法。
+/data/
 .gomodcache/
 .gocache-temp
 .gopath
