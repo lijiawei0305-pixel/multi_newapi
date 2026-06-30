@@ -49,8 +49,7 @@ func (a *alipayAdapter) createPay(ctx context.Context, orderNo, subject string, 
 	p.ProductCode = "FAST_INSTANT_TRADE_PAY"
 	p.NotifyURL = notifyURL
 	p.ReturnURL = a.returnURL
-	// NOTE(W4): smartwalle/alipay/v3 的 TradePagePay 返回 (*url.URL, error)（页面跳转类、无网络调用）。
-	// 若 pinned 版本签名带 ctx，请改为 a.client.TradePagePay(ctx, p)。
+	// v3.2.29 verified: TradePagePay(param) (*url.URL, error)（页面跳转类、无网络调用，无 ctx）。
 	u, err := a.client.TradePagePay(p)
 	if err != nil {
 		return "", fmt.Errorf("alipay page pay: %w", err)
@@ -59,12 +58,12 @@ func (a *alipayAdapter) createPay(ctx context.Context, orderNo, subject string, 
 }
 
 // verifyNotify 解析并验签异步通知（DecodeNotification 内部已验签），校验 app_id / seller_id。
-func (a *alipayAdapter) verifyNotify(_ context.Context, r *http.Request) (*payment.CallbackInfo, error) {
+func (a *alipayAdapter) verifyNotify(ctx context.Context, r *http.Request) (*payment.CallbackInfo, error) {
 	if err := r.ParseForm(); err != nil {
 		return nil, payment.ErrCallbackInvalid
 	}
-	// DecodeNotification 内部调用 VerifySign（用支付宝公钥）；失败即验签不通过。
-	noti, err := a.client.DecodeNotification(r.Form)
+	// v3.2.29 verified: DecodeNotification(ctx, values) —— 内部调用 VerifySign（支付宝公钥）；失败即验签不通过。
+	noti, err := a.client.DecodeNotification(ctx, r.Form)
 	if err != nil {
 		return nil, payment.ErrSignInvalid
 	}
@@ -99,9 +98,7 @@ func aliNotificationToInfo(noti *alipay.Notification, appID, sellerID string) (*
 
 // queryOrder 按商户订单号主动查单：TRADE_SUCCESS/TRADE_FINISHED 视为已收款。
 func (a *alipayAdapter) queryOrder(ctx context.Context, orderNo string) (bool, error) {
-	// NOTE(W4): smartwalle/alipay/v3 v3.2+ 的 TradeQuery 形如 (ctx, param) (*TradeQueryRsp, error)，
-	// 且交易状态字段为 rsp.TradeStatus（扁平）。若 pinned 版本无 ctx 或字段嵌套于 rsp.Content，
-	// 请相应改为 a.client.TradeQuery(param) / rsp.Content.TradeStatus。
+	// v3.2.29 verified: TradeQuery(ctx, param) (*TradeQueryRsp, error)，交易状态为扁平 rsp.TradeStatus。
 	rsp, err := a.client.TradeQuery(ctx, alipay.TradeQuery{OutTradeNo: orderNo})
 	if err != nil {
 		return false, fmt.Errorf("alipay query: %w", err)
