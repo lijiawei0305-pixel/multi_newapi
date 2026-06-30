@@ -54,6 +54,7 @@ func (s *Server) Router() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /auth/healthz", s.handleHealth)
 	mux.HandleFunc("POST /auth/order", s.handleCreateOrder)
+	mux.HandleFunc("GET /auth/order/status", s.handleOrderStatus)
 	mux.HandleFunc("GET /auth/mock/pay", s.handleMockPayPage)
 	mux.HandleFunc("POST /auth/mock/confirm", s.handleMockConfirm)
 	mux.HandleFunc("POST /auth/wxpay/notify", s.handleWxpayNotify)
@@ -212,6 +213,27 @@ func (s *Server) processNotify(ctx context.Context, provider payment.Provider, r
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, jsonObj{"success": true, "mock": s.cfg.Mock})
+}
+
+// handleOrderStatus GET /auth/order/status?order_no=XXX —— 主站对账查单：返回订单是否已支付。
+// 内网鉴权（共享密钥头，与入账回调同一信任边界）；公网经 nginx 拒绝该路径。
+// 供主站 SUB 卡单对账：pending 套餐订单在此查到 paid → 补激活（订单回调丢失/失败时的兜底）。
+func (s *Server) handleOrderStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get(internalSecretHeader) != s.cfg.Internal.SharedSecret {
+		writeJSON(w, http.StatusUnauthorized, jsonObj{"success": false, "message": "unauthorized"})
+		return
+	}
+	order, err := s.repo.GetByOrderNo(r.Context(), r.URL.Query().Get("order_no"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, jsonObj{"success": false, "message": "order not found"})
+		return
+	}
+	// paid|credited 都代表平台已收款（credited=主站已入账，paid=已收款待入账/在途）。
+	paid := order.Status == payment.OrderPaid || order.Status == payment.OrderCredited
+	writeJSON(w, http.StatusOK, jsonObj{
+		"success": true,
+		"data":    jsonObj{"order_no": order.OrderNo, "paid": paid, "status": string(order.Status)},
+	})
 }
 
 // ---- forwarder：OrderSink 实现，验签+幂等通过后回调主站内网入账端点 ----
