@@ -42,7 +42,7 @@ func TestReconcileStuckSubscriptions(t *testing.T) {
 	// 桩：查单 —— 仅 SUB-paid 已付。
 	origQ := subOrderPaidQuery
 	t.Cleanup(func() { subOrderPaidQuery = origQ })
-	subOrderPaidQuery = func(_ *App, _ context.Context, orderNo string) (bool, error) {
+	subOrderPaidQuery = func(_ *App, _ context.Context, orderNo, _ string) (bool, error) {
 		return orderNo == "SUB-paid", nil
 	}
 	// 桩：激活 —— 计数（不跑真实激活链）。

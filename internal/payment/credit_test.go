@@ -34,7 +34,7 @@ func TestCreditPaidOrderConcurrentCreditsOnce(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
-			_ = g.CreditPaidOrder(context.Background(), orderNo, "txn-x")
+			_ = g.CreditPaidOrder(context.Background(), orderNo, "txn-x", 0)
 		}()
 	}
 	wg.Wait()
@@ -54,10 +54,10 @@ func TestCreditPaidOrderRepeatShortCircuits(t *testing.T) {
 	const orderNo = "RCG-repeat"
 	seedCreatedOrder(t, repo, orderNo, OrderTypeRecharge)
 
-	if err := g.CreditPaidOrder(context.Background(), orderNo, "t1"); err != nil {
+	if err := g.CreditPaidOrder(context.Background(), orderNo, "t1", 0); err != nil {
 		t.Fatalf("first credit: %v", err)
 	}
-	if err := g.CreditPaidOrder(context.Background(), orderNo, "t2"); err != nil {
+	if err := g.CreditPaidOrder(context.Background(), orderNo, "t2", 0); err != nil {
 		t.Fatalf("second credit must short-circuit success, got %v", err)
 	}
 	if got := recharge.count(); got != 1 {
@@ -68,7 +68,7 @@ func TestCreditPaidOrderRepeatShortCircuits(t *testing.T) {
 // TestCreditPaidOrderUnknownOrder 未知订单号 → ORDER_NOT_FOUND。
 func TestCreditPaidOrderUnknownOrder(t *testing.T) {
 	g, _, _, _ := newGateway()
-	err := g.CreditPaidOrder(context.Background(), "nope", "t")
+	err := g.CreditPaidOrder(context.Background(), "nope", "t", 0)
 	if got := apperr.CodeOf(err); got != CodeOrderNotFound {
 		t.Fatalf("code = %q, want %q", got, CodeOrderNotFound)
 	}
@@ -83,7 +83,7 @@ func TestCreditPaidOrderSinkErrorRollsBack(t *testing.T) {
 	const orderNo = "RCG-rollback"
 	seedCreatedOrder(t, repo, orderNo, OrderTypeRecharge)
 
-	if err := g.CreditPaidOrder(context.Background(), orderNo, "t"); err == nil {
+	if err := g.CreditPaidOrder(context.Background(), orderNo, "t", 0); err == nil {
 		t.Fatal("expected sink error to propagate")
 	}
 	got, _ := repo.GetByOrderNo(context.Background(), orderNo)
@@ -93,11 +93,38 @@ func TestCreditPaidOrderSinkErrorRollsBack(t *testing.T) {
 
 	// 上游重试：sink 恢复后应能成功入账。
 	recharge.err = nil
-	if err := g.CreditPaidOrder(context.Background(), orderNo, "t-retry"); err != nil {
+	if err := g.CreditPaidOrder(context.Background(), orderNo, "t-retry", 0); err != nil {
 		t.Fatalf("retry credit: %v", err)
 	}
 	if recharge.count() != 1 {
 		t.Fatalf("retry sink count = %d, want 1", recharge.count())
+	}
+}
+
+// TestCreditPaidOrderAmountMismatch 回传金额与库内订单不一致 → PAY_AMOUNT_MISMATCH，不入账、不动状态。
+func TestCreditPaidOrderAmountMismatch(t *testing.T) {
+	g, repo, recharge, _ := newGateway()
+	const orderNo = "RCG-amount"
+	seedCreatedOrder(t, repo, orderNo, OrderTypeRecharge) // ActualPaid=73
+
+	err := g.CreditPaidOrder(context.Background(), orderNo, "t", 99) // 回传 99 ≠ 73
+	if got := apperr.CodeOf(err); got != CodeAmountMismatch {
+		t.Fatalf("code = %q, want %q", got, CodeAmountMismatch)
+	}
+	if recharge.count() != 0 {
+		t.Fatalf("sink must not be called on amount mismatch, got %d", recharge.count())
+	}
+	got, _ := repo.GetByOrderNo(context.Background(), orderNo)
+	if got.Status != OrderCreated {
+		t.Fatalf("status = %q, want created (unchanged)", got.Status)
+	}
+
+	// 金额一致（容差内）→ 正常入账。
+	if err := g.CreditPaidOrder(context.Background(), orderNo, "t2", 73); err != nil {
+		t.Fatalf("matching amount credit: %v", err)
+	}
+	if recharge.count() != 1 {
+		t.Fatalf("sink count = %d, want 1", recharge.count())
 	}
 }
 

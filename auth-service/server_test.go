@@ -14,21 +14,27 @@ import (
 
 // mainSiteStub 模拟主站 /api/internal/order/paid，记录收到的入账回调。
 type mainSiteStub struct {
-	mu      sync.Mutex
-	calls   []string // 收到的 order_no（按序）
-	secrets []string // 每次的共享密钥头
-	status  int      // 返回状态（默认 200）
+	mu        sync.Mutex
+	calls     []string  // 收到的 order_no（按序）
+	secrets   []string  // 每次的共享密钥头
+	amounts   []float64 // 每次的 paid_amount（反篡改金额校验透传值）
+	providers []string  // 每次的 provider
+	status    int       // 返回状态（默认 200）
 }
 
 func (m *mainSiteStub) handler(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		OrderNo string `json:"order_no"`
-		TxnID   string `json:"txn_id"`
+		OrderNo    string  `json:"order_no"`
+		TxnID      string  `json:"txn_id"`
+		PaidAmount float64 `json:"paid_amount"`
+		Provider   string  `json:"provider"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	m.mu.Lock()
 	m.calls = append(m.calls, body.OrderNo)
 	m.secrets = append(m.secrets, r.Header.Get(internalSecretHeader))
+	m.amounts = append(m.amounts, body.PaidAmount)
+	m.providers = append(m.providers, body.Provider)
 	st := m.status
 	m.mu.Unlock()
 	if st == 0 {
@@ -54,7 +60,11 @@ func newTestServer(t *testing.T, callbackURL string) *Server {
 	cfg.SignSecret = "sign-secret"
 	cfg.Internal.CallbackURL = callbackURL
 	cfg.Internal.SharedSecret = "shared-secret"
-	return NewServer(cfg)
+	srv, err := NewServer(cfg)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	return srv
 }
 
 func createOrder(t *testing.T, srv *Server, orderNo, provider string) {
@@ -96,6 +106,13 @@ func TestMockConfirmForwardsToMainSite(t *testing.T) {
 	}
 	if main.secrets[0] != "shared-secret" {
 		t.Fatalf("forwarded secret = %q, want shared-secret", main.secrets[0])
+	}
+	// 反篡改透传：paid_amount 与下单 AmountCNY 一致、provider 正确（供主站金额校验）。
+	if main.amounts[0] != 73 {
+		t.Fatalf("forwarded paid_amount = %v, want 73", main.amounts[0])
+	}
+	if main.providers[0] != "wxpay" {
+		t.Fatalf("forwarded provider = %q, want wxpay", main.providers[0])
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
 	"github.com/QuantumNous/new-api/model"
 )
@@ -61,6 +62,7 @@ type subscriptionOrderRow struct {
 	TenantID     int64     `gorm:"column:tenant_id;not null;index"`
 	UserID       int64     `gorm:"column:user_id;not null;index"`
 	AmountCNY    float64   `gorm:"column:amount_cny;type:decimal(20,2);not null;default:0"`
+	Provider     string    `gorm:"column:provider;type:varchar(16);not null;default:''"` // wxpay|alipay：下单时回填，供真实回调路由 + 主动查单识别渠道
 	Status       string    `gorm:"column:status;type:varchar(16);not null;default:pending;index"`
 	NativePlanID int64     `gorm:"column:native_plan_id;not null;default:0"` // 激活时回填：原生 SubscriptionPlan.id
 	NativeSubID  int64     `gorm:"column:native_sub_id;not null;default:0"`  // 激活时回填：原生 UserSubscription.id
@@ -99,6 +101,17 @@ func newSubOrderStore(db *gorm.DB) *subOrderStore { return &subOrderStore{db: db
 // create 落一条新订单；order_no 主键冲突即唯一约束冲突（由调用方按需处理）。
 func (s *subOrderStore) create(ctx context.Context, row *subscriptionOrderRow) error {
 	return s.db.WithContext(ctx).Create(row).Error
+}
+
+// setProvider 回填订单支付渠道（下单选定 wxpay/alipay 后调用；仅在仍为 pending 时更新，幂等）。
+// 与 tokenplan 包解耦：订单由 subPayment.CreateOrder 落库（不含渠道），此处由 mtwire 装配层补写。
+func (s *subOrderStore) setProvider(ctx context.Context, orderNo, provider string) error {
+	if orderNo == "" || provider == "" {
+		return nil
+	}
+	return s.db.WithContext(ctx).Model(&subscriptionOrderRow{}).
+		Where("order_no = ? AND status = ?", orderNo, subOrderPending).
+		Update("provider", provider).Error
 }
 
 // ---- subPayment：tokenplan.PaymentGateway 实现，取代 wire.go 的 stubPayment ----
@@ -251,7 +264,9 @@ func (a *App) defaultActivateNativeSub(ctx context.Context, tx *gorm.DB, snap *t
 //     且与建订阅同事务（失败回滚→订单退回 pending 可重试，不留半成品）；
 //   - 我们记录/分润：ActivateFromPayment 自身按 source_order_id / (SourceType,SourceID) 幂等，
 //     即便重复调用（如步骤②已 activated 但②③之间崩溃后重试）也只落一次、只入账一次。
-func (a *App) ActivatePaidTokenplanOrder(ctx context.Context, orderNo string) error {
+// paidAmountCNY 是支付平台回传的用户实付（元），用于反篡改一致性校验（与库内 AmountCNY 比对）；
+// <=0 表示调用方未提供（如对账兜底主动查单）——跳过比对。激活额度/周期一律以购买快照为准。
+func (a *App) ActivatePaidTokenplanOrder(ctx context.Context, orderNo string, paidAmountCNY float64) error {
 	if !IsSubscriptionOrderNo(orderNo) {
 		return tokenplan.ErrSubscriptionNotFound // 非 SUB 订单不归本入口
 	}
@@ -274,6 +289,10 @@ func (a *App) ActivatePaidTokenplanOrder(ctx context.Context, orderNo string) er
 		}
 		if ord.Status != subOrderPending {
 			return tokenplan.ErrSubscriptionNotFound
+		}
+		// 反篡改：回传实付金额必须与库内订单一致（仅对未激活单校验；激活额度以快照为准）。
+		if !amountMatchesCNY(paidAmountCNY, ord.AmountCNY) {
+			return payment.ErrAmountMismatch
 		}
 		// CAS：pending→activated，抢到者负责建原生订阅。
 		res := tx.Model(&subscriptionOrderRow{}).

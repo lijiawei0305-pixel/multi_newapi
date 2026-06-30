@@ -16,6 +16,7 @@ import (
 	"crypto/hmac"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -99,6 +100,18 @@ func rechargeQuota(amountUSD float64) int {
 // actualPaidCNY 计算用户实付人民币 = 美元额 × 汇率（收益币种；差价基准）。
 func actualPaidCNY(amountUSD, rate float64) float64 {
 	return amountUSD * rate
+}
+
+// amountToleranceCNY 金额比对容差（元）：≤1 分视为相等，吸收浮点/汇率取整噪声。
+const amountToleranceCNY = 0.011
+
+// amountMatchesCNY 报告回调实付金额是否与库内订单金额一致（反篡改）。
+// paidCNY<=0 视为「调用方未提供」（如对账兜底主动查单），跳过比对。
+func amountMatchesCNY(paidCNY, orderCNY float64) bool {
+	if paidCNY <= 0 {
+		return true
+	}
+	return math.Abs(paidCNY-orderCNY) <= amountToleranceCNY
 }
 
 // 说明：tokenplan 套餐订单（SUB 前缀）的激活由 Track 1 的 App.ActivatePaidTokenplanOrder
@@ -191,6 +204,10 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 type internalOrderPaidRequest struct {
 	OrderNo string `json:"order_no"`
 	TxnID   string `json:"txn_id"` // 平台交易号（审计/收益引用；不作金额来源）
+	// PaidAmount 是平台回传的用户实付（元）。入账仍以库内订单金额为准，此值仅用于反篡改一致性校验。
+	PaidAmount float64 `json:"paid_amount"`
+	// Provider 是支付渠道（wxpay|alipay），仅用于日志/审计；入账分发以 order_no 前缀 + 库内订单为准。
+	Provider string `json:"provider"`
 }
 
 // HandleInternalOrderPaid POST /api/internal/order/paid —— 内网入账（仅 auth-service 调）。
@@ -214,9 +231,9 @@ func (a *App) HandleInternalOrderPaid(c *gin.Context) {
 	//   - 其余（RCG 等）→ 本模块充值入账（读 payment_orders，created→paid→credited CAS）。
 	var err error
 	if IsSubscriptionOrderNo(body.OrderNo) {
-		err = a.ActivatePaidTokenplanOrder(ctx, body.OrderNo)
+		err = a.ActivatePaidTokenplanOrder(ctx, body.OrderNo, body.PaidAmount)
 	} else if a.RechargeGateway != nil {
-		err = a.RechargeGateway.CreditPaidOrder(ctx, body.OrderNo, body.TxnID)
+		err = a.RechargeGateway.CreditPaidOrder(ctx, body.OrderNo, body.TxnID, body.PaidAmount)
 	} else {
 		err = apperr.New("RECHARGE_UNAVAILABLE", "充值服务未装配", http.StatusServiceUnavailable)
 	}
@@ -301,10 +318,14 @@ func (c *authServiceClient) Verify(_ context.Context, _ payment.Provider, _ []by
 	return nil, errVerifyUnsupported
 }
 
-// QueryOrderStatus GET /auth/order/status?order_no=X（内网共享密钥头）——对账兜底查单：
-// 该订单平台是否已收款。供 SUB 卡单对账：pending 套餐单查到 paid → 补激活。
-func (c *authServiceClient) QueryOrderStatus(ctx context.Context, orderNo string) (bool, error) {
+// QueryOrderStatus GET /auth/order/status?order_no=X&provider=Y（内网共享密钥头）——对账兜底查单：
+// 该订单平台是否已收款。供 RCG/SUB 卡单对账：created/pending 单查到 paid → 补入账/补激活。
+// provider 在真实模式下决定向微信还是支付宝主动查单；mock 模式忽略（读本地订单状态）。
+func (c *authServiceClient) QueryOrderStatus(ctx context.Context, orderNo, provider string) (bool, error) {
 	u := c.baseURL + "/auth/order/status?order_no=" + url.QueryEscape(orderNo)
+	if provider != "" {
+		u += "&provider=" + url.QueryEscape(provider)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return false, err

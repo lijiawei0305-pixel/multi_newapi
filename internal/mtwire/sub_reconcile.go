@@ -12,17 +12,19 @@ import (
 var errAuthClientUnset = apperr.New("AUTH_CLIENT_UNSET", "支付查单客户端未装配", http.StatusInternalServerError)
 
 // subOrderPaidQuery 查 auth-service 该 SUB 订单是否已支付（对账兜底用）；单测替换为桩。
-var subOrderPaidQuery = func(a *App, ctx context.Context, orderNo string) (bool, error) {
+// provider 在真实模式下决定向微信/支付宝主动查单；mock 模式忽略。
+var subOrderPaidQuery = func(a *App, ctx context.Context, orderNo, provider string) (bool, error) {
 	if a.authClient == nil {
 		return false, errAuthClientUnset
 	}
-	return a.authClient.QueryOrderStatus(ctx, orderNo)
+	return a.authClient.QueryOrderStatus(ctx, orderNo, provider)
 }
 
 // activatePaidSubHook 激活一笔已确认支付的 SUB 订单（对账兜底用）；单测替换为计数桩。
 // 默认指向幂等的 ActivatePaidTokenplanOrder（重复激活只生效一次）。
+// 主动查单已确认平台已收款，故跳过金额比对（paidAmountCNY=0）。
 var activatePaidSubHook = func(a *App, ctx context.Context, orderNo string) error {
-	return a.ActivatePaidTokenplanOrder(ctx, orderNo)
+	return a.ActivatePaidTokenplanOrder(ctx, orderNo, 0)
 }
 
 // ReconcileSubResult 汇总一次 SUB 卡单对账结果（供 admin 端点 / 日志展示）。
@@ -48,7 +50,7 @@ func (a *App) ReconcileStuckSubscriptions(ctx context.Context, before time.Time)
 	}
 	res := ReconcileSubResult{Scanned: len(rows), Failed: map[string]string{}}
 	for _, row := range rows {
-		paid, err := subOrderPaidQuery(a, ctx, row.OrderNo)
+		paid, err := subOrderPaidQuery(a, ctx, row.OrderNo, row.Provider)
 		if err != nil {
 			res.Failed[row.OrderNo] = "query: " + err.Error()
 			continue

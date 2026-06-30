@@ -27,6 +27,8 @@ const (
 	CodeOrderInvalid = "PAY_ORDER_INVALID"
 	// CodeOrderTypeUnknown 订单类型无对应 OrderSink（防御；正常不达）。
 	CodeOrderTypeUnknown = "PAY_ORDER_TYPE_UNKNOWN"
+	// CodeAmountMismatch 回调实付金额与库内订单金额不一致（疑似篡改）—— 拒绝入账。
+	CodeAmountMismatch = "PAY_AMOUNT_MISMATCH"
 )
 
 var (
@@ -44,4 +46,6 @@ var (
 	ErrOrderInvalid = apperr.New(CodeOrderInvalid, "下单参数非法", http.StatusBadRequest)
 	// ErrOrderTypeUnknown 订单类型无对应入账分发目标。
 	ErrOrderTypeUnknown = apperr.New(CodeOrderTypeUnknown, "未知订单类型", http.StatusInternalServerError)
+	// ErrAmountMismatch 回调实付金额与库内订单金额不一致（反篡改）。
+	ErrAmountMismatch = apperr.New(CodeAmountMismatch, "支付金额与订单不一致", http.StatusBadRequest)
 )

@@ -97,10 +97,10 @@ func TestActivatePaidTokenplanOrder_Idempotent(t *testing.T) {
 	}
 
 	// 调两次（模拟回调重试）。
-	if err := app.ActivatePaidTokenplanOrder(ctx, orderNo); err != nil {
+	if err := app.ActivatePaidTokenplanOrder(ctx, orderNo, 0); err != nil {
 		t.Fatalf("activate #1: %v", err)
 	}
-	if err := app.ActivatePaidTokenplanOrder(ctx, orderNo); err != nil {
+	if err := app.ActivatePaidTokenplanOrder(ctx, orderNo, 0); err != nil {
 		t.Fatalf("activate #2: %v", err)
 	}
 
@@ -128,10 +128,10 @@ func TestActivatePaidTokenplanOrder_Errors(t *testing.T) {
 	app, _ := newBridgeTestApp(t)
 	ctx := context.Background()
 
-	if err := app.ActivatePaidTokenplanOrder(ctx, "RCG123"); err == nil {
+	if err := app.ActivatePaidTokenplanOrder(ctx, "RCG123", 0); err == nil {
 		t.Fatalf("non-SUB order must be rejected")
 	}
-	if err := app.ActivatePaidTokenplanOrder(ctx, "SUBunknown"); err == nil {
+	if err := app.ActivatePaidTokenplanOrder(ctx, "SUBunknown", 0); err == nil {
 		t.Fatalf("unknown order must error (no pending snapshot)")
 	}
 }
@@ -241,7 +241,7 @@ func TestActivatePaidTokenplanOrder_NativeIntegration(t *testing.T) {
 	}
 
 	for i := 0; i < 2; i++ {
-		if err := app.ActivatePaidTokenplanOrder(ctx, orderNo); err != nil {
+		if err := app.ActivatePaidTokenplanOrder(ctx, orderNo, 0); err != nil {
 			t.Fatalf("activate #%d: %v", i+1, err)
 		}
 	}

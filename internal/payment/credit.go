@@ -4,9 +4,22 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"math"
 	"strconv"
 	"time"
 )
+
+// amountTolerance 是金额比对容差（元）：≤1 分视为相等，吸收浮点/汇率取整噪声。
+const amountTolerance = 0.011
+
+// amountMatches 报告回调实付金额是否与库内订单金额一致。
+// paidCNY<=0 视为「调用方未提供金额」（如对账兜底主动查单路径），跳过比对。
+func amountMatches(paidCNY, orderCNY float64) bool {
+	if paidCNY <= 0 {
+		return true
+	}
+	return math.Abs(paidCNY-orderCNY) <= amountTolerance
+}
 
 // 订单号业务前缀（与 defaultOrderNo 的 "PAY" 同构，便于人工与日志辨识订单用途）。
 const (
@@ -34,11 +47,20 @@ func NewOrderNo(prefix string) string {
 //	  → 已 paid/credited → 幂等短路成功（不重复入账）
 //	  → 首个推进者：按 type 分发 OnPaid → 成功置 credited / 失败回滚 created 供上游重试
 //
-// 错误码：未知单 ORDER_NOT_FOUND；类型无 Sink PAY_ORDER_TYPE_UNKNOWN；OnPaid 错误原样上浮。
-func (g *Gateway) CreditPaidOrder(ctx context.Context, orderNo, txnID string) error {
+// 错误码：未知单 ORDER_NOT_FOUND；金额不符 PAY_AMOUNT_MISMATCH；类型无 Sink PAY_ORDER_TYPE_UNKNOWN；OnPaid 错误原样上浮。
+//
+// paidAmountCNY 是支付平台回传的用户实付（元）。本方法以**库内订单金额**入账（金额可信，不信外部报文），
+// 同时在推进状态机前比对回传金额，不一致即 PAY_AMOUNT_MISMATCH 拒绝入账（反篡改）。
+// paidAmountCNY<=0 表示调用方未提供（如对账兜底主动查单）——跳过比对。
+func (g *Gateway) CreditPaidOrder(ctx context.Context, orderNo, txnID string, paidAmountCNY float64) error {
 	ord, err := g.repo.GetByOrderNo(ctx, orderNo)
 	if err != nil {
 		return err // ORDER_NOT_FOUND
+	}
+
+	// 反篡改：回传实付金额必须与库内订单一致（在 CAS 推进前校验，金额不符则不动状态、不入账）。
+	if !amountMatches(paidAmountCNY, ord.ActualPaid) {
+		return ErrAmountMismatch
 	}
 
 	// 幂等占位：created→paid 原子 CAS。并发/重复回调只有一个胜者继续入账。

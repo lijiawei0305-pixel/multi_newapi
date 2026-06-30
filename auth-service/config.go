@@ -42,9 +42,24 @@ type Config struct {
 	} `yaml:"wxpay"`
 	Alipay struct {
 		AppID               string `yaml:"app_id"`                 // 应用 appid
-		PrivateKeyPath      string `yaml:"private_key_path"`       // 应用私钥路径
-		AlipayPublicKeyPath string `yaml:"alipay_public_key_path"` // 支付宝公钥路径
+		PrivateKeyPath      string `yaml:"private_key_path"`       // 应用私钥路径（PEM 文件）
+		AlipayPublicKeyPath string `yaml:"alipay_public_key_path"` // 支付宝公钥路径（PEM 文件）
+		SellerID            string `yaml:"seller_id"`              // 可选：收款账号 UID（pid，2088 开头）；非空则校验回调 seller_id
+		ReturnURL           string `yaml:"return_url"`             // 同步跳转地址（仅展示，不入账）
+		Sandbox             bool   `yaml:"sandbox"`                // true=沙箱网关，false=正式
 	} `yaml:"alipay"`
+}
+
+// wxpayConfigured 报告微信支付凭据是否齐全（真实模式可用微信）。
+func (c *Config) wxpayConfigured() bool {
+	w := c.Wxpay
+	return w.MchID != "" && w.AppID != "" && w.APIv3Key != "" && w.CertSerialNo != "" && w.PrivateKeyPath != ""
+}
+
+// alipayConfigured 报告支付宝凭据是否齐全（真实模式可用支付宝）。
+func (c *Config) alipayConfigured() bool {
+	a := c.Alipay
+	return a.AppID != "" && a.PrivateKeyPath != "" && a.AlipayPublicKeyPath != ""
 }
 
 // LoadConfig 读取 yaml 配置并应用环境变量覆盖（敏感项不入库）。
@@ -96,6 +111,41 @@ func (c *Config) applyEnvOverrides() {
 	if v := os.Getenv("AUTH_MOCK"); v != "" {
 		c.Mock = v == "1" || v == "true"
 	}
+
+	// 真实支付凭据（敏感）：仅经环境变量/部署期注入，不写进 yaml、不入库。
+	if v := os.Getenv("AUTH_WXPAY_APP_ID"); v != "" {
+		c.Wxpay.AppID = v
+	}
+	if v := os.Getenv("AUTH_WXPAY_MCH_ID"); v != "" {
+		c.Wxpay.MchID = v
+	}
+	if v := os.Getenv("AUTH_WXPAY_APIV3_KEY"); v != "" {
+		c.Wxpay.APIv3Key = v
+	}
+	if v := os.Getenv("AUTH_WXPAY_CERT_SERIAL"); v != "" {
+		c.Wxpay.CertSerialNo = v
+	}
+	if v := os.Getenv("AUTH_WXPAY_PRIVATE_KEY_PATH"); v != "" {
+		c.Wxpay.PrivateKeyPath = v
+	}
+	if v := os.Getenv("AUTH_ALIPAY_APP_ID"); v != "" {
+		c.Alipay.AppID = v
+	}
+	if v := os.Getenv("AUTH_ALIPAY_PRIVATE_KEY_PATH"); v != "" {
+		c.Alipay.PrivateKeyPath = v
+	}
+	if v := os.Getenv("AUTH_ALIPAY_PUBLIC_KEY_PATH"); v != "" {
+		c.Alipay.AlipayPublicKeyPath = v
+	}
+	if v := os.Getenv("AUTH_ALIPAY_SELLER_ID"); v != "" {
+		c.Alipay.SellerID = v
+	}
+	if v := os.Getenv("AUTH_ALIPAY_RETURN_URL"); v != "" {
+		c.Alipay.ReturnURL = v
+	}
+	if v := os.Getenv("AUTH_ALIPAY_SANDBOX"); v != "" {
+		c.Alipay.Sandbox = v == "1" || v == "true"
+	}
 }
 
 // validate 校验最小可运行所需字段（mock 模式下也必须有签名密钥与主站回调地址）。
@@ -109,8 +159,9 @@ func (c *Config) validate() error {
 	if c.Mock && c.SignSecret == "" {
 		return fmt.Errorf("sign_secret is required in mock mode (mock HMAC 签名密钥)")
 	}
-	if !c.Mock {
-		return fmt.Errorf("real wxpay/alipay V3 SDK not wired yet; set mock:true for now (见包注释 TODO)")
+	if !c.Mock && !c.wxpayConfigured() && !c.alipayConfigured() {
+		// 真实模式至少需配齐微信或支付宝其一的凭据，否则无渠道可下单。
+		return fmt.Errorf("real mode requires wxpay and/or alipay credentials (见 config.yaml 模板)")
 	}
 	return nil
 }

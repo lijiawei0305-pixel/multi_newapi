@@ -1,0 +1,37 @@
+# auth-service 配置模板（脱敏占位，真实值绝不入库）。
+# 用法：cp auth-service/config.example.yaml /etc/auth-service/config.yaml，填真实值后启动：
+#   authservice -config /etc/auth-service/config.yaml
+# 敏感项也可经环境变量覆盖（见 config.go applyEnvOverrides，部署期 compose/.env 注入更安全）。
+#
+# 两种模式：
+#   mock: true   —— 无真实商户凭据即可端到端跑通（HMAC 占位签名 + 确认页）。wxpay/alipay 段留空。
+#   mock: false  —— 接真实微信/支付宝 V3。至少配齐 wxpay 或 alipay 其一；私钥/证书用文件路径注入。
+
+server:
+  addr: ":8080"                                   # 监听地址（仅内部端口；公网经 nginx ^~ /auth/ ^~ /pay/ 反代）
+  public_base_url: "https://your-domain.example"  # 支付确认/二维码 URL 公网基址
+
+mock: false                                       # 真实模式
+usd_to_cny_rate: 7.3                              # 美元→人民币汇率（须与主站 operation_setting.USDExchangeRate 同值，否则金额校验失败）
+sign_secret: ""                                   # 仅 mock 模式需要（HMAC 签名密钥）
+
+internal:
+  callback_url: "http://app:3000/api/internal/order/paid"  # 主站内网入账端点（compose 内部网，不经公网）
+  shared_secret: "REPLACE_WITH_STRONG_RANDOM"              # 与主站 MT_INTERNAL_SECRET 同值
+
+# 微信支付（Native 扫码）—— 平台证书自动下载模式（仅需商户私钥 + 证书序列号 + APIv3 密钥）。
+wxpay:
+  app_id: "wx_REPLACE"                            # 公众号/开放平台 appid
+  mch_id: "REPLACE"                               # 商户号
+  api_v3_key: "REPLACE_32_CHARS"                  # APIv3 密钥（AES-256-GCM 回调解密）
+  cert_serial_no: "REPLACE"                       # 商户证书序列号（openssl x509 -in apiclient_cert.pem -noout -serial）
+  private_key_path: "/etc/auth-service/secrets/wx_apiclient_key.pem"  # 商户私钥文件（chmod 600）
+
+# 支付宝（电脑网站支付）—— 普通公钥模式（应用私钥 + 支付宝公钥）。
+alipay:
+  app_id: "REPLACE"                               # 支付宝应用 appid
+  private_key_path: "/etc/auth-service/secrets/alipay_app_private_key.pem"  # 应用私钥文件（PKCS#8，chmod 600）
+  alipay_public_key_path: "/etc/auth-service/secrets/alipay_public_key.pem" # 支付宝公钥文件
+  seller_id: ""                                   # 可选：收款账号 UID（pid，2088 开头）；填则校验回调 seller_id
+  return_url: "https://your-domain.example/order/status"  # 同步跳转地址（仅展示，不入账）
+  sandbox: false                                  # true=沙箱网关

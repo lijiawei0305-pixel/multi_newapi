@@ -27,7 +27,10 @@ func main() {
 		log.Fatalf("auth-service: load config: %v", err)
 	}
 
-	srv := authservice.NewServer(cfg)
+	srv, err := authservice.NewServer(cfg)
+	if err != nil {
+		log.Fatalf("auth-service: new server: %v", err)
+	}
 	httpSrv := &http.Server{
 		Addr:              cfg.Server.Addr,
 		Handler:           srv.Router(),

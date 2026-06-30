@@ -50,3 +50,55 @@ func (g *Gateway) ReconcileStuckPaid(ctx context.Context, before time.Time) (Rec
 func (g *Gateway) ListStuckPaid(ctx context.Context, before time.Time) ([]*PayOrder, error) {
 	return g.repo.ListByStatus(ctx, OrderPaid, before)
 }
+
+// ReconcileStuckCreated 扫卡在 created（早于 before）的订单，逐笔经 query 向支付平台主动查单：
+// 已付 → 走 CreditPaidOrder 补入账（paidAmount=0 跳过金额比对，信己方查单结果）；
+// 真未付 / 查单失败 → 不动状态、计入结果，下次再扫。
+//
+// 卡单成因：用户已付，但平台异步回调始终未成功送达主站（极端：平台多次重推全失败），
+// 订单永停 created。本方法是其兜底（与 ReconcileStuckPaid 互补：后者管「已 paid 未 credited」崩溃缺口）。
+//
+//   - query：由调用方注入（主站经 auth-service 向微信/支付宝查单），返回该单平台是否已收款。
+//   - maxAge：早于 now-maxAge 的 created 单视为已过期废弃单，跳过查单（微信≈8h、支付宝≈25h 后必失效）。
+//   - limit：单轮最多处理笔数（>0 生效），防一轮查单过多。
+func (g *Gateway) ReconcileStuckCreated(
+	ctx context.Context,
+	before time.Time,
+	maxAge time.Duration,
+	limit int,
+	query func(ctx context.Context, orderNo, provider string) (bool, error),
+) (ReconcileResult, error) {
+	if query == nil {
+		return ReconcileResult{}, nil
+	}
+	created, err := g.repo.ListByStatus(ctx, OrderCreated, before)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	res := ReconcileResult{Failed: map[string]string{}}
+	cutoff := g.now().Add(-maxAge)
+	for _, ord := range created {
+		if maxAge > 0 && ord.CreatedAt.Before(cutoff) {
+			continue // 早已过期的废弃单，不再查单
+		}
+		if limit > 0 && res.Scanned >= limit {
+			break
+		}
+		res.Scanned++
+		paid, qErr := query(ctx, ord.OrderNo, string(ord.Provider))
+		if qErr != nil {
+			res.Failed[ord.OrderNo] = "query: " + qErr.Error()
+			continue
+		}
+		if !paid {
+			continue // 真未付：用户没付，不动
+		}
+		// 信己方查单结果，金额已由下单时落库；paidAmount=0 跳过比对，复用强幂等入账。
+		if cErr := g.CreditPaidOrder(ctx, ord.OrderNo, "reconcile", 0); cErr != nil {
+			res.Failed[ord.OrderNo] = "credit: " + cErr.Error()
+			continue
+		}
+		res.Reconciled = append(res.Reconciled, ord.OrderNo)
+	}
+	return res, nil
+}

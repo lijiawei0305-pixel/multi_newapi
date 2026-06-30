@@ -215,6 +215,10 @@ func (a *App) HandlePurchase(c *gin.Context) {
 // 原生订阅桶，非充值额度，故下单不传美元额）。NotifyURL 与 recharge 同口径（mock 不实际使用）。
 // authClient 未装配（如单测直构 App）时回退占位 PayURL，保证可跑不 panic。
 func (a *App) subscriptionPayURL(ctx context.Context, ticket *tokenplan.PurchaseTicket, provider payment.Provider) (string, error) {
+	// 回填订单支付渠道（供真实回调路由 + 卡单对账主动查单识别渠道）；best-effort，失败不阻断下单。
+	if err := newSubOrderStore(a.DB).setProvider(ctx, ticket.OrderID, string(provider)); err != nil {
+		common.SysLog("set sub order provider failed: " + err.Error())
+	}
 	if a.authClient == nil {
 		return ticket.PayURL, nil
 	}

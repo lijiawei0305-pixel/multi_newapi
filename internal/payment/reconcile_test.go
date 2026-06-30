@@ -57,6 +57,47 @@ func TestReconcileSkipsFreshAndNonPaid(t *testing.T) {
 	}
 }
 
+// TestReconcileStuckCreated 卡在 created（回调从未送达）的订单 → 主动查单：已付补入账、未付不动。
+func TestReconcileStuckCreated(t *testing.T) {
+	g, repo, recharge, _ := newGateway()
+	seedCreatedOrder(t, repo, "RCG-paid", OrderTypeRecharge)
+	seedCreatedOrder(t, repo, "RCG-unpaid", OrderTypeRecharge)
+
+	query := func(_ context.Context, orderNo, _ string) (bool, error) {
+		return orderNo == "RCG-paid", nil // 仅 RCG-paid 平台已收款
+	}
+	// before 取极大值确保两单都被扫到（seed 的 UpdatedAt 为零值）；maxAge=0 关闭年龄过滤。
+	res, err := g.ReconcileStuckCreated(context.Background(), time.Unix(1<<40, 0), 0, 0, query)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if res.Scanned != 2 {
+		t.Fatalf("scanned=%d, want 2", res.Scanned)
+	}
+	if len(res.Reconciled) != 1 || res.Reconciled[0] != "RCG-paid" {
+		t.Fatalf("reconciled=%v, want [RCG-paid]", res.Reconciled)
+	}
+	if recharge.count() != 1 {
+		t.Fatalf("OnPaid called %d, want exactly 1", recharge.count())
+	}
+	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-paid"); got.Status != OrderCredited {
+		t.Fatalf("RCG-paid status=%q, want credited", got.Status)
+	}
+	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-unpaid"); got.Status != OrderCreated {
+		t.Fatalf("RCG-unpaid status=%q, want created (untouched)", got.Status)
+	}
+}
+
+// TestReconcileStuckCreatedNilQuery query 未注入 → 安全空跑（不扫不入账）。
+func TestReconcileStuckCreatedNilQuery(t *testing.T) {
+	g, repo, _, _ := newGateway()
+	seedCreatedOrder(t, repo, "RCG-x", OrderTypeRecharge)
+	res, err := g.ReconcileStuckCreated(context.Background(), time.Unix(1<<40, 0), 0, 0, nil)
+	if err != nil || res.Scanned != 0 {
+		t.Fatalf("nil query should no-op, got scanned=%d err=%v", res.Scanned, err)
+	}
+}
+
 // TestReconcileSinkStillFailingStaysPaid 入账仍失败 → 留在 paid、计入 Failed，下次可再试。
 func TestReconcileSinkStillFailingStaysPaid(t *testing.T) {
 	repo := NewMemRepo()

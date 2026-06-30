@@ -5,6 +5,8 @@ go 1.25.1
 
 require (
 	github.com/Calcium-Ion/go-epay v0.0.4
+	github.com/smartwalle/alipay/v3 v3.2.23
+	github.com/wechatpay-apiv3/wechatpay-go v0.2.20
 	github.com/abema/go-mp4 v1.4.1
 	github.com/andybalholm/brotli v1.1.1
 	github.com/anknown/ahocorasick v0.0.0-20190904063843-d75dbd5169c0

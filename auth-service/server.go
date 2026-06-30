@@ -8,9 +8,11 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/auth-service/realpay"
 	"github.com/QuantumNous/new-api/internal/payment"
 )
 
@@ -19,34 +21,84 @@ const internalSecretHeader = "X-Internal-Secret"
 
 // Server 是 auth-service 的 HTTP 服务。
 //
-// 复用 internal/payment 的状态机蓝本：Gateway(MemRepo + StubPaySDK + forwarder Sink)。
-//   - 下单（/auth/order）：据主站给定 order_no 落一条 created 订单（MemRepo）+ 返回 mock 支付凭据；
-//   - 回调（/auth/{wxpay,alipay}/notify）：Gateway 验签 → created→paid CAS 幂等 → forwarder 调主站入账；
-//   - mock 确认页（/auth/mock/pay|confirm）：用户「支付」→ 合成合法签名回调 → 复用同一回调路径。
+// 两种形态：
+//   - mock（cfg.Mock=true）：复用 internal/payment 的 Gateway(MemRepo + StubPaySDK + forwarder Sink)：
+//     下单落 MemRepo + 返 mock 确认页；确认页合成合法签名回调 → Gateway 验签/幂等 → forward 主站。
+//   - 真实（cfg.Mock=false）：用 realpay 适配真实微信/支付宝 V3。回调走**无状态 verify-and-forward**
+//     （realpay.VerifyNotify → forwarder.OnPaid 直接回调主站），不依赖本地 MemRepo——
+//     主站持久订单 + created→paid→credited CAS 是唯一幂等 + 金额权威，故 auth-service 重启不丢单。
 type Server struct {
 	cfg    Config
-	gw     *payment.Gateway
-	repo   payment.OrderRepo   // 直接落单/读单（确认页展示）
-	sdk    *payment.StubPaySDK // 合成 mock 回调（与 gw 验签同密钥）
+	gw     *payment.Gateway    // mock 模式：状态机编排
+	repo   payment.OrderRepo   // mock 模式：落单/读单（确认页/查单）
+	sdk    *payment.StubPaySDK // mock 模式：合成 mock 回调
+	real   *realpay.SDK        // 真实模式：微信/支付宝 V3 适配器
+	fwd    *forwarder          // 入账转发器（两种模式共用）
 	client *http.Client
 }
 
-// NewServer 组装服务：Gateway 的两个 Sink 都指向 forwarder（统一回调主站，主站按前缀分发入账）。
-func NewServer(cfg Config) *Server {
-	repo := payment.NewMemRepo()
-	sdk := payment.NewStubPaySDK(cfg.SignSecret)
+// NewServer 组装服务。真实模式装配 realpay（凭据/密钥文件错误会返回 error）。
+func NewServer(cfg Config) (*Server, error) {
 	client := &http.Client{Timeout: 8 * time.Second}
 	fwd := &forwarder{
 		callbackURL: cfg.Internal.CallbackURL,
 		secret:      cfg.Internal.SharedSecret,
 		client:      client,
 	}
-	sinks := map[payment.OrderType]payment.OrderSink{
-		payment.OrderTypeRecharge:     fwd,
-		payment.OrderTypeSubscription: fwd,
+	s := &Server{cfg: cfg, fwd: fwd, client: client}
+
+	if cfg.Mock {
+		repo := payment.NewMemRepo()
+		sdk := payment.NewStubPaySDK(cfg.SignSecret)
+		sinks := map[payment.OrderType]payment.OrderSink{
+			payment.OrderTypeRecharge:     fwd,
+			payment.OrderTypeSubscription: fwd,
+		}
+		s.repo = repo
+		s.sdk = sdk
+		s.gw = payment.NewGateway(repo, sdk, sinks)
+		return s, nil
 	}
-	gw := payment.NewGateway(repo, sdk, sinks)
-	return &Server{cfg: cfg, gw: gw, repo: repo, sdk: sdk, client: client}
+
+	real, err := buildRealSDK(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("auth-service: build real pay sdk: %w", err)
+	}
+	s.real = real
+	return s, nil
+}
+
+// buildRealSDK 从 Config 映射出 realpay.Config（读取支付宝私钥/公钥文件内容）。
+func buildRealSDK(cfg Config) (*realpay.SDK, error) {
+	rc := realpay.Config{}
+	if cfg.wxpayConfigured() {
+		rc.Wxpay = realpay.WxpayConfig{
+			AppID:          cfg.Wxpay.AppID,
+			MchID:          cfg.Wxpay.MchID,
+			APIv3Key:       cfg.Wxpay.APIv3Key,
+			CertSerialNo:   cfg.Wxpay.CertSerialNo,
+			PrivateKeyPath: cfg.Wxpay.PrivateKeyPath, // realpay 内部经 utils.LoadPrivateKeyWithPath 读取
+		}
+	}
+	if cfg.alipayConfigured() {
+		priv, err := os.ReadFile(cfg.Alipay.PrivateKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("read alipay private key %q: %w", cfg.Alipay.PrivateKeyPath, err)
+		}
+		pub, err := os.ReadFile(cfg.Alipay.AlipayPublicKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("read alipay public key %q: %w", cfg.Alipay.AlipayPublicKeyPath, err)
+		}
+		rc.Alipay = realpay.AlipayConfig{
+			AppID:           cfg.Alipay.AppID,
+			PrivateKey:      string(priv),
+			AlipayPublicKey: string(pub),
+			SellerID:        cfg.Alipay.SellerID,
+			ReturnURL:       cfg.Alipay.ReturnURL,
+			IsProduction:    !cfg.Alipay.Sandbox,
+		}
+	}
+	return realpay.New(context.Background(), rc)
 }
 
 // Router 返回挂载全部路由的 http.Handler（Go 1.22+ 方法模式）。
@@ -57,6 +109,9 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /auth/order/status", s.handleOrderStatus)
 	mux.HandleFunc("GET /auth/mock/pay", s.handleMockPayPage)
 	mux.HandleFunc("POST /auth/mock/confirm", s.handleMockConfirm)
+	// 微信回调：真实微信 POST 到 notify_url = base + Provider.NotifyPath() = base + "/pay/wxpay/notify"
+	// （nginx ^~ /pay/ 反代到此）。同时保留 /auth/wxpay/notify 兼容既有 mock 自检/单测。
+	mux.HandleFunc("POST /pay/wxpay/notify", s.handleWxpayNotify)
 	mux.HandleFunc("POST /auth/wxpay/notify", s.handleWxpayNotify)
 	mux.HandleFunc("POST /auth/alipay/notify", s.handleAlipayNotify)
 	return mux
@@ -73,7 +128,9 @@ type createOrderRequest struct {
 	NotifyURL string  `json:"notify_url"`
 }
 
-// handleCreateOrder POST /auth/order —— 主站下单。落 created 订单 + 返回 mock 支付凭据（pay_url）。
+// handleCreateOrder POST /auth/order —— 主站下单。
+//   - 真实模式：调 realpay.CreatePay 取真实支付凭据（微信 code_url / 支付宝跳转 URL），无状态。
+//   - mock 模式：落 created 订单（MemRepo）+ 返回 mock 确认页 URL。
 func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 	var req createOrderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.OrderNo == "" {
@@ -86,6 +143,24 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.cfg.Mock {
+		if !s.real.Available(provider) {
+			writeJSON(w, http.StatusBadRequest, jsonObj{"success": false, "message": "provider not configured: " + string(provider)})
+			return
+		}
+		payURL, err := s.real.CreatePay(r.Context(), provider, req.OrderNo, req.Subject, req.AmountCNY, req.NotifyURL)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, jsonObj{"success": false, "message": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonObj{
+			"success": true,
+			"data":    jsonObj{"pay_url": payURL, "provider": string(provider), "mock": false},
+		})
+		return
+	}
+
+	// mock 模式：落 created 订单 + 返回 mock 确认页 URL。
 	now := time.Now()
 	order := &payment.PayOrder{
 		OrderNo:    req.OrderNo,
@@ -106,13 +181,12 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
 	writeJSON(w, http.StatusOK, jsonObj{
 		"success": true,
 		"data": jsonObj{
 			"pay_url":  s.payURL(req.OrderNo),
 			"provider": string(provider),
-			"mock":     s.cfg.Mock,
+			"mock":     true,
 		},
 	})
 }
@@ -122,10 +196,14 @@ func (s *Server) payURL(orderNo string) string {
 	return strings.TrimRight(s.cfg.Server.PublicBaseURL, "/") + "/auth/mock/pay?order=" + orderNo
 }
 
-// ---- mock 支付确认页 ----
+// ---- mock 支付确认页（仅 mock 模式）----
 
 // handleMockPayPage GET /auth/mock/pay?order=XXX —— 极简确认页（mock 专用）。
 func (s *Server) handleMockPayPage(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.Mock {
+		http.NotFound(w, r)
+		return
+	}
 	orderNo := r.URL.Query().Get("order")
 	order, err := s.repo.GetByOrderNo(r.Context(), orderNo)
 	if err != nil {
@@ -142,9 +220,13 @@ func (s *Server) handleMockPayPage(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-// handleMockConfirm POST /auth/mock/confirm (order=XXX) —— 用户「确认支付」。
+// handleMockConfirm POST /auth/mock/confirm (order=XXX) —— 用户「确认支付」（mock 专用）。
 // 合成一条带正确签名的平台回调，复用真实回调路径（验签→幂等→调主站入账）。
 func (s *Server) handleMockConfirm(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.Mock {
+		http.NotFound(w, r)
+		return
+	}
 	_ = r.ParseForm()
 	orderNo := r.FormValue("order")
 	if orderNo == "" {
@@ -171,7 +253,7 @@ func (s *Server) handleMockConfirm(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, mockPaidPageHTML, html.EscapeString(orderNo))
 }
 
-// ---- 平台异步回调（真实模式下由微信/支付宝 POST；mock 由确认页合成）----
+// ---- 平台异步回调 ----
 
 func (s *Server) handleWxpayNotify(w http.ResponseWriter, r *http.Request) {
 	s.handleNotify(w, r, payment.ProviderWxpay)
@@ -181,15 +263,52 @@ func (s *Server) handleAlipayNotify(w http.ResponseWriter, r *http.Request) {
 	s.handleNotify(w, r, payment.ProviderAlipay)
 }
 
-// handleNotify 读原文交给 Gateway（验签→幂等→forward）；据渠道返回平台期望的 ack。
+// handleNotify 据模式分发：真实→verify-and-forward；mock→Gateway 验签+幂等+forward。
 func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request, provider payment.Provider) {
+	if !s.cfg.Mock {
+		s.handleRealNotify(w, r, provider)
+		return
+	}
+	// mock：读原文交给 Gateway（StubPaySDK 验签 → created→paid CAS → forward）。
 	raw := readBody(r)
 	if err := s.processNotify(r.Context(), provider, raw); err != nil {
-		// 验签失败/未知单等：返回 400，让平台按其策略重试（幂等已保证不重复入账）。
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	// 平台期望的成功 ack（避免持续重推）。
+	s.ackNotify(w, provider)
+}
+
+// handleRealNotify 真实模式无状态回调：realpay 验签解析 → 成功则直接 forward 主站（主站幂等 + 金额校验）。
+// 不读本地订单、不做本地 CAS：主站 payment_orders 的 created→paid→credited 是唯一幂等权威，
+// 故平台重推/auth-service 重启都不会重复入账或丢单。
+func (s *Server) handleRealNotify(w http.ResponseWriter, r *http.Request, provider payment.Provider) {
+	info, err := s.real.VerifyNotify(r.Context(), provider, r)
+	if err != nil {
+		// 验签失败/报文非法/商户不符 → 400，让平台按策略重试（幂等已保证不重复入账）。
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if info.Success {
+		po := payment.PaidOrder{
+			OrderNo:    info.OrderNo,
+			Type:       orderTypeFromNo(info.OrderNo),
+			Provider:   provider,
+			ActualPaid: info.PaidAmount, // 元；主站据此与库内订单金额比对（反篡改）
+			Reference:  info.TxnID,
+			PaidAt:     time.Now(),
+		}
+		if err := s.fwd.OnPaid(r.Context(), po); err != nil {
+			// 入账失败（含金额不符被主站拒）→ 非 2xx，平台按策略重推；主站幂等吸收重复 forward。
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+	}
+	// 平台期望的成功 ack（即便交易失败/关闭也 ack，停止无谓重推；不 forward 即不入账）。
+	s.ackNotify(w, provider)
+}
+
+// ackNotify 返回各平台期望的成功应答，避免持续重推。
+func (s *Server) ackNotify(w http.ResponseWriter, provider payment.Provider) {
 	switch provider {
 	case payment.ProviderWxpay:
 		writeJSON(w, http.StatusOK, jsonObj{"code": "SUCCESS", "message": "OK"})
@@ -199,7 +318,7 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request, provider p
 	}
 }
 
-// processNotify 复用 Gateway 的回调编排（验签 → created→paid CAS 幂等 → forwarder 调主站）。
+// processNotify 复用 Gateway 的回调编排（mock 专用：验签 → created→paid CAS 幂等 → forwarder 调主站）。
 func (s *Server) processNotify(ctx context.Context, provider payment.Provider, raw []byte) error {
 	switch provider {
 	case payment.ProviderWxpay:
@@ -215,15 +334,37 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, jsonObj{"success": true, "mock": s.cfg.Mock})
 }
 
-// handleOrderStatus GET /auth/order/status?order_no=XXX —— 主站对账查单：返回订单是否已支付。
-// 内网鉴权（共享密钥头，与入账回调同一信任边界）；公网经 nginx 拒绝该路径。
-// 供主站 SUB 卡单对账：pending 套餐订单在此查到 paid → 补激活（订单回调丢失/失败时的兜底）。
+// handleOrderStatus GET /auth/order/status?order_no=XXX[&provider=YYY] —— 主站对账查单。
+// 内网鉴权（共享密钥头）；公网经 nginx 拒绝该路径。
+//   - 真实模式：经 realpay 向微信/支付宝主动查单（需 provider 参数）。
+//   - mock 模式：读本地 MemRepo 订单状态。
+// 供主站 RCG/SUB 卡单对账：查到 paid → 补入账/补激活（回调丢失时的兜底）。
 func (s *Server) handleOrderStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get(internalSecretHeader) != s.cfg.Internal.SharedSecret {
 		writeJSON(w, http.StatusUnauthorized, jsonObj{"success": false, "message": "unauthorized"})
 		return
 	}
-	order, err := s.repo.GetByOrderNo(r.Context(), r.URL.Query().Get("order_no"))
+	orderNo := r.URL.Query().Get("order_no")
+
+	if !s.cfg.Mock {
+		provider := payment.Provider(r.URL.Query().Get("provider"))
+		if !provider.Valid() {
+			writeJSON(w, http.StatusBadRequest, jsonObj{"success": false, "message": "provider required"})
+			return
+		}
+		paid, err := s.real.QueryOrder(r.Context(), provider, orderNo)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, jsonObj{"success": false, "message": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, jsonObj{
+			"success": true,
+			"data":    jsonObj{"order_no": orderNo, "paid": paid},
+		})
+		return
+	}
+
+	order, err := s.repo.GetByOrderNo(r.Context(), orderNo)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, jsonObj{"success": false, "message": "order not found"})
 		return
@@ -246,10 +387,16 @@ type forwarder struct {
 
 var _ payment.OrderSink = (*forwarder)(nil)
 
-// OnPaid 把「已支付订单」回调主站 /api/internal/order/paid（共享密钥头）。失败返回 error，
-// Gateway 据此回滚 paid→created，待平台重推/重试再 forward（不丢账、不重复入账）。
+// OnPaid 把「已支付订单」回调主站 /api/internal/order/paid（共享密钥头）。
+// 透传 paid_amount（元）+ provider 供主站反篡改金额校验；入账金额仍以主站库内订单为准。
+// 失败返回 error → 调用方（mock Gateway 回滚；真实 handler 返回非 2xx）据此让平台重推/重试。
 func (f *forwarder) OnPaid(ctx context.Context, o payment.PaidOrder) error {
-	body, _ := json.Marshal(jsonObj{"order_no": o.OrderNo, "txn_id": o.Reference})
+	body, _ := json.Marshal(jsonObj{
+		"order_no":    o.OrderNo,
+		"txn_id":      o.Reference,
+		"paid_amount": o.ActualPaid,
+		"provider":    string(o.Provider),
+	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.callbackURL, bytes.NewReader(body))
 	if err != nil {
 		return err

@@ -115,6 +115,12 @@
 - **解决/规避**：逻辑层 standalone 先行（已全绿），new-api fork 合并下沉到集成阶段（GORM/Redis/handler/装配一起做）。
 - **升级**：已写入 progress.md「集成层待办」；基线源 = `github.com/QuantumNous/new-api`（见 CLAUDE.md）。
 
+### [已解决] 真实微信/支付宝接入：本机无 Go 工具链 + 微信回调路径不一致
+- **现象**：① 接 `wechatpay-go`/`smartwalle/alipay/v3` 写 `auth-service/realpay/*` 后，本机 `go`/`go.exe` 均不在 PATH，无法本地 `go build`/`go test` 验证。② `internal/payment/model.go` 的 `ProviderWxpay.NotifyPath()` 返回 `/pay/wxpay/notify`，但 auth-service mux 与 nginx 只注册了 `/auth/wxpay/notify` —— mock 模式不暴露（确认页内部合成回调），真实微信回调会 404。
+- **根因**：① 本项目唯一环境是服务器（W4），Mac/本机只编辑调试。② mock 链路从不真正经过 `notify_url`，故路径笔误一直未被发现。
+- **解决/规避**：① 把验签/解密（依赖 SDK）与「解析+商户校验+金额换算」（纯函数 `wxTransactionToInfo`/`aliNotificationToInfo`）拆开，对纯函数写可离线编译的单测；真实 crypto 留服务器沙箱 E2E。`go.mod` 加 require，服务器 `go mod tidy && go build ./... && go test` 验证。② auth-service mux 增注册 `POST /pay/wxpay/notify`，nginx `tokendream` vhost 增 `^~ /pay/` 反代到 auth-service（与 `^~ /auth/` 同）。③ `smartwalle/alipay/v3` 的 `TradePagePay`/`TradeQuery` 随版本演进，代码内以 `NOTE(W4)` 标注，服务器构建时核对签名。
+- **升级**：暂不升级为硬约束；"真实支付接入需服务器构建验证 + 核对 alipay v3 签名" 已写入 `docs/vendor/payments/deploy-real-payments.md`（上线指南）。
+
 ---
 
 ## 三、业务逻辑
