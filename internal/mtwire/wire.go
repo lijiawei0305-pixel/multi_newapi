@@ -21,6 +21,8 @@ import (
 	"github.com/QuantumNous/new-api/internal/agent"
 	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
 	"github.com/QuantumNous/new-api/internal/modelgroup"
+	"github.com/QuantumNous/new-api/internal/moderation"
+	moderationrepo "github.com/QuantumNous/new-api/internal/moderation/gormrepo"
 	"github.com/QuantumNous/new-api/internal/payment"
 	paymentrepo "github.com/QuantumNous/new-api/internal/payment/gormrepo"
 	"github.com/QuantumNous/new-api/internal/pricing"
@@ -67,6 +69,11 @@ type App struct {
 	// 单实例：计费旁路钩子（resolveModelGroup2D）与后台增删（HandleAdmin*ModelGroup*）共享同一缓存。
 	ModelGroupRepo *modelgroup.Repo
 
+	// --- moderation 模块（违禁词屏蔽，6e · §2.14）---
+	// ModerationRepo 持具体类型（BannedWordRepo+ViolationSink，handlers 用）；Moderator 供 /v1 转发前扫描。
+	ModerationRepo *moderationrepo.Repo
+	Moderator      moderation.Moderator
+
 	// --- payment/recharge 模块（目标③）---
 	// RechargeGateway 下单（落库 RCG 订单 + 调 auth-service）与内网入账（强幂等状态机）。
 	RechargeGateway *payment.Gateway
@@ -105,6 +112,10 @@ func New(db *gorm.DB) *App {
 	// 由 Migrate() 后再重载；非 master 节点表已存在即可装载）。
 	mgRepo := modelgroup.New(db)
 	_ = mgRepo.ReloadCache(context.Background())
+
+	// moderation（6e）：违禁词仓储（2 表）+ 服务（AC 匹配 + 租户合并）。
+	modRepo := moderationrepo.New(db)
+	moderator := moderation.NewService(modRepo, moderation.NewMatcher())
 
 	// tokenplan：GORM 仓储（同时满足 PlanRepo + SubscriptionRepo）+ 纯函数成本守卫。
 	tp := tprepo.New(db)
@@ -148,6 +159,8 @@ func New(db *gorm.DB) *App {
 		Promotion:       promoSvc,
 		RedemptionRepo:  redemptionRepo,
 		ModelGroupRepo:  mgRepo,
+		ModerationRepo:  modRepo,
+		Moderator:       moderator,
 		RechargeGateway: rechargeGateway,
 		rechargeCfg:     rechargeCfg,
 		authClient:      authClient, // 复用同一客户端供 tokenplan 购买（SUB）下单
@@ -183,6 +196,9 @@ func (a *App) Migrate() error {
 		return err
 	}
 	if err := modelgroup.AutoMigrate(a.DB); err != nil { // model_groups（2D 倍率 · 模型分组登记，§2.15）
+		return err
+	}
+	if err := moderationrepo.AutoMigrate(a.DB); err != nil { // moderation_banned_words/moderation_content_violations（6e）
 		return err
 	}
 	// 迁移后重载模型分组缓存（master 节点建表 / 补 seed 后，IsModelGroup 即时生效）。

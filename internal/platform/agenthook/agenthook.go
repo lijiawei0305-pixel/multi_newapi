@@ -7,7 +7,12 @@
 // 所有钩子均为**旁路**（best-effort）：实现内部自行兜底 panic/error，绝不可阻断原生扣费/注册主流程。
 package agenthook
 
-import "context"
+import (
+	"context"
+
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/types"
+)
 
 // ConsumeCommission 在一次成功的 PostConsume 之后被调用，按所属代理 commission_ratio 计佣入账。
 // 参数：userID=消费用户；quotaUnits=本次消费的 new-api 内部额度单位（$1=common.QuotaPerUnit，可正可负，
@@ -21,3 +26,8 @@ var ConsumeCommission func(userID int64, quotaUnits int64, requestID, billingSou
 // 令该渠道 registered_count+1 并落一条归属记录；channelCode 为空或未知则回落 Host 归属。
 // nil = 未装配。best-effort（实现内部兜底 panic/error，绝不阻断注册主流程）。
 var AttributeRegistration func(ctx context.Context, host, channelCode string, userID int64)
+
+// ScanUserInput 在 /v1 转发前被调用，扫描用户输入消息的违禁词（6e，§2.14）。
+// 命中 block 级 → 返回非 nil 错误（原生 relay 据此拦截返回）；remind 级 → 返回 nil（实现侧已记录违规）。
+// 实现内部自身兜底 panic/error，扫描/记录失败绝不阻断请求。nil = 未装配。
+var ScanUserInput func(ctx context.Context, userID, tokenID int64, model string, request dto.Request) *types.NewAPIError

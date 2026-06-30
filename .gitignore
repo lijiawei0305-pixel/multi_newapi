@@ -68,4 +68,5 @@ mysql_data/
 *.swp
 /scratchpad/
 /.playwright/
+.playwright-cli/
 node_modules/

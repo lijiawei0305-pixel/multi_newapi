@@ -51,8 +51,12 @@ import { Route as AuthenticatedPromotionChannelsIndexRouteImport } from './route
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedPlansIndexRouteImport } from './routes/_authenticated/plans/index'
+import { Route as AuthenticatedMyViolationsIndexRouteImport } from './routes/_authenticated/my-violations/index'
 import { Route as AuthenticatedMyUsersIndexRouteImport } from './routes/_authenticated/my-users/index'
+import { Route as AuthenticatedMyModerationIndexRouteImport } from './routes/_authenticated/my-moderation/index'
 import { Route as AuthenticatedMyGroupsIndexRouteImport } from './routes/_authenticated/my-groups/index'
+import { Route as AuthenticatedModerationWordsIndexRouteImport } from './routes/_authenticated/moderation-words/index'
+import { Route as AuthenticatedModerationViolationsIndexRouteImport } from './routes/_authenticated/moderation-violations/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedModelGroupsIndexRouteImport } from './routes/_authenticated/model-groups/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
@@ -304,16 +308,40 @@ const AuthenticatedPlansIndexRoute = AuthenticatedPlansIndexRouteImport.update({
   path: '/plans/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedMyViolationsIndexRoute =
+  AuthenticatedMyViolationsIndexRouteImport.update({
+    id: '/my-violations/',
+    path: '/my-violations/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedMyUsersIndexRoute =
   AuthenticatedMyUsersIndexRouteImport.update({
     id: '/my-users/',
     path: '/my-users/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedMyModerationIndexRoute =
+  AuthenticatedMyModerationIndexRouteImport.update({
+    id: '/my-moderation/',
+    path: '/my-moderation/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedMyGroupsIndexRoute =
   AuthenticatedMyGroupsIndexRouteImport.update({
     id: '/my-groups/',
     path: '/my-groups/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedModerationWordsIndexRoute =
+  AuthenticatedModerationWordsIndexRouteImport.update({
+    id: '/moderation-words/',
+    path: '/moderation-words/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedModerationViolationsIndexRoute =
+  AuthenticatedModerationViolationsIndexRouteImport.update({
+    id: '/moderation-violations/',
+    path: '/moderation-violations/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedModelsIndexRoute =
@@ -521,8 +549,12 @@ export interface FileRoutesByFullPath {
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/model-groups/': typeof AuthenticatedModelGroupsIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
+  '/moderation-violations/': typeof AuthenticatedModerationViolationsIndexRoute
+  '/moderation-words/': typeof AuthenticatedModerationWordsIndexRoute
   '/my-groups/': typeof AuthenticatedMyGroupsIndexRoute
+  '/my-moderation/': typeof AuthenticatedMyModerationIndexRoute
   '/my-users/': typeof AuthenticatedMyUsersIndexRoute
+  '/my-violations/': typeof AuthenticatedMyViolationsIndexRoute
   '/plans/': typeof AuthenticatedPlansIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
@@ -592,8 +624,12 @@ export interface FileRoutesByTo {
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/model-groups': typeof AuthenticatedModelGroupsIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
+  '/moderation-violations': typeof AuthenticatedModerationViolationsIndexRoute
+  '/moderation-words': typeof AuthenticatedModerationWordsIndexRoute
   '/my-groups': typeof AuthenticatedMyGroupsIndexRoute
+  '/my-moderation': typeof AuthenticatedMyModerationIndexRoute
   '/my-users': typeof AuthenticatedMyUsersIndexRoute
+  '/my-violations': typeof AuthenticatedMyViolationsIndexRoute
   '/plans': typeof AuthenticatedPlansIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
@@ -667,8 +703,12 @@ export interface FileRoutesById {
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/model-groups/': typeof AuthenticatedModelGroupsIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
+  '/_authenticated/moderation-violations/': typeof AuthenticatedModerationViolationsIndexRoute
+  '/_authenticated/moderation-words/': typeof AuthenticatedModerationWordsIndexRoute
   '/_authenticated/my-groups/': typeof AuthenticatedMyGroupsIndexRoute
+  '/_authenticated/my-moderation/': typeof AuthenticatedMyModerationIndexRoute
   '/_authenticated/my-users/': typeof AuthenticatedMyUsersIndexRoute
+  '/_authenticated/my-violations/': typeof AuthenticatedMyViolationsIndexRoute
   '/_authenticated/plans/': typeof AuthenticatedPlansIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
@@ -741,8 +781,12 @@ export interface FileRouteTypes {
     | '/keys/'
     | '/model-groups/'
     | '/models/'
+    | '/moderation-violations/'
+    | '/moderation-words/'
     | '/my-groups/'
+    | '/my-moderation/'
     | '/my-users/'
+    | '/my-violations/'
     | '/plans/'
     | '/playground/'
     | '/profile/'
@@ -812,8 +856,12 @@ export interface FileRouteTypes {
     | '/keys'
     | '/model-groups'
     | '/models'
+    | '/moderation-violations'
+    | '/moderation-words'
     | '/my-groups'
+    | '/my-moderation'
     | '/my-users'
+    | '/my-violations'
     | '/plans'
     | '/playground'
     | '/profile'
@@ -886,8 +934,12 @@ export interface FileRouteTypes {
     | '/_authenticated/keys/'
     | '/_authenticated/model-groups/'
     | '/_authenticated/models/'
+    | '/_authenticated/moderation-violations/'
+    | '/_authenticated/moderation-words/'
     | '/_authenticated/my-groups/'
+    | '/_authenticated/my-moderation/'
     | '/_authenticated/my-users/'
+    | '/_authenticated/my-violations/'
     | '/_authenticated/plans/'
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
@@ -1237,6 +1289,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlansIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/my-violations/': {
+      id: '/_authenticated/my-violations/'
+      path: '/my-violations'
+      fullPath: '/my-violations/'
+      preLoaderRoute: typeof AuthenticatedMyViolationsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/my-users/': {
       id: '/_authenticated/my-users/'
       path: '/my-users'
@@ -1244,11 +1303,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedMyUsersIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/my-moderation/': {
+      id: '/_authenticated/my-moderation/'
+      path: '/my-moderation'
+      fullPath: '/my-moderation/'
+      preLoaderRoute: typeof AuthenticatedMyModerationIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/my-groups/': {
       id: '/_authenticated/my-groups/'
       path: '/my-groups'
       fullPath: '/my-groups/'
       preLoaderRoute: typeof AuthenticatedMyGroupsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/moderation-words/': {
+      id: '/_authenticated/moderation-words/'
+      path: '/moderation-words'
+      fullPath: '/moderation-words/'
+      preLoaderRoute: typeof AuthenticatedModerationWordsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/moderation-violations/': {
+      id: '/_authenticated/moderation-violations/'
+      path: '/moderation-violations'
+      fullPath: '/moderation-violations/'
+      preLoaderRoute: typeof AuthenticatedModerationViolationsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/models/': {
@@ -1549,8 +1629,12 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedModelGroupsIndexRoute: typeof AuthenticatedModelGroupsIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
+  AuthenticatedModerationViolationsIndexRoute: typeof AuthenticatedModerationViolationsIndexRoute
+  AuthenticatedModerationWordsIndexRoute: typeof AuthenticatedModerationWordsIndexRoute
   AuthenticatedMyGroupsIndexRoute: typeof AuthenticatedMyGroupsIndexRoute
+  AuthenticatedMyModerationIndexRoute: typeof AuthenticatedMyModerationIndexRoute
   AuthenticatedMyUsersIndexRoute: typeof AuthenticatedMyUsersIndexRoute
+  AuthenticatedMyViolationsIndexRoute: typeof AuthenticatedMyViolationsIndexRoute
   AuthenticatedPlansIndexRoute: typeof AuthenticatedPlansIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
@@ -1584,8 +1668,14 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedModelGroupsIndexRoute: AuthenticatedModelGroupsIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
+  AuthenticatedModerationViolationsIndexRoute:
+    AuthenticatedModerationViolationsIndexRoute,
+  AuthenticatedModerationWordsIndexRoute:
+    AuthenticatedModerationWordsIndexRoute,
   AuthenticatedMyGroupsIndexRoute: AuthenticatedMyGroupsIndexRoute,
+  AuthenticatedMyModerationIndexRoute: AuthenticatedMyModerationIndexRoute,
   AuthenticatedMyUsersIndexRoute: AuthenticatedMyUsersIndexRoute,
+  AuthenticatedMyViolationsIndexRoute: AuthenticatedMyViolationsIndexRoute,
   AuthenticatedPlansIndexRoute: AuthenticatedPlansIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,

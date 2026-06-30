@@ -203,6 +203,12 @@
 - **供应商（模型广场按 OpenAI/Anthropic 分组）**：`vendors` 表存供应商(name 唯一+lobehub 图标名)，**`models` 表的 `vendor_id`** 关联模型；模型必须**登记进 models 表并设 vendor_id** 才会在广场归到供应商下（models 表空则广场无供应商分组）。
 - **升级**：①「分组定价」里只改倍率**值**是安全的；改分组**名**必须走全栈 SQL（6 处）。②删渠道前想清楚——**同上游 key 的另一渠道可直接补上同样的模型**（改 `channels.models`+`abilities`+重启），不必重加渠道/重填 key（codex刀 id1 被删后，用同 key 的 codex刀pro id2 补全了 gpt 模型）。③改库后必 `docker restart` app 重载 abilities/options/models 缓存。
 
+### [已解决] 6e 违禁词接入 new-api：原生已有 AC 敏感词 + live 链是 `controller/relay.go` + `dto.Request` 不暴露消息
+- **现象**：要在 /v1 转发前扫「用户输入」违禁词，但不知挂哪、怎么拿到用户消息。
+- **根因/发现**：①new-api **原生已自带**敏感词（`service/str.go` Aho-Corasick 引擎 + `service/sensitive.go` + `setting/sensitive.go`，go.mod 已有 `anknown/ahocorasick`），但**全局/仅拦截/不记录**，满足不了多租户+remind+审阅。②**live /v1 链是 `controller/relay.go`**——`internal/relay.Gateway` 是设计好但**休眠**（`NewGateway` 无人调、gateway.go 自注 TODO），别挂错；原生敏感词检查在 `controller/relay.go:~136`（扫 `meta.CombineText`）。③`dto.Request` 接口只暴露 `GetTokenCountMeta/IsStream/SetModelName`，**不暴露消息**；`TokenCountMeta` 只有 `CombineText`（含 system/assistant）。要「仅用户输入」必须**按格式类型断言**：`*dto.GeneralOpenAIRequest.Messages`(role==user→`ParseContent()`)、`*dto.OpenAIResponsesRequest.Input`(json.RawMessage，自解析 string/数组)。
+- **解决**：复用原生 AC **范式**（模块内自带 `goahocorasick`，不 import 原生 service，§1.4）；在 `internal/moderation` 建多租户/remind/记录；hook 走 **`internal/platform/agenthook`** 包级 var（`ScanUserInput`，原生 relay 调、mtwire `InstallHooks` 注入、nil 回退——避免 native→mtwire import 环）；`controller/relay.go` 原生敏感词检查后加一段调用（小原生改动）。
+- **升级**：①接 /v1 旁路逻辑一律走 `agenthook` 包级 var，别在原生包 import mtwire。②改原生 relay 前先确认 live 链是 `controller/relay.go`（不是休眠的 `internal/relay.Gateway`）。
+
 ---
 
 ## 四、工具链与协作

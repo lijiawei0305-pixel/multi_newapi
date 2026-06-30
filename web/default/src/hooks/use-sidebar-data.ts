@@ -36,8 +36,10 @@ import {
   Package,
   Percent,
   Radio,
+  ScrollText,
   ServerCog,
   Settings,
+  ShieldAlert,
   ShoppingBag,
   Tags,
   Ticket,
@@ -167,6 +169,16 @@ export function useSidebarData(): SidebarData {
             url: '/my-groups',
             icon: Percent,
           },
+          {
+            title: t('My Banned Words'),
+            url: '/my-moderation',
+            icon: ShieldAlert,
+          },
+          {
+            title: t('My Violation Logs'),
+            url: '/my-violations',
+            icon: ScrollText,
+          },
         ],
       },
       {
@@ -222,6 +234,16 @@ export function useSidebarData(): SidebarData {
             title: t('Withdrawal Review'),
             url: '/withdrawals',
             icon: HandCoins,
+          },
+          {
+            title: t('Banned Words Library'),
+            url: '/moderation-words',
+            icon: ShieldAlert,
+          },
+          {
+            title: t('Violation Logs'),
+            url: '/moderation-violations',
+            icon: ScrollText,
           },
           {
             title: t('System Info'),

@@ -93,6 +93,7 @@ func (a *App) InstallHooks() {
 	agenthook.ConsumeCommission = a.creditConsumeCommission
 	agenthook.AttributeRegistration = a.attributeRegistration
 	a.InstallModelGroup2DHook()
+	agenthook.ScanUserInput = a.scanUserInputHook // 6e 违禁词：/v1 转发前扫描用户输入
 }
 
 // attributeRegistration 是 agenthook.AttributeRegistration 实现：把新用户归属到对应代理（租户）。
@@ -227,6 +228,22 @@ func (a *App) userTenantID(ctx context.Context, userID int64) int64 {
 		return 0
 	}
 	return row.TenantID
+}
+
+// moderationTenantID 解析「内容审核归属租户」：普通用户按自身 tenant_id；
+// 站长(代理 owner)自身 tenant_id 多为 0/主租户，但其违规应归到「拥有的代理租户」——
+// 这样代理后台「我的违规日志」可见、且套用该租户词库。仅在 tenant_id==0 时回查 owner_user_id（省热路径一次查询）。
+func (a *App) moderationTenantID(ctx context.Context, userID int64) int64 {
+	tid := a.userTenantID(ctx, userID)
+	if tid != 0 {
+		return tid
+	}
+	var owned struct{ ID int64 }
+	if err := a.DB.WithContext(ctx).Table("tenants").
+		Select("id").Where("owner_user_id = ?", userID).Take(&owned).Error; err == nil && owned.ID > 0 {
+		return owned.ID
+	}
+	return 0
 }
 
 // ============================================================================

@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	agenthook "github.com/QuantumNous/new-api/internal/platform/agenthook"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -138,6 +139,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if contains {
 			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
 			newAPIError = types.NewError(err, types.ErrorCodeSensitiveWordsDetected)
+			return
+		}
+	}
+
+	// 多租户违禁词审核（6e · §2.14）：转发前扫用户输入；命中 block 拦截、remind 仅记录。nil = 未装配。
+	if agenthook.ScanUserInput != nil {
+		if e := agenthook.ScanUserInput(c, int64(c.GetInt("id")), int64(c.GetInt("token_id")), relayInfo.OriginModelName, request); e != nil {
+			newAPIError = e
 			return
 		}
 	}

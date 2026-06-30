@@ -77,6 +77,12 @@ func SetMtRouter(router *gin.Engine) {
 			// 我的模型分组倍率：列表（平台基准 + 本租户覆盖）/ 设覆盖（仅模型分组、≥ 平台基准）。
 			agentSelf.GET("/groups", app.HandleAgentListGroups)
 			agentSelf.PUT("/groups/:group", app.HandleAgentSetGroupRatio)
+			// 6e 违禁词：代理管理本租户词库（scopeByTenant）。
+			agentSelf.GET("/moderation/words", app.HandleAgentListModerationWords)
+			agentSelf.POST("/moderation/words", app.HandleAgentUpsertModerationWord)
+			agentSelf.DELETE("/moderation/words/:id", app.HandleAgentDeleteModerationWord)
+			agentSelf.GET("/moderation/base-words", app.HandleAgentListBaseWords)   // 只读：全站基础库
+			agentSelf.GET("/moderation/violations", app.HandleAgentListViolations) // 本租户违规日志
 		}
 	}
 
@@ -130,6 +136,17 @@ func SetMtRouter(router *gin.Engine) {
 		adminModelGroupGroup.POST("", app.HandleAdminCreateModelGroup)
 		adminModelGroupGroup.PUT("/:name", app.HandleAdminUpdateModelGroup)
 		adminModelGroupGroup.DELETE("/:name", app.HandleAdminDeleteModelGroup)
+	}
+
+	// 主站违禁词审核（6e · §2.14）：全站基础库（tenant_id=0）词库 CRUD + 违规日志（当前 Host 租户）。
+	// 前置 TenantMiddleware（违规日志按 Host 租户隔离）+ new-api AdminAuth。
+	adminModerationGroup := router.Group("/api/admin/moderation")
+	adminModerationGroup.Use(app.TenantMiddleware(), middleware.AdminAuth())
+	{
+		adminModerationGroup.GET("/words", app.HandleAdminListModerationWords)
+		adminModerationGroup.POST("/words", app.HandleAdminUpsertModerationWord)
+		adminModerationGroup.DELETE("/words/:id", app.HandleAdminDeleteModerationWord)
+		adminModerationGroup.GET("/violations", app.HandleAdminListViolations)
 	}
 
 	common.SysLog("multitenant (tenant + tokenplan + agent) routes registered")
