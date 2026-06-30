@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -232,15 +233,17 @@ func (a *App) HandleInternalOrderPaid(c *gin.Context) {
 // 主站只用 CreatePay；Verify 不在主站执行（auth-service 完成平台验签后回调 /api/internal/order/paid）。
 type authServiceClient struct {
 	baseURL string
+	secret  string // 内网共享密钥（查单端点鉴权；与 auth-service shared_secret 同值）
 	http    *http.Client
 }
 
 // 编译期断言：authServiceClient 实现 payment.PaySDK。
 var _ payment.PaySDK = (*authServiceClient)(nil)
 
-func newAuthServiceClient(baseURL string) *authServiceClient {
+func newAuthServiceClient(baseURL, secret string) *authServiceClient {
 	return &authServiceClient{
 		baseURL: baseURL,
+		secret:  secret,
 		http:    &http.Client{Timeout: 8 * time.Second},
 	}
 }
@@ -296,4 +299,32 @@ func (c *authServiceClient) CreatePay(ctx context.Context, req payment.PayReques
 // Verify 主站不验签（验签在 auth-service）。返回 PAY_VERIFY_UNSUPPORTED。
 func (c *authServiceClient) Verify(_ context.Context, _ payment.Provider, _ []byte) (*payment.CallbackInfo, error) {
 	return nil, errVerifyUnsupported
+}
+
+// QueryOrderStatus GET /auth/order/status?order_no=X（内网共享密钥头）——对账兜底查单：
+// 该订单平台是否已收款。供 SUB 卡单对账：pending 套餐单查到 paid → 补激活。
+func (c *authServiceClient) QueryOrderStatus(ctx context.Context, orderNo string) (bool, error) {
+	u := c.baseURL + "/auth/order/status?order_no=" + url.QueryEscape(orderNo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set(internalSecretHeader, c.secret)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return false, apperr.New("AUTH_SERVICE_UNREACHABLE", "支付服务暂不可用", http.StatusBadGateway).Wrap(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, apperr.New("AUTH_SERVICE_QUERY_FAILED", "查单失败", http.StatusBadGateway)
+	}
+	var out struct {
+		Data struct {
+			Paid bool `json:"paid"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return false, apperr.New("AUTH_SERVICE_BAD_RESPONSE", "支付服务响应异常", http.StatusBadGateway).Wrap(err)
+	}
+	return out.Data.Paid, nil
 }

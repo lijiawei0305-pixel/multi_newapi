@@ -149,7 +149,7 @@ func New(db *gorm.DB) *App {
 	// 分发到 App.ActivatePaidTokenplanOrder（Track 1 桥接，读 mt_subscription_orders）。
 	rechargeCfg := loadRechargeConfig()
 	orderRepo := paymentrepo.New(db)
-	authClient := newAuthServiceClient(rechargeCfg.authServiceURL)
+	authClient := newAuthServiceClient(rechargeCfg.authServiceURL, rechargeCfg.internalSecret)
 	rechargeSinks := map[payment.OrderType]payment.OrderSink{
 		payment.OrderTypeRecharge: rechargeQuotaSink{},
 	}
