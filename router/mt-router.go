@@ -40,6 +40,8 @@ func SetMtRouter(router *gin.Engine) {
 			// seed 失败不致命：记录后继续启动（路由仍注册）。
 			common.SysError("mt-router: seed failed: " + err.Error())
 		}
+		// 支付卡单对账兜底定时任务（master-only）：周期扫 RCG/SUB 卡单补入账/补激活。
+		app.StartReconcileLoop()
 	}
 
 	// 租户控制台（Host 维度）。GET /current 公开；其余复用 new-api UserAuth。
