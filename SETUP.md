@@ -13,7 +13,7 @@
 | --- | --- |
 | `internal/mtwire` | 多租户装配层（hook 注入、租户解析 TenantMiddleware、http、对账） |
 | `internal/{agent,tokenplan,payment,moderation,risk,siteconfig,promotion}` | 各业务模块（端口接口 + gormrepo） |
-| `auth-service/` | 独立支付网关（微信/支付宝下单+回调，mock 先行） |
+| `auth-service/` | **已退役**（dormant，不构建/不部署）—— 真实支付改走主站进程内 SDK（`internal/payment/realpay`），凭据存 DB（后台「系统设置 → 支付」选项卡表单）；目录仅作历史参考 |
 | `web/default/src` | 前端：`features/` 业务页、`routes/_authenticated/` 文件路由、`i18n/locales/` |
 | `doc/` | 文档：`acceptance.md`=验收基准（已对齐开发合同）、`architecture/data-model/billing/...` |
 | `deploy/` | `docker-compose.test.yml` + `ops/` 部署脚本 + `.env.test.example` |

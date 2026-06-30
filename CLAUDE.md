@@ -106,7 +106,7 @@
 
 > 「精简」原则的临时例外（用户要求置顶可见）；完成即移除/下沉到 `doc/tasks/phase2.md`。细节见 phase2.md ③ 与 `doc/detailed-design.md`。
 
-- 🔴 **[需你提供] 微信/支付宝商户凭据** —— 接真实支付的**唯一阻塞**（现 auth-service=mock，充值/购买闭环已 E2E 通过）。需：微信 `mch_id`/`app_id`/`api_v3_key`/商户私钥 `apiclient_key.pem`/微信支付公钥+`pub_key_id`；支付宝 `app_id`/应用私钥/应用公钥证书/支付宝公钥证书/根证书。拿到后→填 `auth-service/config.yaml`(wxpay/alipay) + `mock:false` + 接真实 V3 SDK(`wechatpay-go`/`smartwalle/alipay`)→沙箱小额验收（入账侧零改）。
+- 🔴 **[需你提供] 微信/支付宝商户凭据** —— 接真实支付的**唯一外部阻塞**（真实 SDK 已落地：主站进程内 `internal/payment/realpay` + `internal/mtwire/payment_inprocess.go`，凭据存 DB；充值/购买闭环已 E2E 通过）。需：微信 `mch_id`/`app_id`/`api_v3_key`/商户私钥 `apiclient_key.pem`/微信支付公钥+`pub_key_id`；支付宝 `app_id`/应用私钥/应用公钥证书/支付宝公钥证书/根证书。拿到后→后台「系统设置 → 支付 → 微信/支付宝 选项卡」填表单并启用（**单门**：配好即在用户充值页与套餐购买页对买家显示，无需改配置文件/环境变量）→沙箱小额验收（入账侧零改）。
 - 🔴 **[需你后续 · 我以后改] gemini 换上游** —— gemini 渠道（测试栈 channel **id4**，type=24 Google Gemini，分组 `gemini`）上游不出请求 → new-api 跨组回退、报 `no available channel … under group default`。**已逐层验证：token 组=gemini、可用组校验含 gemini、渠道启用、路由 enabled、已配价——分组/调用都没错，纯上游渠道问题。** 换法：控制台「渠道管理」→ gemini 渠道 → 编辑 → 改 **base_url + key**（换成能分发 gemini 的上游）→ 保存（分组/路由/倍率/可选全不动）。换好后若仍回退 default，叫我加调试日志精确定位。
 - ✅ **①+② 买家页端到端闭环（完成）** —— 购买 snake_case + 走 auth-service mock：购买→mock 支付页→确认→激活原生订阅→代理分润(¥23.8)→**/v1 走订阅桶**，全链路 E2E 过。
 - 🆕 **[明日 · Phase 2 新功能] 违禁词屏蔽** —— 识别用户发送的违禁消息→提醒用户→管理员可见。规格已补 `doc/detailed-design.md` §2.14（含开放问题，实现前先与用户确认细节）。

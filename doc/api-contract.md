@@ -82,10 +82,12 @@
 | POST | `/api/tenant/wallet/redeem` | 🅤 | `{code}` 兑换码入账 |
 | GET | `/api/tenant/wallet/orders` | 🅤 | 充值/订单历史（分页） |
 
-> **官方支付标识（前端派发）**：管理员在「系统设置 → 支付 → 新增支付方式」选 `wxpay_official` / `alipay_official`
-> 标识（区别于 Epay 的 `wxpay`/`alipay`、Stripe `stripe`、Waffo `waffo_pancake`）。买家页将官方标识从 Epay
-> 按钮网格中排除，改走上方 `/api/tenant/wallet/recharge`（进程内真实 SDK，USD/扫码/跳转）。后端 PayMethods 透传，
-> 按 `type` 由前端决定支付流程；官方标识永不进入 Epay (`RequestEpay`) 路径。凭据在「微信/支付宝」选项卡（存 DB）。
+> **官方微信/支付宝（单门）**：在「系统设置 → 支付 → 微信/支付宝 选项卡」填凭据（存 DB）并启用即为**唯一开关**；
+> 一旦 `enabled && 凭据齐全`，`/api/tenant/wallet/recharge/methods` 返回该渠道，买家充值页与套餐购买页**自动**呈现
+> 官方微信/支付宝（USD 金额，微信扫码 / 支付宝跳转），无需在「新增支付方式」中上架。
+> 「新增支付方式」仍提供 `wxpay_official` / `alipay_official` 标识（区别于 Epay 的 `wxpay`/`alipay`、Stripe、Waffo），
+> 但属可选/标识用途：买家页会把官方标识从 Epay 按钮网格中排除，且后端 `RequestEpay` / 套餐 Epay 入口拒绝官方标识
+> （`IsOfficialPayMethod`），官方支付**永不**走 Epay 路径。
 
 ### 2.4 tokenplan 套餐 ★
 | 方法 | 路径 | 角色 | 说明 |
@@ -134,7 +136,7 @@
 > 调用链（后端编排，前端仅需带 Token）：**鉴权 → 租户 → 风控 → 模型权限 → 桶路由 → 转发 → 扣费 → 日志**。桶路由：有 active 套餐→套餐桶（独立计量，超额/过期→`SUBSCRIPTION_EXHAUSTED/EXPIRED`，**不回退钱包**）；否则钱包桶（不足→`QUOTA_INSUFFICIENT`）。
 
 ### 2.10 支付回调（server-to-server，**非前端**）
-`POST /pay/wxpay/notify` · `POST /auth/alipay/notify` — 由 auth-service 处理：验签→`order_no` 幂等→入账分发（钱包充值 or 激活订阅）。运维/Nginx 转发，详见 [deployment.md](deployment.md)。
+`POST /api/pay/wechat/notify` · `POST /api/pay/alipay/notify` — 由主站进程内真实 SDK 处理：验签→`order_no` 幂等→入账分发（钱包充值 or 激活订阅）。经主站 nginx `location /` 反代到 app，详见 [deployment.md](deployment.md)。
 
 ---
 

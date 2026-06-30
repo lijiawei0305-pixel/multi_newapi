@@ -15,7 +15,7 @@
 - 🟡 **Wave 1 · 基础层**：[01-tenant](01-tenant.md) ＋ [02-identity](02-identity.md) ＋ [04-pricing](04-pricing.md) — ✅ 接口+领域逻辑+单测（`go test -race` 绿，覆盖率 98/100/100%）；⏳ 迁移 · GORM repo · handler · 集成
 - 🟡 **Wave 2 · 领域核心**：[03-agent](03-agent.md) ＋ [05-billing](05-billing.md) ＋ [06-wallet](06-wallet.md) — ✅ 接口+领域逻辑+单测（99/100/98%，含 `-race` 并发不透支与幂等）；⏳ 迁移 · GORM · handler · 集成
 - 🟡 **Wave 3 · 入口（核心 MVP 收口）**：[11-relay](11-relay.md) ＋ [09-promotion](09-promotion.md) ＋ [10-siteconfig](10-siteconfig.md) ＋ [12-stats](12-stats.md) — ✅ 接口+领域逻辑+单测（100/100/98.9/100%）；⏳ Gin handler · 迁移 · GORM · E2E　← 核心 MVP 逻辑层已就绪
-- 🟡 **Wave 4 · tokenplan 批次**：[08-payment](08-payment.md) ＋ [07-tokenplan](07-tokenplan.md) ＋ [13-risk](13-risk.md)（限购/满额）— ✅ 接口+领域逻辑+单测（payment 99.2 / tokenplan 95.5 / risk 97.3%，含 Meter 并发不击穿/激活幂等/回调幂等/限购单赢家）；⏳ 迁移·GORM·auth-service·handler·E2E
+- 🟡 **Wave 4 · tokenplan 批次**：[08-payment](08-payment.md) ＋ [07-tokenplan](07-tokenplan.md) ＋ [13-risk](13-risk.md)（限购/满额）— ✅ 接口+领域逻辑+单测（payment 99.2 / tokenplan 95.5 / risk 97.3%，含 Meter 并发不击穿/激活幂等/回调幂等/限购单赢家）；⏳ 迁移·GORM·handler·E2E
 
 ---
 
@@ -31,7 +31,7 @@
 | 🟡 | 🧮 Billing & Quota | [05-billing](05-billing.md) | pricing, agent | 双桶路由+计费+单测 ✓ 100%；迁移·txn·E2E ⏳ |
 | 🟡 | 👛 Wallet & Recharge | [06-wallet](06-wallet.md) | pricing, agent, payment | 充值/兑换/WalletQuota+并发 ✓ 98%；迁移·GORM·handler ⏳ |
 | 🟡 | 🎟️ TokenPlan 套餐 ★ | [07-tokenplan](07-tokenplan.md) | pricing, payment, risk, agent | 核心逻辑+计量+幂等+单测 ✓ 95.5%；迁移·GORM·handler·E2E ⏳ |
-| 🟡 | 💳 Payment 支付回调 | [08-payment](08-payment.md) | — (被 wallet/tokenplan 注入) | 下单+回调幂等+分发+单测 ✓ 99.2%；真实SDK·auth-service·迁移 ⏳ |
+| 🟡 | 💳 Payment 支付回调 | [08-payment](08-payment.md) | — (被 wallet/tokenplan 注入) | 下单+回调幂等+分发+单测 ✓ 99.2%；真实SDK 进程内已落地(realpay)；真实凭据(后台表单)·迁移 ⏳ |
 | 🟡 | 📣 Promotion 推广归属 | [09-promotion](09-promotion.md) | tenant | 渠道+归属+单测 ✓ 100%；迁移·GORM·handler ⏳ |
 | 🟡 | 🎨 SiteConfig 装修 | [10-siteconfig](10-siteconfig.md) | tenant | 校验+装修+上传安全+单测 ✓ 99%；迁移·Blob·handler·前端 ⏳ |
 | 🟡 | 🚦 RelayGateway 中继 | [11-relay](11-relay.md) | identity, billing, risk | 接口+编排+全mock单测 ✓ 100%；handler·UpstreamPool·E2E ⏳ |
@@ -71,7 +71,7 @@
 - [ ] 终端用户可建 Token、调用 `/v1/*`、按租户扣费、写使用日志
 - [ ] 消耗分润正确计入代理收益；代理可提现、管理员可审核
 - [ ] 管理员看全局统计；代理只看本站；**跨租户访问被拦截**
-- [ ] 微信 `/pay/wxpay/notify`、支付宝 `/auth/alipay/notify` 正确入账（或管理员人工入账兜底）
+- [ ] 微信 `/api/pay/wechat/notify`、支付宝 `/api/pay/alipay/notify` 正确入账（或管理员人工入账兜底）
 
 **tokenplan 套餐**
 - [ ] 管理员可 CRUD 六档套餐（Trial~Max，售价/原价/月限额/成本价/保护线）

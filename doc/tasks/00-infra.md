@@ -28,8 +28,8 @@
 - [ ] 保留 `api.wedreamhub.com` 现有反代不受影响 ｜ ✅ 现网调用不中断
 
 ## E. 支付回调服务
-- [ ] compose 栈新增 `auth-service` 容器（支付回调），加入 `baota_net` ｜ ✅ `docker compose up -d` 后容器 healthy
-- [ ] 宝塔 Nginx 增 `^~ /pay/`、`^~ /auth/` 转发到 auth-service ｜ ✅ 公网可达 `/pay/wxpay/notify`、`/auth/alipay/notify`
+- [x] 真实支付内置于主站进程内（`internal/payment/realpay` + `internal/mtwire/payment_inprocess.go`），无需独立 `auth-service` 容器 ｜ ✅ 随主站镜像构建（auth-service 已退役）
+- [ ] 回调经主站 nginx `location /` 反代到 app（`/api/pay/wechat/notify`、`/api/pay/alipay/notify`），无需独立 `^~ /pay/ /auth/` 块；凭据存 DB（后台「系统设置 → 支付」选项卡表单）｜ ✅ 公网可达回调地址
 
 ## F. 部署联调
 - [ ] 用自定义镜像替换 `newapi_YFNf/docker-compose.yml` 的 `calciumion/new-api:${VERSION}` ｜ ✅ 替换后栈 healthy、站点可登录

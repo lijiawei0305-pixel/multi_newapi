@@ -1,3 +1,12 @@
+# ============================================================================
+# ⚠️ 已退役（DORMANT）—— 请勿据此部署。
+# auth-service 已退役：代码仍留仓库但不构建、不部署。真实微信/支付宝支付现改为
+# **主站进程内 SDK**（internal/payment/realpay + internal/mtwire/payment_inprocess.go）。
+# 凭据不再用本 YAML / 环境变量，改存 **DB**：管理员在后台「系统设置 → 支付 →
+# 微信/支付宝 选项卡」表单填写并启用（单门：配好即对买家显示）。
+# 本文件仅作历史参考，保留以备查阅，勿用于现网。
+# ============================================================================
+#
 # auth-service 配置模板（脱敏占位，真实值绝不入库）。
 # 用法：cp auth-service/config.example.yaml /etc/auth-service/config.yaml，填真实值后启动：
 #   authservice -config /etc/auth-service/config.yaml

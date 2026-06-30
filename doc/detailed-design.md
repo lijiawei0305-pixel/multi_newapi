@@ -1,7 +1,7 @@
 # New API 多租户代理分销平台 — 详细设计文档
 
 > **依据**：需求文档 [`proposal.md`](proposal.md) v2.0（权威）。
-> **架构形态**：模块化单体（New API fork，Gin + GORM）；领域分包，包间**仅通过接口依赖（依赖倒置）**，支付回调走独立 `auth-service`。
+> **架构形态**：模块化单体（New API fork，Gin + GORM）；领域分包，包间**仅通过接口依赖（依赖倒置）**，支付（含下单/回调）内置于主应用进程内（`internal/payment/realpay` + `internal/mtwire/payment_inprocess.go`，凭据存 DB）。
 > **设计范围**：**增量为主** —— 详设新增/改造模块；复用的 New API 模块只标注接口契约与改造点。
 > **核心原则**：低耦合、高内聚，**每个模块可 mock 依赖独立单测**。
 > **默认假设**：`x1` = 模型上游成本价 ×1.0（不叠分组倍率）；引入 Redis；Trial 限购 = 用户∪实名∪设备 各 1 次；额度桶**独立计量不回退**。
@@ -323,7 +323,7 @@ stateDiagram-v2
 
 ### 2.8 Payment 支付与回调
 
-**职责**：下单（微信/支付宝）、回调验签、**幂等入账**并分发（钱包充值 or 激活订阅）。部署在独立 `auth-service`，经 Nginx `/pay/ /auth/` 转发。
+**职责**：下单（微信/支付宝）、回调验签、**幂等入账**并分发（钱包充值 or 激活订阅）。内置于主应用进程内（`internal/payment/realpay` + `internal/mtwire/payment_inprocess.go`，凭据存 DB），回调经主站 nginx `location /` 反代到 app。
 
 **对外接口**
 ```go
@@ -594,12 +594,12 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   participant WX as WeChat/Alipay
-  participant NG as Nginx(/pay,/auth)
-  participant PY as auth-service:CallbackHandler
+  participant NG as Nginx(location /)
+  participant PY as 主站进程内:CallbackHandler
   participant WL as Wallet
   participant AG as Agent
   WX->>NG: 异步通知
-  NG->>PY: 转发 /pay/wxpay/notify
+  NG->>PY: 转发 /api/pay/wechat/notify
   PY->>PY: 验签 + 幂等(order_no 唯一)
   alt 已处理
     PY-->>WX: success(短路)
@@ -657,7 +657,7 @@ sequenceDiagram
   /billing       port.go service.go quota_router.go *_test.go
   /wallet        port.go service.go quota_wallet.go *_test.go
   /tokenplan     port.go catalog.go retail.go subscription.go quota_sub.go model.go *_test.go
-  /payment       port.go gateway.go callback.go *_test.go    # 部署于 auth-service
+  /payment       port.go gateway.go callback.go *_test.go    # 进程内（realpay + mtwire/payment_inprocess，凭据存 DB）
   /promotion     port.go service.go *_test.go
   /siteconfig    port.go service.go asset.go *_test.go
   /relay         handler.go *_test.go                        # 仅编排
@@ -704,7 +704,7 @@ WHERE id = :id AND status='active' AND expire_at > NOW()
 | --- | --- | --- | --- |
 | 1 | 套餐耗尽/过期回退 | **不回退**，拦截重购 | 已确认 |
 | 2 | `x1` 计量 | 上游成本价 ×1.0，不叠分组倍率 | 默认，`[待确认]` |
-| 3 | Redis / auth-service | 引入 Redis；支付回调独立 auth-service | 已确认（模块化单体） |
+| 3 | Redis / 支付回调 | 引入 Redis；支付回调内置主站进程内（realpay，凭据存 DB；独立 auth-service 已退役） | 已确认（模块化单体） |
 | 4 | Trial 限购口径 | 用户∪实名∪设备 各 1 次 | 默认，`[待确认]` |
 | 5 | 退款对套餐的处理 | `refunded` 终态，按比例/全额策略未定 | `[待确认]` |
 | 6 | 套餐内是否允许多模型差异计量 | 一期统一 ×1.0；分模型倍率顺延 | `[待确认]` |
