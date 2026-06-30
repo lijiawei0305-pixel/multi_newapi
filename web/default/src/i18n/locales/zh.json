@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Payment Providers": "支付渠道",
+    "WeChat Pay (Native)": "微信支付 (Native 扫码)",
+    "Alipay (PC Web)": "支付宝 (电脑网站支付)",
+    "Configured": "已配置",
+    "Not configured": "未配置",
+    "Credentials are set in auth-service (environment variables / config.yaml), not here.": "凭据在 auth-service 配置（环境变量 / config.yaml），不在此填写。",
+    "Failed to load payment providers": "加载支付渠道失败",
+    "Provider settings updated": "渠道设置已更新",
+    "Failed to update payment provider": "更新支付渠道失败",
     "Banned Words Library": "违禁词库",
     "My Banned Words": "我的违禁词",
     "Violation Logs": "违规日志",

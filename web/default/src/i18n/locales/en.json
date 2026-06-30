@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Payment Providers": "Payment Providers",
+    "WeChat Pay (Native)": "WeChat Pay (Native)",
+    "Alipay (PC Web)": "Alipay (PC Web)",
+    "Configured": "Configured",
+    "Not configured": "Not configured",
+    "Credentials are set in auth-service (environment variables / config.yaml), not here.": "Credentials are set in auth-service (environment variables / config.yaml), not here.",
+    "Failed to load payment providers": "Failed to load payment providers",
+    "Provider settings updated": "Provider settings updated",
+    "Failed to update payment provider": "Failed to update payment provider",
     "Model Group Management": "Model Group Management",
     "Create Model Group": "Create Model Group",
     "Update model group": "Update model group",

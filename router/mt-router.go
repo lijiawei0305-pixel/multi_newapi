@@ -54,6 +54,8 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.GET("/subscriptions", middleware.UserAuth(), app.HandleListSubscriptions)
 		// 充值下单（目标③）：UserAuth + Host 租户；下单 → 调 auth-service → 返支付凭据。
 		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), app.HandleWalletRecharge)
+		// 买家可用充值渠道：UserAuth + Host 租户；返回 enabled && configured 的渠道（wxpay/alipay）。
+		tenantGroup.GET("/wallet/recharge/methods", middleware.UserAuth(), app.HandleTenantRechargeMethods)
 		// 用户兑换码（P1-UI-04）：UserAuth + Host 租户（不强制 owner）；单赢家 CAS → 原生 quota 入账。
 		tenantGroup.POST("/redeem", middleware.UserAuth(), app.HandleRedeem)
 		// 代理身份门控信号：UserAuth + Host 租户（**不挂 AgentOwnerAuth**，任何登录用户可调）。
@@ -83,7 +85,7 @@ func SetMtRouter(router *gin.Engine) {
 			agentSelf.GET("/moderation/words", app.HandleAgentListModerationWords)
 			agentSelf.POST("/moderation/words", app.HandleAgentUpsertModerationWord)
 			agentSelf.DELETE("/moderation/words/:id", app.HandleAgentDeleteModerationWord)
-			agentSelf.GET("/moderation/base-words", app.HandleAgentListBaseWords)   // 只读：全站基础库
+			agentSelf.GET("/moderation/base-words", app.HandleAgentListBaseWords)  // 只读：全站基础库
 			agentSelf.GET("/moderation/violations", app.HandleAgentListViolations) // 本租户违规日志
 		}
 	}
@@ -102,6 +104,13 @@ func SetMtRouter(router *gin.Engine) {
 		adminPlanGroup.GET("", app.HandleAdminListPlans)
 		adminPlanGroup.POST("", app.HandleAdminCreatePlan)
 		adminPlanGroup.PATCH("/:id", app.HandleAdminUpdatePlan)
+	}
+
+	// 支付渠道配置（全局，非租户维度）：列两渠道 configured/enabled 状态 + 设启用开关。复用 new-api AdminAuth。
+	adminPaymentGroup := router.Group("/api/admin/payment", middleware.AdminAuth())
+	{
+		adminPaymentGroup.GET("/providers", app.HandleAdminListPaymentProviders)
+		adminPaymentGroup.PUT("/providers/:provider", app.HandleAdminSetPaymentProvider)
 	}
 
 	// 支付卡单对账（兜底）管理：列当前卡单 + 手动立即对账。复用 new-api AdminAuth。

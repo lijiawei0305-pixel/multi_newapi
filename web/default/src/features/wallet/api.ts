@@ -269,3 +269,34 @@ export async function createTenantRecharge(
   } as Record<string, unknown>)
   return res.data
 }
+
+export type TenantRechargeMethod = 'wxpay' | 'alipay'
+
+/**
+ * Get the payment channels a buyer may use (enabled && configured).
+ *
+ * GET /api/tenant/wallet/recharge/methods → { data: { methods: [...] } }.
+ * On failure we fall back to both channels so the recharge card keeps its
+ * existing behavior instead of hiding payment options on a transient error.
+ */
+export async function getTenantRechargeMethods(): Promise<{
+  methods: TenantRechargeMethod[]
+}> {
+  try {
+    const res = await api.get('/api/tenant/wallet/recharge/methods', {
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    } as Record<string, unknown>)
+    const body = res.data as ApiResponse<{ methods?: TenantRechargeMethod[] }>
+    if (isApiSuccess(body) && Array.isArray(body.data?.methods)) {
+      return {
+        methods: body.data.methods.filter(
+          (m): m is TenantRechargeMethod => m === 'wxpay' || m === 'alipay'
+        ),
+      }
+    }
+    return { methods: ['wxpay', 'alipay'] }
+  } catch {
+    return { methods: ['wxpay', 'alipay'] }
+  }
+}

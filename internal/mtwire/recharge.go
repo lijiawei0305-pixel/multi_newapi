@@ -164,6 +164,12 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 		respondErr(c, errRechargeAmountTooSmall)
 		return
 	}
+	// 渠道必须 enabled（管理员开关，缺省 true）且 configured（真实凭据齐全）方可下单；
+	// enabled=false 一律拒绝，configured 未知（auth-service 抖动）放行，明确未配置才拒绝。
+	if err := a.ensureProviderUsable(reqCtx(c), provider); err != nil {
+		respondErr(c, err)
+		return
+	}
 	if a.RechargeGateway == nil {
 		respondErr(c, apperr.New("RECHARGE_UNAVAILABLE", "充值服务未装配", http.StatusServiceUnavailable))
 		return

@@ -331,13 +331,33 @@ func (s *Server) processNotify(ctx context.Context, provider payment.Provider, r
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, jsonObj{"success": true, "mock": s.cfg.Mock})
+	wx, ali := s.providerAvailability()
+	writeJSON(w, http.StatusOK, jsonObj{
+		"success": true,
+		"mock":    s.cfg.Mock,
+		// providers = 是否已配置真实凭据（供主站决定渠道是否可下单）。
+		"providers": jsonObj{"wxpay": wx, "alipay": ali},
+	})
+}
+
+// providerAvailability 报告各支付渠道真实凭据是否齐全：
+//   - mock 模式：两者都视为可用（true，下单走 mock 确认页，不需真实凭据）；
+//   - 真实模式：据 realpay SDK 是否装配该渠道（s.real.Available）；s.real 为 nil 时一律 false。
+func (s *Server) providerAvailability() (wxpay, alipay bool) {
+	if s.cfg.Mock {
+		return true, true
+	}
+	if s.real == nil {
+		return false, false
+	}
+	return s.real.Available(payment.ProviderWxpay), s.real.Available(payment.ProviderAlipay)
 }
 
 // handleOrderStatus GET /auth/order/status?order_no=XXX[&provider=YYY] —— 主站对账查单。
 // 内网鉴权（共享密钥头）；公网经 nginx 拒绝该路径。
 //   - 真实模式：经 realpay 向微信/支付宝主动查单（需 provider 参数）。
 //   - mock 模式：读本地 MemRepo 订单状态。
+//
 // 供主站 RCG/SUB 卡单对账：查到 paid → 补入账/补激活（回调丢失时的兜底）。
 func (s *Server) handleOrderStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get(internalSecretHeader) != s.cfg.Internal.SharedSecret {

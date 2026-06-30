@@ -220,6 +220,9 @@ func (a *App) Migrate() error {
 	if err := moderationrepo.AutoMigrate(a.DB); err != nil { // moderation_banned_words/moderation_content_violations（6e）
 		return err
 	}
+	if err := migratePaymentProviders(a.DB); err != nil { // mt_payment_provider_settings（微信/支付宝渠道启用开关）
+		return err
+	}
 	// 迁移后重载模型分组缓存（master 节点建表 / 补 seed 后，IsModelGroup 即时生效）。
 	if a.ModelGroupRepo != nil {
 		_ = a.ModelGroupRepo.ReloadCache(context.Background())

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -29,6 +29,7 @@ import {
   MIN_RECHARGE_USD,
   type RechargeProvider,
 } from '../hooks/use-tenant-recharge'
+import { useRechargeMethods } from '../hooks/use-recharge-methods'
 import { RechargeQrDialog } from './dialogs/recharge-qr-dialog'
 
 /**
@@ -43,6 +44,19 @@ export function TenantRechargeCard() {
   const [amount, setAmount] = useState<string>(String(MIN_RECHARGE_USD))
   const [provider, setProvider] = useState<RechargeProvider>('wxpay')
   const { submitting, qrState, submit, closeQr } = useTenantRecharge()
+  const { methods } = useRechargeMethods()
+
+  // Keep the selected provider within the available set (default = first).
+  useEffect(() => {
+    if (methods && methods.length > 0 && !methods.includes(provider)) {
+      setProvider(methods[0])
+    }
+  }, [methods, provider])
+
+  // Wait until availability is known to avoid a flash of all buttons.
+  if (methods === null) return null
+  // No enabled && configured channel → hide the whole card.
+  if (methods.length === 0) return null
 
   const amountNum = parseFloat(amount) || 0
   const belowMin = amountNum < MIN_RECHARGE_USD
@@ -96,8 +110,8 @@ export function TenantRechargeCard() {
       </div>
 
       <div className='flex gap-2'>
-        {providerButton('wxpay', t('WeChat Pay'))}
-        {providerButton('alipay', t('Alipay'))}
+        {methods.includes('wxpay') && providerButton('wxpay', t('WeChat Pay'))}
+        {methods.includes('alipay') && providerButton('alipay', t('Alipay'))}
       </div>
 
       <Button
