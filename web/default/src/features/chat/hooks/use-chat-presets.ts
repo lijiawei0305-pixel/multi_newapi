@@ -44,15 +44,20 @@ function extractServerAddress(status: SystemStatus | null) {
     status?.data?.server_address ??
     (status?.data as Record<string, unknown> | undefined)?.serverAddress
 
-  if (fromStatus && typeof fromStatus === 'string') {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+
+  // 多租户：导入到聊天客户端（Cherry Studio 等）的 base_url 必须是用户「当前访问的域名」
+  // （各代理站/主站各自域名），而非全局 ServerAddress。后端未配置 ServerAddress 时默认返回
+  // http://localhost:3000，会污染导入地址——忽略该默认值、优先同源 origin；仅显式配了真实地址才用它。
+  if (
+    fromStatus &&
+    typeof fromStatus === 'string' &&
+    !/(localhost|127\.0\.0\.1):3000/.test(fromStatus)
+  ) {
     return fromStatus
   }
 
-  if (typeof window !== 'undefined') {
-    return window.location.origin
-  }
-
-  return ''
+  return origin
 }
 
 function extractChats(status: SystemStatus | null): RawChatConfig {
