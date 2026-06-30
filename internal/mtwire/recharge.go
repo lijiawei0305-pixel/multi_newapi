@@ -1,26 +1,20 @@
 package mtwire
 
-// 充值 / 支付装配（Phase 2 · 目标③）。
+// 充值 / 支付装配（Phase 2 · 目标③，支付重构后）。
 //
-// 架构：充值入 new-api **原生 quota**（$1 = QuotaPerUnit，IncreaseUserQuota），
-// 微信/支付宝走**独立 auth-service**（原生只有 epay 子渠道、无官方 V3）。本文件是主站侧装配：
-//   - HandleWalletRecharge   下单：校验 → 算实付¥ → 经 RechargeGateway 落库 RCG 订单 + 调 auth-service 下单 → 返支付凭据；
-//   - HandleInternalOrderPaid 入账：仅内网 + 共享密钥；据 order_no 走强幂等状态机入账（RCG→加额度 / SUB→激活套餐）；
-//   - authServiceClient       实现 payment.PaySDK.CreatePay（HTTP 调 auth-service）；主站不验签（验签在 auth-service）。
+// 架构：充值入 new-api **原生 quota**（$1 = QuotaPerUnit，IncreaseUserQuota）。微信/支付宝下单经
+// 进程内 providerManager（inProcessPaySDK）直连真实平台，回调直达主站 /api/pay/*/notify（见
+// payment_inprocess.go）。本文件是主站侧装配：
+//   - HandleWalletRecharge 下单：校验 → 算实付¥ → 经 RechargeGateway 落库 RCG 订单 + 进程内下单 → 返支付凭据；
+//   - rechargeQuotaSink     入账：RCG 订单 → 原生 quota（$1 = QuotaPerUnit）。
 //
-// 金额可信：以**库内订单金额**入账，绝不信回调报文金额；/api/internal/* 仅内网 + 共享密钥（见 nginx deny）。
+// 金额可信：以**库内订单金额**入账，绝不信回调报文金额（回调仅作反篡改校验，见 payment.CreditPaidOrder）。
 
 import (
-	"bytes"
 	"context"
-	"crypto/hmac"
-	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
-	"net/url"
-	"os"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -35,38 +29,22 @@ import (
 // minRechargeUSD 充值美元最低额（对齐 operation_setting.MinTopUp 口径、UI $1 下限）。
 const minRechargeUSD = 1.0
 
-// internalSecretHeader 是 auth-service → 主站内部入账接口的共享密钥请求头。
-const internalSecretHeader = "X-Internal-Secret"
-
 // 充值/支付相关错误码（沿用模块前缀约定）。
 var (
 	errRechargeAmountTooSmall  = apperr.New("RECHARGE_AMOUNT_TOO_SMALL", fmt.Sprintf("充值金额最低 $%g", minRechargeUSD), http.StatusBadRequest)
 	errRechargeUnauthenticated = apperr.New("RECHARGE_UNAUTHENTICATED", "登录态缺失", http.StatusUnauthorized)
-	errInternalUnauthorized    = apperr.New("INTERNAL_UNAUTHORIZED", "内部接口鉴权失败", http.StatusUnauthorized)
-	errVerifyUnsupported       = apperr.New("PAY_VERIFY_UNSUPPORTED", "主站不处理支付平台验签", http.StatusNotImplemented)
 )
 
-// rechargeConfig 是主站侧充值装配参数（从环境变量读取，缺省给开发值）。
+// rechargeConfig 是主站侧充值装配参数。
 type rechargeConfig struct {
-	authServiceURL string // auth-service 内网基址（CreateOrder 下单）
-	internalSecret string // /api/internal/* 共享密钥（与 auth-service 同值）
-	notifyBaseURL  string // 异步回调公网基址（回填订单 notify_url；mock 可空）
+	notifyBaseURL string // 异步回调公网基址（回填订单 notify_url）；缺省取 system_setting.ServerAddress
 }
 
-// loadRechargeConfig 读取充值装配参数。
+// loadRechargeConfig 读取充值装配参数（notify 基址优先 MT_PAY_NOTIFY_BASE，缺省 system_setting.ServerAddress）。
 func loadRechargeConfig() rechargeConfig {
 	return rechargeConfig{
-		authServiceURL: envOr("MT_AUTH_SERVICE_URL", "http://auth-service:8080"),
-		internalSecret: envOr("MT_INTERNAL_SECRET", "dev-internal-secret-change-me"),
-		notifyBaseURL:  os.Getenv("MT_PAY_NOTIFY_BASE"),
+		notifyBaseURL: resolveNotifyBase(),
 	}
-}
-
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }
 
 // ---- 入账分发目标（OrderSink 实现）----
@@ -114,18 +92,9 @@ func amountMatchesCNY(paidCNY, orderCNY float64) bool {
 	return math.Abs(paidCNY-orderCNY) <= amountToleranceCNY
 }
 
-// 说明：tokenplan 套餐订单（SUB 前缀）的激活由 Track 1 的 App.ActivatePaidTokenplanOrder
-// （internal/mtwire/subscription_bridge.go）提供，本入口按前缀分发调用（见 HandleInternalOrderPaid）。
-// SUB 订单存于 Track 1 的 mt_subscription_orders，不在本模块 payment_orders（RCG 充值订单）中。
-
-// checkInternalSecret 常量时间比对内部共享密钥（防时序侧信道）。
-func (a *App) checkInternalSecret(provided string) bool {
-	want := a.rechargeCfg.internalSecret
-	if want == "" || provided == "" {
-		return false
-	}
-	return hmac.Equal([]byte(provided), []byte(want))
-}
+// 说明：tokenplan 套餐订单（SUB 前缀）的激活由 App.ActivatePaidTokenplanOrder
+// （internal/mtwire/subscription_bridge.go）提供，回调按前缀分发调用（见 payment_inprocess.go）。
+// SUB 订单存于 mt_subscription_orders，不在本模块 payment_orders（RCG 充值订单）中。
 
 // ---- HTTP 处理器 ----
 
@@ -138,7 +107,7 @@ type rechargeRequest struct {
 // HandleWalletRecharge POST /api/tenant/wallet/recharge —— 钱包充值下单。需 UserAuth + Host 租户。
 //
 // 流程：校验 amount_usd≥1 与渠道 → 实付¥=usd×汇率 → RechargeGateway.CreateOrder（落库 RCG 订单 +
-// 调 auth-service 下单拿支付凭据）→ 返回 {order_no, amount_*, provider, pay:{wxpay_qr|alipay_url}}。
+// 进程内向平台下单拿支付凭据）→ 返回 {order_no, amount_*, provider, pay:{wxpay_qr|alipay_url}}。
 func (a *App) HandleWalletRecharge(c *gin.Context) {
 	t := tenantFrom(c)
 	if t == nil {
@@ -164,8 +133,7 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 		respondErr(c, errRechargeAmountTooSmall)
 		return
 	}
-	// 渠道必须 enabled（管理员开关，缺省 true）且 configured（真实凭据齐全）方可下单；
-	// enabled=false 一律拒绝，configured 未知（auth-service 抖动）放行，明确未配置才拒绝。
+	// 渠道必须可用（enabled 且凭据齐全，进程内判断）方可下单。
 	if err := a.ensureProviderUsable(reqCtx(c), provider); err != nil {
 		respondErr(c, err)
 		return
@@ -204,154 +172,4 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 		"provider":   string(provider),
 		"pay":        pay,
 	})
-}
-
-// internalOrderPaidRequest 是 POST /api/internal/order/paid 入参（auth-service 验签后调）。
-type internalOrderPaidRequest struct {
-	OrderNo string `json:"order_no"`
-	TxnID   string `json:"txn_id"` // 平台交易号（审计/收益引用；不作金额来源）
-	// PaidAmount 是平台回传的用户实付（元）。入账仍以库内订单金额为准，此值仅用于反篡改一致性校验。
-	PaidAmount float64 `json:"paid_amount"`
-	// Provider 是支付渠道（wxpay|alipay），仅用于日志/审计；入账分发以 order_no 前缀 + 库内订单为准。
-	Provider string `json:"provider"`
-}
-
-// HandleInternalOrderPaid POST /api/internal/order/paid —— 内网入账（仅 auth-service 调）。
-//
-// 鉴权：共享密钥头 + nginx 拒绝公网访问 /api/internal/*。入账按 order_no 走强幂等状态机：
-// 据库内订单类型分发（RCG→原生 quota；SUB→tokenplan 激活），金额一律以库内订单为准。
-func (a *App) HandleInternalOrderPaid(c *gin.Context) {
-	if !a.checkInternalSecret(c.GetHeader(internalSecretHeader)) {
-		respondErr(c, errInternalUnauthorized)
-		return
-	}
-	var body internalOrderPaidRequest
-	if err := c.ShouldBindJSON(&body); err != nil || body.OrderNo == "" {
-		respondErr(c, payment.ErrOrderInvalid)
-		return
-	}
-	ctx := c.Request.Context()
-
-	// 按订单号前缀分发（各自走自身的强幂等路径）：
-	//   - SUB → Track 1 tokenplan 桥接激活（读 mt_subscription_orders，pending→activated CAS）；
-	//   - 其余（RCG 等）→ 本模块充值入账（读 payment_orders，created→paid→credited CAS）。
-	var err error
-	if IsSubscriptionOrderNo(body.OrderNo) {
-		err = a.ActivatePaidTokenplanOrder(ctx, body.OrderNo, body.PaidAmount)
-	} else if a.RechargeGateway != nil {
-		err = a.RechargeGateway.CreditPaidOrder(ctx, body.OrderNo, body.TxnID, body.PaidAmount)
-	} else {
-		err = apperr.New("RECHARGE_UNAVAILABLE", "充值服务未装配", http.StatusServiceUnavailable)
-	}
-	if err != nil {
-		respondErr(c, err)
-		return
-	}
-	respondOK(c, gin.H{"order_no": body.OrderNo, "status": "credited"})
-}
-
-// ---- auth-service 客户端（payment.PaySDK 实现）----
-
-// authServiceClient 把「向支付平台下单」委托给独立 auth-service（HTTP）。
-// 主站只用 CreatePay；Verify 不在主站执行（auth-service 完成平台验签后回调 /api/internal/order/paid）。
-type authServiceClient struct {
-	baseURL string
-	secret  string // 内网共享密钥（查单端点鉴权；与 auth-service shared_secret 同值）
-	http    *http.Client
-}
-
-// 编译期断言：authServiceClient 实现 payment.PaySDK。
-var _ payment.PaySDK = (*authServiceClient)(nil)
-
-func newAuthServiceClient(baseURL, secret string) *authServiceClient {
-	return &authServiceClient{
-		baseURL: baseURL,
-		secret:  secret,
-		http:    &http.Client{Timeout: 8 * time.Second},
-	}
-}
-
-// authOrderRequest / authOrderResponse 是与 auth-service /auth/order 的契约。
-type authOrderRequest struct {
-	OrderNo   string  `json:"order_no"`
-	Provider  string  `json:"provider"`
-	AmountCNY float64 `json:"amount_cny"`
-	AmountUSD float64 `json:"amount_usd"`
-	Subject   string  `json:"subject"`
-	NotifyURL string  `json:"notify_url"`
-}
-
-type authOrderResponse struct {
-	Success bool `json:"success"`
-	Data    struct {
-		PayURL string `json:"pay_url"`
-	} `json:"data"`
-	Message string `json:"message"`
-}
-
-// CreatePay 调 auth-service 下单，返回支付凭据（mock：占位二维码内容/确认页 URL）。
-func (c *authServiceClient) CreatePay(ctx context.Context, req payment.PayRequest) (*payment.PayCredential, error) {
-	payload, _ := json.Marshal(authOrderRequest{
-		OrderNo:   req.OrderNo,
-		Provider:  string(req.Provider),
-		AmountCNY: req.ActualPaid,
-		AmountUSD: req.AmountUSD,
-		Subject:   req.Subject,
-		NotifyURL: req.NotifyURL,
-	})
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/auth/order", bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(httpReq)
-	if err != nil {
-		return nil, apperr.New("AUTH_SERVICE_UNREACHABLE", "支付服务暂不可用", http.StatusBadGateway).Wrap(err)
-	}
-	defer resp.Body.Close()
-	var out authOrderResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, apperr.New("AUTH_SERVICE_BAD_RESPONSE", "支付服务响应异常", http.StatusBadGateway).Wrap(err)
-	}
-	if resp.StatusCode != http.StatusOK || !out.Success || out.Data.PayURL == "" {
-		return nil, apperr.New("AUTH_SERVICE_CREATE_FAILED", "支付下单失败", http.StatusBadGateway)
-	}
-	return &payment.PayCredential{PayURL: out.Data.PayURL}, nil
-}
-
-// Verify 主站不验签（验签在 auth-service）。返回 PAY_VERIFY_UNSUPPORTED。
-func (c *authServiceClient) Verify(_ context.Context, _ payment.Provider, _ []byte) (*payment.CallbackInfo, error) {
-	return nil, errVerifyUnsupported
-}
-
-// QueryOrderStatus GET /auth/order/status?order_no=X&provider=Y（内网共享密钥头）——对账兜底查单：
-// 该订单平台是否已收款。供 RCG/SUB 卡单对账：created/pending 单查到 paid → 补入账/补激活。
-// provider 在真实模式下决定向微信还是支付宝主动查单；mock 模式忽略（读本地订单状态）。
-func (c *authServiceClient) QueryOrderStatus(ctx context.Context, orderNo, provider string) (bool, error) {
-	u := c.baseURL + "/auth/order/status?order_no=" + url.QueryEscape(orderNo)
-	if provider != "" {
-		u += "&provider=" + url.QueryEscape(provider)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return false, err
-	}
-	req.Header.Set(internalSecretHeader, c.secret)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return false, apperr.New("AUTH_SERVICE_UNREACHABLE", "支付服务暂不可用", http.StatusBadGateway).Wrap(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return false, apperr.New("AUTH_SERVICE_QUERY_FAILED", "查单失败", http.StatusBadGateway)
-	}
-	var out struct {
-		Data struct {
-			Paid bool `json:"paid"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return false, apperr.New("AUTH_SERVICE_BAD_RESPONSE", "支付服务响应异常", http.StatusBadGateway).Wrap(err)
-	}
-	return out.Data.Paid, nil
 }

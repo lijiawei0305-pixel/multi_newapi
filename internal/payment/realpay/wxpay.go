@@ -2,6 +2,7 @@ package realpay
 
 import (
 	"context"
+	"crypto/rsa"
 	"fmt"
 	"math"
 	"net/http"
@@ -28,10 +29,27 @@ type wxpayAdapter struct {
 	handler *notify.Handler
 }
 
-func newWxpayAdapter(ctx context.Context, cfg WxpayConfig) (*wxpayAdapter, error) {
+// loadWxPrivateKey 读取微信商户私钥：PrivateKey（PEM 内容）优先，否则回退 PrivateKeyPath（文件路径）。
+// 进程内模式由 setting.WechatPayPrivateKey 注入内容；auth-service dormant 仍可用文件路径。
+func loadWxPrivateKey(cfg WxpayConfig) (*rsa.PrivateKey, error) {
+	if cfg.PrivateKey != "" {
+		priv, err := utils.LoadPrivateKey(cfg.PrivateKey)
+		if err != nil {
+			return nil, fmt.Errorf("wxpay: load private key (content): %w", err)
+		}
+		return priv, nil
+	}
 	priv, err := utils.LoadPrivateKeyWithPath(cfg.PrivateKeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("wxpay: load private key %q: %w", cfg.PrivateKeyPath, err)
+	}
+	return priv, nil
+}
+
+func newWxpayAdapter(ctx context.Context, cfg WxpayConfig) (*wxpayAdapter, error) {
+	priv, err := loadWxPrivateKey(cfg)
+	if err != nil {
+		return nil, err
 	}
 	client, err := core.NewClient(ctx, option.WithWechatPayAutoAuthCipher(cfg.MchID, cfg.CertSerialNo, priv, cfg.APIv3Key))
 	if err != nil {

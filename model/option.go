@@ -89,6 +89,20 @@ func InitOptionMap() {
 	common.OptionMap["StripePriceId"] = setting.StripePriceId
 	common.OptionMap["StripeUnitPrice"] = strconv.FormatFloat(setting.StripeUnitPrice, 'f', -1, 64)
 	common.OptionMap["StripePromotionCodesEnabled"] = strconv.FormatBool(setting.StripePromotionCodesEnabled)
+	// 微信支付 / 支付宝 原生支付凭据
+	common.OptionMap["WechatPayEnabled"] = strconv.FormatBool(setting.WechatPayEnabled)
+	common.OptionMap["WechatPayAppID"] = setting.WechatPayAppID
+	common.OptionMap["WechatPayMchID"] = setting.WechatPayMchID
+	common.OptionMap["WechatPayAPIv3Key"] = setting.WechatPayAPIv3Key
+	common.OptionMap["WechatPayCertSerial"] = setting.WechatPayCertSerial
+	common.OptionMap["WechatPayPrivateKey"] = setting.WechatPayPrivateKey
+	common.OptionMap["AlipayEnabled"] = strconv.FormatBool(setting.AlipayEnabled)
+	common.OptionMap["AlipayAppID"] = setting.AlipayAppID
+	common.OptionMap["AlipayPrivateKey"] = setting.AlipayPrivateKey
+	common.OptionMap["AlipayPublicKey"] = setting.AlipayPublicKey
+	common.OptionMap["AlipaySellerID"] = setting.AlipaySellerID
+	common.OptionMap["AlipayReturnURL"] = setting.AlipayReturnURL
+	common.OptionMap["AlipaySandbox"] = strconv.FormatBool(setting.AlipaySandbox)
 	common.OptionMap["CreemApiKey"] = setting.CreemApiKey
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
@@ -416,6 +430,33 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.StripeMinTopUp, _ = strconv.Atoi(value)
 	case "StripePromotionCodesEnabled":
 		setting.StripePromotionCodesEnabled = value == "true"
+	// 微信支付 / 支付宝 原生支付凭据
+	case "WechatPayEnabled":
+		setting.WechatPayEnabled, _ = strconv.ParseBool(value)
+	case "WechatPayAppID":
+		setting.WechatPayAppID = value
+	case "WechatPayMchID":
+		setting.WechatPayMchID = value
+	case "WechatPayAPIv3Key":
+		setting.WechatPayAPIv3Key = value
+	case "WechatPayCertSerial":
+		setting.WechatPayCertSerial = value
+	case "WechatPayPrivateKey":
+		setting.WechatPayPrivateKey = value
+	case "AlipayEnabled":
+		setting.AlipayEnabled, _ = strconv.ParseBool(value)
+	case "AlipayAppID":
+		setting.AlipayAppID = value
+	case "AlipayPrivateKey":
+		setting.AlipayPrivateKey = value
+	case "AlipayPublicKey":
+		setting.AlipayPublicKey = value
+	case "AlipaySellerID":
+		setting.AlipaySellerID = value
+	case "AlipayReturnURL":
+		setting.AlipayReturnURL = value
+	case "AlipaySandbox":
+		setting.AlipaySandbox, _ = strconv.ParseBool(value)
 	case "CreemApiKey":
 		setting.CreemApiKey = value
 	case "CreemProducts":

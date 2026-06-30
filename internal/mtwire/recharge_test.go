@@ -33,21 +33,3 @@ func TestActualPaidCNY(t *testing.T) {
 		t.Fatalf("actualPaidCNY(1, 7.3) = %g, want 7.3", got)
 	}
 }
-
-func TestCheckInternalSecret(t *testing.T) {
-	a := &App{rechargeCfg: rechargeConfig{internalSecret: "top-secret"}}
-	if !a.checkInternalSecret("top-secret") {
-		t.Fatal("correct secret must pass")
-	}
-	if a.checkInternalSecret("wrong") {
-		t.Fatal("wrong secret must fail")
-	}
-	if a.checkInternalSecret("") {
-		t.Fatal("empty provided secret must fail")
-	}
-	// 服务端未配置密钥时，一律拒绝（避免空密钥放行）。
-	empty := &App{rechargeCfg: rechargeConfig{internalSecret: ""}}
-	if empty.checkInternalSecret("anything") {
-		t.Fatal("server with empty secret must reject all")
-	}
-}

@@ -1,16 +1,19 @@
-// Package realpay 是 auth-service 的「真实支付平台」适配层：把微信支付 V3（Native 扫码）与
-// 支付宝（电脑网站支付 alipay.trade.page.pay）封装成统一的下单 / 验签解析 / 主动查单三件套，
-// 供 auth-service 在 mock:false 时替换 internal/payment.StubPaySDK。
+// Package realpay 是「真实支付平台」适配层：把微信支付 V3（Native 扫码）与支付宝（电脑网站支付
+// alipay.trade.page.pay）封装成统一的下单 / 验签解析 / 主动查单三件套。
+//
+// 历史：本包原属 auth-service（mock:false 时替换 internal/payment.StubPaySDK）。Phase 2 支付重构后
+// 上移到主站进程内（internal/payment/realpay），由 internal/mtwire 的 providerManager 直接从 DB 凭据
+// （setting.* 包级变量）构造、缓存并调用；auth-service 退役但保留可编译（dormant）。
 //
 // 设计：
-//   - 不依赖 authservice 包（避免 import 环：authservice → realpay）；凭据经 Config 注入。
+//   - 不依赖 authservice / mtwire 包（避免 import 环）；凭据经 Config 注入。
 //   - 真实回调验签需要 HTTP 头（微信）/ 表单（支付宝），故 VerifyNotify 接收 *http.Request，
 //     不走 payment.PaySDK.Verify(raw []byte)（该签名只够 mock 用）。
 //   - 金额口径：对外统一「元」（payment.CallbackInfo.PaidAmount）；微信内部分↔元换算在适配器内完成。
 //
 // ⚠️ 构建校验（W4）：本包依赖 github.com/wechatpay-apiv3/wechatpay-go 与
 // github.com/smartwalle/alipay/v3，本机无 Go 工具链，未经编译。少数随版本演进的方法签名
-// （见各文件 NOTE(W4)）须在服务器 `go mod tidy && go build ./auth-service/...` 时核对、必要时微调。
+// （见各文件 NOTE(W4)）须在服务器 `go mod tidy && go build ./...` 时核对、必要时微调。
 package realpay
 
 import (
@@ -22,22 +25,28 @@ import (
 )
 
 // WxpayConfig 微信支付商户凭据（平台证书自动下载模式：仅需商户私钥 + 证书序列号 + APIv3 密钥）。
+//
+// 私钥两种注入方式（二选一，PrivateKey 优先）：
+//   - PrivateKey：商户私钥 PEM **内容**（主站进程内模式：从 DB option 读入后直接注入）；
+//   - PrivateKeyPath：商户私钥 apiclient_key.pem **文件路径**（auth-service dormant 兼容）。
 type WxpayConfig struct {
 	AppID          string // 公众号/开放平台 appid
 	MchID          string // 商户号
 	APIv3Key       string // APIv3 密钥（AES-256-GCM 回调解密 + 平台证书解密）
 	CertSerialNo   string // 商户证书序列号
-	PrivateKeyPath string // 商户私钥 apiclient_key.pem 路径
+	PrivateKey     string // 商户私钥（PEM 内容；进程内模式由 setting.WechatPayPrivateKey 注入，优先于 PrivateKeyPath）
+	PrivateKeyPath string // 商户私钥 apiclient_key.pem 路径（PrivateKey 为空时回退；auth-service 兼容）
 }
 
 func (c WxpayConfig) complete() bool {
-	return c.AppID != "" && c.MchID != "" && c.APIv3Key != "" && c.CertSerialNo != "" && c.PrivateKeyPath != ""
+	return c.AppID != "" && c.MchID != "" && c.APIv3Key != "" && c.CertSerialNo != "" &&
+		(c.PrivateKey != "" || c.PrivateKeyPath != "")
 }
 
 // AlipayConfig 支付宝应用凭据（普通公钥模式：应用私钥 + 支付宝公钥）。
 type AlipayConfig struct {
 	AppID           string // 应用 appid
-	PrivateKey      string // 应用私钥（PEM 内容；由 server 从文件读入后注入）
+	PrivateKey      string // 应用私钥（PEM 内容；由调用方从文件/DB 读入后注入）
 	AlipayPublicKey string // 支付宝公钥（PEM 内容）
 	SellerID        string // 可选：收款账号 UID（pid，2088 开头）；非空则校验回调 seller_id
 	ReturnURL       string // 同步跳转地址（仅展示用，不入账）
@@ -48,7 +57,7 @@ func (c AlipayConfig) complete() bool {
 	return c.AppID != "" && c.PrivateKey != "" && c.AlipayPublicKey != ""
 }
 
-// Config 是 realpay 的总配置（由 server 从 authservice.Config 映射而来）。
+// Config 是 realpay 的总配置（由调用方从 DB 凭据 / authservice.Config 映射而来）。
 type Config struct {
 	Wxpay  WxpayConfig
 	Alipay AlipayConfig
@@ -81,7 +90,7 @@ func New(ctx context.Context, cfg Config) (*SDK, error) {
 	return s, nil
 }
 
-// Available 报告某渠道是否已装配可用（供 server 在下单前校验、给出清晰错误）。
+// Available 报告某渠道是否已装配可用（供调用方在下单前校验、给出清晰错误）。
 func (s *SDK) Available(provider payment.Provider) bool {
 	switch provider {
 	case payment.ProviderWxpay:

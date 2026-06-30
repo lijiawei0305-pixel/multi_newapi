@@ -64,7 +64,7 @@ func TestWxTransactionToInfo_NotSuccess(t *testing.T) {
 	}
 }
 
-// TestWxTransactionToInfo_MerchantMismatch appid/mchid 与本商户不符 → 拒绝（反伪造/串站）。
+// TestWxTransactionToInfo_MerchantMismatch appid/mchid 与本商户不符 → 拒绝(反伪造/串站)。
 func TestWxTransactionToInfo_MerchantMismatch(t *testing.T) {
 	if _, err := wxTransactionToInfo(wxTx("evil", "1600000", "RCG-3", "SUCCESS", "x", 2980), "wxapp", "1600000"); apperr.CodeOf(err) != payment.CodeCallbackInvalid {
 		t.Fatalf("appid mismatch want %s, got %v", payment.CodeCallbackInvalid, err)

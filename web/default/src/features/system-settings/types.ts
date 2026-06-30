@@ -302,6 +302,21 @@ export type BillingSettings = {
   CreemWebhookSecret: string
   CreemTestMode: boolean
   CreemProducts: string
+  // WeChat Pay (Native) credentials — DB option keys
+  WechatPayEnabled: boolean
+  WechatPayAppID: string
+  WechatPayMchID: string
+  WechatPayAPIv3Key: string
+  WechatPayCertSerial: string
+  WechatPayPrivateKey: string
+  // Alipay credentials — DB option keys
+  AlipayEnabled: boolean
+  AlipayAppID: string
+  AlipayPrivateKey: string
+  AlipayPublicKey: string
+  AlipaySellerID: string
+  AlipayReturnURL: string
+  AlipaySandbox: boolean
   WaffoEnabled: boolean
   WaffoApiKey: string
   WaffoPrivateKey: string

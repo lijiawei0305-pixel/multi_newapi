@@ -90,11 +90,12 @@ func SetMtRouter(router *gin.Engine) {
 		}
 	}
 
-	// 内网入账（目标③）：auth-service 验签后回调，仅内网 + 共享密钥头校验。
-	// 安全：nginx 必须拒绝公网访问 /api/internal/*（见 deploy/nginx 配置）；此处不挂 UserAuth/TenantMiddleware。
-	internalGroup := router.Group("/api/internal")
+	// 支付平台异步回调（目标③，支付重构后）：微信/支付宝 POST 到此，handler 内验签（无 UserAuth/TenantMiddleware）。
+	// 签名校验在 providerManager.VerifyNotify；金额/幂等以库内订单为权威。公开路由（平台来源 IP 不固定）。
+	payGroup := router.Group("/api/pay")
 	{
-		internalGroup.POST("/order/paid", app.HandleInternalOrderPaid)
+		payGroup.POST("/wechat/notify", app.HandleWechatNotify)
+		payGroup.POST("/alipay/notify", app.HandleAlipayNotify)
 	}
 
 	// 主站套餐目录管理（全局，非租户维度），复用 new-api AdminAuth。
@@ -106,12 +107,8 @@ func SetMtRouter(router *gin.Engine) {
 		adminPlanGroup.PATCH("/:id", app.HandleAdminUpdatePlan)
 	}
 
-	// 支付渠道配置（全局，非租户维度）：列两渠道 configured/enabled 状态 + 设启用开关。复用 new-api AdminAuth。
-	adminPaymentGroup := router.Group("/api/admin/payment", middleware.AdminAuth())
-	{
-		adminPaymentGroup.GET("/providers", app.HandleAdminListPaymentProviders)
-		adminPaymentGroup.PUT("/providers/:provider", app.HandleAdminSetPaymentProvider)
-	}
+	// 支付渠道配置已移至系统设置（setting.*Enabled + 凭据，DB option）：渠道启用/凭据由设置页管理，
+	// 买家可用渠道经 GET /api/tenant/wallet/recharge/methods 暴露（configured 进程内判断），故此处无独立管理路由。
 
 	// 支付卡单对账（兜底）管理：列当前卡单 + 手动立即对账。复用 new-api AdminAuth。
 	adminReconcileGroup := router.Group("/api/admin/reconcile")

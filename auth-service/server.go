@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/QuantumNous/new-api/auth-service/realpay"
 	"github.com/QuantumNous/new-api/internal/payment"
+	"github.com/QuantumNous/new-api/internal/payment/realpay"
 )
 
 // internalSecretHeader 必须与主站 internal/mtwire.internalSecretHeader 一致。

@@ -117,9 +117,9 @@ func (s *subOrderStore) setProvider(ctx context.Context, orderNo, provider strin
 // ---- subPayment：tokenplan.PaymentGateway 实现，取代 wire.go 的 stubPayment ----
 //
 // 下单 = 落一条真实 pending 订单（前缀 SUB），可被支付回调用 ActivatePaidTokenplanOrder 激活。
-// 本网关只持久化订单意图 + 返回占位支付页 URL；真实 mock 支付页 URL 由 HTTP 装配层
-// （mtwire.HandlePurchase → authServiceClient.CreatePay → auth-service /auth/order）按 order_no
-// 取回并覆盖（与 RCG 充值同形），故下方 PayURL 仅作 authClient 未装配时的回退占位。
+// 本网关只持久化订单意图 + 返回占位支付页 URL；真实支付凭据由 HTTP 装配层
+// （mtwire.HandlePurchase → subscriptionPayURL → providerManager.CreatePay 进程内向平台下单）按
+// order_no 取回并覆盖（与 RCG 充值同形），故下方 PayURL 仅作 providerMgr 未装配时的回退占位。
 type subPayment struct{ orders *subOrderStore }
 
 func newSubPayment(orders *subOrderStore) *subPayment { return &subPayment{orders: orders} }
@@ -264,6 +264,7 @@ func (a *App) defaultActivateNativeSub(ctx context.Context, tx *gorm.DB, snap *t
 //     且与建订阅同事务（失败回滚→订单退回 pending 可重试，不留半成品）；
 //   - 我们记录/分润：ActivateFromPayment 自身按 source_order_id / (SourceType,SourceID) 幂等，
 //     即便重复调用（如步骤②已 activated 但②③之间崩溃后重试）也只落一次、只入账一次。
+//
 // paidAmountCNY 是支付平台回传的用户实付（元），用于反篡改一致性校验（与库内 AmountCNY 比对）；
 // <=0 表示调用方未提供（如对账兜底主动查单）——跳过比对。激活额度/周期一律以购买快照为准。
 func (a *App) ActivatePaidTokenplanOrder(ctx context.Context, orderNo string, paidAmountCNY float64) error {

@@ -8,16 +8,17 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/logger"
 
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
 const (
-	reconcileTickInterval = 5 * time.Minute  // 对账扫描周期
-	reconcileMinAge       = 5 * time.Minute   // 只对账「落单/占位超过此时长」的卡单，过滤仍在途的订单
-	reconcileCreatedMaxAge = 26 * time.Hour   // created 卡单主动查单的最大年龄（超此视为过期废弃单，停止查单）
-	reconcileCreatedLimit  = 200              // created 卡单单轮主动查单上限
+	reconcileTickInterval  = 5 * time.Minute // 对账扫描周期
+	reconcileMinAge        = 5 * time.Minute // 只对账「落单/占位超过此时长」的卡单，过滤仍在途的订单
+	reconcileCreatedMaxAge = 26 * time.Hour  // created 卡单主动查单的最大年龄（超此视为过期废弃单，停止查单）
+	reconcileCreatedLimit  = 200             // created 卡单单轮主动查单上限
 )
 
 var (
@@ -66,10 +67,10 @@ func (a *App) runReconcileOnce() {
 		}
 	}
 
-	// RCG 充值卡单：扫 created（回调始终未送达）→ 向平台主动查单 → 已付补入账。
-	if a.RechargeGateway != nil && a.authClient != nil {
+	// RCG 充值卡单：扫 created（回调始终未送达）→ 向平台主动查单（进程内）→ 已付补入账。
+	if a.RechargeGateway != nil && a.providerMgr != nil {
 		query := func(ctx context.Context, orderNo, provider string) (bool, error) {
-			return a.authClient.QueryOrderStatus(ctx, orderNo, provider)
+			return a.providerMgr.QueryOrder(ctx, payment.Provider(provider), orderNo)
 		}
 		if res, err := a.RechargeGateway.ReconcileStuckCreated(ctx, before, reconcileCreatedMaxAge, reconcileCreatedLimit, query); err != nil {
 			logger.LogWarn(ctx, "reconcile RCG(created) failed: "+err.Error())

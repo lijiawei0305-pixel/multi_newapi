@@ -146,11 +146,11 @@ type purchaseRequest struct {
 
 // HandlePurchase POST /api/tenant/token-plans/:id/purchase —— 下单（返回支付凭据）。需 UserAuth。
 //
-// 流程：校验套餐/上架/限购 → Purchase 落 SUB 待支付订单 + 购买快照 → 像 recharge 一样调
-// auth-service /auth/order 拿 mock 支付页 URL → 返回 snake_case DTO（与充值响应同形）：
-// {order_no, pay_url, amount_cny, plan_id, pay:{wxpay_qr|alipay_url}}。pay_url 与 pay.* 同值
-// （auth-service mock 支付页）：微信端渲染二维码、支付宝端跳转。用户确认 → notify →
-// /api/internal/order/paid → 按 SUB 前缀分发 → ActivatePaidTokenplanOrder（激活原生订阅，链路已就绪）。
+// 流程：校验套餐/上架/限购 → Purchase 落 SUB 待支付订单 + 购买快照 → 像 recharge 一样经
+// providerManager 进程内向平台下单拿支付凭据 → 返回 snake_case DTO（与充值响应同形）：
+// {order_no, pay_url, amount_cny, plan_id, pay:{wxpay_qr|alipay_url}}。pay_url 与 pay.* 同值：
+// 微信端渲染二维码、支付宝端跳转。用户支付 → 平台异步回调 /api/pay/{wechat,alipay}/notify →
+// handlePayNotify 验签 → 按 SUB 前缀分发 → ActivatePaidTokenplanOrder（激活原生订阅，链路已就绪）。
 func (a *App) HandlePurchase(c *gin.Context) {
 	t := tenantFrom(c)
 	if t == nil {
@@ -209,31 +209,26 @@ func (a *App) HandlePurchase(c *gin.Context) {
 	})
 }
 
-// subscriptionPayURL 为一笔已落库的 SUB 套餐订单向 auth-service 下单，取回 mock 支付页 URL，
-// 复用 RCG 充值同一客户端（authServiceClient.CreatePay → auth-service /auth/order）。
-// 金额仅人民币（amount_cny=零售价）：AmountUSD 传 0（套餐额度在激活时按 month_limit_usd 注入
-// 原生订阅桶，非充值额度，故下单不传美元额）。NotifyURL 与 recharge 同口径（mock 不实际使用）。
-// authClient 未装配（如单测直构 App）时回退占位 PayURL，保证可跑不 panic。
+// subscriptionPayURL 为一笔已落库的 SUB 套餐订单向真实平台进程内下单，取回支付凭据
+// （微信 code_url / 支付宝跳转 URL），复用 RCG 充值同一 providerManager。
+// 金额仅人民币（amount_cny=零售价）：套餐额度在激活时按 month_limit_usd 注入原生订阅桶，非充值额度，
+// 故下单只传人民币应付额。notify_url 用契约回调路径（base + notifyPathFor(provider)）。
+// providerMgr 未装配（如单测直构 App）时回退占位 PayURL，保证可跑不 panic。
 func (a *App) subscriptionPayURL(ctx context.Context, ticket *tokenplan.PurchaseTicket, provider payment.Provider) (string, error) {
 	// 回填订单支付渠道（供真实回调路由 + 卡单对账主动查单识别渠道）；best-effort，失败不阻断下单。
 	if err := newSubOrderStore(a.DB).setProvider(ctx, ticket.OrderID, string(provider)); err != nil {
 		common.SysLog("set sub order provider failed: " + err.Error())
 	}
-	if a.authClient == nil {
+	if a.providerMgr == nil {
 		return ticket.PayURL, nil
 	}
-	cred, err := a.authClient.CreatePay(ctx, payment.PayRequest{
-		Provider:   provider,
-		OrderNo:    ticket.OrderID,
-		AmountUSD:  0,
-		ActualPaid: ticket.AmountCNY,
-		Subject:    "套餐购买 #" + strconv.FormatInt(ticket.PlanID, 10),
-		NotifyURL:  a.rechargeCfg.notifyBaseURL + provider.NotifyPath(),
-	})
+	notifyURL := resolveNotifyBase() + notifyPathFor(provider)
+	payURL, err := a.providerMgr.CreatePay(ctx, provider, ticket.OrderID,
+		"套餐购买 #"+strconv.FormatInt(ticket.PlanID, 10), ticket.AmountCNY, notifyURL)
 	if err != nil {
 		return "", err
 	}
-	return cred.PayURL, nil
+	return payURL, nil
 }
 
 // HandleListSubscriptions GET /api/tenant/subscriptions —— 当前用户在本租户的订阅（含历史）。需 UserAuth。

@@ -81,14 +81,14 @@ type App struct {
 	// nil = Redis 未启用 → 风控旁路（CheckCall 直接放行，限流需共享计数）。
 	RiskEngine risk.RiskEngine
 
-	// --- payment/recharge 模块（目标③）---
-	// RechargeGateway 下单（落库 RCG 订单 + 调 auth-service）与内网入账（强幂等状态机）。
+	// --- payment/recharge 模块（目标③，支付重构后）---
+	// RechargeGateway 下单（落库 RCG 订单 + 经 inProcessPaySDK 进程内向平台下单）与入账（强幂等状态机）。
 	RechargeGateway *payment.Gateway
 	rechargeCfg     rechargeConfig
-	// authClient 复用同一 auth-service 客户端：tokenplan 套餐购买（SUB 订单）经 HandlePurchase 装配
-	// 直接调它产出 mock 支付页 URL（与 RCG 充值同形），不再返回占位 PayURL。回调链（确认→notify→
-	// /api/internal/order/paid→按 SUB 前缀分发→ActivatePaidTokenplanOrder）已就绪。
-	authClient *authServiceClient
+	// providerMgr 进程内支付适配（微信/支付宝，凭据指纹缓存 realpay.SDK）：RCG 充值下单（经
+	// inProcessPaySDK）、SUB 套餐购买下单（HandlePurchase → subscriptionPayURL）、回调验签
+	// （/api/pay/*/notify）、卡单对账主动查单共用同一缓存 SDK。
+	providerMgr *providerManager
 
 	// activateNativeSub 在激活事务内建原生 UserSubscription（由 subscription_bridge.go 使用，
 	// 默认 defaultActivateNativeSub，可注入桩便于单测）。
@@ -144,17 +144,17 @@ func New(db *gorm.DB) *App {
 	// 收益经 tokenplanEarningAdapter 真实落到 agent 钱包（ActivateFromPayment 激活事务内、按 source_order_id 幂等）。
 	subs := tokenplan.NewSubscriptionService(tp, tp, newSubPayment(newSubOrderStore(db)), allowAllRisk{}, newTokenplanEarningAdapter(agentEarnings), nil)
 
-	// payment/recharge：GORM 订单仓储（payment_orders，仅存 RCG 充值订单）+ auth-service 客户端（PaySDK）。
-	// 入账 Sink 只挂 recharge→原生 quota；SUB 套餐订单不入 payment_orders，由内网入账端点按前缀
+	// payment/recharge：GORM 订单仓储（payment_orders，仅存 RCG 充值订单）+ 进程内支付适配（PaySDK）。
+	// 入账 Sink 只挂 recharge→原生 quota；SUB 套餐订单不入 payment_orders，由回调按前缀
 	// 分发到 App.ActivatePaidTokenplanOrder（Track 1 桥接，读 mt_subscription_orders）。
 	rechargeCfg := loadRechargeConfig()
 	orderRepo := paymentrepo.New(db)
-	authClient := newAuthServiceClient(rechargeCfg.authServiceURL, rechargeCfg.internalSecret)
+	providerMgr := newProviderManager()
 	rechargeSinks := map[payment.OrderType]payment.OrderSink{
 		payment.OrderTypeRecharge: rechargeQuotaSink{},
 	}
 	rechargeGateway := payment.NewGateway(
-		orderRepo, authClient, rechargeSinks,
+		orderRepo, &inProcessPaySDK{mgr: providerMgr}, rechargeSinks,
 		// 充值端点只产 RCG 订单；SUB 订单由 Track 1 购买流程产出（入账侧按库内 type 分发，与前缀无关）。
 		payment.WithOrderNoFunc(func() string { return payment.NewOrderNo(payment.OrderNoPrefixRecharge) }),
 		payment.WithNotifyBaseURL(rechargeCfg.notifyBaseURL),
@@ -182,7 +182,7 @@ func New(db *gorm.DB) *App {
 		RiskEngine:      riskEngine,
 		RechargeGateway: rechargeGateway,
 		rechargeCfg:     rechargeCfg,
-		authClient:      authClient, // 复用同一客户端供 tokenplan 购买（SUB）下单
+		providerMgr:     providerMgr, // 复用同一进程内适配器供 tokenplan 购买（SUB）下单 + 回调验签 + 对账查单
 	}
 	if app.activateNativeSub == nil {
 		app.activateNativeSub = app.defaultActivateNativeSub // 目标③桥接默认实现（subscription_bridge.go）
@@ -218,9 +218,6 @@ func (a *App) Migrate() error {
 		return err
 	}
 	if err := moderationrepo.AutoMigrate(a.DB); err != nil { // moderation_banned_words/moderation_content_violations（6e）
-		return err
-	}
-	if err := migratePaymentProviders(a.DB); err != nil { // mt_payment_provider_settings（微信/支付宝渠道启用开关）
 		return err
 	}
 	// 迁移后重载模型分组缓存（master 节点建表 / 补 seed 后，IsModelGroup 即时生效）。
