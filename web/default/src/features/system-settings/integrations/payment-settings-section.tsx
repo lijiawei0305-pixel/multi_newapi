@@ -1258,6 +1258,11 @@ export function PaymentSettingsSection({
                   <p className='text-muted-foreground text-sm'>
                     {t('Configuration for WeChat Pay (Native) integration')}
                   </p>
+                  <p className='text-muted-foreground mt-1 text-xs'>
+                    {t(
+                      'Once credentials are filled and the channel is enabled here, it appears automatically for buyers on the recharge and plan-purchase pages — no need to add it under Add payment method.'
+                    )}
+                  </p>
                 </div>
 
                 <div className='rounded-md bg-blue-50 p-4 text-sm text-blue-900 dark:bg-blue-950 dark:text-blue-100'>
@@ -1447,6 +1452,11 @@ export function PaymentSettingsSection({
                   </h3>
                   <p className='text-muted-foreground text-sm'>
                     {t('Configuration for Alipay payment integration')}
+                  </p>
+                  <p className='text-muted-foreground mt-1 text-xs'>
+                    {t(
+                      'Once credentials are filled and the channel is enabled here, it appears automatically for buyers on the recharge and plan-purchase pages — no need to add it under Add payment method.'
+                    )}
                   </p>
                 </div>
 

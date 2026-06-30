@@ -29,7 +29,7 @@ import {
 interface RechargeQrDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** QR payload (WeChat code_url / mock confirm URL). */
+  /** QR payload — WeChat Native code_url (e.g. weixin://wxpay/...). */
   qr: string | null
   orderNo?: string
   amountUsd?: number
@@ -37,9 +37,10 @@ interface RechargeQrDialogProps {
 }
 
 /**
- * RechargeQrDialog renders the WeChat-pay QR code for a pending recharge order.
- * In mock mode the QR encodes the auth-service confirm page URL (also shown as a
- * clickable link), so a payment can be completed without a real scanner.
+ * RechargeQrDialog renders the WeChat Native pay QR code for a pending recharge
+ * order. The QR encodes the real `code_url` returned by the in-process WeChat
+ * SDK; the user scans it in the WeChat app to pay. Payment settles via the async
+ * notify callback (verified server-side) — this dialog only displays the QR.
  */
 export function RechargeQrDialog({
   open,
@@ -84,7 +85,7 @@ export function RechargeQrDialog({
           ) : null}
 
           {qr ? (
-            // Mock fallback: open the confirm page directly (real WeChat replaces this).
+            // On mobile, the weixin:// code_url can open the WeChat app directly.
             <a
               href={qr}
               target='_blank'

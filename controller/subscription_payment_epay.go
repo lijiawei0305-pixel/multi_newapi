@@ -49,6 +49,11 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		common.ApiErrorMsg(c, "支付方式不存在")
 		return
 	}
+	// 官方微信/支付宝走主站进程内真实 SDK（/api/tenant/token-plans/:id/purchase），不得透传给 Epay。
+	if operation_setting.IsOfficialPayMethod(req.PaymentMethod) {
+		common.ApiErrorMsg(c, "请使用官方微信/支付宝购买入口")
+		return
+	}
 
 	userId := c.GetInt("id")
 	if plan.MaxPurchasePerUser > 0 {

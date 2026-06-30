@@ -5025,6 +5025,8 @@
     "WeChat Pay": "WeChat Pay",
     "Official WeChat Pay": "Official WeChat Pay",
     "Official Alipay": "Official Alipay",
+    "Online payment is not configured yet. Please contact the administrator.": "Online payment is not configured yet. Please contact the administrator.",
+    "Once credentials are filled and the channel is enabled here, it appears automatically for buyers on the recharge and plan-purchase pages — no need to add it under Add payment method.": "Once credentials are filled and the channel is enabled here, it appears automatically for buyers on the recharge and plan-purchase pages — no need to add it under Add payment method.",
     "Used to decide the payment flow. Built-in keys: wxpay_official and alipay_official use the official in-process WeChat/Alipay SDK (configured under the WeChat/Alipay tabs); stripe for Stripe; waffo_pancake for Waffo Pancake; other values are sent to Epay as the type parameter.": "Used to decide the payment flow. Built-in keys: wxpay_official and alipay_official use the official in-process WeChat/Alipay SDK (configured under the WeChat/Alipay tabs); stripe for Stripe; waffo_pancake for Waffo Pancake; other values are sent to Epay as the type parameter.",
     "WeChat QR code will be displayed here": "WeChat QR code will be displayed here",
     "WeChat sign in": "WeChat sign in",

@@ -80,7 +80,7 @@ export function useTenantRecharge() {
           })
           return true
         }
-        // Alipay: redirect to the gateway / mock confirm page.
+        // Alipay: redirect to the official PC web payment gateway page.
         const url = pay?.alipay_url
         if (!url) {
           toast.error(i18next.t('Payment request failed'))

@@ -57,3 +57,20 @@ func ContainsPayMethod(method string) bool {
 	}
 	return false
 }
+
+// OfficialPayMethodTypes are the PayMethods `type` keys reserved for the official
+// in-process WeChat/Alipay SDK flow (handled by internal/mtwire, settled via the
+// real notify/query). They must never be sent to the Epay gateway: Epay would
+// receive an unknown channel and fail. Kept distinct from Epay's own
+// "wxpay"/"alipay" so the two never collide.
+var OfficialPayMethodTypes = map[string]bool{
+	"wxpay_official":  true,
+	"alipay_official": true,
+}
+
+// IsOfficialPayMethod reports whether a PayMethods type routes to the official
+// in-process SDK rather than Epay. Epay entry points reject these (defense in
+// depth): the buyer UI already routes official channels to the dedicated flow.
+func IsOfficialPayMethod(method string) bool {
+	return OfficialPayMethodTypes[method]
+}

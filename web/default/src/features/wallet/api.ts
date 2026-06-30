@@ -235,7 +235,7 @@ export async function completeOrder(
 }
 
 // ============================================================================
-// Tenant wallet recharge (multi-tenant; WeChat / Alipay via auth-service)
+// Tenant wallet recharge (multi-tenant; official WeChat / Alipay, in-process SDK)
 // ============================================================================
 
 export interface TenantRechargeRequest {
@@ -258,8 +258,8 @@ export type TenantRechargeResponse = ApiResponse<{
  * Create a tenant wallet recharge order.
  *
  * Credits native quota ($1 = 500k) on payment. WeChat returns a QR payload,
- * Alipay returns a redirect URL. Settlement happens out-of-band via the
- * independent auth-service which calls back the main site's internal endpoint.
+ * Alipay returns a redirect URL. Settlement is handled in-process by the real
+ * WeChat/Alipay SDK via the async notify callback (verify) + active query.
  */
 export async function createTenantRecharge(
   request: TenantRechargeRequest

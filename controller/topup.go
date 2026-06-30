@@ -214,6 +214,11 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "支付方式不存在"})
 		return
 	}
+	// 官方微信/支付宝走主站进程内真实 SDK（/api/tenant/wallet/recharge），不得透传给 Epay。
+	if operation_setting.IsOfficialPayMethod(req.PaymentMethod) {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "请使用官方微信/支付宝充值入口"})
+		return
+	}
 
 	callBackAddress := service.GetCallbackAddress()
 	returnUrl, _ := url.Parse(paymentReturnPath("/console/log"))

@@ -50,12 +50,15 @@ import type {
 } from '../types'
 import { CreemProductsSection } from './creem-products-section'
 import { TenantRechargeCard } from './tenant-recharge-card'
+import { useRechargeMethods } from '../hooks/use-recharge-methods'
 import type { RechargeProvider } from '../hooks/use-tenant-recharge'
 
 /**
- * PayMethods `type` keys that route to the official in-process WeChat/Alipay
- * SDK flow (handled by TenantRechargeCard) instead of the Epay form. Distinct
- * from Epay's own `wxpay` / `alipay` so the two never collide.
+ * PayMethods `type` keys that (if an admin ever adds them) route to the official
+ * in-process WeChat/Alipay SDK flow rather than the Epay form. Single-gate means
+ * official channels are driven by the WeChat/Alipay tab config, not by a
+ * PayMethods entry — but we still exclude these types from the Epay button grid
+ * as a defense so a stray entry never renders as a broken Epay button.
  */
 const OFFICIAL_TYPE_TO_PROVIDER: Record<string, RechargeProvider> = {
   wxpay_official: 'wxpay',
@@ -136,21 +139,18 @@ export function RechargeFormCard({
     }
   }
 
-  // Official WeChat/Alipay entries the admin added as PayMethods (distinct
-  // types). They route to the in-process SDK flow via TenantRechargeCard, so
-  // they're surfaced there and excluded from the Epay button grid below.
-  const officialProviders = useMemo<RechargeProvider[]>(() => {
-    const methods = topupInfo?.pay_methods
-    if (!Array.isArray(methods)) return []
-    const seen = new Set<RechargeProvider>()
-    for (const m of methods) {
-      const provider = OFFICIAL_TYPE_TO_PROVIDER[m.type]
-      if (provider) seen.add(provider)
-    }
-    return [...seen]
-  }, [topupInfo?.pay_methods])
+  // Single-gate: official WeChat/Alipay show once their creds are filled and the
+  // channel is enabled under the WeChat/Alipay tabs. The recharge methods
+  // endpoint returns exactly the enabled && configured set — no PayMethods entry
+  // required. The parent owns this one fetch and hands it to TenantRechargeCard.
+  const { methods: configuredOfficial } = useRechargeMethods()
+  const officialProviders = useMemo<RechargeProvider[]>(
+    () => configuredOfficial ?? [],
+    [configuredOfficial]
+  )
 
-  // Epay/standard PayMethods = everything that is NOT an official-SDK type.
+  // Epay/standard PayMethods = everything that is NOT an official-SDK type
+  // (defense: a stray official entry never renders as a broken Epay button).
   const epayPayMethods = useMemo<PaymentMethod[]>(() => {
     const methods = topupInfo?.pay_methods
     if (!Array.isArray(methods)) return []
@@ -241,9 +241,9 @@ export function RechargeFormCard({
       contentClassName='space-y-4 sm:space-y-6'
     >
       {/* Official WeChat / Alipay (in-process real SDK) — credits native quota.
-          Shown only for providers the admin surfaced as PayMethods entries
-          (wxpay_official / alipay_official) and that are enabled && configured. */}
-      <TenantRechargeCard allowedProviders={officialProviders} />
+          Single-gate: shown for every channel that is enabled && configured
+          under the WeChat/Alipay tabs (no PayMethods entry needed). */}
+      <TenantRechargeCard providers={officialProviders} />
 
       {/* Online Topup Section */}
       {hasAnyTopup ? (

@@ -29,9 +29,16 @@ interface PlanCardProps {
   plan: TenantPlan
   onBuy: (plan: TenantPlan) => void
   purchasing: boolean
+  /** Disabled when no official payment channel is configured (or still loading). */
+  disabled?: boolean
 }
 
-export function PlanCard({ plan, onBuy, purchasing }: PlanCardProps) {
+export function PlanCard({
+  plan,
+  onBuy,
+  purchasing,
+  disabled,
+}: PlanCardProps) {
   const { t } = useTranslation()
   const recommended = !!plan.is_recommended
 
@@ -93,7 +100,7 @@ export function PlanCard({ plan, onBuy, purchasing }: PlanCardProps) {
         <Button
           className='w-full'
           variant={recommended ? 'default' : 'outline'}
-          disabled={purchasing}
+          disabled={purchasing || disabled}
           onClick={() => onBuy(plan)}
           data-testid={`buy-${plan.code}`}
         >

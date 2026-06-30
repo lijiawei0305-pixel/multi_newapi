@@ -16,13 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { SectionPageLayout } from '@/components/layout'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 import { RechargeQrDialog } from '@/features/wallet/components/dialogs/recharge-qr-dialog'
+import { getPaymentIcon } from '@/features/wallet/lib'
+import { useRechargeMethods } from '@/features/wallet/hooks/use-recharge-methods'
+import type { RechargeProvider } from '@/features/wallet/hooks/use-tenant-recharge'
 import {
   getTenantSubscriptions,
   getTenantTokenPlans,
@@ -49,6 +55,26 @@ function TenantPlansContent() {
   const queryClient = useQueryClient()
   const [purchasingCode, setPurchasingCode] = useState<string | null>(null)
   const [qrState, setQrState] = useState<PurchaseQrState | null>(null)
+  const [provider, setProvider] = useState<RechargeProvider>('wxpay')
+
+  // Tokenplans settle only via the official in-process WeChat/Alipay SDK (no
+  // Epay/Stripe path here). Single-gate: the buyer picks among exactly the
+  // channels that are enabled && configured under the WeChat/Alipay tabs.
+  const { methods: officialMethods, loading: methodsLoading } =
+    useRechargeMethods()
+  const officialProviders = useMemo<RechargeProvider[]>(
+    () => officialMethods ?? [],
+    [officialMethods]
+  )
+  // Keep the selected provider within the configured set (default = first).
+  useEffect(() => {
+    if (officialProviders.length > 0 && !officialProviders.includes(provider)) {
+      setProvider(officialProviders[0])
+    }
+  }, [officialProviders, provider])
+
+  const noPaymentConfigured = !methodsLoading && officialProviders.length === 0
+  const buyDisabled = methodsLoading || noPaymentConfigured
 
   const { data: plansData, isLoading: plansLoading } = useQuery({
     queryKey: ['tenant-token-plans'],
@@ -69,9 +95,9 @@ function TenantPlansContent() {
   })
 
   const purchaseMutation = useMutation({
-    // Default to WeChat (QR dialog); Alipay would redirect, same as recharge.
+    // Provider = the buyer-selected official channel (WeChat → QR, Alipay → redirect).
     mutationFn: (plan: TenantPlan) =>
-      purchaseTokenPlan(plan.id ?? plan.code, 'wxpay'),
+      purchaseTokenPlan(plan.id ?? plan.code, provider),
     onMutate: (plan) => setPurchasingCode(plan.code),
     onSettled: () => setPurchasingCode(null),
     onSuccess: (res) => {
@@ -79,7 +105,7 @@ function TenantPlansContent() {
       const data = res.data
       queryClient.invalidateQueries({ queryKey: ['tenant-subscriptions'] })
 
-      // WeChat: pop a scannable QR for the auth-service mock pay page.
+      // WeChat: pop a scannable QR for the in-process pay order.
       const wxQr = data?.pay?.wxpay_qr
       if (wxQr) {
         setQrState({
@@ -89,7 +115,7 @@ function TenantPlansContent() {
         })
         return
       }
-      // Alipay: redirect the browser to the gateway / mock confirm page.
+      // Alipay: redirect the browser to the gateway page.
       const aliUrl = data?.pay?.alipay_url
       if (aliUrl) {
         window.location.href = aliUrl
@@ -113,6 +139,26 @@ function TenantPlansContent() {
 
   const subscriptions = useMemo(() => subsData || [], [subsData])
 
+  const providerButton = (value: RechargeProvider, label: string) => (
+    <Button
+      type='button'
+      size='sm'
+      variant='outline'
+      data-testid={value === 'wxpay' ? 'plan-pay-wxpay' : 'plan-pay-alipay'}
+      aria-pressed={provider === value}
+      onClick={() => setProvider(value)}
+      className={cn(
+        'gap-1.5',
+        provider === value
+          ? 'border-foreground bg-foreground/5 dark:bg-foreground/10'
+          : 'border-muted'
+      )}
+    >
+      {getPaymentIcon(value, 'h-4 w-4')}
+      <span>{label}</span>
+    </Button>
+  )
+
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Buy Plans')}</SectionPageLayout.Title>
@@ -123,6 +169,33 @@ function TenantPlansContent() {
         >
           <section className='flex flex-col gap-3'>
             <h3 className='text-sm font-semibold'>{t('Available Plans')}</h3>
+
+            {/* Payment method selector — official WeChat/Alipay (single-gate). */}
+            {!plansLoading &&
+              plans.length > 0 &&
+              officialProviders.length > 0 && (
+                <div className='flex flex-wrap items-center gap-2'>
+                  <span className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
+                    {t('Payment Method')}
+                  </span>
+                  {officialProviders.includes('wxpay') &&
+                    providerButton('wxpay', t('WeChat Pay'))}
+                  {officialProviders.includes('alipay') &&
+                    providerButton('alipay', t('Alipay'))}
+                </div>
+              )}
+
+            {/* No official channel configured → tokenplans can't be paid for. */}
+            {!plansLoading && plans.length > 0 && noPaymentConfigured && (
+              <Alert>
+                <AlertDescription>
+                  {t(
+                    'Online payment is not configured yet. Please contact the administrator.'
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+
             {plansLoading && (
               <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
                 <Skeleton className='h-56 w-full' />
@@ -142,6 +215,7 @@ function TenantPlansContent() {
                     key={plan.code}
                     plan={plan}
                     purchasing={purchasingCode === plan.code}
+                    disabled={buyDisabled}
                     onBuy={(p) => purchaseMutation.mutate(p)}
                   />
                 ))}

@@ -41,8 +41,9 @@ export async function getTenantTokenPlans(): Promise<
 /**
  * Purchase a plan. `idOrCode` is the plan's numeric id when available,
  * otherwise its code — both are accepted by the `:id` path segment.
- * `provider` (default wxpay) selects the auth-service mock pay page returned as
- * `pay.wxpay_qr` (QR) or `pay.alipay_url` (redirect) — same shape as recharge.
+ * `provider` selects the official in-process channel; the pay credential is
+ * returned as `pay.wxpay_qr` (QR) or `pay.alipay_url` (redirect) — same shape
+ * as recharge.
  */
 export async function purchaseTokenPlan(
   idOrCode: number | string,
