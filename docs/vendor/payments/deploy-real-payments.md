@@ -1,5 +1,12 @@
 # 真实微信/支付宝支付上线指南（auth-service 真实模式）
 
+> ⚠️ **已过时（2026-07-01）**：auth-service 独立支付网关**已退役**。真实微信(Native)/支付宝(电脑网站)
+> 现由**主站进程内真实 SDK** 落地（`internal/payment/realpay` + `internal/mtwire/payment_inprocess.go`），
+> 凭据存 **DB 后台表单**（系统设置 → 支付 → 微信/支付宝 选项卡），回调走 `/api/pay/{wechat,alipay}/notify`
+> （经主站 nginx `location /` 反代，无需独立 auth-service 块）。买家入口：钱包页官方微信/支付宝卡片，
+> 由管理员在「新增支付方式」里以 `wxpay_official` / `alipay_official` 标识上架。
+> 本文档下方的 auth-service 部署/nginx/config.yaml 步骤**仅作历史参考**，请勿据此部署。
+
 - **整理时间**: 2026-06-30
 - **Purpose**: 把 auth-service 从 mock 切到真实微信 Native + 支付宝电脑网站支付的服务器上线步骤。
 - **前置**: 已拿到商户凭据（见 `CLAUDE.md` 待办看板 🔴）。私钥/证书**绝不入库**，只放服务器。

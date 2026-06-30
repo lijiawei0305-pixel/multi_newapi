@@ -77,9 +77,15 @@
 | 方法 | 路径 | 角色 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/api/tenant/wallet` | 🅤 | 当前余额(USD额度)/订单入口/（代理另见可提现） |
-| POST | `/api/tenant/wallet/recharge` | 🅤 | 下单充值 → 返回 `{order_no, pay:{wxpay_qr/alipay_url}}` |
+| POST | `/api/tenant/wallet/recharge` | 🅤 | 下单充值（`{amount_usd, provider:wxpay\|alipay}`）→ 返回 `{order_no, pay:{wxpay_qr/alipay_url}}`，进程内官方 SDK |
+| GET | `/api/tenant/wallet/recharge/methods` | 🅤 | 官方微信/支付宝可用渠道（enabled && configured 交集）→ 买家页据此呈现官方卡片 |
 | POST | `/api/tenant/wallet/redeem` | 🅤 | `{code}` 兑换码入账 |
 | GET | `/api/tenant/wallet/orders` | 🅤 | 充值/订单历史（分页） |
+
+> **官方支付标识（前端派发）**：管理员在「系统设置 → 支付 → 新增支付方式」选 `wxpay_official` / `alipay_official`
+> 标识（区别于 Epay 的 `wxpay`/`alipay`、Stripe `stripe`、Waffo `waffo_pancake`）。买家页将官方标识从 Epay
+> 按钮网格中排除，改走上方 `/api/tenant/wallet/recharge`（进程内真实 SDK，USD/扫码/跳转）。后端 PayMethods 透传，
+> 按 `type` 由前端决定支付流程；官方标识永不进入 Epay (`RequestEpay`) 路径。凭据在「微信/支付宝」选项卡（存 DB）。
 
 ### 2.4 tokenplan 套餐 ★
 | 方法 | 路径 | 角色 | 说明 |

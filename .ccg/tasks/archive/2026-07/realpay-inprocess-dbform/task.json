@@ -1,0 +1,13 @@
+{
+  "id": "realpay-inprocess-dbform",
+  "title": "官方微信/支付宝作为独立支付标识(wxpay_official/alipay_official)接入 Add Payment Method + 买家页",
+  "status": "completed",
+  "strategy": "full-collaborate",
+  "currentPhase": "done",
+  "nextAction": "已完成：前端加官方标识 + 买家页经 TenantRechargeCard 驱动；tsgo EXIT=0；测试栈构建+部署验证（二进制含全部标识，HTTP 200）；commit adbaf55 已推 origin/500L；文档同步。",
+  "gate": null,
+  "branch": "500L",
+  "scope": "realpay-inprocess-dbform",
+  "createdAt": "2026-06-30T18:17:35Z",
+  "completedAt": "2026-07-01T03:40:00Z"
+}

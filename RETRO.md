@@ -232,3 +232,9 @@
 - **根因**：这是"消费者定义接口（依赖倒置）"模式的固有代价 —— 换来的是每个模块可 mock 依赖独立单测（14 模块平均 ~98.7% 覆盖率正源于此）。
 - **解决/规避**：在 `cmd/main` 写**薄适配器**对齐类型（如 `Reference→agent.SourceID` 做幂等键、USD↔¥ 单位换算、`tokenplan.SubscriptionQuotaFactory`→`billing.SubscriptionSourceFactory`）。
 - **升级**：已在 progress.md「组装层 TODO」与 api-contract.md「装配映射」登记；集成阶段统一实现，不在各模块内耦合。
+
+### [已解决] 服务器前端 typecheck：bun workspace 的 `catalog:` 依赖必须在 web/ 根装，且 Docker build 不做 tsgo
+- **现象**：在 `web/default` 单独 `bun install` 报 `oxlint@catalog: failed to resolve`（一堆 `*@catalog:`），且 `tsgo: command not found`。
+- **根因**：`web/` 是 bun workspace，`web/default/package.json` 用 `catalog:` 协议引用版本，**catalog 定义在 workspace 根 `web/package.json` + `web/bun.lock`**——只在子包目录装解析不到 catalog，devDeps（含 tsgo）也装不上。另：根 Dockerfile 前端阶段用 `bun run build`(rsbuild/SWC，只转译**不做类型检查**)，类型错误**不会**让镜像构建失败 → 必须独立跑 `tsgo`。
+- **解决**：①typecheck 在 workspace 根装：`docker run -v /root/newapi-compile/web:/web -v newapi_buncache:/root/.bun/install/cache -w /web oven/bun bun install --frozen-lockfile` → 再 `cd default && bun run typecheck`（=`tsgo -b`，看 `EXIT=0`）。②构建/部署用 `/root/newapi-test`（即运行栈 compose 的 working_dir，`docker compose ls` 可查）；typecheck 用带 node_modules 的 `/root/newapi-compile`——改完两边都 scp 同步。③oxlint 不在构建门里，存量告警勿误判为本次引入，只修自己新增行。
+- **升级**：纯前端改动验收三步：scp 同步 → workspace 根 `bun install` + `tsgo -b`(EXIT=0) → `docker compose -p newapi_test up -d --build` 后 `grep` 二进制确认标识入包（`docker exec app grep -c <marker> /new-api`）。
