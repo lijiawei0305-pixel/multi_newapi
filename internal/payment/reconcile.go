@@ -45,3 +45,8 @@ func (g *Gateway) ReconcileStuckPaid(ctx context.Context, before time.Time) (Rec
 	}
 	return res, nil
 }
+
+// ListStuckPaid 只读列出卡在 paid（早于 before）的订单，供 admin「支付对账」页展示；不触发入账。
+func (g *Gateway) ListStuckPaid(ctx context.Context, before time.Time) ([]*PayOrder, error) {
+	return g.repo.ListByStatus(ctx, OrderPaid, before)
+}

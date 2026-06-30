@@ -51,6 +51,7 @@ import { Route as AuthenticatedPromotionChannelsIndexRouteImport } from './route
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedPlansIndexRouteImport } from './routes/_authenticated/plans/index'
+import { Route as AuthenticatedPaymentReconcileIndexRouteImport } from './routes/_authenticated/payment-reconcile/index'
 import { Route as AuthenticatedMyViolationsIndexRouteImport } from './routes/_authenticated/my-violations/index'
 import { Route as AuthenticatedMyUsersIndexRouteImport } from './routes/_authenticated/my-users/index'
 import { Route as AuthenticatedMyModerationIndexRouteImport } from './routes/_authenticated/my-moderation/index'
@@ -308,6 +309,12 @@ const AuthenticatedPlansIndexRoute = AuthenticatedPlansIndexRouteImport.update({
   path: '/plans/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedPaymentReconcileIndexRoute =
+  AuthenticatedPaymentReconcileIndexRouteImport.update({
+    id: '/payment-reconcile/',
+    path: '/payment-reconcile/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedMyViolationsIndexRoute =
   AuthenticatedMyViolationsIndexRouteImport.update({
     id: '/my-violations/',
@@ -555,6 +562,7 @@ export interface FileRoutesByFullPath {
   '/my-moderation/': typeof AuthenticatedMyModerationIndexRoute
   '/my-users/': typeof AuthenticatedMyUsersIndexRoute
   '/my-violations/': typeof AuthenticatedMyViolationsIndexRoute
+  '/payment-reconcile/': typeof AuthenticatedPaymentReconcileIndexRoute
   '/plans/': typeof AuthenticatedPlansIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
@@ -630,6 +638,7 @@ export interface FileRoutesByTo {
   '/my-moderation': typeof AuthenticatedMyModerationIndexRoute
   '/my-users': typeof AuthenticatedMyUsersIndexRoute
   '/my-violations': typeof AuthenticatedMyViolationsIndexRoute
+  '/payment-reconcile': typeof AuthenticatedPaymentReconcileIndexRoute
   '/plans': typeof AuthenticatedPlansIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
@@ -709,6 +718,7 @@ export interface FileRoutesById {
   '/_authenticated/my-moderation/': typeof AuthenticatedMyModerationIndexRoute
   '/_authenticated/my-users/': typeof AuthenticatedMyUsersIndexRoute
   '/_authenticated/my-violations/': typeof AuthenticatedMyViolationsIndexRoute
+  '/_authenticated/payment-reconcile/': typeof AuthenticatedPaymentReconcileIndexRoute
   '/_authenticated/plans/': typeof AuthenticatedPlansIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
@@ -787,6 +797,7 @@ export interface FileRouteTypes {
     | '/my-moderation/'
     | '/my-users/'
     | '/my-violations/'
+    | '/payment-reconcile/'
     | '/plans/'
     | '/playground/'
     | '/profile/'
@@ -862,6 +873,7 @@ export interface FileRouteTypes {
     | '/my-moderation'
     | '/my-users'
     | '/my-violations'
+    | '/payment-reconcile'
     | '/plans'
     | '/playground'
     | '/profile'
@@ -940,6 +952,7 @@ export interface FileRouteTypes {
     | '/_authenticated/my-moderation/'
     | '/_authenticated/my-users/'
     | '/_authenticated/my-violations/'
+    | '/_authenticated/payment-reconcile/'
     | '/_authenticated/plans/'
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
@@ -1289,6 +1302,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlansIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/payment-reconcile/': {
+      id: '/_authenticated/payment-reconcile/'
+      path: '/payment-reconcile'
+      fullPath: '/payment-reconcile/'
+      preLoaderRoute: typeof AuthenticatedPaymentReconcileIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/my-violations/': {
       id: '/_authenticated/my-violations/'
       path: '/my-violations'
@@ -1635,6 +1655,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedMyModerationIndexRoute: typeof AuthenticatedMyModerationIndexRoute
   AuthenticatedMyUsersIndexRoute: typeof AuthenticatedMyUsersIndexRoute
   AuthenticatedMyViolationsIndexRoute: typeof AuthenticatedMyViolationsIndexRoute
+  AuthenticatedPaymentReconcileIndexRoute: typeof AuthenticatedPaymentReconcileIndexRoute
   AuthenticatedPlansIndexRoute: typeof AuthenticatedPlansIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
@@ -1676,6 +1697,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedMyModerationIndexRoute: AuthenticatedMyModerationIndexRoute,
   AuthenticatedMyUsersIndexRoute: AuthenticatedMyUsersIndexRoute,
   AuthenticatedMyViolationsIndexRoute: AuthenticatedMyViolationsIndexRoute,
+  AuthenticatedPaymentReconcileIndexRoute:
+    AuthenticatedPaymentReconcileIndexRoute,
   AuthenticatedPlansIndexRoute: AuthenticatedPlansIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,

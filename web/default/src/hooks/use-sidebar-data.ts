@@ -246,6 +246,11 @@ export function useSidebarData(): SidebarData {
             icon: ScrollText,
           },
           {
+            title: t('Payment Reconcile'),
+            url: '/payment-reconcile',
+            icon: HandCoins,
+          },
+          {
             title: t('System Info'),
             url: '/system-info',
             icon: ServerCog,

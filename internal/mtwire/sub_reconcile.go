@@ -65,3 +65,12 @@ func (a *App) ReconcileStuckSubscriptions(ctx context.Context, before time.Time)
 	}
 	return res, nil
 }
+
+// listStuckSubscriptions 只读列出卡在 pending（早于 before）的套餐订单，供 admin「支付对账」页展示。
+func (a *App) listStuckSubscriptions(ctx context.Context, before time.Time) ([]subscriptionOrderRow, error) {
+	var rows []subscriptionOrderRow
+	err := a.DB.WithContext(ctx).
+		Where("status = ? AND updated_at < ?", subOrderPending, before).
+		Find(&rows).Error
+	return rows, err
+}

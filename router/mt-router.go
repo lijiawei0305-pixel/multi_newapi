@@ -104,6 +104,14 @@ func SetMtRouter(router *gin.Engine) {
 		adminPlanGroup.PATCH("/:id", app.HandleAdminUpdatePlan)
 	}
 
+	// 支付卡单对账（兜底）管理：列当前卡单 + 手动立即对账。复用 new-api AdminAuth。
+	adminReconcileGroup := router.Group("/api/admin/reconcile")
+	adminReconcileGroup.Use(middleware.AdminAuth())
+	{
+		adminReconcileGroup.GET("/stuck", app.HandleAdminListStuck)
+		adminReconcileGroup.POST("/run", app.HandleAdminRunReconcile)
+	}
+
 	// 管理端订阅监控（当前租户维度，租户来自 Host）。前置 TenantMiddleware + new-api AdminAuth。
 	adminSubGroup := router.Group("/api/admin/subscriptions")
 	adminSubGroup.Use(app.TenantMiddleware(), middleware.AdminAuth())
