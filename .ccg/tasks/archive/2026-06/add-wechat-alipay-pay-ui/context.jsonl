@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "web/default/src/features/system-settings/integrations/payment-settings-section.tsx", "reason": "管理页支付设置主组件(1616行)，现有 epay/stripe/creem/waffo 卡，需加微信/支付宝状态+开关卡"}
+{"file": "web/default/src/features/system-settings/billing/section-registry.tsx", "reason": "billing 分区注册，payment section 入口"}
+{"file": "web/default/src/features/wallet/hooks/use-payment.ts", "reason": "买家充值付款 hook，需加微信扫码/支付宝跳转入口"}
+{"file": "web/default/src/features/wallet/lib/payment.ts", "reason": "买家付款方法库"}
+{"file": "internal/mtwire/recharge.go", "reason": "后端 /api/tenant/wallet/recharge 下单(wxpay/alipay)，买家付款链路；enable 开关读取点"}
+{"file": "internal/mtwire/http.go", "reason": "tenant 路由+handlers，买家页可用支付方式来源"}
+{"file": "auth-service/server.go", "reason": "configured 状态来源(s.real.Available)，可加 provider 可用性状态端点"}
+{"file": "controller/topup.go", "reason": "System1 GetTopUpInfo 模式参考(enable_*_topup 标志如何暴露给前端)"}

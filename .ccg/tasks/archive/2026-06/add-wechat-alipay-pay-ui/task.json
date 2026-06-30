@@ -1,0 +1,13 @@
+{
+  "id": "add-wechat-alipay-pay-ui",
+  "title": "前端管理页加微信/支付宝渠道（状态+开关）+ 买家充值页 gating",
+  "status": "archived",
+  "strategy": "full-collaborate",
+  "currentPhase": "6-final",
+  "nextAction": "已完成：服务器 go build/test/gofmt + 前端 typecheck/JSON 全过；提交并推送 500L",
+  "gate": null,
+  "branch": "500L",
+  "scope": "add-wechat-alipay-pay-ui",
+  "createdAt": "2026-06-30T16:27:11Z",
+  "completedAt": "2026-06-30T17:30:00Z"
+}

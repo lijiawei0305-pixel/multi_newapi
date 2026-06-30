@@ -1,0 +1,1 @@
+[{"phase":"3-planning","next":"等待用户审批计划 + 选择执行模式","ts":1782837560629},{"phase":"3-planning","next":"等待用户审批计划 + 选择执行模式","ts":1782837579188},{"phase":"4-implementation","next":"Agent Teams 并行 Builder：backend(Go) + frontend(web) → 验证 → 审查","ts":1782838668973}]

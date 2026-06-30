@@ -70,3 +70,4 @@ mysql_data/
 /.playwright/
 .playwright-cli/
 node_modules/
+repomix-output.xml
