@@ -43,6 +43,12 @@
 - **解决/规避**：源站侧自治修复——给 `tokendream` vhost 加 `listen 443 ssl` + **自签证书**（CF Full 不校验源站证书），同时保留 80（兼容 Flexible）。无需改 CF 面板。**已验证**：CF 全链路 healthz/品牌/钱包均 200。
 - **升级**：测试栈单域名用自签即可；正式上线 `*.wedreamhub.com` 通配建议用 CF Origin CA 证书（Full strict）或宝塔 Let's Encrypt。`scripts/` 可加 vhost 模板。
 
+### [已解决] 未注册子域 / 野域名指向平台 IP 会看到主站控制台（主站兜底过宽）
+- **现象**：任意 `foo.wedreamhub.com`（未建租户）或把野域名 A 记录指向平台 IP 命中通配 vhost 时，后端解析无租户 → 前端 `getTenantCurrent` 返 null → **回落渲染主站**。用户担心"改个 DNS 就能到主站"。
+- **根因**：`/api/tenant/current` 对"无租户命中"只有一种响应（`TENANT_NOT_FOUND`），前端把它一律当主站（no-op）。"主站兜底"覆盖了 www 之外的所有未知子域，语义过宽。
+- **解决/规避**：改「无租户命中」为**三态**——新增 `tenant.IsMainSiteHost(host)`（apex+www+非平台域→主站；`*.wedreamhub.com` 下未注册子域→false）+ 错误码 `SITE_NOT_ACTIVATED`；`HandleTenantCurrent` 据此分返；前端 `resolveTenant()` 用 `getApiErrorCode` 区分，`__root.tsx` 命中 `not-activated` 渲染全屏「站点未开通」页替代 Outlet。apex 由 `deploy/nginx/apex-redirect.wedreamhub.com.conf` 301→www。**www=主站、其余子域=代理空间、agentdemo 等已注册租户零改动**。（本机无 Go 工具链，后端 `go build`/`go test ./internal/tenant/` **待服务器验证**；前端 `node_modules` 未装，typecheck 一并在服务器跑。）
+- **升级**：主站 Host 严格限 www/apex（+ localhost/IP 直连兜底）；新增"无租户命中"分支时必须走 `IsMainSiteHost` 区分，不得再无条件回落主站。设计落地见 `doc/domains-ssl.md §6.4`。
+
 ### [已解决] 长镜像构建期 SSH 连接被远端关闭（构建仍完成）
 - **现象**：`ssh ... 'docker compose up -d --build'` 在构建中途返回 `exit 255 / Connection closed by remote host`。
 - **根因**：构建（go+node 多阶段）+ 运行容器同时占用，输出流式传输期间 SSH 会话被远端断开（资源瞬时压力/网络抖动）；但 `docker compose up -d --build` 的构建是在服务器侧进行，**断的是 ssh 输出流、不是构建本身**。

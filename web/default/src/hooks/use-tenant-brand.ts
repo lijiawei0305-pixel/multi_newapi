@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getCookie } from '@/lib/cookies'
-import { getTenantCurrent } from '@/lib/tenant'
+import { resolveTenant } from '@/lib/tenant'
 import {
   THEME_COOKIE_KEYS,
   THEME_PRESET_VALUES,
@@ -47,12 +47,15 @@ export function useTenantBrand() {
   const statusLoading = useSystemConfigStore((s) => s.loading)
   const { setPreset } = useThemeCustomization()
 
-  const { data } = useQuery({
-    queryKey: ['tenant-current-brand'],
-    queryFn: getTenantCurrent,
+  // Shares the ['tenant-resolution'] query with the root-level site gate, so the
+  // Host is classified with a single GET /api/tenant/current per session.
+  const { data: resolution } = useQuery({
+    queryKey: ['tenant-resolution'],
+    queryFn: resolveTenant,
     staleTime: 5 * 60 * 1000,
     retry: false,
   })
+  const data = resolution?.kind === 'tenant' ? resolution.tenant : undefined
 
   // Brand name + logo override (applied after /api/status populated the store).
   useEffect(() => {

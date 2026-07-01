@@ -3316,6 +3316,8 @@
     "Only successful requests count toward this limit.": "仅成功的请求计入此限制。",
     "Only the last {{value}} log files will be retained; the rest will be deleted.": "将只保留最近 {{value}} 个日志文件，其余将被删除。",
     "Oops! Page Not Found!": "糟糕！页面未找到！",
+    "Site not activated": "站点未开通",
+    "This site is not open yet or the domain has not been bound.": "该站点尚未开通，或域名尚未绑定。",
     "Oops! Something went wrong": "糟糕！出错了",
     "Open": "打开",
     "Open a source model first": "请先打开一个源模型",

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { api } from '@/lib/api'
+import { api, getApiErrorCode } from '@/lib/api'
 
 // Public per-Host tenant brand (GET /api/tenant/current). No auth required; the
 // backend resolves the tenant from the request Host. Returns null on the main
@@ -35,12 +35,42 @@ export interface TenantCurrent {
   tokenplan_enabled: boolean
 }
 
+/**
+ * Three-way classification of the current Host, resolved from
+ * GET /api/tenant/current:
+ *  - `tenant`        → a registered agent site (carries the brand payload);
+ *  - `main`          → the main site (www / apex / localhost / direct access);
+ *                      backend answers 404 `TENANT_NOT_FOUND`;
+ *  - `not-activated` → an unregistered `*.wedreamhub.com` subdomain; backend
+ *                      answers 404 `SITE_NOT_ACTIVATED` so we render a dedicated
+ *                      "站点未开通" page instead of the main site.
+ */
+export type TenantResolution =
+  | { kind: 'tenant'; tenant: TenantCurrent }
+  | { kind: 'main' }
+  | { kind: 'not-activated' }
+
+export async function resolveTenant(): Promise<TenantResolution> {
+  // skip handlers: main site legitimately 404s TENANT_NOT_FOUND — never toast.
+  try {
+    const res = await api.get('/api/tenant/current', {
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    })
+    const body = res.data as { success?: boolean; data?: TenantCurrent | null }
+    if (body?.success && body.data) return { kind: 'tenant', tenant: body.data }
+    return { kind: 'main' }
+  } catch (err) {
+    // 404s reject through the api interceptor; distinguish "未开通" by stable code.
+    if (getApiErrorCode(err) === 'SITE_NOT_ACTIVATED') {
+      return { kind: 'not-activated' }
+    }
+    return { kind: 'main' }
+  }
+}
+
+// Backward-compatible helper: null on the main site / unknown Host (no tenant).
 export async function getTenantCurrent(): Promise<TenantCurrent | null> {
-  // skip handlers: the main site legitimately returns TENANT_NOT_FOUND — never toast.
-  const res = await api.get('/api/tenant/current', {
-    skipBusinessError: true,
-    skipErrorHandler: true,
-  })
-  const body = res.data as { success?: boolean; data?: TenantCurrent | null }
-  return body?.success && body.data ? body.data : null
+  const r = await resolveTenant()
+  return r.kind === 'tenant' ? r.tenant : null
 }

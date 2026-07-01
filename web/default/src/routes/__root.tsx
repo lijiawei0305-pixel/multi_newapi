@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect } from 'react'
-import { type QueryClient } from '@tanstack/react-query'
+import { type QueryClient, useQuery } from '@tanstack/react-query'
 import {
   createRootRouteWithContext,
   Outlet,
@@ -33,6 +33,8 @@ import { NavigationProgress } from '@/components/navigation-progress'
 import { saveAffiliateCode } from '@/features/auth/lib/storage'
 import { GeneralError } from '@/features/errors/general-error'
 import { NotFoundError } from '@/features/errors/not-found-error'
+import { SiteNotActivated } from '@/features/errors/site-not-activated'
+import { resolveTenant } from '@/lib/tenant'
 import { getSetupStatus } from '@/features/setup/api'
 
 // TenantBrandBoot applies per-tenant brand (name/logo) + default theme preset.
@@ -46,6 +48,17 @@ function RootComponent() {
   // Load system configuration (logo, system name, etc.) from backend
   useSystemConfig({ autoLoad: true })
 
+  // Classify the current Host. Shares the ['tenant-resolution'] query with
+  // useTenantBrand (one GET /api/tenant/current per session). An unregistered
+  // *.wedreamhub.com subdomain resolves to 'not-activated' → full-screen gate
+  // instead of leaking the main-site console.
+  const { data: resolution } = useQuery({
+    queryKey: ['tenant-resolution'],
+    queryFn: resolveTenant,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+
   useEffect(() => {
     const aff = new URLSearchParams(window.location.search).get('aff')?.trim()
     if (aff) {
@@ -53,11 +66,13 @@ function RootComponent() {
     }
   }, [])
 
+  const notActivated = resolution?.kind === 'not-activated'
+
   return (
     <ThemeCustomizationProvider>
       <TenantBrandBoot />
       <NavigationProgress />
-      <Outlet />
+      {notActivated ? <SiteNotActivated /> : <Outlet />}
       <Toaster closeButton duration={5000} position='top-center' richColors />
       {import.meta.env.MODE === 'development' && (
         <>

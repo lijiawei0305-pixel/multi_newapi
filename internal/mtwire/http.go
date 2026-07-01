@@ -107,7 +107,14 @@ func humanMessage(err error) string {
 func (a *App) HandleTenantCurrent(c *gin.Context) {
 	t := tenantFrom(c)
 	if t == nil {
-		respondErr(c, tenant.ErrTenantNotFound)
+		// 无租户命中：区分「主站(www/apex/直连)」与「未注册子域(站点未开通)」。
+		// 主站沿用 TENANT_NOT_FOUND（前端据此按主站渲染，公开契约不变）；
+		// *.wedreamhub.com 下未注册子域返回 SITE_NOT_ACTIVATED（前端据此渲染「站点未开通」页）。
+		if tenant.IsMainSiteHost(c.Request.Host) {
+			respondErr(c, tenant.ErrTenantNotFound)
+			return
+		}
+		respondErr(c, tenant.ErrSiteNotActivated)
 		return
 	}
 	cfg := a.effectiveSiteConfig(c.Request.Context(), t)

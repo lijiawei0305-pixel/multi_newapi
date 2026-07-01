@@ -40,6 +40,21 @@
 `ResolveByHost` 走 `MemCache`（命中即返回，未命中回源 + 写缓存；负结果不缓存）。`TenantMiddleware` 注入租户，未知 Host 放行（由各 handler 自判缺租户）。
 **写后失效**（`Cache.Invalidate`）：解绑、证书回写转 active 时清对应 Host 缓存。
 
+### 主站 / 代理站 / 站点未开通（三态）
+
+「无租户命中」不再一律回落主站，而由 `tenant.IsMainSiteHost(host)`（`internal/tenant/resolver.go`）再分两类，`/api/tenant/current`（`HandleTenantCurrent`）据此返回：
+
+| Host | 分类 | 后端响应 | 前端渲染 |
+| --- | --- | --- | --- |
+| 命中 `tenant_domains` / active 自定义域名 | **代理站** | 200 + 品牌 | 代理品牌 |
+| `www.wedreamhub.com`、apex `wedreamhub.com`、localhost/裸 IP/无关域（直连/调试） | **主站** | 404 `TENANT_NOT_FOUND` | 主站（前端 no-op） |
+| `*.wedreamhub.com` 下未注册子域（非 www、无对应租户） | **站点未开通** | 404 `SITE_NOT_ACTIVATED` | 全屏「站点未开通」页（`features/errors/site-not-activated.tsx`） |
+
+- 前端 `lib/tenant.ts:resolveTenant()` 用 `getApiErrorCode` 区分 `SITE_NOT_ACTIVATED`；`__root.tsx` 命中 `not-activated` 时渲染 `SiteNotActivated` 替代 `Outlet`，与 `useTenantBrand` 共用 `['tenant-resolution']` query（每会话一次调用）。
+- **安全意义**：野域名 / 未注册子域指向平台 IP 时，只见中性「未开通」页，**不再泄露主站控制台**；主站严格限 www/apex（+ 直连兜底）。
+- **apex 规范化**：`wedreamhub.com` 由独立 nginx server 块 301 → `www.wedreamhub.com`（`deploy/nginx/apex-redirect.wedreamhub.com.conf`，需证书 SAN 含 apex，或 CF 侧重定向规则二选一）。
+- **保留词交互**：`www` 等在 `slug.go` 保留词表（代理不可占用）；其中仅 `www`（+ apex）渲染主站，其余保留词子域（api 走独立 3000 vhost 不经此逻辑；admin/status 等若被直接访问）落「站点未开通」。
+
 ## §6.5 HTTPS 证书（acme.sh + 服务器脚本）
 
 异步签发，不在请求里同步做。Go 侧只写状态（`dns_verified` 即"待发证"信号）+ 两个内网端点；实际签发由服务器脚本消费。

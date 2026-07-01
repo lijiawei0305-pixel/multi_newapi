@@ -3213,6 +3213,8 @@
     "Only successful requests count toward this limit.": "Only successful requests count toward this limit.",
     "Only the last {{value}} log files will be retained; the rest will be deleted.": "Only the last {{value}} log files will be retained; the rest will be deleted.",
     "Oops! Page Not Found!": "Oops! Page Not Found!",
+    "Site not activated": "Site not activated",
+    "This site is not open yet or the domain has not been bound.": "This site is not open yet or the domain has not been bound.",
     "Oops! Something went wrong": "Oops! Something went wrong",
     "Open": "Open",
     "Open a source model first": "Open a source model first",

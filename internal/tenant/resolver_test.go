@@ -118,6 +118,40 @@ func TestResolver_HostNormalization_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestIsMainSiteHost(t *testing.T) {
+	cases := []struct {
+		name string
+		host string
+		want bool
+	}{
+		// 主站：apex + www（含大小写/端口/末尾点归一）。
+		{"apex", "wedreamhub.com", true},
+		{"www", "www.wedreamhub.com", true},
+		{"www-upper", "WWW.WEDREAMHUB.COM", true},
+		{"www-port", "www.wedreamhub.com:443", true},
+		{"apex-trailing-dot", "wedreamhub.com.", true},
+		// 未注册租户子域 → 站点未开通（false）。调用方已确认未命中租户。
+		{"unknown-sub", "foo.wedreamhub.com", false},
+		{"deep-sub", "a.b.wedreamhub.com", false},
+		{"reserved-non-www", "admin.wedreamhub.com", false},
+		// 非本平台域名 / 本地直连 → 主站兜底（true），避免误伤开发/直连。
+		{"localhost", "localhost", true},
+		{"localhost-port", "localhost:3100", true},
+		{"raw-ip", "127.0.0.1:3100", true},
+		{"unrelated-domain", "example.com", true},
+		{"lookalike-suffix", "notwedreamhub.com", true},
+		// 空 Host 归一化为空串，非平台子域 → 主站兜底。
+		{"empty", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsMainSiteHost(tc.host); got != tc.want {
+				t.Errorf("IsMainSiteHost(%q) = %v, want %v", tc.host, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestContextWithTenant(t *testing.T) {
 	// 空 ctx：注入 TenantID。
 	ctx := ContextWithTenant(context.Background(), &Tenant{ID: 42})

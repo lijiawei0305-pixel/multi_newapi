@@ -48,6 +48,25 @@ func normalizeHost(host string) string {
 	return h
 }
 
+// IsMainSiteHost 判定「无租户命中」的 Host 是否应渲染主站。
+// 规则：
+//   - apex（wedreamhub.com）与 www.wedreamhub.com → 主站（true）；
+//   - BaseDomain 之下的其余子域（非 www，且调用方已确认未命中租户）→ "站点未开通"（false）；
+//   - 任何不在 BaseDomain 之下的 Host（localhost / 裸 IP / 无关域名，如本地调试或直连）→ 主站兜底（true），
+//     避免误伤开发/直连访问。
+//
+// 仅在租户解析未命中后调用；命中租户者永远走代理站分支，不经此函数。
+func IsMainSiteHost(host string) bool {
+	h := normalizeHost(host)
+	if h == BaseDomain || h == "www."+BaseDomain {
+		return true
+	}
+	if strings.HasSuffix(h, "."+BaseDomain) {
+		return false // 未注册的租户子域 → 站点未开通
+	}
+	return true // 非本平台子域（localhost / IP / 其它）→ 主站兜底
+}
+
 func isAllDigits(s string) bool {
 	if s == "" {
 		return false

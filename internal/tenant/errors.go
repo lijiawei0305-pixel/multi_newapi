@@ -12,6 +12,9 @@ import (
 var (
 	// ErrTenantNotFound 按 id / host / slug 均未找到租户。
 	ErrTenantNotFound = apperr.New("TENANT_NOT_FOUND", "租户不存在", http.StatusNotFound)
+	// ErrSiteNotActivated 命中 *.wedreamhub.com 下的未注册子域（既非 www/apex 主站，也无对应租户）。
+	// 供 /api/tenant/current 区分「主站」与「站点未开通」两种"无租户命中"场景（见 IsMainSiteHost）。
+	ErrSiteNotActivated = apperr.New("SITE_NOT_ACTIVATED", "站点未开通", http.StatusNotFound)
 	// ErrTenantSuspended 租户被禁用（运行期守卫使用；本轮仅定义命名空间）。
 	ErrTenantSuspended = apperr.New("TENANT_SUSPENDED", "租户已被禁用", http.StatusForbidden)
 	// ErrSlugReserved slug 命中系统保留词。
