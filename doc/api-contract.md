@@ -50,7 +50,8 @@
 | Promotion | `CHANNEL_PREFIX_DUP` / `CHANNEL_PREFIX_INVALID` / `CHANNEL_NOT_FOUND` | 409/400/404 | 渠道前缀重复/非法/不存在 |
 | SiteConfig | `THEME_NOT_IN_PALETTE` / `HOME_MODE_LOCKED` | 400/403 | 主题色不在色板/首页模式锁定 |
 | SiteConfig | `ASSET_TYPE_FORBIDDEN` / `ASSET_TOO_LARGE` / `ASSET_NOT_FOUND` | 400/400/404 | 图片类型/大小/不存在 |
-| Stats | `STATS_CROSS_TENANT` / `STATS_RANGE_INVALID` | 403/400 | 跨租户/范围非法 |
+| Stats | `STATS_CROSS_TENANT` / `STATS_RANGE_INVALID` | 403/400 | 跨租户/范围非法（财务报表区间复用 `STATS_RANGE_INVALID`） |
+| Report | `REPORT_GRANULARITY_INVALID` / `REPORT_LENS_INVALID` / `REPORT_FORMAT_INVALID` / `REPORT_EXPORT_FAILED` | 400/400/400/500 | 趋势粒度/透镜/导出格式非法、导出失败（财务报表；代理越权复用 `AGENT_FORBIDDEN`） |
 | Risk | `RATE_LIMITED` / `IP_NOT_ALLOWED` / `STATUS_FORBIDDEN` | 429/403/403 | 限流/IP 不允许/状态禁止 |
 | Relay | `UPSTREAM_ERROR` | 502 | 上游渠道错误 |
 
@@ -137,6 +138,26 @@
 
 ### 2.10 支付回调（server-to-server，**非前端**）
 `POST /api/pay/wechat/notify` · `POST /api/pay/alipay/notify` — 由主站进程内真实 SDK 处理：验签→`order_no` 幂等→入账分发（钱包充值 or 激活订阅）。经主站 nginx `location /` 反代到 app，详见 [deployment.md](deployment.md)。
+
+### 2.11 财务报表 ★（管理端 🅐 跨租户 ｜ 代理自助 🅖 单租户）
+
+> 权威实现契约见 [finance-report-contract.md](finance-report-contract.md)。两套报表、四透镜（`earnings`/`recharge`/`consumption`/`withdrawals`）。
+> 公共请求参数：`start_timestamp` / `end_timestamp`（epoch 秒，UTC；`start≤end` 且跨度 ≤366 天，否则 `STATS_RANGE_INVALID`）。
+> 金额一律 JSON `float64`，币种由字段名后缀（`_cny`/`_usd`）表达、边界四舍五入到 2 位；整数计量（`used_quota`/`calls`/`tokens`）精确。响应时间为 ISO-8601 UTC；趋势桶含日历标签 `bucket` + 桶起始 epoch `bucket_ts`。
+> 分页**嵌套在 `data` 内**：`data:{items,total,page,page_size}`（信封只允许单值 data）。
+
+| 方法 | 路径 | 角色 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/admin/finance/summary` | 🅐 | 平台财务汇总（跨租户）：`earnings`(by_source+wallet_total) / `recharge` / `consumption` / `withdrawals` / `exchange` 五块 |
+| GET | `/api/admin/finance/trend` | 🅐 | 平台趋势：`?granularity=day\|week\|month`（否则 `REPORT_GRANULARITY_INVALID`）+ `?lens=`（否则 `REPORT_LENS_INVALID`）→ `{lens,granularity,series[]}`，点字段随透镜 |
+| GET | `/api/admin/finance/agents` | 🅐 | 按代理/租户排行：`?sort_by`（白名单，非法回退 `total_earned_cny`）`?order=asc\|desc`（默认 desc）`?page&page_size` → `{items,total,page,page_size,sort_by,order}` |
+| GET | `/api/admin/finance/detail` | 🅐 | 明细：`?lens=`（必填）`?page&page_size`，可选 `?format=csv\|pdf`（否则 `REPORT_FORMAT_INVALID`）流式下载附件，header 行 = JSON 字段名 |
+| GET | `/api/tenant/finance/summary` | 🅖 | 同 admin/summary，作用域单租户（`tenant_id` 取自 `AgentOwnerAuth`；缺/越权→`AGENT_FORBIDDEN`） |
+| GET | `/api/tenant/finance/trend` | 🅖 | 同 admin/trend，作用域单租户 |
+| GET | `/api/tenant/finance/detail` | 🅖 | 同 admin/detail，作用域单租户；行省略 `tenant_id`/`agent_name`，导出仅含本租户 |
+
+> 趋势点字段（随 `lens`）：`earnings`→`amount_cny`；`recharge`→`recharge_paid_cny,subscription_paid_cny,subscription_cost_cny,subscription_spread_cny`；`consumption`→`used_quota,used_cost_cny,calls,tokens`；`withdrawals`→`pending_cny,withdrawn_cny,rejected_cny`。
+> 明细 `items[]`（随 `lens`，管理端含 `tenant_id`/`agent_name`，代理端省略）：`earnings`→`{source_type,amount_cny,reference,created_at}`；`withdrawals`→`{id,amount_cny,status,created_at,reviewed_at}`；`recharge`→`{order_no,kind,provider,amount_usd,actual_paid_cny,agent_cost_price_cny,status,created_at}`；`consumption`→`{model_name,calls,tokens,used_quota,used_cost_cny}`。
 
 ---
 

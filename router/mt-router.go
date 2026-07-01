@@ -87,6 +87,10 @@ func SetMtRouter(router *gin.Engine) {
 			agentSelf.DELETE("/moderation/words/:id", app.HandleAgentDeleteModerationWord)
 			agentSelf.GET("/moderation/base-words", app.HandleAgentListBaseWords)  // 只读：全站基础库
 			agentSelf.GET("/moderation/violations", app.HandleAgentListViolations) // 本租户违规日志
+			// 财务报表（代理自助，单租户，tenant_id 取自 AgentOwnerAuth）：汇总 / 趋势 / 明细（?format=csv|pdf 导出）。
+			agentSelf.GET("/finance/summary", app.HandleTenantFinanceSummary)
+			agentSelf.GET("/finance/trend", app.HandleTenantFinanceTrend)
+			agentSelf.GET("/finance/detail", app.HandleTenantFinanceDetail)
 		}
 	}
 
@@ -132,6 +136,17 @@ func SetMtRouter(router *gin.Engine) {
 		adminAgentGroup.GET("", app.HandleAdminListAgents)
 		adminAgentGroup.POST("", app.HandleAdminCreateAgent)
 		adminAgentGroup.PATCH("/:id", app.HandleAdminUpdateAgent)
+	}
+
+	// 主站财务报表（全局跨租户，非 Host 维度）：汇总 / 趋势 / 代理排行 / 明细（明细支持 ?format=csv|pdf 导出）。
+	// 仅 AdminAuth，不挂 TenantMiddleware（排行跨租户 GROUP BY tenant_id，消耗/汇总均排除 tenant_id=0）。
+	financeAdminGroup := router.Group("/api/admin/finance")
+	financeAdminGroup.Use(middleware.AdminAuth())
+	{
+		financeAdminGroup.GET("/summary", app.HandleAdminFinanceSummary)
+		financeAdminGroup.GET("/trend", app.HandleAdminFinanceTrend)
+		financeAdminGroup.GET("/agents", app.HandleAdminFinanceAgents)
+		financeAdminGroup.GET("/detail", app.HandleAdminFinanceDetail)
 	}
 
 	// 主站提现审核（全局，非租户维度）：列表 / 通过 / 拒绝。复用 new-api AdminAuth。

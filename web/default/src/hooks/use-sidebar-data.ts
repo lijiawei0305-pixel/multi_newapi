@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   Activity,
   Box,
+  ChartColumnBig,
   Coins,
   CreditCard,
   FileText,
@@ -130,6 +131,12 @@ export function useSidebarData(): SidebarData {
             title: t('My Earnings'),
             url: '/agent-earnings',
             icon: Coins,
+            agentOwnerOnly: true,
+          },
+          {
+            title: t('Financial Report'),
+            url: '/finance-report',
+            icon: ChartColumnBig,
             agentOwnerOnly: true,
           },
           {
@@ -249,6 +256,12 @@ export function useSidebarData(): SidebarData {
             title: t('Payment Reconcile'),
             url: '/payment-reconcile',
             icon: HandCoins,
+          },
+          {
+            title: t('Financial Report'),
+            url: '/admin/finance-report',
+            icon: ChartColumnBig,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('System Info'),

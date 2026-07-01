@@ -29,6 +29,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/pricing"
 	"github.com/QuantumNous/new-api/internal/promotion"
 	promotionrepo "github.com/QuantumNous/new-api/internal/promotion/gormrepo"
+	"github.com/QuantumNous/new-api/internal/report/reportrepo"
 	"github.com/QuantumNous/new-api/internal/risk"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
@@ -80,6 +81,11 @@ type App struct {
 	// RiskEngine 调用前风控（本轮 RPM 限流 + 租户状态），由 checkCallHook 经 agenthook.CheckCall 在 /v1 调用。
 	// nil = Redis 未启用 → 风控旁路（CheckCall 直接放行，限流需共享计数）。
 	RiskEngine risk.RiskEngine
+
+	// --- report 模块（财务报表聚合，§财务报表契约）---
+	// ReportRepo 持具体 *Repo：财务报表 handlers（report.go）经 raw Table()/Joins() 跨表 SUM/GROUP BY，
+	// 四透镜（收益/充值/消耗/提现）只读聚合，不 import 兄弟模块 model 结构。
+	ReportRepo *reportrepo.Repo
 
 	// --- payment/recharge 模块（目标③，支付重构后）---
 	// RechargeGateway 下单（落库 RCG 订单 + 经 inProcessPaySDK 进程内向平台下单）与入账（强幂等状态机）。
@@ -160,6 +166,9 @@ func New(db *gorm.DB) *App {
 		payment.WithNotifyBaseURL(rechargeCfg.notifyBaseURL),
 	)
 
+	// report（财务报表）：聚合仓储（raw Table()/Joins() 跨表只读聚合），构于同一主库。
+	reportRepo := reportrepo.New(db)
+
 	app := &App{
 		DB:              db,
 		TenantRepo:      tr,
@@ -180,6 +189,7 @@ func New(db *gorm.DB) *App {
 		ModerationRepo:  modRepo,
 		Moderator:       moderator,
 		RiskEngine:      riskEngine,
+		ReportRepo:      reportRepo,
 		RechargeGateway: rechargeGateway,
 		rechargeCfg:     rechargeCfg,
 		providerMgr:     providerMgr, // 复用同一进程内适配器供 tokenplan 购买（SUB）下单 + 回调验签 + 对账查单
@@ -230,6 +240,11 @@ func (a *App) Migrate() error {
 	}
 	// users 增列 promotion_channel_id（经渠道码注册的归属落此列）：同套幂等 raw ALTER。
 	if err := migrateUsersPromotionChannelID(a.DB); err != nil {
+		return err
+	}
+	// 财务报表区间覆盖索引（agent_earning_logs(tenant_id,created_at) + logs(user_id,created_at)）：
+	// 幂等 information_schema 守卫的 raw CREATE INDEX，不改 model.Log/model.User struct（同 migrateUsersTenantID 套路）。
+	if err := reportrepo.AutoMigrate(a.DB); err != nil {
 		return err
 	}
 	// 目标③桥接表：mt_subscription_orders（SUB 套餐订单状态机）+ mt_native_subscription_plans
