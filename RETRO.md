@@ -250,3 +250,13 @@
 - **根因/发现**：①`/api/internal/order/paid` 在 realpay-inprocess 重构中**已退役**（现存 internal-auth 范式只剩 `auth-service` 的 `X-Internal-Secret`）。②本仓库错误码**无 `ERR_` 前缀**惯例，一律模块前缀（`TENANT_NOT_FOUND`/`DOMAIN_LIMIT`）。③Docker Compose 的根 `.env` **仅用于 `${...}` 插值，不自动注入容器**——变量必须在 compose `environment:` 块里显式 `KEY: "${KEY}"` 才到 app。
 - **解决/规避**：①新内网端点沿用 `X-Internal-Secret`（主站读 `MT_INTERNAL_SECRET` env，恒定时间比较 + deny-by-default），签发脚本走 `127.0.0.1:3100` 直连。②错误码落 `DOMAIN_*`（`internal/tenant/errors.go`）。③`MT_INTERNAL_SECRET`/`MT_SITE_IP` 加进 `deploy/docker-compose.test.yml` 的 `environment:` 块（引用服务器 `.env`）。
 - **升级**：**接他人/旧规格前，先用 grep/ToolSearch 核对"被引用的端点/约定/机制是否还存在"**，别照搬过时假设（W1 的延伸）。
+### [已解决] Go 编译校验免整栈部署：用 golang:1.25.1 容器只 build（`./...` 会因 embed 缺 dist 报错，须点包）
+- **现象**：想在服务器验证后端能否编译，但 W4 本地无 Go，且不想 `docker compose up --build` 重部署运行栈；宿主机也没有 `go`/`bun`/`node`（登录 shell PATH 里都没有，只在 Docker 里）。
+- **根因**：服务器工具链全在容器内（`docker images` 有 `golang:1.25.1`（与 go.mod `go 1.25.1` 精确匹配）+ `node:22`/`oven/bun`）。`go build ./...` 会走到 `main.go` 的 `//go:embed web/classic/dist`（scp 源码副本无前端 dist 产物）→ `pattern ... no matching files found` EXIT=1，**并非代码错误**（真实镜像构建先出前端 dist 再 embed）。
+- **解决**：只 build 受影响包，绕开 embed：`docker run --rm -v /root/newapi-test:/app -w /app -v newapi_gomodcache:/go/pkg/mod -v newapi_gobuildcache:/root/.cache/go-build -e GOFLAGS=-buildvcs=false -e GOPROXY=https://goproxy.cn,direct golang:1.25.1 sh -c "go build ./internal/... ./router/..."`（`-buildvcs=false` 因 scp 副本非 git 仓；goproxy.cn 因机房在国内；模块/构建缓存挂命名卷复用）。前端 typecheck 同理容器化：`node:22`（或 `oven/bun`）挂 `/root/newapi-compile/web`（已装 node_modules）跑 `tsgo -b`（EXIT=0=过）。容器 sh 是 dash，别用 `${PIPESTATUS[]}`；exit 码用 `cmd > log 2>&1; echo $?`。
+- **升级**：后端纯改动验收 = scp 同步 `/root/newapi-test` → 上述 golang 容器点包 `go build` → EXIT=0；无需 compose 重部署。补足 §四前端 typecheck 条，构成前后端"改完不部署也能编译校验"的完整闭环。
+
+### [未解决·需决策] feature/finance-report 工作树落后于服务器：缺未入库的 internal/siteconfig/gormrepo
+- **现象**：本地校验后端时，服务器 `go build` 报 `wire.go: could not import internal/siteconfig/gormrepo`；`a.ReportRepo undefined` 是该 import 失败使整个 mtwire 包类型失效的**级联**。
+- **根因**：本 `.ccg` 工作树分支 `feature/finance-report` 的 HEAD **从未含** siteconfig 装配（`git show HEAD:wire.go` 无 siteconfig），而服务器 `/root/newapi-test` 有一份**未入库（scp 而来，git 不跟踪）**的 `internal/siteconfig/gormrepo`（OEM 装修 §5/§9）+ 对应 wire.go/mt-router.go/侧栏/语言包装配。两边 wire.go 各自是公共祖先的超集（本地多 reportrepo、服务器多 siteconfig）——**必须 3-way 合并，不能整文件覆盖**（否则丢 siteconfig）。财务报表改动为纯增量、与 siteconfig 区域不相交：`git diff HEAD -- wire.go mt-router.go` 生成的补丁在服务器真实副本上 `patch --fuzz=3` 干净套用（0 rej），合并后 `go build` EXIT=0 已验证。
+- **规避/待决**：部署财务报表时，wire.go/mt-router.go/use-sidebar-data.ts/6 语言包这 4 类需与服务器版**合并**（非覆盖）；或先把服务器未入库的 siteconfig/gormrepo 收编进分支（rebase 到真实基线）再统一同步。**入库策略待用户定**。
