@@ -58,4 +58,7 @@ type OrderRepo interface {
 	// ListByStatus 返回处于 status 且 UpdatedAt 早于 before 的订单（对账兜底扫描用）。
 	// before 过滤掉刚占位、可能仍在入账的在途订单，避免与正常回调竞态。
 	ListByStatus(ctx context.Context, status OrderStatus, before time.Time) ([]*PayOrder, error)
+	// SetPayURL 回填支付凭据 PayURL（下单改为「先落 created 订单、再向平台下单」后，
+	// 拿到凭据回填；订单不存在返回 ErrOrderNotFound）。
+	SetPayURL(ctx context.Context, orderNo, payURL string) error
 }

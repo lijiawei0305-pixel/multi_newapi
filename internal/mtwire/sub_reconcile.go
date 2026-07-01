@@ -31,21 +31,32 @@ type ReconcileSubResult struct {
 	Failed    map[string]string // 查单/激活失败 → 留待下次再扫
 }
 
-// ReconcileStuckSubscriptions 扫卡在 pending 的套餐订单（SUB），逐笔向 auth-service 查单：
-// 已付 → 补激活（ActivatePaidTokenplanOrder 幂等）；真未付 → 不动；查单/激活失败 → 计 Failed 下次再扫。
+// ReconcileStuckSubscriptions 扫两类卡单，逐笔补驱动幂等激活（ActivatePaidTokenplanOrder 幂等）：
+//   - pending：用户已付但 /api/pay/*/notify 回调丢失/失败，订单永停 pending → 向平台**查单**，已付则补激活；
+//   - activated 且 settled=false：步骤②（原生订阅）已成、但步骤③（我们的订阅记录 + 代理分润）持续失败
+//     且超过平台重推窗口 → 已确认支付，**无需查单**，直接幂等补驱动步骤③（M1，避免分润/记录永久遗漏）。
 //
-// 成因：用户已付，但支付平台→主站 /api/pay/*/notify 异步回调丢失/失败，订单永停 pending
-// （SUB 状态机只有 pending/activated、无「已付未激活」中间态，主站无从自知，故须主动查单兜底）。
-// before 通常取 now-5min：过滤掉刚下单、用户尚在支付中的在途单。
+// before 通常取 now-5min：过滤掉刚下单/刚激活、正常流程仍在途的单。
 func (a *App) ReconcileStuckSubscriptions(ctx context.Context, before time.Time) (ReconcileSubResult, error) {
 	var rows []subscriptionOrderRow
 	if err := a.DB.WithContext(ctx).
-		Where("status = ? AND updated_at < ?", subOrderPending, before).
+		Where("(status = ? OR (status = ? AND settled = ?)) AND updated_at < ?",
+			subOrderPending, subOrderActivated, false, before).
 		Find(&rows).Error; err != nil {
 		return ReconcileSubResult{}, err
 	}
 	res := ReconcileSubResult{Scanned: len(rows), Failed: map[string]string{}}
 	for _, row := range rows {
+		// 已激活未结算：已确认支付，跳过查单，直接补驱动步骤③（幂等：步骤②命中 activated 短路）。
+		if row.Status == subOrderActivated {
+			if err := activatePaidSubHook(a, ctx, row.OrderNo); err != nil {
+				res.Failed[row.OrderNo] = "settle: " + err.Error()
+				continue
+			}
+			res.Activated = append(res.Activated, row.OrderNo)
+			continue
+		}
+		// pending：向平台主动查单确认是否已付。
 		paid, err := subOrderPaidQuery(a, ctx, row.OrderNo, row.Provider)
 		if err != nil {
 			res.Failed[row.OrderNo] = "query: " + err.Error()

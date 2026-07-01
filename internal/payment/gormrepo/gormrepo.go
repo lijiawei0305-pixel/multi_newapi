@@ -77,6 +77,20 @@ func (r *Repo) Create(ctx context.Context, o *payment.PayOrder) error {
 	return nil
 }
 
+// SetPayURL 回填支付凭据 PayURL；订单不存在 → payment.ErrOrderNotFound。
+func (r *Repo) SetPayURL(ctx context.Context, orderNo, payURL string) error {
+	res := r.db.WithContext(ctx).Model(&orderRow{}).
+		Where("order_no = ?", orderNo).
+		Updates(map[string]any{"pay_url": payURL, "updated_at": r.now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return payment.ErrOrderNotFound
+	}
+	return nil
+}
+
 // GetByOrderNo 按订单号查；不存在 → payment.ErrOrderNotFound。
 func (r *Repo) GetByOrderNo(ctx context.Context, orderNo string) (*payment.PayOrder, error) {
 	var row orderRow

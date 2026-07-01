@@ -65,11 +65,15 @@ var realpayNew = func(ctx context.Context, cfg realpay.Config) (realSDK, error) 
 // ---- providerManager：进程内支付适配（凭据指纹缓存 realpay.SDK） ----
 
 // providerManager 按凭据指纹缓存一份 realpay.SDK：指纹不变复用，凭据变更才重建（wechatpay-go client
-// 构造含平台证书下载，重建昂贵）。sync.Mutex 保护缓存。
+// 构造含平台证书下载，重建昂贵）。
+//   - mu 只保护缓存字段的读写（临界区极短、不含 I/O）；
+//   - buildMu 串行化「重建」（含证书下载等网络 I/O），保证同一时刻至多一个重建在跑（避免并发重复
+//     注册证书下载器），且**不**在重建期间持 mu → 快路径（缓存命中）读取不被网络 I/O 阻塞（审计 M4）。
 type providerManager struct {
-	mu  sync.Mutex
-	sdk realSDK // 缓存的真实 SDK
-	fp  string  // 上次构造时的凭据指纹
+	mu      sync.Mutex
+	buildMu sync.Mutex
+	sdk     realSDK // 缓存的真实 SDK
+	fp      string  // 上次构造时的凭据指纹
 }
 
 func newProviderManager() *providerManager { return &providerManager{} }
@@ -86,7 +90,8 @@ func alipayCredentialsComplete() bool {
 	return setting.AlipayAppID != "" && setting.AlipayPrivateKey != "" && setting.AlipayPublicKey != ""
 }
 
-// Configured 报告某渠道是否可对外提供支付：启用开关（setting.*Enabled）为真且凭据齐全。
+// Configured 报告某渠道是否可**对外接单**：启用开关（setting.*Enabled）为真且凭据齐全。
+// 用于下单前置校验（ensureProviderUsable）与买家可用渠道列表——禁用即不接新单、不对买家展示。
 func (m *providerManager) Configured(provider payment.Provider) bool {
 	switch provider {
 	case payment.ProviderWxpay:
@@ -98,10 +103,26 @@ func (m *providerManager) Configured(provider payment.Provider) bool {
 	}
 }
 
-// buildRealpayConfig 从 setting.* 组装 realpay.Config（仅纳入已启用渠道；微信私钥用 PEM 内容注入）。
+// credsComplete 报告某渠道凭据是否齐全（**不**看启用开关）。用于回调验签 / 主动查单：
+// 即便管理员临时禁用某渠道，只要凭据仍在就应能验签、结清在途已付订单（审计 M2）——避免「禁用即丢在途单」。
+// 只有真正**清空凭据**才使该渠道无法验签（不可避免）。
+func (m *providerManager) credsComplete(provider payment.Provider) bool {
+	switch provider {
+	case payment.ProviderWxpay:
+		return wxpayCredentialsComplete()
+	case payment.ProviderAlipay:
+		return alipayCredentialsComplete()
+	default:
+		return false
+	}
+}
+
+// buildRealpayConfig 从 setting.* 组装 realpay.Config。**按凭据齐全**（而非启用开关）纳入渠道：
+// 接单由 Configured（enabled&&creds）上游把关，但 SDK 本身对「凭据齐全」的渠道均可验签/查单，
+// 从而禁用某渠道时仍能结清其在途已付订单（审计 M2）。微信私钥用 PEM 内容注入。
 func buildRealpayConfig() realpay.Config {
 	cfg := realpay.Config{}
-	if setting.WechatPayEnabled {
+	if wxpayCredentialsComplete() {
 		cfg.Wxpay = realpay.WxpayConfig{
 			AppID:        setting.WechatPayAppID,
 			MchID:        setting.WechatPayMchID,
@@ -110,7 +131,7 @@ func buildRealpayConfig() realpay.Config {
 			PrivateKey:   setting.WechatPayPrivateKey, // PEM 内容，realpay 经 utils.LoadPrivateKey 解析
 		}
 	}
-	if setting.AlipayEnabled {
+	if alipayCredentialsComplete() {
 		cfg.Alipay = realpay.AlipayConfig{
 			AppID:           setting.AlipayAppID,
 			PrivateKey:      setting.AlipayPrivateKey,
@@ -123,14 +144,14 @@ func buildRealpayConfig() realpay.Config {
 	return cfg
 }
 
-// credentialFingerprint 拼接全部相关 setting 值的 SHA-256，作缓存键：任一凭据/开关变更即指纹变化 → 重建 SDK。
+// credentialFingerprint 拼接**影响 SDK 构造**的 setting 值的 SHA-256，作缓存键：任一凭据/沙箱变更
+// 即指纹变化 → 重建 SDK。不含 *Enabled 开关——SDK 现按凭据齐全构造（buildRealpayConfig），
+// 启用开关只影响接单（Configured），不影响 SDK 本身，故切换启用无需重建（审计 M2/M4）。
 func credentialFingerprint() string {
 	h := sha256.New()
 	for _, v := range []string{
-		strconv.FormatBool(setting.WechatPayEnabled),
 		setting.WechatPayAppID, setting.WechatPayMchID, setting.WechatPayAPIv3Key,
 		setting.WechatPayCertSerial, setting.WechatPayPrivateKey,
-		strconv.FormatBool(setting.AlipayEnabled),
 		setting.AlipayAppID, setting.AlipayPrivateKey, setting.AlipayPublicKey,
 		setting.AlipaySellerID, setting.AlipayReturnURL,
 		strconv.FormatBool(setting.AlipaySandbox),
@@ -142,19 +163,42 @@ func credentialFingerprint() string {
 }
 
 // getSDK 取（或按需重建）缓存的 realpay.SDK：指纹一致则复用，变化则 realpayNew 重建。
+//
+// 并发（审计 M4）：快路径仅短暂持 mu 读缓存，命中即返回——**不**被重建的网络 I/O 阻塞。
+// 需重建时经 buildMu 串行化：同一时刻至多一个重建在跑（避免并发重复注册证书下载器），
+// 且重建（含证书下载）期间不持 mu。等在 buildMu 上的其它调用方在拿锁后复检，命中新缓存即复用、不重复建。
 func (m *providerManager) getSDK(ctx context.Context) (realSDK, error) {
 	fp := credentialFingerprint()
+
+	// 快路径：缓存命中直接返回（持 mu 只读，无 I/O）。
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.sdk != nil && m.fp == fp {
-		return m.sdk, nil
+		sdk := m.sdk
+		m.mu.Unlock()
+		return sdk, nil
 	}
+	m.mu.Unlock()
+
+	// 慢路径：串行化重建（含证书下载）；不持 mu，避免阻塞快路径。
+	m.buildMu.Lock()
+	defer m.buildMu.Unlock()
+	// 复检：等待 buildMu 期间可能已由他人用相同指纹建好。
+	m.mu.Lock()
+	if m.sdk != nil && m.fp == fp {
+		sdk := m.sdk
+		m.mu.Unlock()
+		return sdk, nil
+	}
+	m.mu.Unlock()
+
 	sdk, err := realpayNew(ctx, buildRealpayConfig())
 	if err != nil {
 		return nil, err // 不缓存失败结果：下次调用重试
 	}
+	m.mu.Lock()
 	m.sdk = sdk
 	m.fp = fp
+	m.mu.Unlock()
 	return sdk, nil
 }
 
@@ -179,9 +223,10 @@ func (m *providerManager) VerifyNotify(ctx context.Context, provider payment.Pro
 	return sdk.VerifyNotify(ctx, provider, r)
 }
 
-// QueryOrder 主动查单（对账兜底）：先校验渠道 Configured。
+// QueryOrder 主动查单（对账兜底）：预检**凭据齐全**（credsComplete，而非 Configured）——即便渠道被禁用，
+// 只要凭据仍在就应能查单结清在途已付订单（审计 M2）。仅清空凭据才使其无法查单。
 func (m *providerManager) QueryOrder(ctx context.Context, provider payment.Provider, orderNo string) (bool, error) {
-	if !m.Configured(provider) {
+	if !m.credsComplete(provider) {
 		return false, errProviderDisabled
 	}
 	sdk, err := m.getSDK(ctx)

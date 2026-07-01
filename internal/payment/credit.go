@@ -88,7 +88,11 @@ func (g *Gateway) CreditPaidOrder(ctx context.Context, orderNo, txnID string, pa
 		return err
 	}
 
-	// 入账成功 → 置终态 credited。
-	_, _ = g.repo.CompareAndSetStatus(ctx, orderNo, OrderPaid, OrderCredited)
+	// 入账成功 → 置终态 credited。额度已由 sink 幂等入账（RCG 走 order_no 唯一台账），
+	// 故此处状态推进失败**不会**导致双扣：订单留在 paid，由 ReconcileStuckPaid 重跑（sink 幂等短路）后置 credited。
+	// 但不再静默吞错——上报观测，避免 stuck-paid 无声堆积。
+	if ok, csErr := g.repo.CompareAndSetStatus(ctx, orderNo, OrderPaid, OrderCredited); csErr != nil || !ok {
+		g.logf("payment: credit %s: advance paid→credited failed (ok=%v err=%v); left paid for reconcile", orderNo, ok, csErr)
+	}
 	return nil
 }

@@ -41,6 +41,19 @@ func (r *MemRepo) Create(_ context.Context, o *PayOrder) error {
 	return nil
 }
 
+// SetPayURL 回填 PayURL；订单不存在 → ErrOrderNotFound。
+func (r *MemRepo) SetPayURL(_ context.Context, orderNo, payURL string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	o, ok := r.orders[orderNo]
+	if !ok {
+		return ErrOrderNotFound
+	}
+	o.PayURL = payURL
+	o.UpdatedAt = r.now()
+	return nil
+}
+
 // GetByOrderNo 返回订单快照拷贝；不存在 → ErrOrderNotFound。
 func (r *MemRepo) GetByOrderNo(_ context.Context, orderNo string) (*PayOrder, error) {
 	r.mu.Lock()

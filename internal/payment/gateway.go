@@ -17,6 +17,7 @@ type Gateway struct {
 	notifyBase string                  // notify_url 前缀（公网回调基址）
 	newOrderNo func() string           // 订单号生成器（可注入，便于测试唯一冲突）
 	now        func() time.Time
+	logf       func(format string, args ...any) // 异常观测钩子（默认 no-op；main 注入 SysLog），本包保持纯净
 }
 
 // 编译期断言：Gateway 实现两个对外接口。
@@ -37,6 +38,16 @@ func WithClock(now func() time.Time) Option { return func(g *Gateway) { g.now = 
 // WithOrderNoFunc 注入订单号生成器（测试用，可制造唯一冲突）。
 func WithOrderNoFunc(fn func() string) Option { return func(g *Gateway) { g.newOrderNo = fn } }
 
+// WithErrorLogf 注入异常观测钩子（如 common.SysLog 包装）。用于把「入账成功后状态推进失败」
+// 等静默异常上报，替代原先 `_, _ =` 的吞错；默认 no-op，保持本包无外部日志依赖。
+func WithErrorLogf(fn func(format string, args ...any)) Option {
+	return func(g *Gateway) {
+		if fn != nil {
+			g.logf = fn
+		}
+	}
+}
+
 // NewGateway 组装支付网关。sinks 按订单类型映射入账目标（recharge→Wallet、subscription→TokenPlan）。
 func NewGateway(repo OrderRepo, sdk PaySDK, sinks map[OrderType]OrderSink, opts ...Option) *Gateway {
 	g := &Gateway{
@@ -45,6 +56,7 @@ func NewGateway(repo OrderRepo, sdk PaySDK, sinks map[OrderType]OrderSink, opts 
 		sinks:      sinks,
 		newOrderNo: defaultOrderNo,
 		now:        time.Now,
+		logf:       func(string, ...any) {}, // 默认 no-op；main 经 WithErrorLogf 注入 SysLog
 	}
 	for _, opt := range opts {
 		opt(g)
@@ -59,10 +71,11 @@ func (g *Gateway) notifyURL(p Provider) string {
 
 // CreateOrder 下单（detailed-design §2.8 / tasks/08-payment.md）：
 //
-//	校验入参 → 生成唯一 order_no → 回填 notify_url → SDK 下单拿支付凭据 → 落库（order_no 唯一）
+//	校验入参 → 生成唯一 order_no → 回填 notify_url → **先落 created 订单** → 向平台下单拿支付凭据 → 回填 PayURL
 //
-// 真实实现应「先落 created 订单再调 SDK」并将下单失败置 failed/删除，放进同一事务；
-// 本轮内存假实现按序执行（见报告 TODO）。
+// 顺序修正（审计 M3）：先落库再向平台下单。避免「平台已建单、本地无记录」的孤儿单——
+// 若本地 Create 失败，直接返回错误、根本不向平台建单；若平台下单失败，本地 created 单置 failed
+// （终态，不被对账反复查单）。本地存在而平台无单是无害的（用户拿不到支付凭据、不会去付）。
 func (g *Gateway) CreateOrder(ctx context.Context, in OrderInput) (*PayOrder, error) {
 	if err := in.validate(); err != nil {
 		return nil, err // PAY_ORDER_INVALID
@@ -86,6 +99,11 @@ func (g *Gateway) CreateOrder(ctx context.Context, in OrderInput) (*PayOrder, er
 		UpdatedAt:  now,
 	}
 
+	// 先落 created 订单（本地权威）。失败则根本不向平台建单，无孤儿。
+	if err := g.repo.Create(ctx, o); err != nil {
+		return nil, err // PAY_ORDER_DUPLICATE（order_no 唯一约束冲突）
+	}
+
 	cred, err := g.sdk.CreatePay(ctx, PayRequest{
 		Provider:   in.Provider,
 		OrderNo:    o.OrderNo,
@@ -95,12 +113,17 @@ func (g *Gateway) CreateOrder(ctx context.Context, in OrderInput) (*PayOrder, er
 		NotifyURL:  o.NotifyURL,
 	})
 	if err != nil {
+		// 平台下单失败 → 本地 created 单置 failed（终态），避免被 ReconcileStuckCreated 反复查单。
+		if ok, csErr := g.repo.CompareAndSetStatus(ctx, o.OrderNo, OrderCreated, OrderFailed); csErr != nil || !ok {
+			g.logf("payment: create %s: CreatePay failed and mark-failed failed (ok=%v err=%v)", o.OrderNo, ok, csErr)
+		}
 		return nil, err // SDK 下单失败原样上浮
 	}
 	o.PayURL = cred.PayURL
 
-	if err := g.repo.Create(ctx, o); err != nil {
-		return nil, err // PAY_ORDER_DUPLICATE（order_no 唯一约束冲突）
+	// 回填支付凭据。失败不阻断（PayURL 已在内存返回给前端）；仅观测。
+	if err := g.repo.SetPayURL(ctx, o.OrderNo, o.PayURL); err != nil {
+		g.logf("payment: create %s: persist pay_url failed: %v", o.OrderNo, err)
 	}
 	return o, nil
 }

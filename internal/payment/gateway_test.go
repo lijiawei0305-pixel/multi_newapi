@@ -101,6 +101,28 @@ func TestCreateOrderPropagatesSDKError(t *testing.T) {
 	}
 }
 
+// TestCreateOrderMarksFailedOnSDKError 锁定审计 M3：改为「先落 created 订单、再向平台下单」后，
+// 平台下单失败 → 本地订单落库并置 failed（终态），非孤儿、不被 ReconcileStuckCreated 反复查单。
+func TestCreateOrderMarksFailedOnSDKError(t *testing.T) {
+	repo := NewMemRepo()
+	sdk := &fakeSDK{createErr: errors.New("sdk down"), verifyFn: okVerify()}
+	g := NewGateway(repo, sdk, map[OrderType]OrderSink{OrderTypeRecharge: newFakeSink()},
+		WithOrderNoFunc(func() string { return "RCG-FAILED" }))
+
+	if _, err := g.CreateOrder(context.Background(), OrderInput{
+		Type: OrderTypeRecharge, TenantID: 1, UserID: 1, Provider: ProviderWxpay, AmountUSD: 10,
+	}); err == nil {
+		t.Fatal("expected SDK error")
+	}
+	got, err := repo.GetByOrderNo(context.Background(), "RCG-FAILED")
+	if err != nil {
+		t.Fatalf("order must be persisted (created-then-failed), got: %v", err)
+	}
+	if got.Status != OrderFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+}
+
 func TestCreateOrderUsesInjectedClock(t *testing.T) {
 	fixed := time.Date(2026, 6, 28, 0, 0, 0, 0, time.UTC)
 	g, _, _, _ := newGateway(WithClock(func() time.Time { return fixed }))

@@ -66,6 +66,7 @@ type subscriptionOrderRow struct {
 	Status       string    `gorm:"column:status;type:varchar(16);not null;default:pending;index"`
 	NativePlanID int64     `gorm:"column:native_plan_id;not null;default:0"` // 激活时回填：原生 SubscriptionPlan.id
 	NativeSubID  int64     `gorm:"column:native_sub_id;not null;default:0"`  // 激活时回填：原生 UserSubscription.id
+	Settled      bool      `gorm:"column:settled;not null;default:false;index"` // 步骤③（订阅记录+代理分润）已落；对账据此补驱动「已激活未结算」卡单（M1）
 	CreatedAt    time.Time `gorm:"column:created_at"`
 	UpdatedAt    time.Time `gorm:"column:updated_at"`
 }
@@ -326,8 +327,14 @@ func (a *App) ActivatePaidTokenplanOrder(ctx context.Context, orderNo string, pa
 		return err
 	}
 
-	// 步骤③：我们订阅记录 + 代理差价分润（幂等）。
+	// 步骤③：我们订阅记录 + 代理差价分润（幂等）。此步在步骤②事务**之外**——若失败，订单已 activated
+	// （用户已可用），故不回滚步骤②；改由 settled 标记 + 对账补驱动兜底（M1），避免代理分润/订阅记录永久遗漏。
 	if _, err := a.Subscriptions.ActivateFromPayment(ctx, orderNo); err != nil {
+		return err
+	}
+	// 步骤③完成 → 置 settled，供 ReconcileStuckSubscriptions 区分「已激活但③未落」的卡单。
+	if err := a.DB.WithContext(ctx).Model(&subscriptionOrderRow{}).
+		Where("order_no = ?", orderNo).Update("settled", true).Error; err != nil {
 		return err
 	}
 	return nil

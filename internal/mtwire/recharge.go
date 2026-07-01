@@ -15,8 +15,11 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/payment"
@@ -49,11 +52,33 @@ func loadRechargeConfig() rechargeConfig {
 
 // ---- 入账分发目标（OrderSink 实现）----
 
-// rechargeQuotaSink 把充值订单入账到 new-api 原生 quota（$1 = QuotaPerUnit）。
-// 幂等由上游 CreditPaidOrder 的 created→paid CAS 保证：OnPaid 仅被首个推进者调用一次。
-type rechargeQuotaSink struct{}
+// rechargeCreditLedgerRow 是充值入账幂等台账（每 order_no 至多一条）。它把「是否已入账」
+// 从订单状态机中解耦出来，作为**唯一事实源**：无论 OnPaid 被调用几次（回调重推、对账
+// ReconcileStuckPaid 重跑、崩溃恢复），台账写入与额度自增在同一 DB 事务内完成，order_no
+// 唯一约束保证每单只入账一次——彻底消除额度双扣（审计 C1），并顺带补上充值入账的审计台账。
+type rechargeCreditLedgerRow struct {
+	OrderNo   string    `gorm:"column:order_no;primaryKey;type:varchar(64)"`
+	TenantID  int64     `gorm:"column:tenant_id;not null;index"`
+	UserID    int64     `gorm:"column:user_id;not null;index"`
+	Quota     int64     `gorm:"column:quota;not null"`                              // 入账的原生 quota 单位
+	AmountUSD float64   `gorm:"column:amount_usd;type:decimal(20,4);not null;default:0"` // 入账美元额（审计）
+	CreatedAt time.Time `gorm:"column:created_at"`
+}
 
-func (rechargeQuotaSink) OnPaid(_ context.Context, o payment.PaidOrder) error {
+// TableName 固定表名（mt_ 前缀，避让原生表）。
+func (rechargeCreditLedgerRow) TableName() string { return "mt_recharge_credit_ledger" }
+
+// migrateRechargeLedger 建充值入账幂等台账表（由 App.Migrate 调用）。
+func migrateRechargeLedger(db *gorm.DB) error {
+	return db.AutoMigrate(&rechargeCreditLedgerRow{})
+}
+
+// rechargeQuotaSink 把充值订单入账到 new-api 原生 quota（$1 = QuotaPerUnit）。
+// **强幂等**：以 mt_recharge_credit_ledger(order_no UNIQUE) 为幂等键，台账写入与额度自增同事务，
+// 重复调用（回调重推 / 对账重跑 / 崩溃恢复）只入账一次，不双扣（审计 C1 修复）。
+type rechargeQuotaSink struct{ db *gorm.DB }
+
+func (s rechargeQuotaSink) OnPaid(ctx context.Context, o payment.PaidOrder) error {
 	q := rechargeQuota(o.AmountUSD)
 	if q <= 0 {
 		return nil
@@ -63,8 +88,35 @@ func (rechargeQuotaSink) OnPaid(_ context.Context, o payment.PaidOrder) error {
 	// 故差价恒为 0、暂不入账。待数据模型补充 agent 充值加价/成本率后，在此按
 	// (o.ActualPaid − agentRechargeCostCNY) 经 AgentEarnings.AddEarning(source=recharge_spread,
 	// SourceID=o.OrderNo) 幂等落账（须先有 agent_profile）。详见报告「风险/未决」。
-	// db=true：同步落 users.quota + 异步刷新额度缓存（与 EpayNotify/Stripe 入账一致）。
-	return model.IncreaseUserQuota(int(o.UserID), q, true)
+	credited := false
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 幂等台账：order_no 已存在（本单已入账）→ 冲突不插、RowsAffected==0 → 短路不加额度。
+		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rechargeCreditLedgerRow{
+			OrderNo:   o.OrderNo,
+			TenantID:  o.TenantID,
+			UserID:    o.UserID,
+			Quota:     int64(q),
+			AmountUSD: o.AmountUSD,
+			CreatedAt: time.Now(),
+		})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return nil // 已入账过 → 幂等短路
+		}
+		credited = true
+		// 与台账写入同事务落 users.quota，二者原子：要么都成、要么都回滚。
+		return tx.Model(&model.User{}).Where("id = ?", o.UserID).
+			Update("quota", gorm.Expr("quota + ?", q)).Error
+	}); err != nil {
+		return err
+	}
+	if credited {
+		// DB 已提交。使额度缓存失效（下次读从 DB 重载，缓存永不与 DB 发散——顺带修审计 M5）。
+		_ = model.InvalidateUserCache(int(o.UserID))
+	}
+	return nil
 }
 
 // rechargeQuota 把充值美元额折算为 new-api 内部 quota 单位（$1 = common.QuotaPerUnit）。

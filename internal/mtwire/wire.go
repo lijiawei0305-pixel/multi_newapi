@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -180,13 +181,15 @@ func New(db *gorm.DB) *App {
 	orderRepo := paymentrepo.New(db)
 	providerMgr := newProviderManager()
 	rechargeSinks := map[payment.OrderType]payment.OrderSink{
-		payment.OrderTypeRecharge: rechargeQuotaSink{},
+		payment.OrderTypeRecharge: rechargeQuotaSink{db: db},
 	}
 	rechargeGateway := payment.NewGateway(
 		orderRepo, &inProcessPaySDK{mgr: providerMgr}, rechargeSinks,
 		// 充值端点只产 RCG 订单；SUB 订单由 Track 1 购买流程产出（入账侧按库内 type 分发，与前缀无关）。
 		payment.WithOrderNoFunc(func() string { return payment.NewOrderNo(payment.OrderNoPrefixRecharge) }),
 		payment.WithNotifyBaseURL(rechargeCfg.notifyBaseURL),
+		// 把入账状态推进等静默异常接到主站日志（替代原 `_, _ =` 吞错）。
+		payment.WithErrorLogf(func(format string, args ...any) { common.SysLog(fmt.Sprintf(format, args...)) }),
 	)
 
 	// report（财务报表）：聚合仓储（raw Table()/Joins() 跨表只读聚合），构于同一主库。
@@ -278,6 +281,10 @@ func (a *App) Migrate() error {
 	// 财务报表区间覆盖索引（agent_earning_logs(tenant_id,created_at) + logs(user_id,created_at)）：
 	// 幂等 information_schema 守卫的 raw CREATE INDEX，不改 model.Log/model.User struct（同 migrateUsersTenantID 套路）。
 	if err := reportrepo.AutoMigrate(a.DB); err != nil {
+		return err
+	}
+	// 充值入账幂等台账：mt_recharge_credit_ledger（order_no 唯一，防额度双扣，审计 C1）。
+	if err := migrateRechargeLedger(a.DB); err != nil {
 		return err
 	}
 	// 目标③桥接表：mt_subscription_orders（SUB 套餐订单状态机）+ mt_native_subscription_plans

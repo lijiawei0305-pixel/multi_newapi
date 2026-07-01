@@ -40,7 +40,10 @@ func (g *Gateway) ReconcileStuckPaid(ctx context.Context, before time.Time) (Rec
 			res.Failed[ord.OrderNo] = err.Error()
 			continue
 		}
-		_, _ = g.repo.CompareAndSetStatus(ctx, ord.OrderNo, OrderPaid, OrderCredited)
+		// OnPaid 幂等（RCG 走 order_no 唯一台账，重跑不双扣）→ 置 credited；推进失败上报观测、下轮再扫。
+		if ok, csErr := g.repo.CompareAndSetStatus(ctx, ord.OrderNo, OrderPaid, OrderCredited); csErr != nil || !ok {
+			g.logf("payment: reconcile %s: advance paid→credited failed (ok=%v err=%v)", ord.OrderNo, ok, csErr)
+		}
 		res.Reconciled = append(res.Reconciled, ord.OrderNo)
 	}
 	return res, nil
