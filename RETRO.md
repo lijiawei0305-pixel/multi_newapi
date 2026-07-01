@@ -256,7 +256,13 @@
 - **解决**：只 build 受影响包，绕开 embed：`docker run --rm -v /root/newapi-test:/app -w /app -v newapi_gomodcache:/go/pkg/mod -v newapi_gobuildcache:/root/.cache/go-build -e GOFLAGS=-buildvcs=false -e GOPROXY=https://goproxy.cn,direct golang:1.25.1 sh -c "go build ./internal/... ./router/..."`（`-buildvcs=false` 因 scp 副本非 git 仓；goproxy.cn 因机房在国内；模块/构建缓存挂命名卷复用）。前端 typecheck 同理容器化：`node:22`（或 `oven/bun`）挂 `/root/newapi-compile/web`（已装 node_modules）跑 `tsgo -b`（EXIT=0=过）。容器 sh 是 dash，别用 `${PIPESTATUS[]}`；exit 码用 `cmd > log 2>&1; echo $?`。
 - **升级**：后端纯改动验收 = scp 同步 `/root/newapi-test` → 上述 golang 容器点包 `go build` → EXIT=0；无需 compose 重部署。补足 §四前端 typecheck 条，构成前后端"改完不部署也能编译校验"的完整闭环。
 
-### [未解决·需决策] feature/finance-report 工作树落后于服务器：缺未入库的 internal/siteconfig/gormrepo
+### [已解决] feature/finance-report 工作树落后于服务器：缺未入库的 internal/siteconfig/gormrepo（已 3-way 合并入 500L）
 - **现象**：本地校验后端时，服务器 `go build` 报 `wire.go: could not import internal/siteconfig/gormrepo`；`a.ReportRepo undefined` 是该 import 失败使整个 mtwire 包类型失效的**级联**。
 - **根因**：本 `.ccg` 工作树分支 `feature/finance-report` 的 HEAD **从未含** siteconfig 装配（`git show HEAD:wire.go` 无 siteconfig），而服务器 `/root/newapi-test` 有一份**未入库（scp 而来，git 不跟踪）**的 `internal/siteconfig/gormrepo`（OEM 装修 §5/§9）+ 对应 wire.go/mt-router.go/侧栏/语言包装配。两边 wire.go 各自是公共祖先的超集（本地多 reportrepo、服务器多 siteconfig）——**必须 3-way 合并，不能整文件覆盖**（否则丢 siteconfig）。财务报表改动为纯增量、与 siteconfig 区域不相交：`git diff HEAD -- wire.go mt-router.go` 生成的补丁在服务器真实副本上 `patch --fuzz=3` 干净套用（0 rej），合并后 `go build` EXIT=0 已验证。
-- **规避/待决**：部署财务报表时，wire.go/mt-router.go/use-sidebar-data.ts/6 语言包这 4 类需与服务器版**合并**（非覆盖）；或先把服务器未入库的 siteconfig/gormrepo 收编进分支（rebase 到真实基线）再统一同步。**入库策略待用户定**。
+- **解决**：其后 siteconfig 已随自定义域名提交（aba3a93/bdfb533）入库，"服务器未入库"顾虑消失 → 遂在 500L 上直接 `git merge feature/finance-report`（真三方合并，非补丁套用）：wire.go/use-sidebar-data.ts git 自动合并（reportrepo + siteconfig 两套 provider 并存、双 AutoMigrate），mt-router.go/RETRO/en+zh 共 4 处**纯增量冲突按并集解决**（en=5214 / zh=5316，无重复键、无值冲突）。并行的 site-branding/主题预设在飞工作（11 文件 + 3 style 键）分离提交、未混入。服务器容器化校验 `go build ./internal/... ./router/...`（golang:1.25.1）+ `tsgo -b`（oven/bun）均 EXIT=0。合并提交 c892e36、主题 c2b12a8。
+
+### [已解决·升级为规则] 合并含新增/改名路由的分支后，必须先重生 routeTree.gen.ts 再跑 tsgo -b
+- **现象**：财务报表合并后独立 `tsgo -b` 报 3 处 `TS2345: '<路径>' is not assignable to keyof FileRoutesByPath`——finance 2 条 + admin-custom-domains 1 条（后者是 500L 既有滞后，非本次引入）。
+- **根因**：`web/default/src/routeTree.gen.ts` 是 `@tanstack/router-plugin` 的生成物，只在 `rsbuild dev/build` 时从 `src/routes/` 重生；两分支都加了路由源文件却没提交重生后的树，提交树滞后。`createFileRoute('/x')` 的路径要命中生成的 `FileRoutesByPath`，否则类型报错（该文件自身 `@ts-nocheck`，报错落在路由源文件）。rsbuild 部署会自动重生 + SWC 不做类型检查 → **部署不受影响，但独立 tsgo 门会挂**。
+- **解决**：服务器容器内跑生成器（无 CLI，用程序化 API，与插件同法 `new Generator({config:getConfig({target:'react',autoCodeSplitting:false},ROOT),root:ROOT}).run()`）：`docker run --rm -v /root/newapi-compile/web:/web -w /web/default node:22 node <脚本>`。`autoCodeSplitting=false` 与既有 eager 树同模式，diff 干净（68 增 0 删，仅补 3 条路由）。重生后 tsgo -b EXIT=0，回传提交 7b190a6。
+- **升级**：**合并/rebase 任何新增或改名 `src/routes/**` 的分支后，先 router-generator 重生 routeTree.gen.ts 再验前端**；§四前端验收范式补一步"路由有增改 → 先重生路由树"。见 [[frontend-typecheck-bun-catalog]]。
