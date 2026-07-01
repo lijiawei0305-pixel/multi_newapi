@@ -1,0 +1,13 @@
+{
+  "id": "fix-payment-chain-bugs",
+  "title": "修复微信/支付宝真实支付链路深审发现的问题(C1 双扣 + M1 分润丢账 + M2-M5)",
+  "status": "completed",
+  "strategy": "debug-investigate",
+  "currentPhase": "done",
+  "nextAction": "已完成：C1/M1/M2/M3/M4/M5 修复+3回归测试+对抗式复核加固(M-1/L-2/L-3/L-4)；全绿；部署 HTTP200；commit 4e4ab9b+1f35078 已推 origin/500L",
+  "gate": null,
+  "branch": "500L",
+  "scope": "fix-payment-chain-bugs",
+  "createdAt": "2026-07-01T00:00:00Z",
+  "completedAt": "2026-07-01T09:00:00Z"
+}
