@@ -5016,6 +5016,18 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Add DNS records": "Ajouter les enregistrements DNS",
+    "Verifying ownership": "Vérification de la propriété",
+    "Live on HTTPS": "En ligne avec HTTPS",
+    "Issuance failed": "Échec de l'émission",
+    "Add the records below, then verify ownership.": "Ajoutez les enregistrements ci-dessous, puis vérifiez la propriété.",
+    "Checking your TXT record...": "Vérification de votre enregistrement TXT...",
+    "Issuing your HTTPS certificate...": "Émission de votre certificat HTTPS...",
+    "Your domain is now served over HTTPS.": "Votre domaine est désormais servi via HTTPS.",
+    "We could not finish this step. Check the error below and retry.": "Nous n'avons pas pu terminer cette étape. Consultez l'erreur ci-dessous et réessayez.",
+    "Secured by Let's Encrypt": "Sécurisé par Let's Encrypt",
+    "Issuing certificate": "Émission du certificat",
+    "Ownership verified. Issuing certificate...": "Propriété vérifiée. Émission du certificat..."
   }
 }

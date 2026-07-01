@@ -5016,6 +5016,18 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Add DNS records": "DNS レコードを追加",
+    "Verifying ownership": "所有権を確認中",
+    "Live on HTTPS": "HTTPS で公開中",
+    "Issuance failed": "発行に失敗しました",
+    "Add the records below, then verify ownership.": "下記のレコードを追加してから、所有権を確認してください。",
+    "Checking your TXT record...": "TXT レコードを確認中...",
+    "Issuing your HTTPS certificate...": "HTTPS 証明書を発行中...",
+    "Your domain is now served over HTTPS.": "あなたのドメインは HTTPS で提供されるようになりました。",
+    "We could not finish this step. Check the error below and retry.": "この手順を完了できませんでした。下記のエラーを確認して再試行してください。",
+    "Secured by Let's Encrypt": "Let's Encrypt により保護",
+    "Issuing certificate": "証明書を発行中",
+    "Ownership verified. Issuing certificate...": "所有権が確認されました。証明書を発行中..."
   }
 }

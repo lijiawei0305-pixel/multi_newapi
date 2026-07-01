@@ -18,14 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  CheckCircle2,
-  Copy,
-  Globe,
-  Link2,
-  RefreshCw,
-  Trash2,
-} from 'lucide-react'
+import { Copy, Globe, Link2, RefreshCw, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { getApiErrorCode } from '@/lib/api'
@@ -49,28 +42,8 @@ import {
   unbindCustomDomain,
   verifyCustomDomain,
 } from './api'
-import type { CustomDomainStatus, DnsRecord } from './types'
-
-type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
-
-function statusMeta(
-  t: (k: string) => string,
-  status?: CustomDomainStatus
-): { label: string; variant: BadgeVariant } {
-  switch (status) {
-    case 'active':
-      return { label: t('Active'), variant: 'default' }
-    case 'failed':
-      return { label: t('Failed'), variant: 'destructive' }
-    case 'dns_verified':
-      return { label: t('Issuing certificate'), variant: 'secondary' }
-    case 'verifying':
-      return { label: t('Verifying'), variant: 'secondary' }
-    case 'pending_dns':
-    default:
-      return { label: t('Awaiting DNS'), variant: 'secondary' }
-  }
-}
+import type { DnsRecord } from './types'
+import { CertificateSeal } from './certificate-seal'
 
 // Map the stable backend error code to a localized message (skipErrorHandler path).
 function domainErrorMessage(t: (k: string) => string, err: unknown): string {
@@ -213,7 +186,6 @@ export function CustomDomain() {
 
   const bound = data?.bound
   const status = data?.status
-  const meta = statusMeta(t, status)
 
   return (
     <SectionPageLayout>
@@ -259,40 +231,34 @@ export function CustomDomain() {
             <>
               <Card>
                 <CardHeader>
-                  <div className='flex items-center justify-between gap-2'>
-                    <CardTitle className='flex min-w-0 items-center gap-2'>
-                      <Globe className='h-5 w-5 shrink-0' />
-                      <span className='truncate'>{data?.domain}</span>
-                    </CardTitle>
-                    <Badge variant={meta.variant}>{meta.label}</Badge>
-                  </div>
-                  {status === 'active' && (
-                    <CardDescription className='flex items-center gap-1 text-emerald-600'>
-                      <CheckCircle2 className='h-4 w-4' />
-                      {t('Your custom domain is live with HTTPS.')}
-                    </CardDescription>
-                  )}
-                  {status === 'failed' && data?.last_error && (
-                    <CardDescription className='text-destructive'>
-                      {data.last_error}
-                    </CardDescription>
-                  )}
+                  <CardTitle className='flex min-w-0 items-center gap-2'>
+                    <Globe className='h-5 w-5 shrink-0' />
+                    <span className='truncate'>{data?.domain}</span>
+                  </CardTitle>
                 </CardHeader>
-                <CardContent className='flex flex-wrap gap-2'>
-                  {status !== 'active' && (
-                    <Button onClick={handleVerify} disabled={verifying}>
-                      <RefreshCw className='h-4 w-4' />
-                      {verifying ? t('Verifying...') : t('I have configured DNS — verify')}
+                <CardContent className='flex flex-col items-center gap-6 pt-2'>
+                  <CertificateSeal
+                    status={status ?? 'pending_dns'}
+                    lastError={data?.last_error}
+                  />
+                  <div className='flex flex-wrap justify-center gap-2'>
+                    {status !== 'active' && (
+                      <Button onClick={handleVerify} disabled={verifying}>
+                        <RefreshCw className='h-4 w-4' />
+                        {verifying
+                          ? t('Verifying...')
+                          : t('I have configured DNS — verify')}
+                      </Button>
+                    )}
+                    <Button
+                      variant='outline'
+                      onClick={handleUnbind}
+                      disabled={unbinding}
+                    >
+                      <Trash2 className='h-4 w-4' />
+                      {t('Unbind')}
                     </Button>
-                  )}
-                  <Button
-                    variant='outline'
-                    onClick={handleUnbind}
-                    disabled={unbinding}
-                  >
-                    <Trash2 className='h-4 w-4' />
-                    {t('Unbind')}
-                  </Button>
+                  </div>
                 </CardContent>
               </Card>
 

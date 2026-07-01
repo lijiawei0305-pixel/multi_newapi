@@ -5016,6 +5016,18 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Add DNS records": "Добавьте DNS-записи",
+    "Verifying ownership": "Проверка владения",
+    "Live on HTTPS": "Работает по HTTPS",
+    "Issuance failed": "Не удалось выпустить сертификат",
+    "Add the records below, then verify ownership.": "Добавьте записи ниже, затем подтвердите владение.",
+    "Checking your TXT record...": "Проверка вашей TXT-записи...",
+    "Issuing your HTTPS certificate...": "Выпуск вашего HTTPS-сертификата...",
+    "Your domain is now served over HTTPS.": "Ваш домен теперь обслуживается по HTTPS.",
+    "We could not finish this step. Check the error below and retry.": "Не удалось завершить этот шаг. Проверьте ошибку ниже и повторите попытку.",
+    "Secured by Let's Encrypt": "Защищено Let's Encrypt",
+    "Issuing certificate": "Выпуск сертификата",
+    "Ownership verified. Issuing certificate...": "Владение подтверждено. Выпуск сертификата..."
   }
 }

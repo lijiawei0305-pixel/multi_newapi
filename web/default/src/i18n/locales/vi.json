@@ -5016,6 +5016,18 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Add DNS records": "Thêm bản ghi DNS",
+    "Verifying ownership": "Đang xác minh quyền sở hữu",
+    "Live on HTTPS": "Đã hoạt động với HTTPS",
+    "Issuance failed": "Cấp chứng chỉ thất bại",
+    "Add the records below, then verify ownership.": "Thêm các bản ghi bên dưới, sau đó xác minh quyền sở hữu.",
+    "Checking your TXT record...": "Đang kiểm tra bản ghi TXT của bạn...",
+    "Issuing your HTTPS certificate...": "Đang cấp chứng chỉ HTTPS của bạn...",
+    "Your domain is now served over HTTPS.": "Tên miền của bạn hiện được phục vụ qua HTTPS.",
+    "We could not finish this step. Check the error below and retry.": "Chúng tôi không thể hoàn tất bước này. Kiểm tra lỗi bên dưới và thử lại.",
+    "Secured by Let's Encrypt": "Được bảo mật bởi Let's Encrypt",
+    "Issuing certificate": "Đang cấp chứng chỉ",
+    "Ownership verified. Issuing certificate...": "Quyền sở hữu đã được xác minh. Đang cấp chứng chỉ..."
   }
 }
