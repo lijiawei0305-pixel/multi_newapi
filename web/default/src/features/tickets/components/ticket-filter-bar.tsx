@@ -73,7 +73,7 @@ export function TicketFilterBar(props: {
       className='flex flex-wrap items-center gap-2'
       data-testid='ticket-filter-bar'
     >
-      <Select value={status} onValueChange={setStatus}>
+      <Select value={status} onValueChange={(v) => setStatus(v ?? ALL)}>
         <SelectTrigger className='w-36' data-testid='ticket-filter-status'>
           <SelectValue placeholder={t('Status')} />
         </SelectTrigger>
@@ -87,7 +87,7 @@ export function TicketFilterBar(props: {
         </SelectContent>
       </Select>
 
-      <Select value={priority} onValueChange={setPriority}>
+      <Select value={priority} onValueChange={(v) => setPriority(v ?? ALL)}>
         <SelectTrigger className='w-36' data-testid='ticket-filter-priority'>
           <SelectValue placeholder={t('Priority')} />
         </SelectTrigger>
@@ -106,7 +106,7 @@ export function TicketFilterBar(props: {
           placeholder={t('User ID')}
           value={userId}
           inputMode='numeric'
-          onChange={(e) => setUserId(e.target.value.replace(/\D/g, ''))}
+          onChange={(e) => setUserId(e.target.value.replaceAll(/\D/g, ''))}
           onKeyDown={(e) => e.key === 'Enter' && apply()}
           className='w-28'
           data-testid='ticket-filter-userid'
@@ -118,7 +118,7 @@ export function TicketFilterBar(props: {
           placeholder={t('Tenant ID')}
           value={tenantId}
           inputMode='numeric'
-          onChange={(e) => setTenantId(e.target.value.replace(/\D/g, ''))}
+          onChange={(e) => setTenantId(e.target.value.replaceAll(/\D/g, ''))}
           onKeyDown={(e) => e.key === 'Enter' && apply()}
           className='w-28'
           data-testid='ticket-filter-tenantid'

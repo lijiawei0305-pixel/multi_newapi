@@ -68,19 +68,22 @@ export function TicketsTable(props: {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {props.loading ? (
+          {props.loading && (
             <TableRow>
               <TableCell colSpan={colSpan} className='text-muted-foreground text-center'>
                 {t('Loading...')}
               </TableCell>
             </TableRow>
-          ) : props.rows.length === 0 ? (
+          )}
+          {!props.loading && props.rows.length === 0 && (
             <TableRow>
               <TableCell colSpan={colSpan} className='text-muted-foreground text-center'>
                 {t('No tickets yet')}
               </TableCell>
             </TableRow>
-          ) : (
+          )}
+          {!props.loading &&
+            props.rows.length > 0 &&
             props.rows.map((row) => (
               <TableRow
                 key={row.id}
@@ -129,8 +132,7 @@ export function TicketsTable(props: {
                   {fmtDateTime(row.created_at)}
                 </TableCell>
               </TableRow>
-            ))
-          )}
+            ))}
         </TableBody>
       </Table>
     </div>

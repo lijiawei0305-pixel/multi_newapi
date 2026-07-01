@@ -41,6 +41,7 @@ import { Route as AuthenticatedWalletIndexRouteImport } from './routes/_authenti
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
 import { Route as AuthenticatedUsageLogsIndexRouteImport } from './routes/_authenticated/usage-logs/index'
 import { Route as AuthenticatedTokenPlansIndexRouteImport } from './routes/_authenticated/token-plans/index'
+import { Route as AuthenticatedTicketsIndexRouteImport } from './routes/_authenticated/tickets/index'
 import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_authenticated/system-settings/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
@@ -67,14 +68,19 @@ import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authe
 import { Route as AuthenticatedCustomDomainIndexRouteImport } from './routes/_authenticated/custom-domain/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedAgentsIndexRouteImport } from './routes/_authenticated/agents/index'
+import { Route as AuthenticatedAgentTicketsIndexRouteImport } from './routes/_authenticated/agent-tickets/index'
 import { Route as AuthenticatedAgentListingsIndexRouteImport } from './routes/_authenticated/agent-listings/index'
 import { Route as AuthenticatedAgentEarningsIndexRouteImport } from './routes/_authenticated/agent-earnings/index'
+import { Route as AuthenticatedAdminTicketsIndexRouteImport } from './routes/_authenticated/admin-tickets/index'
 import { Route as AuthenticatedAdminCustomDomainsIndexRouteImport } from './routes/_authenticated/admin-custom-domains/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
+import { Route as AuthenticatedTicketsTicketIdRouteImport } from './routes/_authenticated/tickets/$ticketId'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
 import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authenticated/chat/$chatId'
+import { Route as AuthenticatedAgentTicketsTicketIdRouteImport } from './routes/_authenticated/agent-tickets/$ticketId'
+import { Route as AuthenticatedAdminTicketsTicketIdRouteImport } from './routes/_authenticated/admin-tickets/$ticketId'
 import { Route as authUserResetRouteImport } from './routes/(auth)/user/reset'
 import { Route as AuthenticatedSystemSettingsSiteIndexRouteImport } from './routes/_authenticated/system-settings/site/index'
 import { Route as AuthenticatedSystemSettingsSecurityIndexRouteImport } from './routes/_authenticated/system-settings/security/index'
@@ -255,6 +261,12 @@ const AuthenticatedTokenPlansIndexRoute =
     path: '/token-plans/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedTicketsIndexRoute =
+  AuthenticatedTicketsIndexRouteImport.update({
+    id: '/tickets/',
+    path: '/tickets/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSystemSettingsIndexRoute =
   AuthenticatedSystemSettingsIndexRouteImport.update({
     id: '/',
@@ -409,6 +421,12 @@ const AuthenticatedAgentsIndexRoute =
     path: '/agents/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedAgentTicketsIndexRoute =
+  AuthenticatedAgentTicketsIndexRouteImport.update({
+    id: '/agent-tickets/',
+    path: '/agent-tickets/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAgentListingsIndexRoute =
   AuthenticatedAgentListingsIndexRouteImport.update({
     id: '/agent-listings/',
@@ -421,6 +439,12 @@ const AuthenticatedAgentEarningsIndexRoute =
     path: '/agent-earnings/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedAdminTicketsIndexRoute =
+  AuthenticatedAdminTicketsIndexRouteImport.update({
+    id: '/admin-tickets/',
+    path: '/admin-tickets/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAdminCustomDomainsIndexRoute =
   AuthenticatedAdminCustomDomainsIndexRouteImport.update({
     id: '/admin-custom-domains/',
@@ -431,6 +455,12 @@ const AuthenticatedUsageLogsSectionRoute =
   AuthenticatedUsageLogsSectionRouteImport.update({
     id: '/usage-logs/$section',
     path: '/usage-logs/$section',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedTicketsTicketIdRoute =
+  AuthenticatedTicketsTicketIdRouteImport.update({
+    id: '/tickets/$ticketId',
+    path: '/tickets/$ticketId',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedModelsSectionRoute =
@@ -456,6 +486,18 @@ const AuthenticatedChatChatIdRoute = AuthenticatedChatChatIdRouteImport.update({
   path: '/chat/$chatId',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedAgentTicketsTicketIdRoute =
+  AuthenticatedAgentTicketsTicketIdRouteImport.update({
+    id: '/agent-tickets/$ticketId',
+    path: '/agent-tickets/$ticketId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAdminTicketsTicketIdRoute =
+  AuthenticatedAdminTicketsTicketIdRouteImport.update({
+    id: '/admin-tickets/$ticketId',
+    path: '/admin-tickets/$ticketId',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const authUserResetRoute = authUserResetRouteImport.update({
   id: '/user/reset',
   path: '/user/reset',
@@ -578,14 +620,19 @@ export interface FileRoutesByFullPath {
   '/rankings/': typeof RankingsIndexRoute
   '/setup/': typeof SetupIndexRoute
   '/user/reset': typeof authUserResetRoute
+  '/admin-tickets/$ticketId': typeof AuthenticatedAdminTicketsTicketIdRoute
+  '/agent-tickets/$ticketId': typeof AuthenticatedAgentTicketsTicketIdRoute
   '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/tickets/$ticketId': typeof AuthenticatedTicketsTicketIdRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/admin-custom-domains/': typeof AuthenticatedAdminCustomDomainsIndexRoute
+  '/admin-tickets/': typeof AuthenticatedAdminTicketsIndexRoute
   '/agent-earnings/': typeof AuthenticatedAgentEarningsIndexRoute
   '/agent-listings/': typeof AuthenticatedAgentListingsIndexRoute
+  '/agent-tickets/': typeof AuthenticatedAgentTicketsIndexRoute
   '/agents/': typeof AuthenticatedAgentsIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
@@ -612,6 +659,7 @@ export interface FileRoutesByFullPath {
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
+  '/tickets/': typeof AuthenticatedTicketsIndexRoute
   '/token-plans/': typeof AuthenticatedTokenPlansIndexRoute
   '/usage-logs/': typeof AuthenticatedUsageLogsIndexRoute
   '/users/': typeof AuthenticatedUsersIndexRoute
@@ -659,14 +707,19 @@ export interface FileRoutesByTo {
   '/rankings': typeof RankingsIndexRoute
   '/setup': typeof SetupIndexRoute
   '/user/reset': typeof authUserResetRoute
+  '/admin-tickets/$ticketId': typeof AuthenticatedAdminTicketsTicketIdRoute
+  '/agent-tickets/$ticketId': typeof AuthenticatedAgentTicketsTicketIdRoute
   '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/tickets/$ticketId': typeof AuthenticatedTicketsTicketIdRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/admin-custom-domains': typeof AuthenticatedAdminCustomDomainsIndexRoute
+  '/admin-tickets': typeof AuthenticatedAdminTicketsIndexRoute
   '/agent-earnings': typeof AuthenticatedAgentEarningsIndexRoute
   '/agent-listings': typeof AuthenticatedAgentListingsIndexRoute
+  '/agent-tickets': typeof AuthenticatedAgentTicketsIndexRoute
   '/agents': typeof AuthenticatedAgentsIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/custom-domain': typeof AuthenticatedCustomDomainIndexRoute
@@ -693,6 +746,7 @@ export interface FileRoutesByTo {
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
+  '/tickets': typeof AuthenticatedTicketsIndexRoute
   '/token-plans': typeof AuthenticatedTokenPlansIndexRoute
   '/usage-logs': typeof AuthenticatedUsageLogsIndexRoute
   '/users': typeof AuthenticatedUsersIndexRoute
@@ -744,14 +798,19 @@ export interface FileRoutesById {
   '/rankings/': typeof RankingsIndexRoute
   '/setup/': typeof SetupIndexRoute
   '/(auth)/user/reset': typeof authUserResetRoute
+  '/_authenticated/admin-tickets/$ticketId': typeof AuthenticatedAdminTicketsTicketIdRoute
+  '/_authenticated/agent-tickets/$ticketId': typeof AuthenticatedAgentTicketsTicketIdRoute
   '/_authenticated/chat/$chatId': typeof AuthenticatedChatChatIdRoute
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/_authenticated/tickets/$ticketId': typeof AuthenticatedTicketsTicketIdRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/admin-custom-domains/': typeof AuthenticatedAdminCustomDomainsIndexRoute
+  '/_authenticated/admin-tickets/': typeof AuthenticatedAdminTicketsIndexRoute
   '/_authenticated/agent-earnings/': typeof AuthenticatedAgentEarningsIndexRoute
   '/_authenticated/agent-listings/': typeof AuthenticatedAgentListingsIndexRoute
+  '/_authenticated/agent-tickets/': typeof AuthenticatedAgentTicketsIndexRoute
   '/_authenticated/agents/': typeof AuthenticatedAgentsIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
@@ -778,6 +837,7 @@ export interface FileRoutesById {
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
+  '/_authenticated/tickets/': typeof AuthenticatedTicketsIndexRoute
   '/_authenticated/token-plans/': typeof AuthenticatedTokenPlansIndexRoute
   '/_authenticated/usage-logs/': typeof AuthenticatedUsageLogsIndexRoute
   '/_authenticated/users/': typeof AuthenticatedUsersIndexRoute
@@ -828,14 +888,19 @@ export interface FileRouteTypes {
     | '/rankings/'
     | '/setup/'
     | '/user/reset'
+    | '/admin-tickets/$ticketId'
+    | '/agent-tickets/$ticketId'
     | '/chat/$chatId'
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/tickets/$ticketId'
     | '/usage-logs/$section'
     | '/admin-custom-domains/'
+    | '/admin-tickets/'
     | '/agent-earnings/'
     | '/agent-listings/'
+    | '/agent-tickets/'
     | '/agents/'
     | '/channels/'
     | '/custom-domain/'
@@ -862,6 +927,7 @@ export interface FileRouteTypes {
     | '/subscriptions/'
     | '/system-info/'
     | '/system-settings/'
+    | '/tickets/'
     | '/token-plans/'
     | '/usage-logs/'
     | '/users/'
@@ -909,14 +975,19 @@ export interface FileRouteTypes {
     | '/rankings'
     | '/setup'
     | '/user/reset'
+    | '/admin-tickets/$ticketId'
+    | '/agent-tickets/$ticketId'
     | '/chat/$chatId'
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/tickets/$ticketId'
     | '/usage-logs/$section'
     | '/admin-custom-domains'
+    | '/admin-tickets'
     | '/agent-earnings'
     | '/agent-listings'
+    | '/agent-tickets'
     | '/agents'
     | '/channels'
     | '/custom-domain'
@@ -943,6 +1014,7 @@ export interface FileRouteTypes {
     | '/subscriptions'
     | '/system-info'
     | '/system-settings'
+    | '/tickets'
     | '/token-plans'
     | '/usage-logs'
     | '/users'
@@ -993,14 +1065,19 @@ export interface FileRouteTypes {
     | '/rankings/'
     | '/setup/'
     | '/(auth)/user/reset'
+    | '/_authenticated/admin-tickets/$ticketId'
+    | '/_authenticated/agent-tickets/$ticketId'
     | '/_authenticated/chat/$chatId'
     | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
+    | '/_authenticated/tickets/$ticketId'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/admin-custom-domains/'
+    | '/_authenticated/admin-tickets/'
     | '/_authenticated/agent-earnings/'
     | '/_authenticated/agent-listings/'
+    | '/_authenticated/agent-tickets/'
     | '/_authenticated/agents/'
     | '/_authenticated/channels/'
     | '/_authenticated/custom-domain/'
@@ -1027,6 +1104,7 @@ export interface FileRouteTypes {
     | '/_authenticated/subscriptions/'
     | '/_authenticated/system-info/'
     | '/_authenticated/system-settings/'
+    | '/_authenticated/tickets/'
     | '/_authenticated/token-plans/'
     | '/_authenticated/usage-logs/'
     | '/_authenticated/users/'
@@ -1297,6 +1375,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTokenPlansIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/tickets/': {
+      id: '/_authenticated/tickets/'
+      path: '/tickets'
+      fullPath: '/tickets/'
+      preLoaderRoute: typeof AuthenticatedTicketsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/system-settings/': {
       id: '/_authenticated/system-settings/'
       path: '/'
@@ -1479,6 +1564,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAgentsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/agent-tickets/': {
+      id: '/_authenticated/agent-tickets/'
+      path: '/agent-tickets'
+      fullPath: '/agent-tickets/'
+      preLoaderRoute: typeof AuthenticatedAgentTicketsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/agent-listings/': {
       id: '/_authenticated/agent-listings/'
       path: '/agent-listings'
@@ -1493,6 +1585,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAgentEarningsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/admin-tickets/': {
+      id: '/_authenticated/admin-tickets/'
+      path: '/admin-tickets'
+      fullPath: '/admin-tickets/'
+      preLoaderRoute: typeof AuthenticatedAdminTicketsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/admin-custom-domains/': {
       id: '/_authenticated/admin-custom-domains/'
       path: '/admin-custom-domains'
@@ -1505,6 +1604,13 @@ declare module '@tanstack/react-router' {
       path: '/usage-logs/$section'
       fullPath: '/usage-logs/$section'
       preLoaderRoute: typeof AuthenticatedUsageLogsSectionRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/tickets/$ticketId': {
+      id: '/_authenticated/tickets/$ticketId'
+      path: '/tickets/$ticketId'
+      fullPath: '/tickets/$ticketId'
+      preLoaderRoute: typeof AuthenticatedTicketsTicketIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/models/$section': {
@@ -1533,6 +1639,20 @@ declare module '@tanstack/react-router' {
       path: '/chat/$chatId'
       fullPath: '/chat/$chatId'
       preLoaderRoute: typeof AuthenticatedChatChatIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/agent-tickets/$ticketId': {
+      id: '/_authenticated/agent-tickets/$ticketId'
+      path: '/agent-tickets/$ticketId'
+      fullPath: '/agent-tickets/$ticketId'
+      preLoaderRoute: typeof AuthenticatedAgentTicketsTicketIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/admin-tickets/$ticketId': {
+      id: '/_authenticated/admin-tickets/$ticketId'
+      path: '/admin-tickets/$ticketId'
+      fullPath: '/admin-tickets/$ticketId'
+      preLoaderRoute: typeof AuthenticatedAdminTicketsTicketIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/(auth)/user/reset': {
@@ -1736,14 +1856,19 @@ const AuthenticatedSystemSettingsRouteRouteWithChildren =
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedSystemSettingsRouteRoute: typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   AuthenticatedChat2linkRoute: typeof AuthenticatedChat2linkRoute
+  AuthenticatedAdminTicketsTicketIdRoute: typeof AuthenticatedAdminTicketsTicketIdRoute
+  AuthenticatedAgentTicketsTicketIdRoute: typeof AuthenticatedAgentTicketsTicketIdRoute
   AuthenticatedChatChatIdRoute: typeof AuthenticatedChatChatIdRoute
   AuthenticatedDashboardSectionRoute: typeof AuthenticatedDashboardSectionRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
+  AuthenticatedTicketsTicketIdRoute: typeof AuthenticatedTicketsTicketIdRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedAdminCustomDomainsIndexRoute: typeof AuthenticatedAdminCustomDomainsIndexRoute
+  AuthenticatedAdminTicketsIndexRoute: typeof AuthenticatedAdminTicketsIndexRoute
   AuthenticatedAgentEarningsIndexRoute: typeof AuthenticatedAgentEarningsIndexRoute
   AuthenticatedAgentListingsIndexRoute: typeof AuthenticatedAgentListingsIndexRoute
+  AuthenticatedAgentTicketsIndexRoute: typeof AuthenticatedAgentTicketsIndexRoute
   AuthenticatedAgentsIndexRoute: typeof AuthenticatedAgentsIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedCustomDomainIndexRoute: typeof AuthenticatedCustomDomainIndexRoute
@@ -1769,6 +1894,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedSubscriptionMonitorIndexRoute: typeof AuthenticatedSubscriptionMonitorIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
+  AuthenticatedTicketsIndexRoute: typeof AuthenticatedTicketsIndexRoute
   AuthenticatedTokenPlansIndexRoute: typeof AuthenticatedTokenPlansIndexRoute
   AuthenticatedUsageLogsIndexRoute: typeof AuthenticatedUsageLogsIndexRoute
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
@@ -1781,15 +1907,22 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSystemSettingsRouteRoute:
     AuthenticatedSystemSettingsRouteRouteWithChildren,
   AuthenticatedChat2linkRoute: AuthenticatedChat2linkRoute,
+  AuthenticatedAdminTicketsTicketIdRoute:
+    AuthenticatedAdminTicketsTicketIdRoute,
+  AuthenticatedAgentTicketsTicketIdRoute:
+    AuthenticatedAgentTicketsTicketIdRoute,
   AuthenticatedChatChatIdRoute: AuthenticatedChatChatIdRoute,
   AuthenticatedDashboardSectionRoute: AuthenticatedDashboardSectionRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
+  AuthenticatedTicketsTicketIdRoute: AuthenticatedTicketsTicketIdRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedAdminCustomDomainsIndexRoute:
     AuthenticatedAdminCustomDomainsIndexRoute,
+  AuthenticatedAdminTicketsIndexRoute: AuthenticatedAdminTicketsIndexRoute,
   AuthenticatedAgentEarningsIndexRoute: AuthenticatedAgentEarningsIndexRoute,
   AuthenticatedAgentListingsIndexRoute: AuthenticatedAgentListingsIndexRoute,
+  AuthenticatedAgentTicketsIndexRoute: AuthenticatedAgentTicketsIndexRoute,
   AuthenticatedAgentsIndexRoute: AuthenticatedAgentsIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedCustomDomainIndexRoute: AuthenticatedCustomDomainIndexRoute,
@@ -1821,6 +1954,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedSubscriptionMonitorIndexRoute,
   AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
+  AuthenticatedTicketsIndexRoute: AuthenticatedTicketsIndexRoute,
   AuthenticatedTokenPlansIndexRoute: AuthenticatedTokenPlansIndexRoute,
   AuthenticatedUsageLogsIndexRoute: AuthenticatedUsageLogsIndexRoute,
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
