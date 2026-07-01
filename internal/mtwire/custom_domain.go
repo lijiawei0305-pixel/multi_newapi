@@ -8,8 +8,10 @@ package mtwire
 // 跨租户因此天然隔离（A 代理拿不到/改不动 B 的绑定）。
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -178,4 +180,99 @@ func (a *App) HandleInternalCertIssued(c *gin.Context) {
 	// 写后失效：转 active 后清掉可能存在的负/旧缓存，确保新域名立即可解析到租户。
 	a.tenantCache.Invalidate(c.Request.Context(), host)
 	respondOK(c, gin.H{"domain": host, "status": string(tenant.CustomDomainActive)})
+}
+
+// ============================ 主站 admin（跨租户，全局） ============================
+
+// adminCustomDomainOut 是主站 admin「自定义域名」列表条目（跨租户，带租户标识）。
+type adminCustomDomainOut struct {
+	ID            int64  `json:"id"`
+	TenantID      int64  `json:"tenant_id"`
+	TenantSlug    string `json:"tenant_slug"`
+	TenantName    string `json:"tenant_name"`
+	Domain        string `json:"domain"`
+	Status        string `json:"status"`
+	CertStatus    string `json:"cert_status"`
+	CertExpiresAt string `json:"cert_expires_at"`
+	LastError     string `json:"last_error"`
+	CreatedAt     string `json:"created_at"`
+}
+
+// HandleAdminListCustomDomains GET /api/admin/custom-domains —— 列出全部租户的自定义域名（AdminAuth）。
+func (a *App) HandleAdminListCustomDomains(c *gin.Context) {
+	list, err := a.CustomDomains.ListAll(c.Request.Context())
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	ids := make([]int64, 0, len(list))
+	for _, d := range list {
+		ids = append(ids, d.TenantID)
+	}
+	tenants := a.tenantsByIDs(c.Request.Context(), ids)
+	out := make([]adminCustomDomainOut, 0, len(list))
+	for _, d := range list {
+		ti := tenants[d.TenantID]
+		exp := ""
+		if d.CertExpiresAt != nil {
+			exp = isoUTC(*d.CertExpiresAt)
+		}
+		out = append(out, adminCustomDomainOut{
+			ID:            d.ID,
+			TenantID:      d.TenantID,
+			TenantSlug:    ti.slug,
+			TenantName:    ti.name,
+			Domain:        d.Domain,
+			Status:        string(d.Status),
+			CertStatus:    d.CertStatus,
+			CertExpiresAt: exp,
+			LastError:     d.LastError,
+			CreatedAt:     isoUTC(d.CreatedAt),
+		})
+	}
+	respondOK(c, out)
+}
+
+// HandleAdminUnbindCustomDomain DELETE /api/admin/custom-domains/:id —— 主站 admin 强制解绑（AdminAuth）。
+func (a *App) HandleAdminUnbindCustomDomain(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondErr(c, tenant.ErrCustomDomainNotFound)
+		return
+	}
+	domain, err := a.CustomDomains.UnbindByID(c.Request.Context(), id)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	a.tenantCache.Invalidate(c.Request.Context(), domain)
+	respondOK(c, gin.H{"unbound": true, "domain": domain})
+}
+
+// tenantBrief 是 admin 列表用的最小租户标识。
+type tenantBrief struct {
+	slug string
+	name string
+}
+
+// tenantsByIDs 批量回查 tenants 表的 id→(slug,name)（单次 IN 查询，避免 N+1；失败/缺失给空）。
+func (a *App) tenantsByIDs(ctx context.Context, ids []int64) map[int64]tenantBrief {
+	out := make(map[int64]tenantBrief, len(ids))
+	if len(ids) == 0 {
+		return out
+	}
+	var rows []struct {
+		ID   int64
+		Slug string
+		Name string
+	}
+	if err := a.DB.WithContext(ctx).
+		Table("tenants").Select("id, slug, name").
+		Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return out
+	}
+	for _, r := range rows {
+		out[r.ID] = tenantBrief{slug: r.Slug, name: r.Name}
+	}
+	return out
 }

@@ -364,6 +364,34 @@ func (r *Repo) ListPendingCert(ctx context.Context) ([]tenant.CustomDomain, erro
 	return out, nil
 }
 
+// ListAllCustomDomains 返回全部自定义域名（admin 跨租户列表，按创建时间倒序）。
+func (r *Repo) ListAllCustomDomains(ctx context.Context) ([]tenant.CustomDomain, error) {
+	var rows []customDomainRow
+	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]tenant.CustomDomain, 0, len(rows))
+	for i := range rows {
+		out = append(out, *mapCustomDomain(&rows[i]))
+	}
+	return out, nil
+}
+
+// DeleteCustomDomainByID 按 id 删除并返回被删域名；不存在返回 ErrCustomDomainNotFound。
+func (r *Repo) DeleteCustomDomainByID(ctx context.Context, id int64) (string, error) {
+	var row customDomainRow
+	if err := r.db.WithContext(ctx).Take(&row, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", tenant.ErrCustomDomainNotFound
+		}
+		return "", err
+	}
+	if err := r.db.WithContext(ctx).Delete(&customDomainRow{}, "id = ?", id).Error; err != nil {
+		return "", err
+	}
+	return row.Domain, nil
+}
+
 // mapCustomDomainResult 把一次 Take 结果统一翻译为 domain 模型或 tenant 包错误码。
 func mapCustomDomainResult(row *customDomainRow, err error) (*tenant.CustomDomain, error) {
 	if err != nil {

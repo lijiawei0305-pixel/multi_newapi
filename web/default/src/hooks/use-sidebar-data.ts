@@ -243,6 +243,11 @@ export function useSidebarData(): SidebarData {
             icon: Network,
           },
           {
+            title: t('Custom Domains'),
+            url: '/admin-custom-domains',
+            icon: Globe,
+          },
+          {
             title: t('Withdrawal Review'),
             url: '/withdrawals',
             icon: HandCoins,

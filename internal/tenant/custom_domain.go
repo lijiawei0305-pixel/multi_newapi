@@ -264,6 +264,16 @@ func (s *customDomainService) ListPendingCert(ctx context.Context) ([]CustomDoma
 	return s.repo.ListPendingCert(ctx)
 }
 
+// ListAll 返回全部租户的自定义域名（主站 admin 跨租户视角）。
+func (s *customDomainService) ListAll(ctx context.Context) ([]CustomDomain, error) {
+	return s.repo.ListAllCustomDomains(ctx)
+}
+
+// UnbindByID 主站 admin 按记录 id 强制解绑，返回被删域名供装配层失效缓存。
+func (s *customDomainService) UnbindByID(ctx context.Context, id int64) (string, error) {
+	return s.repo.DeleteCustomDomainByID(ctx, id)
+}
+
 // MarkCertIssued 证书就绪回写：仅允许 dns_verified（首签）或 active（续期）→ active。
 func (s *customDomainService) MarkCertIssued(ctx context.Context, domain, certStatus string, expiresAt *time.Time) (string, error) {
 	d := normalizeHost(domain)

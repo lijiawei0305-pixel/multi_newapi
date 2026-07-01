@@ -1,5 +1,9 @@
 {
   "translation": {
+    "Custom Domains": "自定义域名",
+    "Cert": "证书",
+    "No custom domains yet": "暂无自定义域名",
+    "Force unbind {{domain}}?": "强制解绑 {{domain}}？",
     "Custom Domain": "自定义域名",
     "Site Branding": "站点品牌",
     "Issuing certificate": "正在签发证书",

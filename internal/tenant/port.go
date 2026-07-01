@@ -74,6 +74,10 @@ type CustomDomainService interface {
 	ListPendingCert(ctx context.Context) ([]CustomDomain, error)
 	// MarkCertIssued 由内网回写端点调用：证书就绪后置 cert 字段并转 active，返回被激活域名（供失效缓存）。
 	MarkCertIssued(ctx context.Context, domain, certStatus string, expiresAt *time.Time) (activatedHost string, err error)
+	// ListAll 返回全部租户的自定义域名（主站 admin 跨租户视角）。
+	ListAll(ctx context.Context) ([]CustomDomain, error)
+	// UnbindByID 主站 admin 按记录 id 强制解绑，返回被删域名（供失效缓存）。
+	UnbindByID(ctx context.Context, id int64) (deletedDomain string, err error)
 }
 
 // CustomDomainRepo 是自定义域名持久化抽象（消费者定义）。生产由 gormrepo.Repo 实现，单测用内存假实现。
@@ -92,6 +96,10 @@ type CustomDomainRepo interface {
 	DeleteCustomDomainByTenant(ctx context.Context, tenantID int64) (string, error)
 	// ListPendingCert 返回 status=dns_verified 的全部绑定。
 	ListPendingCert(ctx context.Context) ([]CustomDomain, error)
+	// ListAllCustomDomains 返回全部自定义域名（admin 跨租户列表，按创建时间倒序）。
+	ListAllCustomDomains(ctx context.Context) ([]CustomDomain, error)
+	// DeleteCustomDomainByID 按 id 删除并返回被删域名（不存在返回 ErrCustomDomainNotFound）。
+	DeleteCustomDomainByID(ctx context.Context, id int64) (string, error)
 }
 
 // DNSVerifier 抽象 TXT 记录查询（默认包裹 net.LookupTXT，单测可注入桩）。

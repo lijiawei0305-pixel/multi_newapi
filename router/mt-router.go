@@ -172,6 +172,14 @@ func SetMtRouter(router *gin.Engine) {
 		adminModelGroupGroup.DELETE("/:name", app.HandleAdminDeleteModelGroup)
 	}
 
+	// 主站自定义域名管理（全局，非租户维度，§6）：跨租户查看所有代理站自定义域名 + 强制解绑。复用 new-api AdminAuth。
+	adminCustomDomainGroup := router.Group("/api/admin/custom-domains")
+	adminCustomDomainGroup.Use(middleware.AdminAuth())
+	{
+		adminCustomDomainGroup.GET("", app.HandleAdminListCustomDomains)
+		adminCustomDomainGroup.DELETE("/:id", app.HandleAdminUnbindCustomDomain)
+	}
+
 	// 主站违禁词审核（6e · §2.14）：全站基础库（tenant_id=0）词库 CRUD + 违规日志（当前 Host 租户）。
 	// 前置 TenantMiddleware（违规日志按 Host 租户隔离）+ new-api AdminAuth。
 	adminModerationGroup := router.Group("/api/admin/moderation")

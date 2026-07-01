@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Custom Domains": "Custom Domains",
+    "Tenant": "Tenant",
+    "Cert": "Cert",
+    "No custom domains yet": "No custom domains yet",
+    "Force unbind {{domain}}?": "Force unbind {{domain}}?",
     "Custom Domain": "Custom Domain",
     "Site Branding": "Site Branding",
     "Issuing certificate": "Issuing certificate",

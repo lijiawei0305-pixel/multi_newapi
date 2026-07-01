@@ -195,6 +195,24 @@ func (f *fakeCDRepo) ListPendingCert(_ context.Context) ([]CustomDomain, error) 
 	return out, nil
 }
 
+func (f *fakeCDRepo) ListAllCustomDomains(_ context.Context) ([]CustomDomain, error) {
+	out := make([]CustomDomain, 0, len(f.byID))
+	for _, e := range f.byID {
+		out = append(out, *e)
+	}
+	return out, nil
+}
+
+func (f *fakeCDRepo) DeleteCustomDomainByID(_ context.Context, id int64) (string, error) {
+	e, ok := f.byID[id]
+	if !ok {
+		return "", ErrCustomDomainNotFound
+	}
+	dom := e.Domain
+	delete(f.byID, id)
+	return dom, nil
+}
+
 type fakeDNS struct {
 	values map[string][]string
 	err    error
