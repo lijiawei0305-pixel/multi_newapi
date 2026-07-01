@@ -1,10 +1,10 @@
 {
   "id": "add-support-tickets",
   "title": "新增支持工单系统（用户/代理商/管理员三端 + 权限隔离 + 前后端 + 测试 + 文档）",
-  "status": "in_progress",
+  "status": "completed",
   "strategy": "full-collaborate",
-  "currentPhase": "6-server-verified",
-  "nextAction": "服务器全绿并已 push: go build ./internal/... ./router/...=0, go test ticket/mtwire=ok, FE build=ok(routeTree 重生), tsgo typecheck=0, oxlint(ticket)=0. 修了 3 处前端类型/lint. i18n:sync 全量 backfill(fr/ja/ru/vi 各~388行)判为无关维护、未并入(ticket UI 走 en/zh+运行时回退). 可选后续: E2 客服名 mask / i18n 全量 backfill 独立提交 / docker compose 部署上线",
+  "currentPhase": "7-deployed",
+  "nextAction": "完成并上线: 已 push(a952ebf+f0ac1c1) + docker compose 部署 newapi_test. 线上验证全绿: 两表迁移OK, 三端路由401(注册+鉴权), /api/status 200, 二进制含 ticket 码, MT_INTERNAL_SECRET len=48. 可选后续(非阻断): E2 客服名 mask / i18n 全量 backfill 独立提交.",
   "gate": null,
   "branch": "500L",
   "scope": "add-support-tickets",
