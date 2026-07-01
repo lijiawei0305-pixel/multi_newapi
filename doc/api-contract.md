@@ -54,6 +54,13 @@
 | Report | `REPORT_GRANULARITY_INVALID` / `REPORT_LENS_INVALID` / `REPORT_FORMAT_INVALID` / `REPORT_EXPORT_FAILED` | 400/400/400/500 | 趋势粒度/透镜/导出格式非法、导出失败（财务报表；代理越权复用 `AGENT_FORBIDDEN`） |
 | Risk | `RATE_LIMITED` / `IP_NOT_ALLOWED` / `STATUS_FORBIDDEN` | 429/403/403 | 限流/IP 不允许/状态禁止 |
 | Relay | `UPSTREAM_ERROR` | 502 | 上游渠道错误 |
+| Ticket | `TICKET_NOT_FOUND` | 404 | 工单不存在，或跨用户/跨租户访问（IDOR 坍缩为「不存在」，不泄漏存在性） |
+| Ticket | `TICKET_INPUT_INVALID` | 400 | 请求体非法：缺标题/正文，或标题超长 |
+| Ticket | `TICKET_PRIORITY_INVALID` | 400 | 优先级不在 `low\|normal\|high\|urgent` |
+| Ticket | `TICKET_STATUS_INVALID` | 400 | 目标状态非法或不允许的流转（如 `closed→resolved`；`closed` 只能重开为 `open`） |
+| Ticket | `TICKET_CLOSED` | 409 | 向已关闭工单回复（需先重开） |
+| Ticket | `TICKET_REPLY_EMPTY` | 400 | 回复内容为空 |
+| Ticket | `TICKET_TENANT_LOOKUP` | 503 | 建单时归属租户查询失败（可重试；区别于合法的 `tenant_id=0` 平台工单） |
 
 ---
 
@@ -159,6 +166,36 @@
 > 趋势点字段（随 `lens`）：`earnings`→`amount_cny`；`recharge`→`recharge_paid_cny,subscription_paid_cny,subscription_cost_cny,subscription_spread_cny`；`consumption`→`used_quota,used_cost_cny,calls,tokens`；`withdrawals`→`pending_cny,withdrawn_cny,rejected_cny`。
 > 明细 `items[]`（随 `lens`，管理端含 `tenant_id`/`agent_name`，代理端省略）：`earnings`→`{source_type,amount_cny,reference,created_at}`；`withdrawals`→`{id,amount_cny,status,created_at,reviewed_at}`；`recharge`→`{order_no,kind,provider,amount_usd,actual_paid_cny,agent_cost_price_cny,status,created_at}`；`consumption`→`{model_name,calls,tokens,used_quota,used_cost_cny}`。
 
+### 2.12 支持工单 ★（用户 🅤 ｜ 代理 🅖 ｜ 管理员 🅐）
+
+> **隔离契约（最高优先级）**：
+> - 用户端仅按会话 `user_id`（`UserAuth` 写入）过滤，**绝不信任**客户端传入 `user_id`；
+> - 代理端仅按 `AgentOwnerAuth` 校验过的权威 `tenant_id`（`agentTenantID`）过滤，**绝不接受** query/body/path 的 `tenant_id`（传了也被忽略，作用域不变）；
+> - 管理端经 `AdminAuth` 跨租户，`tenant_id` 仅作可选筛选。
+> - 详情/回复/关闭/状态变更在服务层**每次操作前**按作用域复校归属，跨作用域一律 `TICKET_NOT_FOUND`（非仅列表过滤）。
+>
+> **`tenant_id` 归属**：新建工单时服务端从「提交用户的 `users.tenant_id`」派生并固化（0 = 主站平台工单，仅管理员可见），此后不可变、不来自请求体。
+> **状态机**：`open`（待客服）→ `pending`（客服已回复，待用户）→ `resolved`（已解决）→ `closed`（终态）。用户回复→重置为 `open`；客服/管理员回复→置 `pending`；`closed` 不可回复（`TICKET_CLOSED`），仅可被重开为 `open`（其他 `closed→*` 均 `TICKET_STATUS_INVALID`）。
+> **时间**：ISO-8601 UTC 字符串。**分页嵌套在 `data` 内**：`data:{items,total,page,page_size}`；公共 query `?page&page_size&status&priority&keyword`。
+
+| 方法 | 路径 | 角色 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/tenant/tickets` | 🅤 | 我的工单列表（仅本人）；filters `status/priority/keyword`；`data:{items,total,page,page_size}` |
+| POST | `/api/tenant/tickets` | 🅤 | 新建：`{title, content, priority?}`（`priority` 默认 `normal`，缺标题/正文→`TICKET_INPUT_INVALID`）→ 返回 Ticket 对象（`status=open`，开帖作为第一条 `user` 消息） |
+| GET | `/api/tenant/tickets/:id` | 🅤 | 我的工单详情 `{ticket, messages[]}`；跨用户→`TICKET_NOT_FOUND` |
+| POST | `/api/tenant/tickets/:id/replies` | 🅤 | 追加回复：`{content}`（空→`TICKET_REPLY_EMPTY`）；重开为 `open`；已关闭→`TICKET_CLOSED` → 返回 Message 对象 |
+| POST | `/api/tenant/tickets/:id/close` | 🅤 | 关闭自己的工单（`open/pending/resolved→closed`；已关闭→`TICKET_STATUS_INVALID`） |
+| GET | `/api/tenant/agent/tickets` | 🅖 | 本租户工单（tenant 取自 `AgentOwnerAuth`）；filters `status/priority/keyword/user_id`；分页 |
+| GET | `/api/tenant/agent/tickets/:id` | 🅖 | 详情，作用域本租户；跨租户→`TICKET_NOT_FOUND` |
+| POST | `/api/tenant/agent/tickets/:id/replies` | 🅖 | 代理回复：`{content}`（`author_role=agent`，置 `pending`） |
+| POST | `/api/tenant/agent/tickets/:id/status` | 🅖 | 改状态：`{status}`（`open\|pending\|resolved\|closed`，非法流转→`TICKET_STATUS_INVALID`） |
+| GET | `/api/admin/tickets` | 🅐 | 全部工单（跨租户）；filters `tenant_id/user_id/status/priority/keyword`；分页（items 含 `tenant_id`+`username`） |
+| GET | `/api/admin/tickets/:id` | 🅐 | 任意工单详情 |
+| POST | `/api/admin/tickets/:id/replies` | 🅐 | 管理员回复：`{content}`（`author_role=admin`，置 `pending`） |
+| POST | `/api/admin/tickets/:id/status` | 🅐 | 改状态：`{status}` |
+
+> 说明：代理端为避免 gin 通配路径冲突使用独立子前缀 `/api/tenant/agent/tickets`；管理端 `/api/admin/tickets` 仅 `AdminAuth`、不挂 `TenantMiddleware`（跨租户）。创建/回复/关闭/重开/状态变更/管理员跨租户处理均写入既有审计日志（`LogTypeManage`）。
+
 ---
 
 ## 3. 关键对象字段（前端渲染依据）
@@ -184,6 +221,18 @@
 
 **Channel**：`{ name, prefix, channel_code, signup_url, registered_count }`
 **RedemptionCode**：`{ name, code, amount_usd, status: enabled|disabled|used|expired, expires_at }`
+
+**Ticket（支持工单，§2.12 列表/详情项）**：
+```json
+{ "id":12, "tenant_id":3, "user_id":100, "username":"alice",
+  "title":"充值未到账", "status":"open", "priority":"normal",
+  "message_count":2, "last_reply_at":"2026-07-01T09:00:00Z", "last_reply_role":"agent",
+  "created_at":"2026-07-01T08:00:00Z", "updated_at":"2026-07-01T09:00:00Z" }
+```
+> `status: open|pending|resolved|closed`；`priority: low|normal|high|urgent`；`last_reply_role: user|agent|admin`（驱动「等待谁回复」）。`tenant_id=0` = 主站平台工单。
+
+**TicketMessage（工单消息，详情 `messages[]`）**：`{ id, ticket_id, user_id, username, author_role: user|agent|admin, content, created_at }`（`author_role` 驱动左右气泡渲染；开帖为第一条 `user` 消息）。
+> 详情响应形状：`{ "ticket": Ticket, "messages": [TicketMessage] }`（消息按时间升序）。
 
 ---
 

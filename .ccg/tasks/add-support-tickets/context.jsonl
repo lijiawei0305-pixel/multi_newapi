@@ -1,0 +1,13 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "internal/moderation/", "reason": "domain/repo/service 分层模板（violation 记录 + 租户归属），工单后端可镜像"}
+{"file": "internal/report/", "reason": "另一份 domain 分层参考"}
+{"file": "internal/mtwire/moderation_http.go", "reason": "多租户 HTTP handler 范式（TenantMiddleware + 上下文取 principal）"}
+{"file": "internal/mtwire/agent.go", "reason": "AgentOwnerAuth 代理自助端权威租户上下文取法"}
+{"file": "router/mt-router.go", "reason": "多租户 /api/tenant 路由组注册位置（代理自助端）"}
+{"file": "router/api-router.go", "reason": "原生 /api 与 /api/admin 路由组注册位置"}
+{"file": "internal/platform/appctx/appctx.go", "reason": "appctx.Principal 上下文契约"}
+{"file": "internal/platform/apperr/apperr.go", "reason": "AppError/错误码风格，TICKET_* 前缀错误码在此登记"}
+{"file": "web/default/src/features/moderation-violations/", "reason": "default 前端列表/详情/筛选/React Query 模板"}
+{"file": "web/default/src/hooks/use-sidebar-data.ts", "reason": "侧栏入口 + agentOwnerOnly/requiredRole 可见性机制"}
+{"file": "web/default/src/lib/agent-context.ts", "reason": "agentContextQueryOptions 前端 route guard 范式"}
+{"file": "doc/api-contract.md", "reason": "需追加工单 API 契约 + 错误码"}

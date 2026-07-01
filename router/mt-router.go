@@ -52,6 +52,13 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.GET("/token-plans", middleware.UserAuth(), app.HandleListTokenPlans)
 		tenantGroup.POST("/token-plans/:id/purchase", middleware.UserAuth(), app.HandlePurchase)
 		tenantGroup.GET("/subscriptions", middleware.UserAuth(), app.HandleListSubscriptions)
+		// 支持工单（用户端）：UserAuth + Host 租户；仅按会话 user_id 隔离（不信任客户端 user_id）。
+		// tenant_id 于创建时由服务端从提交用户 users.tenant_id 派生固化，不接受请求体传入。
+		tenantGroup.GET("/tickets", middleware.UserAuth(), app.HandleUserListTickets)
+		tenantGroup.POST("/tickets", middleware.UserAuth(), app.HandleUserCreateTicket)
+		tenantGroup.GET("/tickets/:id", middleware.UserAuth(), app.HandleUserGetTicket)
+		tenantGroup.POST("/tickets/:id/replies", middleware.UserAuth(), app.HandleUserReplyTicket)
+		tenantGroup.POST("/tickets/:id/close", middleware.UserAuth(), app.HandleUserCloseTicket)
 		// 充值下单（目标③）：UserAuth + Host 租户；下单 → 调 auth-service → 返支付凭据。
 		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), app.HandleWalletRecharge)
 		// 买家可用充值渠道：UserAuth + Host 租户；返回 enabled && configured 的渠道（wxpay/alipay）。
@@ -87,6 +94,12 @@ func SetMtRouter(router *gin.Engine) {
 			agentSelf.DELETE("/moderation/words/:id", app.HandleAgentDeleteModerationWord)
 			agentSelf.GET("/moderation/base-words", app.HandleAgentListBaseWords)  // 只读：全站基础库
 			agentSelf.GET("/moderation/violations", app.HandleAgentListViolations) // 本租户违规日志
+			// 支持工单（代理端）：tenant 取自 AgentOwnerAuth（agentTenantID），绝不接受客户端 tenant_id。
+			// 用 /agent/tickets 独立子前缀，避免与用户 /tickets/:id 的 gin 通配路径冲突。
+			agentSelf.GET("/agent/tickets", app.HandleAgentListTickets)
+			agentSelf.GET("/agent/tickets/:id", app.HandleAgentGetTicket)
+			agentSelf.POST("/agent/tickets/:id/replies", app.HandleAgentReplyTicket)
+			agentSelf.POST("/agent/tickets/:id/status", app.HandleAgentSetTicketStatus)
 			// 自定义域名（OEM，§6.2/§6.3）：绑定（返 A+TXT 指引）/ 查状态 / 触发 TXT 校验 / 解绑（owner 维度）。
 			agentSelf.POST("/custom-domain", app.HandleAgentBindCustomDomain)
 			agentSelf.GET("/custom-domain", app.HandleAgentGetCustomDomain)
@@ -204,6 +217,17 @@ func SetMtRouter(router *gin.Engine) {
 		adminModerationGroup.POST("/words", app.HandleAdminUpsertModerationWord)
 		adminModerationGroup.DELETE("/words/:id", app.HandleAdminDeleteModerationWord)
 		adminModerationGroup.GET("/violations", app.HandleAdminListViolations)
+	}
+
+	// 主站支持工单（全局跨租户，非 Host 维度）：列表/详情/回复/状态。仅 AdminAuth，不挂 TenantMiddleware
+	// （跨租户查看所有工单，tenant_id 仅作可选筛选；镜像 financeAdminGroup）。
+	adminTicketGroup := router.Group("/api/admin/tickets")
+	adminTicketGroup.Use(middleware.AdminAuth())
+	{
+		adminTicketGroup.GET("", app.HandleAdminListTickets)
+		adminTicketGroup.GET("/:id", app.HandleAdminGetTicket)
+		adminTicketGroup.POST("/:id/replies", app.HandleAdminReplyTicket)
+		adminTicketGroup.POST("/:id/status", app.HandleAdminSetTicketStatus)
 	}
 
 	common.SysLog("multitenant (tenant + tokenplan + agent) routes registered")

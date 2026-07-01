@@ -36,6 +36,8 @@ import (
 	siteconfigrepo "github.com/QuantumNous/new-api/internal/siteconfig/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
+	"github.com/QuantumNous/new-api/internal/ticket"
+	ticketrepo "github.com/QuantumNous/new-api/internal/ticket/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
 	tprepo "github.com/QuantumNous/new-api/internal/tokenplan/gormrepo"
 	walletrepo "github.com/QuantumNous/new-api/internal/wallet/gormrepo"
@@ -92,6 +94,11 @@ type App struct {
 	// ModerationRepo 持具体类型（BannedWordRepo+ViolationSink，handlers 用）；Moderator 供 /v1 转发前扫描。
 	ModerationRepo *moderationrepo.Repo
 	Moderator      moderation.Moderator
+
+	// --- ticket 模块（支持工单，用户/代理/管理员三端 + 隔离）---
+	// TicketRepo 持具体类型（TicketRepo 实现）；TicketService 提供状态流转/校验/归属复校。
+	TicketRepo    *ticketrepo.Repo
+	TicketService ticket.TicketService
 
 	// --- risk 模块（多档风控，7c · §2.13）---
 	// RiskEngine 调用前风控（本轮 RPM 限流 + 租户状态），由 checkCallHook 经 agenthook.CheckCall 在 /v1 调用。
@@ -153,6 +160,10 @@ func New(db *gorm.DB) *App {
 	// moderation（6e）：违禁词仓储（2 表）+ 服务（AC 匹配 + 租户合并）。
 	modRepo := moderationrepo.New(db)
 	moderator := moderation.NewService(modRepo, moderation.NewMatcher())
+
+	// ticket（支持工单）：工单仓储（2 表）+ 服务（状态流转/校验/三端隔离）。
+	ticketRepo := ticketrepo.New(db)
+	ticketSvc := ticket.NewService(ticketRepo)
 
 	// risk（7c）：调用前风控引擎。RPM 固定窗口限流需共享计数 → 仅 Redis 启用时装配；
 	// 否则置 nil（checkCallHook 旁路放行）。RPM 默认阈值来自 env RISK_DEFAULT_RPM（0=不限）。
@@ -221,6 +232,8 @@ func New(db *gorm.DB) *App {
 		ModelGroupRepo:  mgRepo,
 		ModerationRepo:  modRepo,
 		Moderator:       moderator,
+		TicketRepo:      ticketRepo,
+		TicketService:   ticketSvc,
 		RiskEngine:      riskEngine,
 		ReportRepo:      reportRepo,
 		RechargeGateway: rechargeGateway,
@@ -261,6 +274,9 @@ func (a *App) Migrate() error {
 		return err
 	}
 	if err := moderationrepo.AutoMigrate(a.DB); err != nil { // moderation_banned_words/moderation_content_violations（6e）
+		return err
+	}
+	if err := ticketrepo.AutoMigrate(a.DB); err != nil { // support_tickets/support_ticket_messages（支持工单）
 		return err
 	}
 	if err := siteconfigrepo.AutoMigrate(a.DB); err != nil { // tenant_site_configs/tenant_assets（OEM 装修，§5/§9）

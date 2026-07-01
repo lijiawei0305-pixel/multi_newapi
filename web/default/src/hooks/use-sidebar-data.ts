@@ -31,6 +31,7 @@ import {
   Key,
   Layers,
   LayoutDashboard,
+  LifeBuoy,
   ListTodo,
   Megaphone,
   MessageSquare,
@@ -142,6 +143,11 @@ export function useSidebarData(): SidebarData {
             agentOwnerOnly: true,
           },
           {
+            title: t('Support Tickets'),
+            url: '/tickets',
+            icon: LifeBuoy,
+          },
+          {
             title: t('Profile'),
             url: '/profile',
             icon: User,
@@ -197,6 +203,12 @@ export function useSidebarData(): SidebarData {
             title: t('Site Branding'),
             url: '/site-branding',
             icon: Palette,
+          },
+          {
+            title: t('Support Tickets'),
+            url: '/agent-tickets',
+            icon: LifeBuoy,
+            agentOwnerOnly: true,
           },
         ],
       },
@@ -273,6 +285,12 @@ export function useSidebarData(): SidebarData {
             title: t('Payment Reconcile'),
             url: '/payment-reconcile',
             icon: HandCoins,
+          },
+          {
+            title: t('Support Tickets'),
+            url: '/admin-tickets',
+            icon: LifeBuoy,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Financial Report'),

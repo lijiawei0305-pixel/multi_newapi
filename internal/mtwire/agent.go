@@ -221,14 +221,21 @@ func consumeCommissionCNY(quotaUnits int64, ratio, usdRate float64) float64 {
 	return usd * ratio * usdRate
 }
 
-// userTenantID 轻量直读 users.tenant_id（不经 new-api model.User）；列缺失/查询失败一律给 0。
-func (a *App) userTenantID(ctx context.Context, userID int64) int64 {
+// userTenantIDStrict 直读 users.tenant_id，区分「用户 tenant_id=0（合法平台用户）」与「查询失败」：
+// 失败返回 error，供建单等需要严格归属的场景拒绝，而非静默落为平台工单（tenant_id=0）。
+func (a *App) userTenantIDStrict(ctx context.Context, userID int64) (int64, error) {
 	var row struct{ TenantID int64 }
 	if err := a.DB.WithContext(ctx).Table("users").
 		Select("tenant_id").Where("id = ?", userID).Take(&row).Error; err != nil {
-		return 0
+		return 0, err
 	}
-	return row.TenantID
+	return row.TenantID, nil
+}
+
+// userTenantID 轻量直读 users.tenant_id（不经 new-api model.User）；列缺失/查询失败一律给 0（旁路安全，非严格场景用）。
+func (a *App) userTenantID(ctx context.Context, userID int64) int64 {
+	tid, _ := a.userTenantIDStrict(ctx, userID)
+	return tid
 }
 
 // moderationTenantID 解析「内容审核归属租户」：普通用户按自身 tenant_id；

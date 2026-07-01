@@ -1,0 +1,12 @@
+{
+  "id": "add-support-tickets",
+  "title": "新增支持工单系统（用户/代理商/管理员三端 + 权限隔离 + 前后端 + 测试 + 文档）",
+  "status": "in_progress",
+  "strategy": "full-collaborate",
+  "currentPhase": "5-hardening-done",
+  "nextAction": "已修 E1(repo 写作用域绑定+回滚测试)+E3(建单 tenant 查询失败即拒). tenant_id 按 home 租户(用户确认). 待服务器权威验证: golang:1.25.1 容器 go build ./internal/... ./router/... + go test ./internal/ticket/... ./internal/mtwire/...; 前端重生 routeTree + bun typecheck/lint/build + i18n:sync",
+  "gate": null,
+  "branch": "500L",
+  "scope": "add-support-tickets",
+  "createdAt": "2026-07-01T10:43:46Z"
+}

@@ -272,3 +272,9 @@
 - **根因**：`web/default/src/routeTree.gen.ts` 是 `@tanstack/router-plugin` 的生成物，只在 `rsbuild dev/build` 时从 `src/routes/` 重生；两分支都加了路由源文件却没提交重生后的树，提交树滞后。`createFileRoute('/x')` 的路径要命中生成的 `FileRoutesByPath`，否则类型报错（该文件自身 `@ts-nocheck`，报错落在路由源文件）。rsbuild 部署会自动重生 + SWC 不做类型检查 → **部署不受影响，但独立 tsgo 门会挂**。
 - **解决**：服务器容器内跑生成器（无 CLI，用程序化 API，与插件同法 `new Generator({config:getConfig({target:'react',autoCodeSplitting:false},ROOT),root:ROOT}).run()`）：`docker run --rm -v /root/newapi-compile/web:/web -w /web/default node:22 node <脚本>`。`autoCodeSplitting=false` 与既有 eager 树同模式，diff 干净（68 增 0 删，仅补 3 条路由）。重生后 tsgo -b EXIT=0，回传提交 7b190a6。
 - **升级**：**合并/rebase 任何新增或改名 `src/routes/**` 的分支后，先 router-generator 重生 routeTree.gen.ts 再验前端**；§四前端验收范式补一步"路由有增改 → 先重生路由树"。见 [[frontend-typecheck-bun-catalog]]。
+
+### [已解决] Workflow 多 Agent 生成的前端文件带尾部 `</content>` 包裹标签（会全量 typecheck/build 失败）
+- **现象**：用 Workflow 多 Agent 并行生成工单 default 前端，25 个 `.ts/.tsx` 文件每个末行都多出一个杂散 `</content>` XML 标签（`od -c` 确认真实字节），非法 TS，会让 esbuild/SWC 解析、`bun run typecheck`、`bun run build` 整个 feature 全挂。
+- **根因**：子 Agent 落盘时把「工具调用包裹标签」误写进了文件内容尾部（生成产物污染），系统性出现在**每个**新建文件。
+- **解决/规避**：Verify 阶段 Agent 用锚定 `sed '/^<\/content>$/d'` 逐文件删除（每文件唯一、恒在末行）；主控二次核验 `grep -rlE '</?content>|^\x60\x60\x60|<file>'` 新增文件 → 0 残留。
+- **升级**：**多 Agent 生成/落盘一批文件后，主控必须做「产物完整性扫描」**（stray XML 包裹标签 / ``` 代码围栏 / `<file>` 标签）再进构建门；本机无 go/node 时更要用 grep 静态兜住，别等服务器 typecheck 才发现。
