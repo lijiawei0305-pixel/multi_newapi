@@ -62,12 +62,14 @@ import { Route as AuthenticatedModerationViolationsIndexRouteImport } from './ro
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedModelGroupsIndexRouteImport } from './routes/_authenticated/model-groups/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
+import { Route as AuthenticatedFinanceReportIndexRouteImport } from './routes/_authenticated/finance-report/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedCustomDomainIndexRouteImport } from './routes/_authenticated/custom-domain/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedAgentsIndexRouteImport } from './routes/_authenticated/agents/index'
 import { Route as AuthenticatedAgentListingsIndexRouteImport } from './routes/_authenticated/agent-listings/index'
 import { Route as AuthenticatedAgentEarningsIndexRouteImport } from './routes/_authenticated/agent-earnings/index'
+import { Route as AuthenticatedAdminCustomDomainsIndexRouteImport } from './routes/_authenticated/admin-custom-domains/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
@@ -81,6 +83,7 @@ import { Route as AuthenticatedSystemSettingsModelsIndexRouteImport } from './ro
 import { Route as AuthenticatedSystemSettingsContentIndexRouteImport } from './routes/_authenticated/system-settings/content/index'
 import { Route as AuthenticatedSystemSettingsBillingIndexRouteImport } from './routes/_authenticated/system-settings/billing/index'
 import { Route as AuthenticatedSystemSettingsAuthIndexRouteImport } from './routes/_authenticated/system-settings/auth/index'
+import { Route as AuthenticatedAdminFinanceReportIndexRouteImport } from './routes/_authenticated/admin/finance-report/index'
 import { Route as AuthenticatedSystemSettingsSiteSectionRouteImport } from './routes/_authenticated/system-settings/site/$section'
 import { Route as AuthenticatedSystemSettingsSecuritySectionRouteImport } from './routes/_authenticated/system-settings/security/$section'
 import { Route as AuthenticatedSystemSettingsOperationsSectionRouteImport } from './routes/_authenticated/system-settings/operations/$section'
@@ -376,6 +379,12 @@ const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
   path: '/keys/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedFinanceReportIndexRoute =
+  AuthenticatedFinanceReportIndexRouteImport.update({
+    id: '/finance-report/',
+    path: '/finance-report/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDashboardIndexRoute =
   AuthenticatedDashboardIndexRouteImport.update({
     id: '/dashboard/',
@@ -410,6 +419,12 @@ const AuthenticatedAgentEarningsIndexRoute =
   AuthenticatedAgentEarningsIndexRouteImport.update({
     id: '/agent-earnings/',
     path: '/agent-earnings/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAdminCustomDomainsIndexRoute =
+  AuthenticatedAdminCustomDomainsIndexRouteImport.update({
+    id: '/admin-custom-domains/',
+    path: '/admin-custom-domains/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedUsageLogsSectionRoute =
@@ -488,6 +503,12 @@ const AuthenticatedSystemSettingsAuthIndexRoute =
     path: '/auth/',
     getParentRoute: () => AuthenticatedSystemSettingsRouteRoute,
   } as any)
+const AuthenticatedAdminFinanceReportIndexRoute =
+  AuthenticatedAdminFinanceReportIndexRouteImport.update({
+    id: '/admin/finance-report/',
+    path: '/admin/finance-report/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSystemSettingsSiteSectionRoute =
   AuthenticatedSystemSettingsSiteSectionRouteImport.update({
     id: '/site/$section',
@@ -562,12 +583,14 @@ export interface FileRoutesByFullPath {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/admin-custom-domains/': typeof AuthenticatedAdminCustomDomainsIndexRoute
   '/agent-earnings/': typeof AuthenticatedAgentEarningsIndexRoute
   '/agent-listings/': typeof AuthenticatedAgentListingsIndexRoute
   '/agents/': typeof AuthenticatedAgentsIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/finance-report/': typeof AuthenticatedFinanceReportIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/model-groups/': typeof AuthenticatedModelGroupsIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
@@ -602,6 +625,7 @@ export interface FileRoutesByFullPath {
   '/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/system-settings/security/$section': typeof AuthenticatedSystemSettingsSecuritySectionRoute
   '/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
+  '/admin/finance-report/': typeof AuthenticatedAdminFinanceReportIndexRoute
   '/system-settings/auth/': typeof AuthenticatedSystemSettingsAuthIndexRoute
   '/system-settings/billing/': typeof AuthenticatedSystemSettingsBillingIndexRoute
   '/system-settings/content/': typeof AuthenticatedSystemSettingsContentIndexRoute
@@ -640,12 +664,14 @@ export interface FileRoutesByTo {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/admin-custom-domains': typeof AuthenticatedAdminCustomDomainsIndexRoute
   '/agent-earnings': typeof AuthenticatedAgentEarningsIndexRoute
   '/agent-listings': typeof AuthenticatedAgentListingsIndexRoute
   '/agents': typeof AuthenticatedAgentsIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/custom-domain': typeof AuthenticatedCustomDomainIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
+  '/finance-report': typeof AuthenticatedFinanceReportIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/model-groups': typeof AuthenticatedModelGroupsIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
@@ -680,6 +706,7 @@ export interface FileRoutesByTo {
   '/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/system-settings/security/$section': typeof AuthenticatedSystemSettingsSecuritySectionRoute
   '/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
+  '/admin/finance-report': typeof AuthenticatedAdminFinanceReportIndexRoute
   '/system-settings/auth': typeof AuthenticatedSystemSettingsAuthIndexRoute
   '/system-settings/billing': typeof AuthenticatedSystemSettingsBillingIndexRoute
   '/system-settings/content': typeof AuthenticatedSystemSettingsContentIndexRoute
@@ -722,12 +749,14 @@ export interface FileRoutesById {
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
+  '/_authenticated/admin-custom-domains/': typeof AuthenticatedAdminCustomDomainsIndexRoute
   '/_authenticated/agent-earnings/': typeof AuthenticatedAgentEarningsIndexRoute
   '/_authenticated/agent-listings/': typeof AuthenticatedAgentListingsIndexRoute
   '/_authenticated/agents/': typeof AuthenticatedAgentsIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/_authenticated/finance-report/': typeof AuthenticatedFinanceReportIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/model-groups/': typeof AuthenticatedModelGroupsIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
@@ -762,6 +791,7 @@ export interface FileRoutesById {
   '/_authenticated/system-settings/operations/$section': typeof AuthenticatedSystemSettingsOperationsSectionRoute
   '/_authenticated/system-settings/security/$section': typeof AuthenticatedSystemSettingsSecuritySectionRoute
   '/_authenticated/system-settings/site/$section': typeof AuthenticatedSystemSettingsSiteSectionRoute
+  '/_authenticated/admin/finance-report/': typeof AuthenticatedAdminFinanceReportIndexRoute
   '/_authenticated/system-settings/auth/': typeof AuthenticatedSystemSettingsAuthIndexRoute
   '/_authenticated/system-settings/billing/': typeof AuthenticatedSystemSettingsBillingIndexRoute
   '/_authenticated/system-settings/content/': typeof AuthenticatedSystemSettingsContentIndexRoute
@@ -803,12 +833,14 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/models/$section'
     | '/usage-logs/$section'
+    | '/admin-custom-domains/'
     | '/agent-earnings/'
     | '/agent-listings/'
     | '/agents/'
     | '/channels/'
     | '/custom-domain/'
     | '/dashboard/'
+    | '/finance-report/'
     | '/keys/'
     | '/model-groups/'
     | '/models/'
@@ -843,6 +875,7 @@ export interface FileRouteTypes {
     | '/system-settings/operations/$section'
     | '/system-settings/security/$section'
     | '/system-settings/site/$section'
+    | '/admin/finance-report/'
     | '/system-settings/auth/'
     | '/system-settings/billing/'
     | '/system-settings/content/'
@@ -881,12 +914,14 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/models/$section'
     | '/usage-logs/$section'
+    | '/admin-custom-domains'
     | '/agent-earnings'
     | '/agent-listings'
     | '/agents'
     | '/channels'
     | '/custom-domain'
     | '/dashboard'
+    | '/finance-report'
     | '/keys'
     | '/model-groups'
     | '/models'
@@ -921,6 +956,7 @@ export interface FileRouteTypes {
     | '/system-settings/operations/$section'
     | '/system-settings/security/$section'
     | '/system-settings/site/$section'
+    | '/admin/finance-report'
     | '/system-settings/auth'
     | '/system-settings/billing'
     | '/system-settings/content'
@@ -962,12 +998,14 @@ export interface FileRouteTypes {
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
     | '/_authenticated/usage-logs/$section'
+    | '/_authenticated/admin-custom-domains/'
     | '/_authenticated/agent-earnings/'
     | '/_authenticated/agent-listings/'
     | '/_authenticated/agents/'
     | '/_authenticated/channels/'
     | '/_authenticated/custom-domain/'
     | '/_authenticated/dashboard/'
+    | '/_authenticated/finance-report/'
     | '/_authenticated/keys/'
     | '/_authenticated/model-groups/'
     | '/_authenticated/models/'
@@ -1002,6 +1040,7 @@ export interface FileRouteTypes {
     | '/_authenticated/system-settings/operations/$section'
     | '/_authenticated/system-settings/security/$section'
     | '/_authenticated/system-settings/site/$section'
+    | '/_authenticated/admin/finance-report/'
     | '/_authenticated/system-settings/auth/'
     | '/_authenticated/system-settings/billing/'
     | '/_authenticated/system-settings/content/'
@@ -1405,6 +1444,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedKeysIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/finance-report/': {
+      id: '/_authenticated/finance-report/'
+      path: '/finance-report'
+      fullPath: '/finance-report/'
+      preLoaderRoute: typeof AuthenticatedFinanceReportIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard/': {
       id: '/_authenticated/dashboard/'
       path: '/dashboard'
@@ -1445,6 +1491,13 @@ declare module '@tanstack/react-router' {
       path: '/agent-earnings'
       fullPath: '/agent-earnings/'
       preLoaderRoute: typeof AuthenticatedAgentEarningsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/admin-custom-domains/': {
+      id: '/_authenticated/admin-custom-domains/'
+      path: '/admin-custom-domains'
+      fullPath: '/admin-custom-domains/'
+      preLoaderRoute: typeof AuthenticatedAdminCustomDomainsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/usage-logs/$section': {
@@ -1537,6 +1590,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/system-settings/auth/'
       preLoaderRoute: typeof AuthenticatedSystemSettingsAuthIndexRouteImport
       parentRoute: typeof AuthenticatedSystemSettingsRouteRoute
+    }
+    '/_authenticated/admin/finance-report/': {
+      id: '/_authenticated/admin/finance-report/'
+      path: '/admin/finance-report'
+      fullPath: '/admin/finance-report/'
+      preLoaderRoute: typeof AuthenticatedAdminFinanceReportIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/system-settings/site/$section': {
       id: '/_authenticated/system-settings/site/$section'
@@ -1681,12 +1741,14 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
+  AuthenticatedAdminCustomDomainsIndexRoute: typeof AuthenticatedAdminCustomDomainsIndexRoute
   AuthenticatedAgentEarningsIndexRoute: typeof AuthenticatedAgentEarningsIndexRoute
   AuthenticatedAgentListingsIndexRoute: typeof AuthenticatedAgentListingsIndexRoute
   AuthenticatedAgentsIndexRoute: typeof AuthenticatedAgentsIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedCustomDomainIndexRoute: typeof AuthenticatedCustomDomainIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
+  AuthenticatedFinanceReportIndexRoute: typeof AuthenticatedFinanceReportIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedModelGroupsIndexRoute: typeof AuthenticatedModelGroupsIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
@@ -1712,6 +1774,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsersIndexRoute: typeof AuthenticatedUsersIndexRoute
   AuthenticatedWalletIndexRoute: typeof AuthenticatedWalletIndexRoute
   AuthenticatedWithdrawalsIndexRoute: typeof AuthenticatedWithdrawalsIndexRoute
+  AuthenticatedAdminFinanceReportIndexRoute: typeof AuthenticatedAdminFinanceReportIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -1723,12 +1786,15 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
+  AuthenticatedAdminCustomDomainsIndexRoute:
+    AuthenticatedAdminCustomDomainsIndexRoute,
   AuthenticatedAgentEarningsIndexRoute: AuthenticatedAgentEarningsIndexRoute,
   AuthenticatedAgentListingsIndexRoute: AuthenticatedAgentListingsIndexRoute,
   AuthenticatedAgentsIndexRoute: AuthenticatedAgentsIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedCustomDomainIndexRoute: AuthenticatedCustomDomainIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
+  AuthenticatedFinanceReportIndexRoute: AuthenticatedFinanceReportIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedModelGroupsIndexRoute: AuthenticatedModelGroupsIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
@@ -1760,6 +1826,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedUsersIndexRoute: AuthenticatedUsersIndexRoute,
   AuthenticatedWalletIndexRoute: AuthenticatedWalletIndexRoute,
   AuthenticatedWithdrawalsIndexRoute: AuthenticatedWithdrawalsIndexRoute,
+  AuthenticatedAdminFinanceReportIndexRoute:
+    AuthenticatedAdminFinanceReportIndexRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
