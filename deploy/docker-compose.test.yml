@@ -25,6 +25,9 @@ services:
       # —— 微信/支付宝支付：主站进程内真实 SDK（凭据存 DB 管理页表单；已退役 auth-service）——
       # 异步回调公网基址，回填 notify_url（= 此值 + /api/pay/{wechat,alipay}/notify）。
       MT_PAY_NOTIFY_BASE: "${MT_PAY_NOTIFY_BASE:-https://tokendream.wedreamhub.com}"
+      # —— 自定义域名（OEM，§6）：内网回写端点共享密钥（引用服务器 .env，值不入库）+ A 记录目标 IP（前端指引）——
+      MT_INTERNAL_SECRET: "${MT_INTERNAL_SECRET}"
+      MT_SITE_IP: "${MT_SITE_IP:-64.90.4.114}"
     depends_on:
       - mysql
       - redis

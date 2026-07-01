@@ -30,6 +30,8 @@ import (
 	"github.com/QuantumNous/new-api/internal/promotion"
 	promotionrepo "github.com/QuantumNous/new-api/internal/promotion/gormrepo"
 	"github.com/QuantumNous/new-api/internal/risk"
+	"github.com/QuantumNous/new-api/internal/siteconfig"
+	siteconfigrepo "github.com/QuantumNous/new-api/internal/siteconfig/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
@@ -45,6 +47,19 @@ type App struct {
 	TenantRepo     *tenantrepo.Repo
 	TenantResolver tenant.TenantResolver
 	TenantService  tenant.TenantService
+	// CustomDomains 自定义域名绑定（OEM，§6.2/§6.3）：代理自助 Bind/Verify/Unbind + 内网发证回写。
+	CustomDomains tenant.CustomDomainService
+	// tenantCache 是 resolver 共享的 Host->Tenant 缓存引用，供写后失效（绑定转 active / 解绑）。
+	tenantCache tenant.Cache
+	// internalSecret 内网回写端点（/api/internal/domain/*）共享密钥（MT_INTERNAL_SECRET）；空=拒绝全部内网调用。
+	internalSecret string
+	// siteIP 返回给前端的 A 记录目标 IP（自定义域名配置指引，MT_SITE_IP）。
+	siteIP string
+
+	// --- siteconfig 模块（OEM 装修：站名/Logo/品牌隐藏，§5/§9）---
+	SiteConfig     siteconfig.SiteConfigService // 读写租户装修配置（受控字段校验在包内）
+	Assets         siteconfig.AssetService      // Logo 等素材上传（类型/大小校验 + data: URL）
+	siteConfigRepo siteconfig.SiteConfigRepo    // found-aware 直读（/api/tenant/current 区分"已配置"与默认回退）
 
 	// --- tokenplan 模块 ---
 	TokenPlanRepo *tprepo.Repo // 持有具体类型：seed 与「我的套餐」列表用到非接口方法
@@ -98,10 +113,18 @@ type App struct {
 
 // New 用 new-api 的共享 db 装配全部增量服务（不再自开连接）。
 func New(db *gorm.DB) *App {
-	// tenant：GORM 仓储 + 内存解析缓存（Redis 适配顺延）。
+	// tenant：GORM 仓储 + 内存解析缓存（Redis 适配顺延）。tcache 引用留给装配层做写后失效。
 	tr := tenantrepo.New(db)
-	resolver := tenant.NewResolver(tr, tenant.NewMemCache())
+	tcache := tenant.NewMemCache()
+	resolver := tenant.NewResolver(tr, tcache)
 	tsvc := tenant.NewService(tr, tenant.NewSlugValidator())
+	// 自定义域名服务：tr 同时实现 CustomDomainRepo；DNS 用标准库 net.LookupTXT（带超时）。
+	customDomains := tenant.NewCustomDomainService(tr, nil)
+
+	// siteconfig：GORM 仓储（tenant_site_configs + tenant_assets）+ 装修服务 + 素材上传（data: URL Blob，免对象存储）。
+	scRepo := siteconfigrepo.New(db)
+	siteConfigSvc := siteconfig.NewService(scRepo)
+	assetSvc := siteconfig.NewAssetService(scRepo, newDataURLBlob())
 
 	// agent：GORM 仓储（4 表）+ 真实成本守卫；服务 / 提现状态机 / 收益入账口。
 	ar := agentrepo.New(db)
@@ -165,6 +188,13 @@ func New(db *gorm.DB) *App {
 		TenantRepo:      tr,
 		TenantResolver:  resolver,
 		TenantService:   tsvc,
+		CustomDomains:   customDomains,
+		tenantCache:     tcache,
+		internalSecret:  common.GetEnvOrDefaultString("MT_INTERNAL_SECRET", ""),
+		siteIP:          common.GetEnvOrDefaultString("MT_SITE_IP", ""),
+		SiteConfig:      siteConfigSvc,
+		Assets:          assetSvc,
+		siteConfigRepo:  scRepo,
 		TokenPlanRepo:   tp,
 		Catalog:         catalog,
 		Retail:          retail,
@@ -218,6 +248,9 @@ func (a *App) Migrate() error {
 		return err
 	}
 	if err := moderationrepo.AutoMigrate(a.DB); err != nil { // moderation_banned_words/moderation_content_violations（6e）
+		return err
+	}
+	if err := siteconfigrepo.AutoMigrate(a.DB); err != nil { // tenant_site_configs/tenant_assets（OEM 装修，§5/§9）
 		return err
 	}
 	// 迁移后重载模型分组缓存（master 节点建表 / 补 seed 后，IsModelGroup 即时生效）。

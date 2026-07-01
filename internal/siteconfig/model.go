@@ -61,6 +61,9 @@ type SiteConfig struct {
 	CustomerService string
 	Footer          string
 
+	// BrandHidden 为 OEM 开关：代理在自定义域名上隐藏主站品牌、只显示自定 logo/站名（§6 OEM 最小版）。
+	BrandHidden bool
+
 	// --- 二期预留字段（字段已建，一期只接受受控值；见 proposal §11）---
 	ThemeColor       string           // 主题色，必须命中预设色板
 	TemplateKey      string           // 模板 A/B/C（二期）
@@ -86,6 +89,7 @@ type SiteConfigPatch struct {
 	Announcement    *string
 	CustomerService *string
 	Footer          *string
+	BrandHidden     *bool // OEM：隐藏主站品牌开关
 
 	ThemeColor   *string   // 受控：必须命中色板，否则 THEME_NOT_IN_PALETTE
 	TemplateKey  *string   // 二期预留
@@ -210,6 +214,9 @@ func applyPatch(cfg *SiteConfig, in SiteConfigPatch) {
 	}
 	if in.Footer != nil {
 		cfg.Footer = *in.Footer
+	}
+	if in.BrandHidden != nil {
+		cfg.BrandHidden = *in.BrandHidden
 	}
 	if in.ThemeColor != nil {
 		cfg.ThemeColor = strings.ToLower(strings.TrimSpace(*in.ThemeColor))

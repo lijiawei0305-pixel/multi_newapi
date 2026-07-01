@@ -45,6 +45,7 @@ import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedSubscriptionMonitorIndexRouteImport } from './routes/_authenticated/subscription-monitor/index'
+import { Route as AuthenticatedSiteBrandingIndexRouteImport } from './routes/_authenticated/site-branding/index'
 import { Route as AuthenticatedRedemptionsIndexRouteImport } from './routes/_authenticated/redemptions/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedPromotionChannelsIndexRouteImport } from './routes/_authenticated/promotion-channels/index'
@@ -62,6 +63,7 @@ import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenti
 import { Route as AuthenticatedModelGroupsIndexRouteImport } from './routes/_authenticated/model-groups/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
+import { Route as AuthenticatedCustomDomainIndexRouteImport } from './routes/_authenticated/custom-domain/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedAgentsIndexRouteImport } from './routes/_authenticated/agents/index'
 import { Route as AuthenticatedAgentListingsIndexRouteImport } from './routes/_authenticated/agent-listings/index'
@@ -274,6 +276,12 @@ const AuthenticatedSubscriptionMonitorIndexRoute =
     path: '/subscription-monitor/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedSiteBrandingIndexRoute =
+  AuthenticatedSiteBrandingIndexRouteImport.update({
+    id: '/site-branding/',
+    path: '/site-branding/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedRedemptionsIndexRoute =
   AuthenticatedRedemptionsIndexRouteImport.update({
     id: '/redemptions/',
@@ -372,6 +380,12 @@ const AuthenticatedDashboardIndexRoute =
   AuthenticatedDashboardIndexRouteImport.update({
     id: '/dashboard/',
     path: '/dashboard/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedCustomDomainIndexRoute =
+  AuthenticatedCustomDomainIndexRouteImport.update({
+    id: '/custom-domain/',
+    path: '/custom-domain/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedChannelsIndexRoute =
@@ -552,6 +566,7 @@ export interface FileRoutesByFullPath {
   '/agent-listings/': typeof AuthenticatedAgentListingsIndexRoute
   '/agents/': typeof AuthenticatedAgentsIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
+  '/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/model-groups/': typeof AuthenticatedModelGroupsIndexRoute
@@ -569,6 +584,7 @@ export interface FileRoutesByFullPath {
   '/promotion-channels/': typeof AuthenticatedPromotionChannelsIndexRoute
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/redemptions/': typeof AuthenticatedRedemptionsIndexRoute
+  '/site-branding/': typeof AuthenticatedSiteBrandingIndexRoute
   '/subscription-monitor/': typeof AuthenticatedSubscriptionMonitorIndexRoute
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
@@ -628,6 +644,7 @@ export interface FileRoutesByTo {
   '/agent-listings': typeof AuthenticatedAgentListingsIndexRoute
   '/agents': typeof AuthenticatedAgentsIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
+  '/custom-domain': typeof AuthenticatedCustomDomainIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/model-groups': typeof AuthenticatedModelGroupsIndexRoute
@@ -645,6 +662,7 @@ export interface FileRoutesByTo {
   '/promotion-channels': typeof AuthenticatedPromotionChannelsIndexRoute
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
   '/redemptions': typeof AuthenticatedRedemptionsIndexRoute
+  '/site-branding': typeof AuthenticatedSiteBrandingIndexRoute
   '/subscription-monitor': typeof AuthenticatedSubscriptionMonitorIndexRoute
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
@@ -708,6 +726,7 @@ export interface FileRoutesById {
   '/_authenticated/agent-listings/': typeof AuthenticatedAgentListingsIndexRoute
   '/_authenticated/agents/': typeof AuthenticatedAgentsIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
+  '/_authenticated/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/model-groups/': typeof AuthenticatedModelGroupsIndexRoute
@@ -725,6 +744,7 @@ export interface FileRoutesById {
   '/_authenticated/promotion-channels/': typeof AuthenticatedPromotionChannelsIndexRoute
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/_authenticated/redemptions/': typeof AuthenticatedRedemptionsIndexRoute
+  '/_authenticated/site-branding/': typeof AuthenticatedSiteBrandingIndexRoute
   '/_authenticated/subscription-monitor/': typeof AuthenticatedSubscriptionMonitorIndexRoute
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
@@ -787,6 +807,7 @@ export interface FileRouteTypes {
     | '/agent-listings/'
     | '/agents/'
     | '/channels/'
+    | '/custom-domain/'
     | '/dashboard/'
     | '/keys/'
     | '/model-groups/'
@@ -804,6 +825,7 @@ export interface FileRouteTypes {
     | '/promotion-channels/'
     | '/redemption-codes/'
     | '/redemptions/'
+    | '/site-branding/'
     | '/subscription-monitor/'
     | '/subscriptions/'
     | '/system-info/'
@@ -863,6 +885,7 @@ export interface FileRouteTypes {
     | '/agent-listings'
     | '/agents'
     | '/channels'
+    | '/custom-domain'
     | '/dashboard'
     | '/keys'
     | '/model-groups'
@@ -880,6 +903,7 @@ export interface FileRouteTypes {
     | '/promotion-channels'
     | '/redemption-codes'
     | '/redemptions'
+    | '/site-branding'
     | '/subscription-monitor'
     | '/subscriptions'
     | '/system-info'
@@ -942,6 +966,7 @@ export interface FileRouteTypes {
     | '/_authenticated/agent-listings/'
     | '/_authenticated/agents/'
     | '/_authenticated/channels/'
+    | '/_authenticated/custom-domain/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/keys/'
     | '/_authenticated/model-groups/'
@@ -959,6 +984,7 @@ export interface FileRouteTypes {
     | '/_authenticated/promotion-channels/'
     | '/_authenticated/redemption-codes/'
     | '/_authenticated/redemptions/'
+    | '/_authenticated/site-branding/'
     | '/_authenticated/subscription-monitor/'
     | '/_authenticated/subscriptions/'
     | '/_authenticated/system-info/'
@@ -1260,6 +1286,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSubscriptionMonitorIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/site-branding/': {
+      id: '/_authenticated/site-branding/'
+      path: '/site-branding'
+      fullPath: '/site-branding/'
+      preLoaderRoute: typeof AuthenticatedSiteBrandingIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/redemptions/': {
       id: '/_authenticated/redemptions/'
       path: '/redemptions'
@@ -1377,6 +1410,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard/'
       preLoaderRoute: typeof AuthenticatedDashboardIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/custom-domain/': {
+      id: '/_authenticated/custom-domain/'
+      path: '/custom-domain'
+      fullPath: '/custom-domain/'
+      preLoaderRoute: typeof AuthenticatedCustomDomainIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/channels/': {
@@ -1645,6 +1685,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAgentListingsIndexRoute: typeof AuthenticatedAgentListingsIndexRoute
   AuthenticatedAgentsIndexRoute: typeof AuthenticatedAgentsIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
+  AuthenticatedCustomDomainIndexRoute: typeof AuthenticatedCustomDomainIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedModelGroupsIndexRoute: typeof AuthenticatedModelGroupsIndexRoute
@@ -1662,6 +1703,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPromotionChannelsIndexRoute: typeof AuthenticatedPromotionChannelsIndexRoute
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
   AuthenticatedRedemptionsIndexRoute: typeof AuthenticatedRedemptionsIndexRoute
+  AuthenticatedSiteBrandingIndexRoute: typeof AuthenticatedSiteBrandingIndexRoute
   AuthenticatedSubscriptionMonitorIndexRoute: typeof AuthenticatedSubscriptionMonitorIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
@@ -1685,6 +1727,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAgentListingsIndexRoute: AuthenticatedAgentListingsIndexRoute,
   AuthenticatedAgentsIndexRoute: AuthenticatedAgentsIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
+  AuthenticatedCustomDomainIndexRoute: AuthenticatedCustomDomainIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedModelGroupsIndexRoute: AuthenticatedModelGroupsIndexRoute,
@@ -1707,6 +1750,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedRedemptionCodesIndexRoute:
     AuthenticatedRedemptionCodesIndexRoute,
   AuthenticatedRedemptionsIndexRoute: AuthenticatedRedemptionsIndexRoute,
+  AuthenticatedSiteBrandingIndexRoute: AuthenticatedSiteBrandingIndexRoute,
   AuthenticatedSubscriptionMonitorIndexRoute:
     AuthenticatedSubscriptionMonitorIndexRoute,
   AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,

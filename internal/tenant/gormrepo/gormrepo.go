@@ -47,21 +47,45 @@ type domainRow struct {
 // TableName 固定表名。
 func (domainRow) TableName() string { return "tenant_domains" }
 
+// customDomainRow 是 tenant_custom_domains 表的 GORM 模型（OEM 自定义域名，§6.2/§6.3）。
+// 与 tenant_domains（wildcard 二级域名）分表：解析热路径不受影响，且"仅 active 自定义域名可解析"
+// 这条安全红线由独立表 + status 过滤天然隔离。
+//   - tenant_id 唯一索引：每租户至多 1 个自定义域名（业务上限的 DB 兜底）。
+//   - domain 唯一索引：自定义域名全局唯一。
+type customDomainRow struct {
+	ID            int64      `gorm:"column:id;primaryKey;autoIncrement"`
+	TenantID      int64      `gorm:"column:tenant_id;not null;uniqueIndex:idx_tcd_tenant"`
+	Domain        string     `gorm:"column:domain;type:varchar(255);not null;uniqueIndex:idx_tcd_domain"`
+	Status        string     `gorm:"column:status;type:varchar(16);not null;default:pending_dns;index:idx_tcd_status"`
+	VerifyToken   string     `gorm:"column:verify_token;type:varchar(64);not null"`
+	CertStatus    string     `gorm:"column:cert_status;type:varchar(16);not null;default:''"`
+	CertExpiresAt *time.Time `gorm:"column:cert_expires_at"`
+	LastError     string     `gorm:"column:last_error;type:varchar(512);not null;default:''"`
+	CreatedAt     time.Time  `gorm:"column:created_at"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at"`
+}
+
+// TableName 固定表名。
+func (customDomainRow) TableName() string { return "tenant_custom_domains" }
+
 // Repo 是 tenant.TenantRepo 的 GORM 实现。
 type Repo struct {
 	db *gorm.DB
 }
 
-// 编译期断言：*Repo 满足 tenant.TenantRepo 契约。
-var _ tenant.TenantRepo = (*Repo)(nil)
+// 编译期断言：*Repo 同时满足 tenant.TenantRepo 与 tenant.CustomDomainRepo 契约。
+var (
+	_ tenant.TenantRepo       = (*Repo)(nil)
+	_ tenant.CustomDomainRepo = (*Repo)(nil)
+)
 
 // New 用已建立连接的 *gorm.DB 构造仓储。
 func New(db *gorm.DB) *Repo { return &Repo{db: db} }
 
-// AutoMigrate 建/补 tenants 与 tenant_domains 表结构（含唯一/普通索引）。
+// AutoMigrate 建/补 tenants / tenant_domains / tenant_custom_domains 表结构（含唯一/普通索引）。
 // 由 cmd/server 在启动时调用；本包不持有迁移时机决策。
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&tenantRow{}, &domainRow{}, &groupRow{})
+	return db.AutoMigrate(&tenantRow{}, &domainRow{}, &groupRow{}, &customDomainRow{})
 }
 
 // CreateTenant 入库租户并回填 ID/时间戳；slug 冲突翻译为 tenant.ErrSlugDuplicate。
@@ -154,16 +178,30 @@ func (r *Repo) CreateDomain(ctx context.Context, d *tenant.TenantDomain) error {
 	return nil
 }
 
-// GetTenantByDomain 先按 domain 命中映射，再读对应租户；任一步未找到均返回 ErrTenantNotFound。
+// GetTenantByDomain 解析 Host→租户：先查 tenant_domains（wildcard 二级域名热路径），未命中再查
+// tenant_custom_domains 中 **status='active'** 的自定义域名；任一命中读对应租户，均未命中返回 ErrTenantNotFound。
+//
+// 安全红线（DoD §6.4）：未激活（pending_dns/verifying/dns_verified/failed）的自定义域名绝不在此命中——
+// status='active' 过滤由独立表 + 显式 WHERE 双重保证，wildcard 查询路径完全不受影响。
 func (r *Repo) GetTenantByDomain(ctx context.Context, domain string) (*tenant.Tenant, error) {
 	var d domainRow
-	if err := r.db.WithContext(ctx).Take(&d, "domain = ?", domain).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, tenant.ErrTenantNotFound
-		}
+	err := r.db.WithContext(ctx).Take(&d, "domain = ?", domain).Error
+	if err == nil {
+		return r.GetTenant(ctx, d.TenantID)
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	return r.GetTenant(ctx, d.TenantID)
+	// wildcard 未命中 → 仅命中 active 自定义域名。
+	var cd customDomainRow
+	cerr := r.db.WithContext(ctx).Take(&cd, "domain = ? AND status = ?", domain, string(tenant.CustomDomainActive)).Error
+	if cerr != nil {
+		if errors.Is(cerr, gorm.ErrRecordNotFound) {
+			return nil, tenant.ErrTenantNotFound
+		}
+		return nil, cerr
+	}
+	return r.GetTenant(ctx, cd.TenantID)
 }
 
 // mapTenantResult 把一次 Take 的结果统一翻译为 domain 模型或 tenant 包错误码。
@@ -212,6 +250,145 @@ func (r *Repo) OwnerUserID(ctx context.Context, tenantID int64) (int64, error) {
 		return 0, err
 	}
 	return row.OwnerUserID, nil
+}
+
+// ============================================================================
+// 自定义域名持久化（tenant.CustomDomainRepo 实现，§6.2/§6.3）
+// ============================================================================
+
+// CreateCustomDomain 入库自定义域名并回填 ID/时间戳；唯一键冲突翻译为 tenant.ErrDomainTaken。
+// （tenant_id 上限冲突由 service 先行 GetCustomDomainByTenant 拦截为 ErrDomainLimit。）
+func (r *Repo) CreateCustomDomain(ctx context.Context, d *tenant.CustomDomain) error {
+	row := customDomainRow{
+		ID:            d.ID,
+		TenantID:      d.TenantID,
+		Domain:        d.Domain,
+		Status:        string(d.Status),
+		VerifyToken:   d.VerifyToken,
+		CertStatus:    d.CertStatus,
+		CertExpiresAt: d.CertExpiresAt,
+		LastError:     d.LastError,
+		CreatedAt:     d.CreatedAt,
+		UpdatedAt:     d.UpdatedAt,
+	}
+	if row.Status == "" {
+		row.Status = string(tenant.CustomDomainPendingDNS)
+	}
+	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
+		if isDuplicate(err) {
+			return tenant.ErrDomainTaken
+		}
+		return err
+	}
+	d.ID = row.ID
+	d.Status = tenant.CustomDomainStatus(row.Status)
+	d.CreatedAt = row.CreatedAt
+	d.UpdatedAt = row.UpdatedAt
+	return nil
+}
+
+// GetCustomDomainByTenant 按租户取唯一绑定；未找到返回 tenant.ErrCustomDomainNotFound。
+func (r *Repo) GetCustomDomainByTenant(ctx context.Context, tenantID int64) (*tenant.CustomDomain, error) {
+	var row customDomainRow
+	err := r.db.WithContext(ctx).Take(&row, "tenant_id = ?", tenantID).Error
+	return mapCustomDomainResult(&row, err)
+}
+
+// GetCustomDomainByName 按域名取绑定；未找到返回 tenant.ErrCustomDomainNotFound。
+func (r *Repo) GetCustomDomainByName(ctx context.Context, domain string) (*tenant.CustomDomain, error) {
+	var row customDomainRow
+	err := r.db.WithContext(ctx).Take(&row, "domain = ?", domain).Error
+	return mapCustomDomainResult(&row, err)
+}
+
+// UpdateCustomDomainStatus 改状态机状态与 last_error（GORM 自动维护 updated_at）；行不存在返回 ErrCustomDomainNotFound。
+func (r *Repo) UpdateCustomDomainStatus(ctx context.Context, id int64, status tenant.CustomDomainStatus, lastError string) error {
+	res := r.db.WithContext(ctx).Model(&customDomainRow{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"status": string(status), "last_error": lastError})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return tenant.ErrCustomDomainNotFound
+	}
+	return nil
+}
+
+// UpdateCustomDomainCert 按域名回写证书字段并置目标状态（首签/续期）；行不存在返回 ErrCustomDomainNotFound。
+func (r *Repo) UpdateCustomDomainCert(ctx context.Context, domain, certStatus string, expiresAt *time.Time, status tenant.CustomDomainStatus) error {
+	res := r.db.WithContext(ctx).Model(&customDomainRow{}).
+		Where("domain = ?", domain).
+		Updates(map[string]any{
+			"cert_status":     certStatus,
+			"cert_expires_at": expiresAt,
+			"status":          string(status),
+			"last_error":      "",
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return tenant.ErrCustomDomainNotFound
+	}
+	return nil
+}
+
+// DeleteCustomDomainByTenant 删除租户绑定并返回被删域名；无绑定返回 ErrCustomDomainNotFound。
+func (r *Repo) DeleteCustomDomainByTenant(ctx context.Context, tenantID int64) (string, error) {
+	var row customDomainRow
+	if err := r.db.WithContext(ctx).Take(&row, "tenant_id = ?", tenantID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", tenant.ErrCustomDomainNotFound
+		}
+		return "", err
+	}
+	if err := r.db.WithContext(ctx).Delete(&customDomainRow{}, "id = ?", row.ID).Error; err != nil {
+		return "", err
+	}
+	return row.Domain, nil
+}
+
+// ListPendingCert 返回 status='dns_verified' 的全部绑定（供签发脚本消费）。
+func (r *Repo) ListPendingCert(ctx context.Context) ([]tenant.CustomDomain, error) {
+	var rows []customDomainRow
+	if err := r.db.WithContext(ctx).
+		Where("status = ?", string(tenant.CustomDomainDNSVerified)).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]tenant.CustomDomain, 0, len(rows))
+	for i := range rows {
+		out = append(out, *mapCustomDomain(&rows[i]))
+	}
+	return out, nil
+}
+
+// mapCustomDomainResult 把一次 Take 结果统一翻译为 domain 模型或 tenant 包错误码。
+func mapCustomDomainResult(row *customDomainRow, err error) (*tenant.CustomDomain, error) {
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, tenant.ErrCustomDomainNotFound
+		}
+		return nil, err
+	}
+	return mapCustomDomain(row), nil
+}
+
+// mapCustomDomain 把 GORM 行映射为 domain 模型。
+func mapCustomDomain(row *customDomainRow) *tenant.CustomDomain {
+	return &tenant.CustomDomain{
+		ID:            row.ID,
+		TenantID:      row.TenantID,
+		Domain:        row.Domain,
+		Status:        tenant.CustomDomainStatus(row.Status),
+		VerifyToken:   row.VerifyToken,
+		CertStatus:    row.CertStatus,
+		CertExpiresAt: row.CertExpiresAt,
+		LastError:     row.LastError,
+		CreatedAt:     row.CreatedAt,
+		UpdatedAt:     row.UpdatedAt,
+	}
 }
 
 // isDuplicate 判断是否唯一键冲突：优先用 GORM TranslateError 归一化的 ErrDuplicatedKey，

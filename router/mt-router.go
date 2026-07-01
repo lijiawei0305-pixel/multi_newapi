@@ -87,7 +87,25 @@ func SetMtRouter(router *gin.Engine) {
 			agentSelf.DELETE("/moderation/words/:id", app.HandleAgentDeleteModerationWord)
 			agentSelf.GET("/moderation/base-words", app.HandleAgentListBaseWords)  // 只读：全站基础库
 			agentSelf.GET("/moderation/violations", app.HandleAgentListViolations) // 本租户违规日志
+			// 自定义域名（OEM，§6.2/§6.3）：绑定（返 A+TXT 指引）/ 查状态 / 触发 TXT 校验 / 解绑（owner 维度）。
+			agentSelf.POST("/custom-domain", app.HandleAgentBindCustomDomain)
+			agentSelf.GET("/custom-domain", app.HandleAgentGetCustomDomain)
+			agentSelf.POST("/custom-domain/verify", app.HandleAgentVerifyCustomDomain)
+			agentSelf.DELETE("/custom-domain", app.HandleAgentUnbindCustomDomain)
+			// 站点装修（OEM 最小版，§5/§9）：读/改装修配置 + 上传 Logo（owner 维度）。
+			agentSelf.GET("/site-config", app.HandleAgentGetSiteConfig)
+			agentSelf.PUT("/site-config", app.HandleAgentUpdateSiteConfig)
+			agentSelf.POST("/site-config/logo", app.HandleAgentUploadLogo)
 		}
+	}
+
+	// 内网回写（自定义域名证书签发，§6.5）：共享密钥 X-Internal-Secret 校验（deny-by-default）。
+	// Nginx 边界另以 `location ^~ /api/internal/ { return 404; }` 拒绝公网；签发脚本走 127.0.0.1:3100 直连本组。
+	internalDomainGroup := router.Group("/api/internal/domain")
+	internalDomainGroup.Use(app.InternalSecretAuth())
+	{
+		internalDomainGroup.GET("/pending-cert", app.HandleInternalListPendingCert)   // 列待发证（dns_verified）域名
+		internalDomainGroup.POST("/cert-issued", app.HandleInternalCertIssued)        // 证书就绪 → active + 失效缓存
 	}
 
 	// 支付平台异步回调（目标③，支付重构后）：微信/支付宝 POST 到此，handler 内验签（无 UserAuth/TenantMiddleware）。

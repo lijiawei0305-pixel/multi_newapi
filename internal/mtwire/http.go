@@ -102,16 +102,22 @@ func humanMessage(err error) string {
 // ============================ 租户控制台（Host 维度） ============================
 
 // HandleTenantCurrent GET /api/tenant/current —— 按 Host 返当前租户品牌（无需登录）。
+// 合并 siteconfig 装修：已配置租户返回其 site_name/logo_url/theme_color/brand_hidden（OEM 自定义域名据此
+// 隐藏主站品牌、显示代理自定 Logo/站名）；未配置则回退租户名、无 Logo、不隐藏品牌。
 func (a *App) HandleTenantCurrent(c *gin.Context) {
 	t := tenantFrom(c)
 	if t == nil {
 		respondErr(c, tenant.ErrTenantNotFound)
 		return
 	}
+	cfg := a.effectiveSiteConfig(c.Request.Context(), t)
 	respondOK(c, gin.H{
 		"id":                t.ID,
 		"slug":              t.Slug,
-		"site_name":         t.Name, // 一期品牌名取租户名；主题色/Logo 等装修字段顺延 siteconfig
+		"site_name":         cfg.SiteName,
+		"logo_url":          cfg.LogoURL,
+		"theme_color":       cfg.ThemeColor,
+		"brand_hidden":      cfg.BrandHidden,
 		"status":            string(t.Status),
 		"tokenplan_enabled": t.TokenplanEnabled,
 	})

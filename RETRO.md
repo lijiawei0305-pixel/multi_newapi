@@ -91,6 +91,12 @@
 - **解决**：新增**精确 `server_name api.wedreamhub.com; listen 443 ssl` vhost → 现网 3000**（`deploy/nginx/api-443-to-origin.wedreamhub.com.conf`，证书复用通配 Origin CA、`Host 127.0.0.1` 镜像现网反代）。验证（**必须带正确 SNI**，`curl --resolve` 或经 CF）：api→3000(start_time 现网)、tokendream/子域→3100。
 - **升级**：**加通配 443 vhost 后，必须为所有"只 listen 80"的现网精确域名补一条精确 443 vhost 指回其后端**，并用 `curl --resolve <域名>:443:IP`（带 SNI）逐一核验路由——`curl -H Host` 不设 SNI 会误判。属 C1「不碰现网」红线的隐性陷阱。
 
+### [已解决] 自定义域名证书：宝塔接管 Nginx 下用「每域名独立 vhost + 不声明 default_server」零冲突共存
+- **现象**：要让任意代理自定义域名（A 记录直指主站 IP）反代到多租户栈 3100 并签 LE 证书，但宝塔接管了 Nginx（`/www/server/panel/vhost/nginx/`，主配 `include *.conf`），盲目加 `default_server` 会与宝塔 `0.default.conf` 抢每端口唯一的 default 槽位。
+- **根因**：nginx 每个 `listen` 端口只允许一个 `default_server`；但**精确 `server_name` 匹配优先于 default**（同 §一 通配劫持那条的反向利用）。自定义域名是具体主机名，天然可被精确 server 块命中，无需 default。
+- **解决/规避**：`scripts/issue-cert.sh` 为每个域名写 `custom_<域名>.conf` 到宝塔 vhost 目录（被主配 `include *.conf` 自动加载），**不声明 default_server**；HTTP-01 走共享 webroot `/www/wwwroot/acme-challenge`，签发前先写「仅 80」vhost+reload 让 challenge 可达，装证后再写「80→443」完整 vhost。`Host $host` 透传供后端按 Host 解析租户。**红线**：只反代 127.0.0.1:3100，绝不碰现网 3000。已 E2E（绑定→TXT→active→解析→品牌→解绑）全绿；真实 LE 签发需代理提供可控域名（A 直连、勿套 CF 代理，否则 HTTP-01 取不到）。
+- **升级**：宝塔下加自定义反代一律走「手写精确 server_name vhost + 不碰 default + 勿在面板编辑这些站点」。已写入 `doc/domains-ssl.md` §6.5 / `scripts/README.md`。
+
 ---
 
 ## 二、构建与依赖
@@ -238,3 +244,9 @@
 - **根因**：`web/` 是 bun workspace，`web/default/package.json` 用 `catalog:` 协议引用版本，**catalog 定义在 workspace 根 `web/package.json` + `web/bun.lock`**——只在子包目录装解析不到 catalog，devDeps（含 tsgo）也装不上。另：根 Dockerfile 前端阶段用 `bun run build`(rsbuild/SWC，只转译**不做类型检查**)，类型错误**不会**让镜像构建失败 → 必须独立跑 `tsgo`。
 - **解决**：①typecheck 在 workspace 根装：`docker run -v /root/newapi-compile/web:/web -v newapi_buncache:/root/.bun/install/cache -w /web oven/bun bun install --frozen-lockfile` → 再 `cd default && bun run typecheck`（=`tsgo -b`，看 `EXIT=0`）。②构建/部署用 `/root/newapi-test`（即运行栈 compose 的 working_dir，`docker compose ls` 可查）；typecheck 用带 node_modules 的 `/root/newapi-compile`——改完两边都 scp 同步。③oxlint 不在构建门里，存量告警勿误判为本次引入，只修自己新增行。
 - **升级**：纯前端改动验收三步：scp 同步 → workspace 根 `bun install` + `tsgo -b`(EXIT=0) → `docker compose -p newapi_test up -d --build` 后 `grep` 二进制确认标识入包（`docker exec app grep -c <marker> /new-api`）。
+
+### [已解决] 接旧规格前先核对现状：三处"规格已过时"的坑（自定义域名任务）
+- **现象**：自定义域名任务书让"仿照 `/api/internal/order/paid` 内网端点"、用 `ERR_DOMAIN_LIMIT` 等错误码、并假设 `.env` 变量会自动进容器——三处都与现状不符。
+- **根因/发现**：①`/api/internal/order/paid` 在 realpay-inprocess 重构中**已退役**（现存 internal-auth 范式只剩 `auth-service` 的 `X-Internal-Secret`）。②本仓库错误码**无 `ERR_` 前缀**惯例，一律模块前缀（`TENANT_NOT_FOUND`/`DOMAIN_LIMIT`）。③Docker Compose 的根 `.env` **仅用于 `${...}` 插值，不自动注入容器**——变量必须在 compose `environment:` 块里显式 `KEY: "${KEY}"` 才到 app。
+- **解决/规避**：①新内网端点沿用 `X-Internal-Secret`（主站读 `MT_INTERNAL_SECRET` env，恒定时间比较 + deny-by-default），签发脚本走 `127.0.0.1:3100` 直连。②错误码落 `DOMAIN_*`（`internal/tenant/errors.go`）。③`MT_INTERNAL_SECRET`/`MT_SITE_IP` 加进 `deploy/docker-compose.test.yml` 的 `environment:` 块（引用服务器 `.env`）。
+- **升级**：**接他人/旧规格前，先用 grep/ToolSearch 核对"被引用的端点/约定/机制是否还存在"**，别照搬过时假设（W1 的延伸）。

@@ -1,6 +1,9 @@
 package tenant
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // --- 对外接口（detailed-design §2.1 的 Go 签名）---
 
@@ -45,8 +48,53 @@ type TenantRepo interface {
 }
 
 // Cache 是 Host->Tenant 的解析缓存抽象。本轮提供内存假实现（MemCache）；
-// 真实 Redis 适配（序列化 + TTL + 写后失效）顺延（见报告 TODO）。
+// 真实 Redis 适配（序列化 + TTL）顺延（见报告 TODO）。
 type Cache interface {
 	Get(ctx context.Context, host string) (*Tenant, bool)
 	Set(ctx context.Context, host string, t *Tenant)
+	// Invalidate 主动失效一个 Host 的缓存条目（写后失效）。
+	// 自定义域名转 active / 解绑后由装配层调用，避免旧解析结果泄露或滞留。
+	Invalidate(ctx context.Context, host string)
+}
+
+// --- 自定义域名（OEM，二期 §6.2/§6.3）---
+
+// CustomDomainService 是代理自助绑定自定义域名的领域服务（owner 维度）。
+// 安全不变量：未 active 的绑定绝不参与 Host 解析（见 ResolveByHost / GetTenantByDomain）。
+type CustomDomainService interface {
+	// Bind 校验格式/保留词/每租户上限后落一条 pending_dns 记录（不进解析），返回含 verify_token 的绑定。
+	Bind(ctx context.Context, tenantID int64, domain string) (*CustomDomain, error)
+	// VerifyOwnership 查 TXT 记录校验所有权；通过则转 dns_verified（触发异步发证信号），否则转 failed。
+	VerifyOwnership(ctx context.Context, tenantID int64) (*CustomDomain, error)
+	// Unbind 删除绑定并返回被删域名（供装配层失效其 Host 缓存）。
+	Unbind(ctx context.Context, tenantID int64) (deletedDomain string, err error)
+	// GetByTenant 返回当前绑定及状态（未绑定返回 ErrCustomDomainNotFound）。
+	GetByTenant(ctx context.Context, tenantID int64) (*CustomDomain, error)
+	// ListPendingCert 返回待签发证书（status=dns_verified）的绑定，供服务器侧签发脚本消费。
+	ListPendingCert(ctx context.Context) ([]CustomDomain, error)
+	// MarkCertIssued 由内网回写端点调用：证书就绪后置 cert 字段并转 active，返回被激活域名（供失效缓存）。
+	MarkCertIssued(ctx context.Context, domain, certStatus string, expiresAt *time.Time) (activatedHost string, err error)
+}
+
+// CustomDomainRepo 是自定义域名持久化抽象（消费者定义）。生产由 gormrepo.Repo 实现，单测用内存假实现。
+type CustomDomainRepo interface {
+	// CreateCustomDomain 入库并回填 ID/时间戳；域名全局冲突返回 ErrDomainTaken。
+	CreateCustomDomain(ctx context.Context, d *CustomDomain) error
+	// GetCustomDomainByTenant 按租户取唯一绑定；无绑定返回 ErrCustomDomainNotFound。
+	GetCustomDomainByTenant(ctx context.Context, tenantID int64) (*CustomDomain, error)
+	// GetCustomDomainByName 按域名取绑定；未找到返回 ErrCustomDomainNotFound。
+	GetCustomDomainByName(ctx context.Context, domain string) (*CustomDomain, error)
+	// UpdateCustomDomainStatus 改状态机状态与 last_error（GORM 维护 updated_at）。
+	UpdateCustomDomainStatus(ctx context.Context, id int64, status CustomDomainStatus, lastError string) error
+	// UpdateCustomDomainCert 按域名回写证书字段并置目标状态（发证/续期）。
+	UpdateCustomDomainCert(ctx context.Context, domain, certStatus string, expiresAt *time.Time, status CustomDomainStatus) error
+	// DeleteCustomDomainByTenant 删除租户绑定，返回被删域名（无绑定返回 ErrCustomDomainNotFound）。
+	DeleteCustomDomainByTenant(ctx context.Context, tenantID int64) (string, error)
+	// ListPendingCert 返回 status=dns_verified 的全部绑定。
+	ListPendingCert(ctx context.Context) ([]CustomDomain, error)
+}
+
+// DNSVerifier 抽象 TXT 记录查询（默认包裹 net.LookupTXT，单测可注入桩）。
+type DNSVerifier interface {
+	LookupTXT(ctx context.Context, name string) ([]string, error)
 }
