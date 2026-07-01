@@ -12,6 +12,8 @@ import (
 var (
 	// ErrThemeNotInPalette 主题色不在主站预设色板内。
 	ErrThemeNotInPalette = apperr.New("THEME_NOT_IN_PALETTE", "主题色不在预设色板内", http.StatusBadRequest)
+	// ErrThemePresetInvalid 主题风格不在预设列表内。
+	ErrThemePresetInvalid = apperr.New("THEME_PRESET_INVALID", "主题风格不在预设列表内", http.StatusBadRequest)
 	// ErrHomeModeLocked 首页模式越界：一期仅放行 default/config，custom_html 锁定。
 	ErrHomeModeLocked = apperr.New("HOME_MODE_LOCKED", "首页模式一期仅支持 default/config（自定义 HTML 已锁定）", http.StatusForbidden)
 	// ErrAssetTypeForbidden 上传素材类型不在白名单（仅 jpg/png/webp）。

@@ -31,6 +31,9 @@ var allowedMIME = map[string]bool{
 //   - HomeMode 非 nil 时仅放行 default/config，否则 HOME_MODE_LOCKED；
 //   - CustomHTML 非 nil 且非空时一期锁定，返回 HOME_MODE_LOCKED。
 func ValidatePatch(in SiteConfigPatch) error {
+	if in.ThemePreset != nil && !ValidThemePreset(strings.TrimSpace(*in.ThemePreset)) {
+		return ErrThemePresetInvalid
+	}
 	if in.ThemeColor != nil && !InPalette(*in.ThemeColor) {
 		return ErrThemeNotInPalette
 	}

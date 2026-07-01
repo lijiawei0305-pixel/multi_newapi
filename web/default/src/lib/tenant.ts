@@ -26,6 +26,8 @@ export interface TenantCurrent {
   slug: string
   site_name: string
   logo_url: string
+  /** Default theme preset key the agent set for this site (empty = default). */
+  theme_preset: string
   theme_color: string
   /** OEM: when true the agent has opted to hide main-site branding. */
   brand_hidden: boolean

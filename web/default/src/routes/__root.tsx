@@ -35,11 +35,16 @@ import { GeneralError } from '@/features/errors/general-error'
 import { NotFoundError } from '@/features/errors/not-found-error'
 import { getSetupStatus } from '@/features/setup/api'
 
+// TenantBrandBoot applies per-tenant brand (name/logo) + default theme preset.
+// It must live INSIDE ThemeCustomizationProvider so it can call setPreset.
+function TenantBrandBoot() {
+  useTenantBrand()
+  return null
+}
+
 function RootComponent() {
   // Load system configuration (logo, system name, etc.) from backend
   useSystemConfig({ autoLoad: true })
-  // OEM: on a custom/tenant domain with brand hiding on, override branding with the agent's.
-  useTenantBrand()
 
   useEffect(() => {
     const aff = new URLSearchParams(window.location.search).get('aff')?.trim()
@@ -50,6 +55,7 @@ function RootComponent() {
 
   return (
     <ThemeCustomizationProvider>
+      <TenantBrandBoot />
       <NavigationProgress />
       <Outlet />
       <Toaster closeButton duration={5000} position='top-center' richColors />

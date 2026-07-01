@@ -64,6 +64,10 @@ type SiteConfig struct {
 	// BrandHidden 为 OEM 开关：代理在自定义域名上隐藏主站品牌、只显示自定 logo/站名（§6 OEM 最小版）。
 	BrandHidden bool
 
+	// ThemePreset 是代理为本站点选的默认视觉风格（前端主题预设 key，如 ocean-breeze/rose-garden；
+	// 空 = default）。终端用户未自选主题时套用此默认（见前端 useTenantBrand + theme-customization）。
+	ThemePreset string
+
 	// --- 二期预留字段（字段已建，一期只接受受控值；见 proposal §11）---
 	ThemeColor       string           // 主题色，必须命中预设色板
 	TemplateKey      string           // 模板 A/B/C（二期）
@@ -91,6 +95,7 @@ type SiteConfigPatch struct {
 	Footer          *string
 	BrandHidden     *bool // OEM：隐藏主站品牌开关
 
+	ThemePreset  *string   // 受控：必须是合法主题预设 key（或空），否则 THEME_PRESET_INVALID
 	ThemeColor   *string   // 受控：必须命中色板，否则 THEME_NOT_IN_PALETTE
 	TemplateKey  *string   // 二期预留
 	HeroImageURL *string   // 二期预留
@@ -170,6 +175,23 @@ func InPalette(color string) bool {
 	return false
 }
 
+// themePresets 是合法主题预设 key 白名单。**必须与前端 web/default/src/lib/theme-customization.ts
+// 的 THEME_PRESETS 对齐**（代理在「站点品牌」页选默认风格，终端用户未自选时套用）。
+var themePresets = map[string]struct{}{
+	"default": {}, "anthropic": {}, "simple-large": {}, "underground": {},
+	"rose-garden": {}, "lake-view": {}, "sunset-glow": {}, "forest-whisper": {},
+	"ocean-breeze": {}, "lavender-dream": {},
+}
+
+// ValidThemePreset 报告 key 是否为合法主题预设（空串视为合法 = 用默认）。
+func ValidThemePreset(key string) bool {
+	if key == "" {
+		return true
+	}
+	_, ok := themePresets[key]
+	return ok
+}
+
 // defaultEnabledModules 是主站默认开启的模块集合（二期配置驱动渲染的基线）。
 var defaultEnabledModules = []string{"dashboard", "tokens", "wallet", "logs", "playground"}
 
@@ -217,6 +239,9 @@ func applyPatch(cfg *SiteConfig, in SiteConfigPatch) {
 	}
 	if in.BrandHidden != nil {
 		cfg.BrandHidden = *in.BrandHidden
+	}
+	if in.ThemePreset != nil {
+		cfg.ThemePreset = strings.TrimSpace(*in.ThemePreset)
 	}
 	if in.ThemeColor != nil {
 		cfg.ThemeColor = strings.ToLower(strings.TrimSpace(*in.ThemeColor))

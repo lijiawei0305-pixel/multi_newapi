@@ -48,6 +48,7 @@ type siteConfigPatchIn struct {
 	CustomerService *string `json:"customer_service"`
 	Footer          *string `json:"footer"`
 	BrandHidden     *bool   `json:"brand_hidden"`
+	ThemePreset     *string `json:"theme_preset"`
 	ThemeColor      *string `json:"theme_color"`
 }
 
@@ -62,6 +63,7 @@ func (in siteConfigPatchIn) toPatch() siteconfig.SiteConfigPatch {
 		CustomerService: in.CustomerService,
 		Footer:          in.Footer,
 		BrandHidden:     in.BrandHidden,
+		ThemePreset:     in.ThemePreset,
 		ThemeColor:      in.ThemeColor,
 	}
 }
@@ -78,6 +80,7 @@ func siteConfigOut(cfg *siteconfig.SiteConfig) gin.H {
 		"customer_service": cfg.CustomerService,
 		"footer":           cfg.Footer,
 		"brand_hidden":     cfg.BrandHidden,
+		"theme_preset":     cfg.ThemePreset,
 		"theme_color":      cfg.ThemeColor,
 	}
 }

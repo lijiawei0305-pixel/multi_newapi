@@ -30,6 +30,7 @@ type siteConfigRow struct {
 	CustomerService  string    `gorm:"column:customer_service;type:varchar(255);not null;default:''"`
 	Footer           string    `gorm:"column:footer;type:text"`
 	BrandHidden      bool      `gorm:"column:brand_hidden;not null;default:false"`
+	ThemePreset      string    `gorm:"column:theme_preset;type:varchar(32);not null;default:''"`
 	ThemeColor       string    `gorm:"column:theme_color;type:varchar(16);not null;default:''"`
 	TemplateKey      string    `gorm:"column:template_key;type:varchar(32);not null;default:''"`
 	HeroImageURL     string    `gorm:"column:hero_image_url;type:longtext"`
@@ -93,9 +94,9 @@ func (r *Repo) UpsertConfig(ctx context.Context, cfg *siteconfig.SiteConfig) err
 		Columns: []clause.Column{{Name: "tenant_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"site_name", "logo_url", "favicon_url", "hero_title", "hero_subtitle",
-			"announcement", "customer_service", "footer", "brand_hidden", "theme_color",
-			"template_key", "hero_image_url", "banner_json", "home_mode", "custom_html",
-			"custom_html_status", "enabled_modules", "updated_at",
+			"announcement", "customer_service", "footer", "brand_hidden", "theme_preset",
+			"theme_color", "template_key", "hero_image_url", "banner_json", "home_mode",
+			"custom_html", "custom_html_status", "enabled_modules", "updated_at",
 		}),
 	}).Create(&row).Error
 }
@@ -171,6 +172,7 @@ func configToRow(cfg *siteconfig.SiteConfig) siteConfigRow {
 		CustomerService:  cfg.CustomerService,
 		Footer:           cfg.Footer,
 		BrandHidden:      cfg.BrandHidden,
+		ThemePreset:      cfg.ThemePreset,
 		ThemeColor:       cfg.ThemeColor,
 		TemplateKey:      cfg.TemplateKey,
 		HeroImageURL:     cfg.HeroImageURL,
@@ -194,6 +196,7 @@ func rowToConfig(row *siteConfigRow) *siteconfig.SiteConfig {
 		CustomerService:  row.CustomerService,
 		Footer:           row.Footer,
 		BrandHidden:      row.BrandHidden,
+		ThemePreset:      row.ThemePreset,
 		ThemeColor:       row.ThemeColor,
 		TemplateKey:      row.TemplateKey,
 		HeroImageURL:     row.HeroImageURL,

@@ -34,6 +34,8 @@ export interface SiteConfig {
   customer_service: string
   footer: string
   brand_hidden: boolean
+  /** Default theme preset key (e.g. ocean-breeze); empty = default. */
+  theme_preset: string
   theme_color: string
 }
 
@@ -41,7 +43,7 @@ export interface SiteConfigPatch {
   site_name?: string
   logo_url?: string
   brand_hidden?: boolean
-  theme_color?: string
+  theme_preset?: string
 }
 
 export interface ApiResponse<T = unknown> {

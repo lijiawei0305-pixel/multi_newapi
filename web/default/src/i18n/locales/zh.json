@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Default style": "默认风格",
+    "The default visual style your users see. They can still change it themselves from the top-right theme menu.": "用户看到的默认视觉风格。他们仍可从右上角主题菜单自行更改。",
+    "Selected style is not allowed": "所选风格不被允许",
     "Custom Domains": "自定义域名",
     "Cert": "证书",
     "No custom domains yet": "暂无自定义域名",

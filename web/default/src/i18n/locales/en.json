@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Default style": "Default style",
+    "The default visual style your users see. They can still change it themselves from the top-right theme menu.": "The default visual style your users see. They can still change it themselves from the top-right theme menu.",
+    "Selected style is not allowed": "Selected style is not allowed",
     "Custom Domains": "Custom Domains",
     "Tenant": "Tenant",
     "Cert": "Cert",

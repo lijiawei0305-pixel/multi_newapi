@@ -116,6 +116,7 @@ func (a *App) HandleTenantCurrent(c *gin.Context) {
 		"slug":              t.Slug,
 		"site_name":         cfg.SiteName,
 		"logo_url":          cfg.LogoURL,
+		"theme_preset":      cfg.ThemePreset,
 		"theme_color":       cfg.ThemeColor,
 		"brand_hidden":      cfg.BrandHidden,
 		"status":            string(t.Status),

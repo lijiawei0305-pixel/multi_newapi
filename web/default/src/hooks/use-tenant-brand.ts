@@ -18,26 +18,34 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { getCookie } from '@/lib/cookies'
 import { getTenantCurrent } from '@/lib/tenant'
+import {
+  THEME_COOKIE_KEYS,
+  THEME_PRESET_VALUES,
+  type ThemePreset,
+} from '@/lib/theme-customization'
+import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 /**
- * OEM brand override for custom / tenant domains.
+ * Per-tenant brand + default theme for custom / tenant domains.
  *
- * Fetches GET /api/tenant/current; when the current Host resolves to a tenant
- * that has opted into brand hiding (`brand_hidden`), it overrides the
- * system-config store's `systemName`/`logo` with the agent's brand. Because all
- * branding surfaces (header, sidebar, login page, footer) read from that store,
- * this single override flips them to the agent identity with no per-component
- * changes.
+ * Fetches GET /api/tenant/current and, for the resolved tenant:
+ *  - when `brand_hidden`, overrides systemName/logo in the system-config store
+ *    (every branding surface reads from it, so all flip with no per-component
+ *    changes);
+ *  - applies the agent's chosen default `theme_preset` for users who have not
+ *    picked their own (no preset cookie). Cookies are host-only, so an agent's
+ *    default never leaks to the main site or other tenants; users keep the
+ *    ability to change the style from the top-right theme menu.
  *
- * No-op on the main site (no tenant → null) and on tenant hosts that have not
- * enabled brand hiding. Applied only after `/api/status` finished loading so the
- * agent brand wins over the just-populated main-site values.
+ * MUST be rendered inside ThemeCustomizationProvider (it calls setPreset).
  */
 export function useTenantBrand() {
   const setConfig = useSystemConfigStore((s) => s.setConfig)
   const statusLoading = useSystemConfigStore((s) => s.loading)
+  const { setPreset } = useThemeCustomization()
 
   const { data } = useQuery({
     queryKey: ['tenant-current-brand'],
@@ -46,6 +54,7 @@ export function useTenantBrand() {
     retry: false,
   })
 
+  // Brand name + logo override (applied after /api/status populated the store).
   useEffect(() => {
     if (statusLoading) return
     if (!data?.brand_hidden) return
@@ -54,4 +63,13 @@ export function useTenantBrand() {
     if (data.logo_url) override.logo = data.logo_url
     if (Object.keys(override).length > 0) setConfig(override)
   }, [statusLoading, data, setConfig])
+
+  // Default theme preset for this tenant's site.
+  useEffect(() => {
+    const preset = data?.theme_preset
+    if (!preset || preset === 'default') return
+    if (!THEME_PRESET_VALUES.has(preset as ThemePreset)) return
+    if (getCookie(THEME_COOKIE_KEYS.preset)) return // user already chose their own
+    setPreset(preset as ThemePreset)
+  }, [data, setPreset])
 }
