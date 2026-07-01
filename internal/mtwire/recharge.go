@@ -12,14 +12,15 @@ package mtwire
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/payment"
@@ -90,20 +91,21 @@ func (s rechargeQuotaSink) OnPaid(ctx context.Context, o payment.PaidOrder) erro
 	// SourceID=o.OrderNo) 幂等落账（须先有 agent_profile）。详见报告「风险/未决」。
 	credited := false
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 幂等台账：order_no 已存在（本单已入账）→ 冲突不插、RowsAffected==0 → 短路不加额度。
-		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rechargeCreditLedgerRow{
+		// 幂等台账：order_no 为主键。已存在（本单已入账）→ 唯一约束冲突 → 短路不加额度。
+		// 用「唯一约束错误」判定幂等，而非 RowsAffected 数值——后者依赖 driver 的 affected/found-rows
+		// 语义（如 DSN 开 clientFoundRows 会使 OnConflict 的 RowsAffected 失真而误判成双扣，审计复核 M-1）。
+		if err := tx.Create(&rechargeCreditLedgerRow{
 			OrderNo:   o.OrderNo,
 			TenantID:  o.TenantID,
 			UserID:    o.UserID,
 			Quota:     int64(q),
 			AmountUSD: o.AmountUSD,
 			CreatedAt: time.Now(),
-		})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return nil // 已入账过 → 幂等短路
+		}).Error; err != nil {
+			if isDuplicateLedgerErr(err) {
+				return nil // 已入账过 → 幂等短路，不重复加额度
+			}
+			return err
 		}
 		credited = true
 		// 与台账写入同事务落 users.quota，二者原子：要么都成、要么都回滚。
@@ -114,9 +116,30 @@ func (s rechargeQuotaSink) OnPaid(ctx context.Context, o payment.PaidOrder) erro
 	}
 	if credited {
 		// DB 已提交。使额度缓存失效（下次读从 DB 重载，缓存永不与 DB 发散——顺带修审计 M5）。
-		_ = model.InvalidateUserCache(int(o.UserID))
+		if cErr := model.InvalidateUserCache(int(o.UserID)); cErr != nil {
+			common.SysLog("recharge credit: invalidate user cache failed (order " + o.OrderNo + "): " + cErr.Error())
+		}
 	}
 	return nil
+}
+
+// isDuplicateLedgerErr 报告是否为唯一约束/主键冲突错误（跨 MySQL/sqlite，driver 无关）。
+// 与 internal/payment/gormrepo.Create 同范式：既认 gorm 翻译错误（TranslateError 开启时，如测试库），
+// 又认原始 driver 错误串（主库未开 TranslateError）——两路兜底，稳过。
+func isDuplicateLedgerErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, frag := range []string{"duplicate entry", "unique constraint", "duplicate key", "duplicated key", "1062"} {
+		if strings.Contains(msg, frag) {
+			return true
+		}
+	}
+	return false
 }
 
 // rechargeQuota 把充值美元额折算为 new-api 内部 quota 单位（$1 = common.QuotaPerUnit）。

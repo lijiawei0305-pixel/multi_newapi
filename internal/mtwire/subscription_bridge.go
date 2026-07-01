@@ -333,9 +333,11 @@ func (a *App) ActivatePaidTokenplanOrder(ctx context.Context, orderNo string, pa
 		return err
 	}
 	// 步骤③完成 → 置 settled，供 ReconcileStuckSubscriptions 区分「已激活但③未落」的卡单。
+	// 置位失败不返错（与 credit.go 末次 CAS 同范式）：分润/记录已幂等落账，仅缺 settled 标记，
+	// 留 settled=false 由 ReconcileStuckSubscriptions 幂等补驱动，避免多余的回调重推。
 	if err := a.DB.WithContext(ctx).Model(&subscriptionOrderRow{}).
 		Where("order_no = ?", orderNo).Update("settled", true).Error; err != nil {
-		return err
+		common.SysLog("activate sub: set settled failed (order " + orderNo + "): " + err.Error())
 	}
 	return nil
 }

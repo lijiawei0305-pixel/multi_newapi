@@ -182,6 +182,9 @@ func (m *providerManager) getSDK(ctx context.Context) (realSDK, error) {
 	// 慢路径：串行化重建（含证书下载）；不持 mu，避免阻塞快路径。
 	m.buildMu.Lock()
 	defer m.buildMu.Unlock()
+	// 在 buildMu 下重算指纹：与随后 buildRealpayConfig 读到的 setting 保持一致（等锁期间凭据可能已变），
+	// 令缓存键 fp 与缓存值 sdk 始终同源，避免标签错位导致的多余重建（审计复核 L-3）。
+	fp = credentialFingerprint()
 	// 复检：等待 buildMu 期间可能已由他人用相同指纹建好。
 	m.mu.Lock()
 	if m.sdk != nil && m.fp == fp {
