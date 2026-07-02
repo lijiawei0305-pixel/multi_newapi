@@ -22,10 +22,8 @@ import { AgentTicketDetail } from '@/features/tickets'
 
 export const Route = createFileRoute('/_authenticated/agent-tickets/$ticketId')({
   beforeLoad: async ({ context, params }) => {
-    const isAgentOwner = await context.queryClient.fetchQuery(
-      agentContextQueryOptions
-    )
-    if (!isAgentOwner) {
+    const ctx = await context.queryClient.fetchQuery(agentContextQueryOptions)
+    if (!ctx.is_agent_owner) {
       throw redirect({ to: '/403' })
     }
     if (!Number.isInteger(Number(params.ticketId))) {

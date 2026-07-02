@@ -20,19 +20,23 @@ import { queryOptions } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 
 /**
- * Agent self-service identity gate.
+ * Agent self-service identity + capability gate.
  *
  * `GET /api/tenant/agent-context` is UserAuth-only (any logged-in user may
  * call it) and returns whether the *current* user owns the *current Host's*
- * tenant — the authoritative `tenant.owner_user_id === session user id` check,
+ * tenant — the authoritative `tenant.owner_user_id === session user id` check
+ * — plus that tenant's `level` (0=普通/basic, 1=独立/independent) and `can_api`,
  * read straight from the DB on the backend. It always responds 200; no
- * tenant / not the owner / not logged in all yield `is_agent_owner === false`.
+ * tenant / not the owner / not logged in all yield the fail-closed defaults
+ * (`is_agent_owner: false, level: 0, can_api: false`).
  *
  * Shared by the sidebar (React `useQuery`) and the route guards (`beforeLoad`
  * via `queryClient.fetchQuery`) so both honour one source of truth.
  */
 export type AgentContext = {
   is_agent_owner: boolean
+  level: number
+  can_api: boolean
 }
 
 type AgentContextEnvelope = {
@@ -40,25 +44,32 @@ type AgentContextEnvelope = {
   data?: Partial<AgentContext> | null
 }
 
+const CLOSED: AgentContext = { is_agent_owner: false, level: 0, can_api: false }
+
 /**
- * Fetch the agent-owner flag for the current Host + session. Any failure
- * (network, 401, non-owner) collapses to `false` so the gate fails closed —
- * the agent menus stay hidden and the guarded routes redirect away.
+ * Fetch the agent context for the current Host + session. Any failure
+ * (network, 401, non-owner) collapses to the fail-closed defaults — the
+ * agent menus stay hidden and the guarded routes redirect away.
  */
-async function fetchAgentContext(): Promise<boolean> {
+async function fetchAgentContext(): Promise<AgentContext> {
   try {
     const res = await api.get<AgentContextEnvelope>(
       '/api/tenant/agent-context',
       { skipBusinessError: true, skipErrorHandler: true }
     )
-    return Boolean(res.data?.data?.is_agent_owner)
+    const d = res.data?.data
+    return {
+      is_agent_owner: Boolean(d?.is_agent_owner),
+      level: Number(d?.level ?? 0),
+      can_api: Boolean(d?.can_api),
+    }
   } catch {
-    return false
+    return CLOSED
   }
 }
 
 /**
- * TanStack Query options for the agent-owner flag. Usable directly with
+ * TanStack Query options for the agent context. Usable directly with
  * `useQuery(agentContextQueryOptions)` and
  * `queryClient.fetchQuery(agentContextQueryOptions)`.
  */

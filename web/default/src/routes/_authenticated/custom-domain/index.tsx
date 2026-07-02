@@ -20,15 +20,15 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 import { agentContextQueryOptions } from '@/lib/agent-context'
 import { CustomDomain } from '@/features/custom-domain'
 
-// Agent self-service (custom domain): accessible only to the agent owner of the
-// current Host's tenant. Non-owners are redirected before the backend rejects
-// with AGENT_FORBIDDEN.
+// Agent self-service (custom domain): an independent-tier capability, so this
+// is accessible only to the agent owner of the current Host's tenant AND only
+// once that tenant is level>=1 (独立/independent). Non-owners and level-0
+// (普通/basic) owners are redirected before the backend rejects with
+// AGENT_FORBIDDEN / AGENT_LEVEL_LOCKED.
 export const Route = createFileRoute('/_authenticated/custom-domain/')({
   beforeLoad: async ({ context }) => {
-    const isAgentOwner = await context.queryClient.fetchQuery(
-      agentContextQueryOptions
-    )
-    if (!isAgentOwner) {
+    const ctx = await context.queryClient.fetchQuery(agentContextQueryOptions)
+    if (!ctx.is_agent_owner || ctx.level < 1) {
       throw redirect({ to: '/403' })
     }
   },

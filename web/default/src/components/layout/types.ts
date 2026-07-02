@@ -41,6 +41,11 @@ type BaseNavItem = {
    * `beforeLoad` guards enforce the same gate independently.
    */
   agentOwnerOnly?: boolean
+  /**
+   * Minimum agent level required to see this item (see `/api/tenant/agent-context`).
+   * Used to gate independent-site items (Custom Domain, Site Branding) at level>=1.
+   */
+  agentLevelMin?: number
 }
 
 /**

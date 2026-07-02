@@ -25,10 +25,8 @@ import { PromotionChannels } from '@/features/promotion-channels'
 // agent's site) are redirected before the backend rejects with AGENT_FORBIDDEN.
 export const Route = createFileRoute('/_authenticated/promotion-channels/')({
   beforeLoad: async ({ context }) => {
-    const isAgentOwner = await context.queryClient.fetchQuery(
-      agentContextQueryOptions
-    )
-    if (!isAgentOwner) {
+    const ctx = await context.queryClient.fetchQuery(agentContextQueryOptions)
+    if (!ctx.is_agent_owner) {
       throw redirect({ to: '/403' })
     }
   },

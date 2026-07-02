@@ -54,8 +54,10 @@ export function useSidebarView(): ResolvedSidebarView {
   const rootSidebarData = useSidebarData()
   const configFilteredRoot = useSidebarConfig(rootSidebarData.navGroups)
   // Fail closed: while the gate is loading (data === undefined) treat the user
-  // as a non-owner so the agent menus never flash for normal users.
-  const isAgentOwner = useQuery(agentContextQueryOptions).data ?? false
+  // as a non-owner / level 0 so the agent menus never flash for normal users.
+  const agentCtx = useQuery(agentContextQueryOptions).data
+  const isAgentOwner = agentCtx?.is_agent_owner ?? false
+  const agentLevel = agentCtx?.level ?? 0
 
   const rootNavGroups = useMemo<NavGroup[]>(() => {
     const role = userRole ?? ROLE.GUEST
@@ -67,11 +69,12 @@ export function useSidebarView(): ResolvedSidebarView {
         const items = group.items.filter(
           (item) =>
             (item.requiredRole === undefined || role >= item.requiredRole) &&
-            (!item.agentOwnerOnly || isAgentOwner)
+            (!item.agentOwnerOnly || isAgentOwner) &&
+            (!item.agentLevelMin || agentLevel >= item.agentLevelMin)
         )
         return items.length === group.items.length ? group : { ...group, items }
       })
-  }, [configFilteredRoot, userRole, isAgentOwner])
+  }, [configFilteredRoot, userRole, isAgentOwner, agentLevel])
 
   const view = resolveSidebarView(pathname)
 

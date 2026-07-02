@@ -198,11 +198,13 @@ export function useSidebarData(): SidebarData {
             title: t('Custom Domain'),
             url: '/custom-domain',
             icon: Globe,
+            agentLevelMin: 1,
           },
           {
             title: t('Site Branding'),
             url: '/site-branding',
             icon: Palette,
+            agentLevelMin: 1,
           },
           {
             title: t('Support Tickets'),

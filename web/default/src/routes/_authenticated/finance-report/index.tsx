@@ -26,10 +26,8 @@ import { AgentFinancialReport } from '@/features/financial-report/agent'
 // endpoints reject with AGENT_FORBIDDEN. Mirrors the agent-earnings gate.
 export const Route = createFileRoute('/_authenticated/finance-report/')({
   beforeLoad: async ({ context }) => {
-    const isAgentOwner = await context.queryClient.fetchQuery(
-      agentContextQueryOptions
-    )
-    if (!isAgentOwner) {
+    const ctx = await context.queryClient.fetchQuery(agentContextQueryOptions)
+    if (!ctx.is_agent_owner) {
       throw redirect({ to: '/403' })
     }
   },
