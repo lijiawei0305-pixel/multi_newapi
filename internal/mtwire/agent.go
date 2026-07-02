@@ -193,8 +193,8 @@ func (a *App) attributeByHost(ctx context.Context, host string, userID int64) {
 }
 
 // creditConsumeCommission 是 agenthook.ConsumeCommission 实现：userId→users.tenant_id→agent
-// commission_ratio→AddEarning。币种换算 收益¥ = 消耗USD × commission_ratio × USDExchangeRate
-// （USD = quotaUnits / QuotaPerUnit）。幂等键 = requestID。best-effort：失败不阻断扣费。
+// level→按档二选一入账（spec agent-tiering §9.9）：level==0 → L0 提成（creditL0Commission）；
+// level≥1 → L1 差价（creditRatioMarkup，Task 13）。幂等键=requestID。best-effort：失败不阻断扣费。
 func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -210,10 +210,26 @@ func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID,
 		return // 主站用户 / 未归属：无代理分润
 	}
 	params, found, err := a.AgentRepo.GetAgentType(ctx, tenantID)
-	if err != nil || !found || params.CommissionRatio <= 0 {
-		return // 该租户未设代理或分润比例为 0
+	if err != nil || !found {
+		return // 该租户未设代理
 	}
-	cny := consumeCommissionCNY(quotaUnits, params.CommissionRatio, operation_setting.USDExchangeRate)
+	// 按档二选一（spec §9.9）：level==0 → L0 提成通路；level≥1 → L1 差价通路。NEVER both——两条路径
+	// 在此分支互斥，绝不重叠调用。
+	if params.Level == 0 {
+		a.creditL0Commission(ctx, tenantID, userID, quotaUnits, requestID, billingSource, params.CommissionRatio)
+		return
+	}
+	a.creditRatioMarkup(ctx, tenantID, userID, quotaUnits, usingGroup, requestID, billingSource, chargedGroupRatio, params.BottomPriceRatio)
+}
+
+// creditL0Commission 是 L0（普通档）计费通路：官方原价提成（commission_ratio × quotaUnits，公式不变，
+// spec §9.5——v2 不再有邀请 9 折，纯提成）。从 creditConsumeCommission 抽出以保持按档分支清晰；
+// panic 由调用方的 defer 统一兜底。
+func (a *App) creditL0Commission(ctx context.Context, tenantID, userID, quotaUnits int64, requestID, billingSource string, commissionRatio float64) {
+	if commissionRatio <= 0 {
+		return
+	}
+	cny := consumeCommissionCNY(quotaUnits, commissionRatio, operation_setting.USDExchangeRate)
 	if cny <= 0 {
 		return
 	}
