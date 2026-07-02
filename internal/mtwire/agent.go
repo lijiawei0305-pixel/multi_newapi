@@ -413,12 +413,28 @@ func (a *App) isAgentOwner(c *gin.Context) bool {
 // 前端据此隐藏代理自助菜单 + 在路由 beforeLoad 拦截直敲 URL，避免普通用户/别站代理触发
 // AGENT_FORBIDDEN。永远 200：无租户/未登录/非 owner → is_agent_owner=false（不 abort）。
 func (a *App) HandleAgentContext(c *gin.Context) {
-	respondOK(c, gin.H{"is_agent_owner": a.isAgentOwner(c)})
+	out := agentContextOut{IsAgentOwner: a.isAgentOwner(c)}
+	if out.IsAgentOwner {
+		if t := tenantFrom(c); t != nil {
+			if p, found, err := a.AgentRepo.GetAgentType(c.Request.Context(), t.ID); err == nil && found {
+				out.Level = p.Level
+				out.CanAPI = p.CanAPI
+			}
+		}
+	}
+	respondOK(c, out)
 }
 
 // ============================================================================
 // DTO（snake_case，对齐 doc/api-contract.md §2.7 与前端 Worker）
 // ============================================================================
+
+// agentContextOut 是 GET /api/tenant/agent-context 响应：前端据此隐藏菜单 + 路由守卫 gate。
+type agentContextOut struct {
+	IsAgentOwner bool `json:"is_agent_owner"`
+	Level        int  `json:"level"`
+	CanAPI       bool `json:"can_api"`
+}
 
 type agentOut struct {
 	ID              int64   `json:"id"` // = tenant_id
