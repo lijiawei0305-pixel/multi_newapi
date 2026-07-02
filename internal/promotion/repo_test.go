@@ -87,3 +87,42 @@ func TestMemRepo_Attribution(t *testing.T) {
 		t.Fatalf("GetAttribution = %+v, %v", got, ok)
 	}
 }
+
+// TestMemRepo_VoidChannelsByTenant 验证作废按租户隔离（不动别的租户）且幂等
+// （重复调用 / 对无渠道租户调用均不报错）。
+func TestMemRepo_VoidChannelsByTenant(t *testing.T) {
+	ctx := context.Background()
+	r := NewMemRepo()
+
+	a := &Channel{TenantID: 1, Prefix: "wechat", ChannelCode: "wechat_a"}
+	b := &Channel{TenantID: 1, Prefix: "weibo", ChannelCode: "weibo_b"}
+	other := &Channel{TenantID: 2, Prefix: "douyin", ChannelCode: "douyin_c"}
+	for _, c := range []*Channel{a, b, other} {
+		if err := r.CreateChannel(ctx, c); err != nil {
+			t.Fatalf("seed channel: %v", err)
+		}
+	}
+
+	if err := r.VoidChannelsByTenant(ctx, 1); err != nil {
+		t.Fatalf("VoidChannelsByTenant err = %v", err)
+	}
+
+	gotA, _ := r.GetChannelByCode(ctx, "wechat_a")
+	gotB, _ := r.GetChannelByCode(ctx, "weibo_b")
+	gotOther, _ := r.GetChannelByCode(ctx, "douyin_c")
+	if !gotA.Voided || !gotB.Voided {
+		t.Fatalf("tenant 1 channels not voided: a.Voided=%v b.Voided=%v", gotA.Voided, gotB.Voided)
+	}
+	if gotOther.Voided {
+		t.Fatal("tenant 2 channel must stay un-voided (scoped by tenant)")
+	}
+
+	// 幂等：重复作废不报错。
+	if err := r.VoidChannelsByTenant(ctx, 1); err != nil {
+		t.Fatalf("repeat VoidChannelsByTenant err = %v, want idempotent no-op", err)
+	}
+	// 无渠道的租户调用不报错。
+	if err := r.VoidChannelsByTenant(ctx, 999); err != nil {
+		t.Fatalf("VoidChannelsByTenant(no channels) err = %v, want nil", err)
+	}
+}

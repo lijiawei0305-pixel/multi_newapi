@@ -129,3 +129,50 @@ func TestAttribution_IdempotentByUser(t *testing.T) {
 		t.Fatalf("dup attribution should be idempotent, got %v", err)
 	}
 }
+
+// TestVoidChannelsByTenant_ScopedAndIdempotent 验证作废按租户隔离（不动别的租户的渠道）且幂等
+// （重复调用 / 对无渠道租户调用均不报错）。代理升级为独立档时由 mtwire.HandleAdminUpdateAgent 调用。
+func TestVoidChannelsByTenant_ScopedAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+
+	a := &promotion.Channel{TenantID: 1, ChannelCode: "v_a"}
+	b := &promotion.Channel{TenantID: 1, ChannelCode: "v_b"}
+	other := &promotion.Channel{TenantID: 2, ChannelCode: "v_other"}
+	for _, c := range []*promotion.Channel{a, b, other} {
+		if err := r.CreateChannel(ctx, c); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	if err := r.VoidChannelsByTenant(ctx, 1); err != nil {
+		t.Fatalf("VoidChannelsByTenant: %v", err)
+	}
+	gotA, err := r.GetChannelByCode(ctx, "v_a")
+	if err != nil {
+		t.Fatalf("get v_a: %v", err)
+	}
+	gotB, err := r.GetChannelByCode(ctx, "v_b")
+	if err != nil {
+		t.Fatalf("get v_b: %v", err)
+	}
+	gotOther, err := r.GetChannelByCode(ctx, "v_other")
+	if err != nil {
+		t.Fatalf("get v_other: %v", err)
+	}
+	if !gotA.Voided || !gotB.Voided {
+		t.Fatalf("tenant 1 channels not voided: a=%v b=%v", gotA.Voided, gotB.Voided)
+	}
+	if gotOther.Voided {
+		t.Fatal("tenant 2 channel must stay un-voided")
+	}
+
+	// 幂等：重复调用不报错。
+	if err := r.VoidChannelsByTenant(ctx, 1); err != nil {
+		t.Fatalf("repeat VoidChannelsByTenant: %v, want idempotent no-op", err)
+	}
+	// 无渠道的租户调用不报错（RowsAffected=0 不是错误）。
+	if err := r.VoidChannelsByTenant(ctx, 999); err != nil {
+		t.Fatalf("VoidChannelsByTenant(no channels): %v, want nil", err)
+	}
+}

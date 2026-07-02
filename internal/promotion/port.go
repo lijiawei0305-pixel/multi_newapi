@@ -13,6 +13,11 @@ type PromotionService interface {
 	// AttributeOnSignup 在用户注册时按 channelCode 绑定其归属的 tenant+channel，并令该渠道
 	// registered_count+1。未知渠道码 -> ErrChannelNotFound。
 	AttributeOnSignup(ctx context.Context, channelCode string, userID int64) error
+	// VoidChannelsByTenant 作废某租户名下的全部推广渠道（代理升级为独立档 level>=1 时自动调用，
+	// 见 mtwire.HandleAdminUpdateAgent）。作废后的渠道不再向*新*注册归属（调用方按 Channel.Voided
+	// 跳过并回落 Host/none）；已归属该渠道的历史用户不受影响。幂等：无渠道 / 已全部作废的租户
+	// 重复调用不报错、无副作用（再次升档 / 重复请求安全）。
+	VoidChannelsByTenant(ctx context.Context, tenantID int64) error
 }
 
 // --- 消费者定义的依赖接口（本包声明，main 装配具体实现）---
@@ -32,4 +37,7 @@ type PromotionRepo interface {
 	IncrRegisteredCount(ctx context.Context, channelID int64) error
 	// CreateAttribution 落库一条用户归属记录（user -> tenant+channel）。
 	CreateAttribution(ctx context.Context, a *Attribution) error
+	// VoidChannelsByTenant 原子地将某租户的全部渠道标记为已作废（voided=true）。
+	// 幂等：无渠道 / 已全部作废的租户调用不报错（受影响行数可为 0，不视为失败）。
+	VoidChannelsByTenant(ctx context.Context, tenantID int64) error
 }
