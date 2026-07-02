@@ -481,6 +481,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	// mt: 代理消耗分润 —— 文本中继结算走本函数（PostTextConsumeQuota），故在此挂钩。
 	// best-effort、幂等键=RequestId（与 PostConsumeQuota 的钩子靠 RequestId 去重，绝不双计）。
 	if agenthook.ConsumeCommission != nil && summary.Quota > 0 {
-		agenthook.ConsumeCommission(int64(relayInfo.UserId), int64(summary.Quota), relayInfo.RequestId, relayInfo.BillingSource)
+		agenthook.ConsumeCommission(int64(relayInfo.UserId), int64(summary.Quota), relayInfo.RequestId, relayInfo.BillingSource,
+			relayInfo.UsingGroup, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
 	}
 }

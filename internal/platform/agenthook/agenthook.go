@@ -14,11 +14,15 @@ import (
 	"github.com/QuantumNous/new-api/types"
 )
 
-// ConsumeCommission 在一次成功的 PostConsume 之后被调用，按所属代理 commission_ratio 计佣入账。
-// 参数：userID=消费用户；quotaUnits=本次消费的 new-api 内部额度单位（$1=common.QuotaPerUnit，可正可负，
-// 实现侧只对正向消费计佣）；requestID=幂等键来源；billingSource="wallet"|"subscription"（区分钱包桶/套餐桶）。
+// ConsumeCommission 在一次成功的 PostConsume 之后被调用，按所属代理档位二选一计佣入账
+// （level==0 → 提成 consume_commission；level≥1 → 差价 ratio_markup；见 mtwire.creditConsumeCommission，
+// Task 14）。参数：userID=消费用户；quotaUnits=本次消费的 new-api 内部额度单位（$1=common.QuotaPerUnit，
+// 可正可负，实现侧只对正向消费计佣）；requestID=幂等键来源；billingSource="wallet"|"subscription"
+// （区分钱包桶/套餐桶）；usingGroup=本次计费实际使用的分组（relayInfo.UsingGroup）；chargedGroupRatio=
+// 本次计费实际生效的组合倍率（用户层级优惠×分组倍率，relayInfo.PriceData.GroupRatioInfo.GroupRatio）——
+// 后两者供 L1 差价入账精确反推 token×ModelRatio，spec agent-tiering §9.4。
 // nil = 未装配。实现必须自身幂等且 best-effort（失败仅记日志，不返回错误）。
-var ConsumeCommission func(userID int64, quotaUnits int64, requestID, billingSource string)
+var ConsumeCommission func(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64)
 
 // AttributeRegistration 在新用户创建后被调用，把用户归属到对应代理（租户）。
 // 归属优先级：渠道码 channelCode（经代理推广链接 /sign-up?channel=<code> 注册）> 注册 Host >

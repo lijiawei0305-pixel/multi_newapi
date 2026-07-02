@@ -195,7 +195,7 @@ func (a *App) attributeByHost(ctx context.Context, host string, userID int64) {
 // creditConsumeCommission 是 agenthook.ConsumeCommission 实现：userId→users.tenant_id→agent
 // commission_ratio→AddEarning。币种换算 收益¥ = 消耗USD × commission_ratio × USDExchangeRate
 // （USD = quotaUnits / QuotaPerUnit）。幂等键 = requestID。best-effort：失败不阻断扣费。
-func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource string) {
+func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64) {
 	defer func() {
 		if r := recover(); r != nil {
 			common.SysError("mtwire: creditConsumeCommission panic recovered")

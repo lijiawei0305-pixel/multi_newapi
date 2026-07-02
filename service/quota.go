@@ -453,7 +453,8 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 	// 钩子内部自身幂等（键=RequestId）且绝不返回错误阻断扣费；未装配（nil）时直接跳过。
 	if relayInfo != nil && agenthook.ConsumeCommission != nil {
 		if total := int64(quota) + int64(preConsumedQuota); total > 0 {
-			agenthook.ConsumeCommission(int64(relayInfo.UserId), total, relayInfo.RequestId, relayInfo.BillingSource)
+			agenthook.ConsumeCommission(int64(relayInfo.UserId), total, relayInfo.RequestId, relayInfo.BillingSource,
+				relayInfo.UsingGroup, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
 		}
 	}
 

@@ -66,6 +66,9 @@ const (
 	SourceTokenplanSpread EarningSource = "tokenplan_spread"
 	// SourceTokenplanCommission 套餐内消耗分润。
 	SourceTokenplanCommission EarningSource = "tokenplan_commission"
+	// SourceRatioMarkup 差价入账（L1/独立档：卖价高于底价的部分，按官方 token×ModelRatio 折算；
+	// spec agent-tiering §9.4）。
+	SourceRatioMarkup EarningSource = "ratio_markup"
 	// SourceManualAdjustment 人工调整（管理员修正，金额可正可负）。
 	SourceManualAdjustment EarningSource = "manual_adjustment"
 )
@@ -74,7 +77,7 @@ const (
 func (s EarningSource) Valid() bool {
 	switch s {
 	case SourceRechargeSpread, SourceConsumeCommission,
-		SourceTokenplanSpread, SourceTokenplanCommission, SourceManualAdjustment:
+		SourceTokenplanSpread, SourceTokenplanCommission, SourceRatioMarkup, SourceManualAdjustment:
 		return true
 	default:
 		return false

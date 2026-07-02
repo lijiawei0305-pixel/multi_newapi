@@ -40,6 +40,7 @@ func TestEarningSource_Valid(t *testing.T) {
 		{SourceConsumeCommission, true},
 		{SourceTokenplanSpread, true},
 		{SourceTokenplanCommission, true},
+		{SourceRatioMarkup, true},
 		{SourceManualAdjustment, true},
 		{EarningSource(""), false},
 		{EarningSource("bonus"), false},
