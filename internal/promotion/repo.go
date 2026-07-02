@@ -83,6 +83,22 @@ func (r *MemRepo) CreateAttribution(_ context.Context, a *Attribution) error {
 	return nil
 }
 
+// VoidChannelsByTenant 把某租户名下的全部渠道标记为已作废；幂等——无渠道 / 已全部作废均不报错。
+func (r *MemRepo) VoidChannelsByTenant(_ context.Context, tenantID int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ts := r.now()
+	for id, c := range r.channels {
+		if c.TenantID != tenantID {
+			continue
+		}
+		c.Voided = true
+		c.UpdatedAt = ts
+		r.channels[id] = c
+	}
+	return nil
+}
+
 // GetAttribution 读取用户的归属记录（供单测断言；非 PromotionRepo 接口方法）。
 func (r *MemRepo) GetAttribution(_ context.Context, userID int64) (*Attribution, bool) {
 	r.mu.RLock()

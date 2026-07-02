@@ -12,8 +12,13 @@ type Channel struct {
 	ChannelCode     string // 完整渠道码 <prefix>_<rand>
 	SignupURL       string // 专属注册链接 /sign-up?channel=<channel_code>
 	RegisteredCount int64  // 经本渠道注册的用户数
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// Voided 标记该渠道是否已作废：代理升级为独立档（level>=1）时由 mtwire.HandleAdminUpdateAgent
+	// 自动置 true（VoidChannelsByTenant）。作废语义仅影响*新*注册的归属——mtwire.attributeByChannel
+	// 命中已作废渠道时跳过按渠道归属、回落 Host/none；已经归属到该渠道的历史用户（users.tenant_id /
+	// promotion_channel_id、agent_promotion_attributions）不受影响、不回滚。
+	Voided    bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Attribution 是“用户经链接/域名注册 → 归属代理 + 渠道”的绑定记录。

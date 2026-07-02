@@ -223,6 +223,58 @@ func (f *faultyRepo) CreateAttribution(context.Context, *Attribution) error {
 	return f.attrErr
 }
 
+// TestVoidChannelsByTenant_Delegates 验证 PromotionService.VoidChannelsByTenant 委派给仓储，
+// 渠道的 Voided 状态真实翻转（代理升级为独立档时的核心行为）。
+func TestVoidChannelsByTenant_Delegates(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newService()
+	ch, err := svc.CreateChannel(ctx, 5, "n", "wechat")
+	if err != nil {
+		t.Fatalf("CreateChannel err = %v", err)
+	}
+	if ch.Voided {
+		t.Fatal("newly created channel must not start voided")
+	}
+
+	if err := svc.VoidChannelsByTenant(ctx, 5); err != nil {
+		t.Fatalf("VoidChannelsByTenant err = %v", err)
+	}
+	got, err := repo.GetChannelByCode(ctx, ch.ChannelCode)
+	if err != nil {
+		t.Fatalf("GetChannelByCode err = %v", err)
+	}
+	if !got.Voided {
+		t.Fatal("channel not voided after VoidChannelsByTenant")
+	}
+
+	// 幂等：重复作废同一租户不报错。
+	if err := svc.VoidChannelsByTenant(ctx, 5); err != nil {
+		t.Fatalf("repeat VoidChannelsByTenant err = %v, want idempotent no-op", err)
+	}
+}
+
+// TestVoidChannelsByTenant_ErrorPropagates 验证仓储错误原样上浮（不吞错）。
+func TestVoidChannelsByTenant_ErrorPropagates(t *testing.T) {
+	ctx := context.Background()
+	sentinel := errors.New("void write failed")
+	repo := &voidFaultyRepo{MemRepo: NewMemRepo(), voidErr: sentinel}
+	svc := NewService(repo)
+	err := svc.VoidChannelsByTenant(ctx, 1)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("err = %v, want sentinel propagated", err)
+	}
+}
+
+// voidFaultyRepo 让 VoidChannelsByTenant 失败，覆盖该方法的错误上浮分支。
+type voidFaultyRepo struct {
+	*MemRepo
+	voidErr error
+}
+
+func (f *voidFaultyRepo) VoidChannelsByTenant(context.Context, int64) error {
+	return f.voidErr
+}
+
 // 编译期断言：MemRepo 满足 PromotionRepo。
 var _ PromotionRepo = (*MemRepo)(nil)
 

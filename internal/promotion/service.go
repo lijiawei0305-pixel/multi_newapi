@@ -72,3 +72,9 @@ func (s *promotionService) AttributeOnSignup(ctx context.Context, channelCode st
 	}
 	return s.repo.IncrRegisteredCount(ctx, ch.ID)
 }
+
+// VoidChannelsByTenant 作废某租户名下的全部推广渠道（代理升级为独立档时自动调用）。薄委派仓储；
+// 幂等性由仓储实现保证（重复调用 / 无渠道租户均不报错）。
+func (s *promotionService) VoidChannelsByTenant(ctx context.Context, tenantID int64) error {
+	return s.repo.VoidChannelsByTenant(ctx, tenantID)
+}

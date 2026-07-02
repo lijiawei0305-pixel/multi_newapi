@@ -33,6 +33,7 @@ type channelRow struct {
 	Code            string    `gorm:"column:code;type:varchar(64);not null;uniqueIndex:idx_apc_code"`
 	Name            string    `gorm:"column:name;type:varchar(128);not null;default:''"`
 	RegisteredCount int64     `gorm:"column:registered_count;not null;default:0"`
+	Voided          bool      `gorm:"column:voided;not null;default:false"`
 	CreatedAt       time.Time `gorm:"column:created_at"`
 	UpdatedAt       time.Time `gorm:"column:updated_at"`
 }
@@ -155,6 +156,15 @@ func (r *Repo) ListChannelsByTenant(ctx context.Context, tenantID int64) ([]prom
 	return out, nil
 }
 
+// VoidChannelsByTenant 原子地将某租户的全部渠道标记为已作废（voided=true）；幂等——无渠道 /
+// 已全部作废的租户调用不报错（RowsAffected 可为 0，不视为失败）。由 mtwire.HandleAdminUpdateAgent
+// 在代理升级为独立档（level>=1）时调用。
+func (r *Repo) VoidChannelsByTenant(ctx context.Context, tenantID int64) error {
+	return r.db.WithContext(ctx).Model(&channelRow{}).
+		Where("tenant_id = ?", tenantID).
+		Update("voided", true).Error
+}
+
 // toChannel 把 DB 行映射为 domain 模型（Prefix/SignupURL 不持久化，列表/创建响应无需）。
 func toChannel(row *channelRow) *promotion.Channel {
 	return &promotion.Channel{
@@ -163,6 +173,7 @@ func toChannel(row *channelRow) *promotion.Channel {
 		Name:            row.Name,
 		ChannelCode:     row.Code,
 		RegisteredCount: row.RegisteredCount,
+		Voided:          row.Voided,
 		CreatedAt:       row.CreatedAt,
 		UpdatedAt:       row.UpdatedAt,
 	}
