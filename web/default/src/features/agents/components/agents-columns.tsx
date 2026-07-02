@@ -22,7 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import type { Agent } from '../types'
-import { agentStatusMeta, agentTypeLabel, cny, num } from '../lib'
+import { agentStatusMeta, agentLevelLabel, cny, num } from '../lib'
 import { DataTableRowActions } from './data-table-row-actions'
 
 export function useAgentsColumns(): ColumnDef<Agent>[] {
@@ -62,30 +62,18 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
         size: 160,
       },
       {
-        accessorFn: (row) => row.type,
-        id: 'type',
-        header: t('Type'),
-        meta: { mobileBadge: true },
-        cell: ({ row }) => (
-          <StatusBadge
-            label={agentTypeLabel(row.original.type, t)}
-            variant='info'
-            copyable={false}
-          />
-        ),
-        size: 90,
-      },
-      {
         accessorFn: (row) => row.level,
         id: 'level',
         header: t('Level'),
-        meta: { mobileHidden: true },
+        meta: { mobileBadge: true },
         cell: ({ row }) => (
-          <span className='text-muted-foreground tabular-nums'>
-            {row.original.level}
-          </span>
+          <StatusBadge
+            label={agentLevelLabel(row.original.level, t)}
+            variant={row.original.level >= 1 ? 'info' : 'neutral'}
+            copyable={false}
+          />
         ),
-        size: 70,
+        size: 110,
       },
       {
         accessorFn: (row) => row.cost_price_cny,

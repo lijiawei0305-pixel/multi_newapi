@@ -120,7 +120,6 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
         isEdit && currentRow?.id
           ? await updateAgent(currentRow.id, {
               name: payload.name,
-              type: payload.type,
               cost_price_cny: payload.cost_price_cny,
               package_discount: payload.package_discount,
               commission_ratio: payload.commission_ratio,
@@ -251,45 +250,30 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
 
                 <FormField
                   control={form.control}
-                  name='type'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Agent Type')}</FormLabel>
-                      <FormControl>
-                        <NativeSelect
-                          value={field.value}
-                          onChange={(e) => field.onChange(e.target.value)}
-                        >
-                          <NativeSelectOption value='normal'>
-                            {t('Normal')}
-                          </NativeSelectOption>
-                          <NativeSelectOption value='oem'>
-                            {t('OEM')}
-                          </NativeSelectOption>
-                          <NativeSelectOption value='api'>
-                            {t('API')}
-                          </NativeSelectOption>
-                        </NativeSelect>
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
                   name='level'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Level')}</FormLabel>
+                      <FormLabel>{t('Agent Level')}</FormLabel>
                       <FormControl>
-                        <Input
-                          {...field}
-                          type='number'
-                          min={0}
-                          onChange={numberChange(field.onChange, true)}
-                        />
+                        <NativeSelect
+                          value={String(field.value ?? 0)}
+                          onChange={(e) =>
+                            field.onChange(Number(e.target.value) || 0)
+                          }
+                        >
+                          <NativeSelectOption value='0'>
+                            {t('Basic Agent')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='1'>
+                            {t('Independent Agent')}
+                          </NativeSelectOption>
+                        </NativeSelect>
                       </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Independent unlocks subdomain, custom domain and site branding. Promote manually when the agent performs well.'
+                        )}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

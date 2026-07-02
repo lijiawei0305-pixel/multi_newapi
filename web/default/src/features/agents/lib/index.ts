@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
 import type { StatusVariant } from '@/components/status-badge'
-import type { AgentType } from '../types'
 
 export {
   getAgentFormSchema,
@@ -36,18 +35,9 @@ export const num = (v: number | undefined) => {
   return Number.isInteger(n) ? String(n) : n.toFixed(2)
 }
 
-/** i18n label for an agent type. */
-export function agentTypeLabel(type: AgentType | string, t: TFunction): string {
-  switch (type) {
-    case 'oem':
-      return t('OEM')
-    case 'api':
-      return t('API')
-    case 'normal':
-      return t('Normal')
-    default:
-      return String(type || '-')
-  }
+/** i18n label for an agent level (0=普通/basic, 1=独立/independent). */
+export function agentLevelLabel(level: number, t: TFunction): string {
+  return level >= 1 ? t('Independent Agent') : t('Basic Agent')
 }
 
 /** Badge styling + i18n label for an agent status (tolerant of backend values). */

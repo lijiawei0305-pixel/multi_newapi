@@ -21,7 +21,7 @@ For commercial licensing, please contact support@quantumnous.com
 // Sub-agent management — Admin types.
 //
 // Mirrors the field contract aligned with the backend Worker (snake_case):
-//   id / owner_user_id / owner_username / slug / name / type / level /
+//   id / owner_user_id / owner_username / slug / name / level /
 //   cost_price_cny / package_discount / commission_ratio / status /
 //   withdrawable_cny / frozen_cny / total_earned_cny
 // Backed by GET/POST/PATCH /api/admin/agents[/:id]. Auth is carried by
@@ -29,19 +29,14 @@ For commercial licensing, please contact support@quantumnous.com
 // identical to every other admin page.
 // ============================================================================
 
-/** Agent tier — plain distributor, OEM (white-label), or open-API reseller. */
-export const agentTypeValues = ['normal', 'oem', 'api'] as const
-export type AgentType = (typeof agentTypeValues)[number]
-
-/** One row of the admin agent table. `status` is kept as a tolerant string
- *  because the backend may emit enabled/disabled/active/suspended/etc. */
+/** One row of the admin agent table. `status` is a tolerant string; `level`
+ *  drives capability gating (0=普通/basic, 1=独立/independent). */
 export interface Agent {
   id: number
   owner_user_id: number
   owner_username: string
   slug: string
   name: string
-  type: AgentType
   level: number
   /** 成本价 — main-site cost basis for this agent (¥). */
   cost_price_cny: number
@@ -71,7 +66,6 @@ export interface AgentPayload {
   owner_user_id: number
   slug: string
   name: string
-  type: AgentType
   cost_price_cny: number
   package_discount: number
   commission_ratio: number

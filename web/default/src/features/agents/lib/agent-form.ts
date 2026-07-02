@@ -28,7 +28,6 @@ export function getAgentFormSchema(t: TFunction) {
       .min(1, t('Please select an owner user')),
     slug: z.string().min(1, t('Please enter a slug')),
     name: z.string().min(1, t('Please enter agent name')),
-    type: z.enum(['normal', 'oem', 'api']),
     cost_price_cny: z.coerce.number().min(0, t('Please enter amount')),
     package_discount: z.coerce.number().min(0),
     commission_ratio: z.coerce.number().min(0),
@@ -42,11 +41,10 @@ export const AGENT_FORM_DEFAULTS: AgentFormValues = {
   owner_user_id: 0,
   slug: '',
   name: '',
-  type: 'normal',
   cost_price_cny: 0,
   package_discount: 1,
   commission_ratio: 0,
-  level: 1,
+  level: 0,
 }
 
 export function agentToFormValues(agent: Agent): AgentFormValues {
@@ -54,7 +52,6 @@ export function agentToFormValues(agent: Agent): AgentFormValues {
     owner_user_id: Number(agent.owner_user_id || 0),
     slug: agent.slug || '',
     name: agent.name || '',
-    type: agent.type || 'normal',
     cost_price_cny: Number(agent.cost_price_cny || 0),
     package_discount: Number(agent.package_discount ?? 1),
     commission_ratio: Number(agent.commission_ratio || 0),
@@ -67,7 +64,6 @@ export function formValuesToPayload(values: AgentFormValues): AgentPayload {
     owner_user_id: Number(values.owner_user_id || 0),
     slug: values.slug.trim(),
     name: values.name.trim(),
-    type: values.type,
     cost_price_cny: Number(values.cost_price_cny || 0),
     package_discount: Number(values.package_discount || 0),
     commission_ratio: Number(values.commission_ratio || 0),
