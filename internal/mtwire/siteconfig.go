@@ -108,19 +108,23 @@ func (a *App) effectiveSiteConfig(ctx context.Context, t *tenant.Tenant) *siteco
 // ---- 代理自助 handlers ----
 
 // HandleAgentGetSiteConfig GET /api/tenant/site-config —— 读当前租户装修配置（含回退默认）。
+// 租户一律取自 agentTenantID(c)（AgentOwnerAuthByUser 校验过的 owner 租户），绝不用 tenantFrom(c)
+// （Host 租户）——否则调用者的 Host 若解析到别的租户，会读到别人的装修配置（越权读，Fix 2）。
 func (a *App) HandleAgentGetSiteConfig(c *gin.Context) {
 	if !a.ensureAgentLevel(c, 1) {
 		return
 	}
-	t := tenantFrom(c)
-	if t == nil {
-		respondErr(c, tenant.ErrTenantNotFound)
+	t, err := a.TenantService.Get(c.Request.Context(), agentTenantID(c))
+	if err != nil {
+		respondErr(c, err) // TENANT_NOT_FOUND
 		return
 	}
 	respondOK(c, siteConfigOut(a.effectiveSiteConfig(c.Request.Context(), t)))
 }
 
 // HandleAgentUpdateSiteConfig PUT /api/tenant/site-config —— 局部更新装修配置（受控字段校验在包内）。
+// 读/改/鉴权三处租户一律取自 agentTenantID(c)，与 HandleAgentGetSiteConfig 同一口径（Fix 2）；
+// 绝不用 tenantFrom(c)（Host 租户）—— 其在无 Host→租户映射时（如主站）为 nil，用于响应会 nil-deref。
 func (a *App) HandleAgentUpdateSiteConfig(c *gin.Context) {
 	if !a.ensureAgentLevel(c, 1) {
 		return
@@ -135,7 +139,11 @@ func (a *App) HandleAgentUpdateSiteConfig(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
-	t := tenantFrom(c)
+	t, err := a.TenantService.Get(c.Request.Context(), tenantID)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
 	respondOK(c, siteConfigOut(a.effectiveSiteConfig(c.Request.Context(), t)))
 }
 

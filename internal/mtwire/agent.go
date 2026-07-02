@@ -416,37 +416,41 @@ func (a *App) RequireAgentLevel(min int) gin.HandlerFunc {
 	}
 }
 
-// isAgentOwner 复用 AgentOwnerAuth 的**权威**判定（Host 解析出的租户 owner_user_id == 当前 session
-// 用户 id；直读 DB 绕过解析缓存），但以布尔返回而非中止请求。无租户（主站/未知 Host）/ 未登录 /
-// 非 owner / 直读失败一律 false（绝不抛错）。供前端门控信号端点（HandleAgentContext）使用。
-func (a *App) isAgentOwner(c *gin.Context) bool {
-	t := tenantFrom(c)
-	if t == nil {
-		return false // 主站 / 未知 Host：无租户即非代理 owner
-	}
+// callerOwnedTenant 返回当前 session 用户拥有的租户（owner-based：TenantByOwner，与 Host 无关，
+// 镜像 AgentOwnerAuthByUser 的解析口径）——L0 无子域名、请求打在主站 Host 上时也能命中自己的租户。
+// 未登录 / 不拥有任何租户（含 ErrTenantNotFound）/ 查询失败一律 nil（绝不抛错，调用方保守判非 owner）。
+func (a *App) callerOwnedTenant(c *gin.Context) *tenant.Tenant {
 	userID := int64(c.GetInt("id"))
 	if userID <= 0 {
-		return false // 未登录
+		return nil // 未登录
 	}
-	owner, err := a.TenantRepo.OwnerUserID(c.Request.Context(), t.ID)
+	t, err := a.TenantRepo.TenantByOwner(c.Request.Context(), userID)
 	if err != nil {
-		return false // 租户不存在 / 查询失败：保守判 false
+		return nil // 不拥有任何租户 / 查询失败：保守判 false
 	}
-	return owner == userID
+	return t
+}
+
+// isAgentOwner 判定当前 session 用户是否拥有某个代理租户（owner-based、Host 无关，见
+// callerOwnedTenant）。供前端门控信号端点（HandleAgentContext）使用。
+func (a *App) isAgentOwner(c *gin.Context) bool {
+	return a.callerOwnedTenant(c) != nil
 }
 
 // HandleAgentContext GET /api/tenant/agent-context —— 代理身份门控信号。**仅 UserAuth**（不挂
-// AgentOwnerAuth），任何登录用户可调；返回当前用户是否为「当前 Host 所指租户」的代理 owner。
-// 前端据此隐藏代理自助菜单 + 在路由 beforeLoad 拦截直敲 URL，避免普通用户/别站代理触发
-// AGENT_FORBIDDEN。永远 200：无租户/未登录/非 owner → is_agent_owner=false（不 abort）。
+// AgentOwnerAuth/AgentOwnerAuthByUser），任何登录用户可调；返回当前用户是否拥有某个代理租户
+// ——owner-based 解析（TenantByOwner），与 Host 无关：L0 无子域名、请求打在主站 Host 上也必须能
+// 命中，前端代理自助 UI（侧栏 + 10 处路由守卫）才对 L0 可达（Fix 1：此前用 Host 租户判定，L0 因无
+// 子域名而永远 false，UI 不可达）。前端据此隐藏代理自助菜单 + 在路由 beforeLoad 拦截直敲 URL，避免
+// 普通用户/别站代理触发 AGENT_FORBIDDEN。永远 200：未登录/非 owner/查询失败 → is_agent_owner=false
+// （不 abort）。
 func (a *App) HandleAgentContext(c *gin.Context) {
-	out := agentContextOut{IsAgentOwner: a.isAgentOwner(c)}
-	if out.IsAgentOwner {
-		if t := tenantFrom(c); t != nil {
-			if p, found, err := a.AgentRepo.GetAgentType(c.Request.Context(), t.ID); err == nil && found {
-				out.Level = p.Level
-				out.CanAPI = p.CanAPI
-			}
+	out := agentContextOut{}
+	if t := a.callerOwnedTenant(c); t != nil {
+		out.IsAgentOwner = true
+		if p, found, err := a.AgentRepo.GetAgentType(c.Request.Context(), t.ID); err == nil && found {
+			out.Level = p.Level
+			out.CanAPI = p.CanAPI
 		}
 	}
 	respondOK(c, out)
@@ -683,17 +687,20 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 	if in.DiscountFloor != nil {
 		curParams.DiscountFloor = *in.DiscountFloor
 	}
-	// SetAgentType 内含参数 + 折扣保护线校验（非法即上浮，不落库）。
-	if err := a.AgentService.SetAgentType(ctx, tenantID, curParams); err != nil {
-		respondErr(c, err)
-		return
-	}
-	// 升档 → 独立档：幂等派生子域名 `<slug>.wedreamhub.com`（resolver 不缓存负结果，无需失效缓存）。
+	// 升档 → 独立档：先幂等派生子域名 `<slug>.wedreamhub.com`（resolver 不缓存负结果，无需失效缓存），
+	// 成功后才落 level（原子性：EnsureSubdomain 失败绝不能让代理停在「level=1 但无子域名」——那会
+	// 解锁独立档自助能力却没有可用站点，见复盘 Fix 3）。EnsureSubdomain 本身幂等，对已是 L1 的代理
+	// 重复调用无副作用，故重排序对既有（已是 L1 / 不升档）流程安全。
 	if in.Level != nil && *in.Level >= 1 {
 		if err := a.TenantService.EnsureSubdomain(ctx, tenantID, t.Slug); err != nil {
 			respondErr(c, err)
 			return
 		}
+	}
+	// SetAgentType 内含参数 + 折扣保护线校验（非法即上浮，不落库）。
+	if err := a.AgentService.SetAgentType(ctx, tenantID, curParams); err != nil {
+		respondErr(c, err)
+		return
 	}
 	// 可选：更新租户名 / 状态。
 	if in.Name != nil && *in.Name != "" {
