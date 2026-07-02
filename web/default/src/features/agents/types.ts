@@ -78,3 +78,10 @@ export type AgentUpdatePayload = Partial<
 >
 
 export type AgentsDialogType = 'create' | 'update'
+
+/** Read-only promotion-decision metrics for one agent (GET /api/admin/agents/:id/metrics). */
+export interface AgentMetrics {
+  recharge_total_cny: number
+  commission_earned_cny: number
+  downstream_user_count: number
+}

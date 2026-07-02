@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import type {
   Agent,
+  AgentMetrics,
   AgentPayload,
   AgentUpdatePayload,
   ApiResponse,
@@ -45,5 +46,12 @@ export async function updateAgent(
   data: AgentUpdatePayload
 ): Promise<ApiResponse<Agent>> {
   const res = await api.patch(`/api/admin/agents/${id}`, data)
+  return res.data
+}
+
+export async function getAgentMetrics(
+  id: number
+): Promise<ApiResponse<AgentMetrics>> {
+  const res = await api.get(`/api/admin/agents/${id}/metrics`)
   return res.data
 }

@@ -20,7 +20,7 @@ import { useEffect, useState } from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
-import { CreditCard, UserCog } from 'lucide-react'
+import { CreditCard, TrendingUp, UserCog } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { getUsers } from '@/features/users/api'
@@ -55,10 +55,11 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
-import { createAgent, updateAgent } from '../api'
+import { createAgent, getAgentMetrics, updateAgent } from '../api'
 import {
   AGENT_FORM_DEFAULTS,
   agentToFormValues,
+  cny,
   formValuesToPayload,
   getAgentFormSchema,
   type AgentFormValues,
@@ -97,6 +98,14 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
     },
     enabled: open && !isEdit,
   })
+
+  // Read-only promotion metrics — only when editing an existing agent.
+  const { data: metricsRes } = useQuery({
+    queryKey: ['admin-agent-metrics', currentRow?.id],
+    queryFn: () => (currentRow?.id ? getAgentMetrics(currentRow.id) : null),
+    enabled: open && isEdit && !!currentRow?.id,
+  })
+  const metrics = metricsRes?.data
 
   const schema = getAgentFormSchema(t)
   const form = useForm<AgentFormValues>({
@@ -280,6 +289,46 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                 />
               </div>
             </SideDrawerSection>
+
+            {isEdit && (
+              <SideDrawerSection>
+                <h3 className='flex items-center gap-2 text-sm font-medium'>
+                  <TrendingUp className='h-4 w-4' />
+                  {t('Promotion metrics')}
+                </h3>
+                <div className='grid grid-cols-3 gap-3'>
+                  <div className='rounded-md border p-3'>
+                    <div className='text-xs text-muted-foreground'>
+                      {t('Total recharge (¥)')}
+                    </div>
+                    <div className='text-lg font-semibold'>
+                      {metrics ? cny(metrics.recharge_total_cny) : '—'}
+                    </div>
+                  </div>
+                  <div className='rounded-md border p-3'>
+                    <div className='text-xs text-muted-foreground'>
+                      {t('Commission earned (¥)')}
+                    </div>
+                    <div className='text-lg font-semibold'>
+                      {metrics ? cny(metrics.commission_earned_cny) : '—'}
+                    </div>
+                  </div>
+                  <div className='rounded-md border p-3'>
+                    <div className='text-xs text-muted-foreground'>
+                      {t('Downstream users')}
+                    </div>
+                    <div className='text-lg font-semibold'>
+                      {metrics ? String(metrics.downstream_user_count) : '—'}
+                    </div>
+                  </div>
+                </div>
+                <FormDescription>
+                  {t(
+                    'Lifetime totals to help you decide whether to promote this agent to independent (level 1).'
+                  )}
+                </FormDescription>
+              </SideDrawerSection>
+            )}
 
             {/* Commercials */}
             <SideDrawerSection>
