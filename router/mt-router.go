@@ -175,6 +175,7 @@ func SetMtRouter(router *gin.Engine) {
 		adminAgentGroup.GET("", app.HandleAdminListAgents)
 		adminAgentGroup.POST("", app.HandleAdminCreateAgent)
 		adminAgentGroup.PATCH("/:id", app.HandleAdminUpdateAgent)
+		adminAgentGroup.GET("/:id/metrics", app.HandleAdminAgentMetrics) // 升档决策指标（只读）
 	}
 
 	// 主站财务报表（全局跨租户，非 Host 维度）：汇总 / 趋势 / 代理排行 / 明细（明细支持 ?format=csv|pdf 导出）。

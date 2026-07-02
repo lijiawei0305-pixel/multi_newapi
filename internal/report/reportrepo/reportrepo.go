@@ -1318,6 +1318,19 @@ func (r *Repo) scopeUserIDs(ctx context.Context, tenantID *int64) ([]int64, erro
 	return ids, nil
 }
 
+// CountTenantUsers 返回归属某租户的下级用户数（软删除排除），与 scopeUserIDs 同过滤口径
+// （tenant_id=? AND deleted_at IS NULL）。供 admin 代理升档决策指标（无现成 per-agent 用户计数聚合，
+// 故补此一条薄查询）。
+func (r *Repo) CountTenantUsers(ctx context.Context, tenantID int64) (int64, error) {
+	var n int64
+	if err := r.db.WithContext(ctx).Table("users").
+		Where("tenant_id = ? AND deleted_at IS NULL", tenantID).
+		Count(&n).Error; err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // scopeUserTenant 取 scope 内 user_id→tenant_id 映射（分库降级用）。
 func (r *Repo) scopeUserTenant(ctx context.Context, tenantID *int64) (map[int64]int64, error) {
 	var rows []struct {

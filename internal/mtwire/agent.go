@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -479,6 +480,14 @@ type agentOut struct {
 	TotalEarnedCNY  float64 `json:"total_earned_cny"`
 }
 
+// agentMetricsOut 是 GET /api/admin/agents/:id/metrics 响应：代理升档决策的只读指标
+// （总充值 / 累计分润 / 下级用户数），复用 reportrepo 财务聚合 + 一条下级计数薄查询。
+type agentMetricsOut struct {
+	RechargeTotalCNY    float64 `json:"recharge_total_cny"`
+	CommissionEarnedCNY float64 `json:"commission_earned_cny"`
+	DownstreamUserCount int64   `json:"downstream_user_count"`
+}
+
 type withdrawalOut struct {
 	ID         int64   `json:"id"`
 	TenantID   int64   `json:"tenant_id"`
@@ -702,6 +711,45 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 		t.Status = tenant.TenantStatus(*in.Status)
 	}
 	respondOK(c, a.buildAgentOut(ctx, tenantID, t.OwnerUserID, t.Slug, t.Name, string(t.Status), curParams))
+}
+
+// HandleAdminAgentMetrics GET /api/admin/agents/:id/metrics —— 代理升档决策指标（需 AdminAuth；id=tenant_id）。
+// 只读复用 reportrepo：总充值=RechargePaid([1,now] 求和)；分润收益=WalletTotals.TotalEarnedCNY（累计）；
+// 下级用户数=CountTenantUsers（薄查询）。绝不接受客户端传除 :id 外的任何口径。
+func (a *App) HandleAdminAgentMetrics(c *gin.Context) {
+	tenantID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || tenantID <= 0 {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	ctx := reqCtx(c)
+	// 总充值：生命周期窗口 [1, now] 上复用 RechargePaid（单租户 map 至多一条，求和即总额）。
+	rechargeMap, err := a.ReportRepo.RechargePaid(ctx, &tenantID, 1, time.Now().Unix())
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	var rechargeTotal float64
+	for _, v := range rechargeMap {
+		rechargeTotal += v
+	}
+	// 分润收益：钱包累计已赚（生命周期；缺行返回零值不报错）。
+	wallet, err := a.ReportRepo.WalletTotals(ctx, &tenantID)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	// 下级用户数：薄计数查询（tenant_id=? AND deleted_at IS NULL）。
+	userCount, err := a.ReportRepo.CountTenantUsers(ctx, tenantID)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	respondOK(c, agentMetricsOut{
+		RechargeTotalCNY:    round2(rechargeTotal),
+		CommissionEarnedCNY: round2(wallet.TotalEarnedCNY),
+		DownstreamUserCount: userCount,
+	})
 }
 
 // ============================================================================
