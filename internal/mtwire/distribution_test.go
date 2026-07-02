@@ -12,6 +12,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/agent"
+	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
 	"github.com/QuantumNous/new-api/internal/modelgroup"
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
 )
@@ -138,7 +140,9 @@ func TestHandleAgentSetUserTier(t *testing.T) {
 
 // ---- 代理调模型分组倍率（PUT /api/tenant/groups/:group, GET /api/tenant/groups）----
 
-// newGroupRatioApp 装配 App：sqlite + model_groups + users + tenant_groups + Repos。
+// newGroupRatioApp 装配 App：sqlite + model_groups + users + tenant_groups + agent 四表 + Repos。
+// AgentRepo/AgentService 供 ensureAgentLevel（level 门禁）+ consumeFloorRatio（该代理底价，Task 12/
+// spec §9.7）用；同一份底层 sqlite 存储，SetAgentType 写入的档位/底价对两者立即可见（无缓存分歧）。
 func newGroupRatioApp(t *testing.T) *App {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
@@ -156,13 +160,23 @@ func newGroupRatioApp(t *testing.T) *App {
 	if err := tenantrepo.AutoMigrate(db); err != nil {
 		t.Fatalf("tenant migrate: %v", err)
 	}
-	return &App{DB: db, ModelGroupRepo: modelgroup.New(db), TenantRepo: tenantrepo.New(db)}
+	if err := agentrepo.AutoMigrate(db); err != nil {
+		t.Fatalf("agent migrate: %v", err)
+	}
+	ar := agentrepo.New(db)
+	return &App{
+		DB: db, ModelGroupRepo: modelgroup.New(db), TenantRepo: tenantrepo.New(db),
+		AgentRepo: ar, AgentService: agent.NewService(ar, nil),
+	}
 }
 
 func TestHandleAgentSetGroupRatio(t *testing.T) {
 	app := newGroupRatioApp(t)
 	ctx := context.Background()
 	const tenantID = int64(7)
+	if err := app.AgentService.SetAgentType(ctx, tenantID, agent.AgentParams{Level: 1}); err != nil { // Task 12 门禁：需 L1
+		t.Fatalf("set L1: %v", err)
+	}
 	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
 		t.Fatalf("register claude-kiro: %v", err)
 	}
@@ -248,5 +262,116 @@ func TestHandleAgentListGroups(t *testing.T) {
 	}
 	if plus.GroupName != "openai-plus" || plus.HasOverride || plus.Ratio != 0.5 || plus.PlatformRatio != 0.5 || plus.Floor != 0.5 {
 		t.Fatalf("openai-plus row wrong: %+v", plus)
+	}
+}
+
+// TestHandleAgentSetGroupRatio_RequiresLevel1 覆盖分层门禁（spec §9.5）：L0（普通档）设卖价 →
+// 403 AGENT_LEVEL_LOCKED，且不落 tenant_groups；L1（独立档）→ 200 放行（既有校验——下限/仅模型
+// 分组——照常生效）。
+func TestHandleAgentSetGroupRatio_RequiresLevel1(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register claude-kiro: %v", err)
+	}
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios
+
+	if err := app.AgentService.SetAgentType(ctx, 70, agent.AgentParams{Level: 0}); err != nil {
+		t.Fatalf("set L0: %v", err)
+	}
+	if err := app.AgentService.SetAgentType(ctx, 71, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set L1: %v", err)
+	}
+
+	c, rec := newAgentCtx(70, "PUT", `{"ratio":0.4}`, gin.Params{{Key: "group", Value: "claude-kiro"}})
+	app.HandleAgentSetGroupRatio(c)
+	if r := decodeResp(t, rec); r.Success || r.Code != "AGENT_LEVEL_LOCKED" {
+		t.Fatalf("L0 must be locked, got %+v", r)
+	}
+	if _, found, _ := app.TenantRepo.LookupEnabledGroupRatio(ctx, 70, "claude-kiro"); found {
+		t.Fatal("L0 must not have persisted a group override")
+	}
+
+	c, rec = newAgentCtx(71, "PUT", `{"ratio":0.4}`, gin.Params{{Key: "group", Value: "claude-kiro"}})
+	app.HandleAgentSetGroupRatio(c)
+	if r := decodeResp(t, rec); !r.Success {
+		t.Fatalf("L1 should be allowed, got %+v", r)
+	}
+}
+
+// TestHandleAgentSetGroupRatio_FloorUsesAgentBottomPriceRatio 是本任务的核心用例（spec §9.7）：
+// 一旦该代理配置了 BottomPriceRatio，卖价下限改用它而非全局平台基准——即便该值高于平台基准，
+// 曾经合法的加价现在也可能被挡（下限收紧，不是放宽）。
+func TestHandleAgentSetGroupRatio_FloorUsesAgentBottomPriceRatio(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	const tenantID = int64(72)
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register claude-kiro: %v", err)
+	}
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios // claude-kiro 平台基准 = 0.3
+
+	// 该代理底价 0.5（高于平台基准 0.3）。
+	if err := app.AgentService.SetAgentType(ctx, tenantID, agent.AgentParams{Level: 1, BottomPriceRatio: 0.5}); err != nil {
+		t.Fatalf("set L1 with bottom price ratio: %v", err)
+	}
+
+	// 0.4：曾经（对平台基准=0.3 而言）合法，但现在 < 该代理底价 0.5 → 拒。
+	c, rec := newAgentCtx(tenantID, "PUT", `{"ratio":0.4}`, gin.Params{{Key: "group", Value: "claude-kiro"}})
+	app.HandleAgentSetGroupRatio(c)
+	if r := decodeResp(t, rec); r.Success || r.Code != "RATIO_BELOW_FLOOR" {
+		t.Fatalf("0.4 must be rejected by the agent's own 0.5 floor, got %+v", r)
+	}
+
+	// 0.5：等于该代理底价 → 放行（边界=允许，同 pricing.Guard.ValidateGroupRatio 的既有语义）。
+	c, rec = newAgentCtx(tenantID, "PUT", `{"ratio":0.5}`, gin.Params{{Key: "group", Value: "claude-kiro"}})
+	app.HandleAgentSetGroupRatio(c)
+	if r := decodeResp(t, rec); !r.Success {
+		t.Fatalf("0.5 (== agent floor) should be admitted, got %+v", r)
+	}
+}
+
+// TestHandleAgentListGroups_FloorReflectsAgentBottomPriceRatio 覆盖 spec §9.7 的展示口径：
+// Floor 字段跟随该代理的 BottomPriceRatio；PlatformRatio 保持平台基准不变（两者语义分离）。
+func TestHandleAgentListGroups_FloorReflectsAgentBottomPriceRatio(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	const tenantID = int64(73)
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register claude-kiro: %v", err)
+	}
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios // claude-kiro 平台基准 = 0.3
+	if err := app.AgentService.SetAgentType(ctx, tenantID, agent.AgentParams{Level: 1, BottomPriceRatio: 0.6}); err != nil {
+		t.Fatalf("set L1 with bottom price ratio: %v", err)
+	}
+
+	c, rec := newAgentCtx(tenantID, "GET", "", nil)
+	app.HandleAgentListGroups(c)
+	r := decodeResp(t, rec)
+	if !r.Success {
+		t.Fatalf("list groups should succeed, got %+v", r)
+	}
+	var rows []modelGroupRatioOut
+	if err := json.Unmarshal(r.Data, &rows); err != nil {
+		t.Fatalf("decode rows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want 1 model group, got %d (%+v)", len(rows), rows)
+	}
+	row := rows[0]
+	if row.PlatformRatio != 0.3 {
+		t.Fatalf("PlatformRatio must stay at platform baseline, got %v", row.PlatformRatio)
+	}
+	if row.Floor != 0.6 {
+		t.Fatalf("Floor must reflect the agent's own BottomPriceRatio, got %v, want 0.6", row.Floor)
+	}
+	if row.Ratio != 0.3 {
+		t.Fatalf("Ratio (effective price, no override set) must still be platform baseline, got %v", row.Ratio)
 	}
 }
