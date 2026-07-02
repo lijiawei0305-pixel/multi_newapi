@@ -20,6 +20,8 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/agent"
 	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
+	"github.com/QuantumNous/new-api/internal/promotion"
+	promotionrepo "github.com/QuantumNous/new-api/internal/promotion/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tenant"
 )
 
@@ -48,9 +50,10 @@ func (f *failingSubdomainTenantService) SetStatus(_ context.Context, _ int64, _ 
 
 var _ tenant.TenantService = (*failingSubdomainTenantService)(nil)
 
-// newPromoteTestApp 造最小 App：真实 GORM agent_profiles（sqlite，验证 level 是否真落库）+ 测试桩
-// TenantService（EnsureSubdomain 结果可控）。tenantID 固定，起点 L0 且已有非零成本/折扣/分润参数，
-// 用来同时验证「失败时这些字段也不该被 SetAgentType 覆盖」。
+// newPromoteTestApp 造最小 App：真实 GORM agent_profiles（sqlite，验证 level 是否真落库）+ 真实 GORM
+// 推广渠道（sqlite，验证升档是否真作废渠道，见 agent_promote_void_test.go）+ 测试桩 TenantService
+// （EnsureSubdomain 结果可控）。tenantID 固定，起点 L0 且已有非零成本/折扣/分润参数，用来同时验证
+// 「失败时这些字段也不该被 SetAgentType 覆盖」。
 func newPromoteTestApp(t *testing.T, subErr error) (*App, int64) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
@@ -62,6 +65,9 @@ func newPromoteTestApp(t *testing.T, subErr error) (*App, int64) {
 	if err := agentrepo.AutoMigrate(db); err != nil {
 		t.Fatalf("agent migrate: %v", err)
 	}
+	if err := promotionrepo.AutoMigrate(db); err != nil {
+		t.Fatalf("promotion migrate: %v", err)
+	}
 	ar := agentrepo.New(db)
 	const tenantID = int64(42)
 	if err := ar.SetAgentType(context.Background(), tenantID, agent.AgentParams{
@@ -69,10 +75,13 @@ func newPromoteTestApp(t *testing.T, subErr error) (*App, int64) {
 	}); err != nil {
 		t.Fatalf("seed initial L0 profile: %v", err)
 	}
+	pr := promotionrepo.New(db)
 	app := &App{
-		DB:           db,
-		AgentRepo:    ar,
-		AgentService: agent.NewService(ar, nil), // guard=nil：本测试不需要折扣保护线
+		DB:            db,
+		AgentRepo:     ar,
+		AgentService:  agent.NewService(ar, nil), // guard=nil：本测试不需要折扣保护线
+		PromotionRepo: pr,
+		Promotion:     promotion.NewService(pr),
 		TenantService: &failingSubdomainTenantService{
 			tn:     &tenant.Tenant{ID: tenantID, Slug: "promo-shop", Name: "promo", Status: tenant.StatusActive},
 			subErr: subErr,
@@ -139,5 +148,113 @@ func TestHandleAdminUpdateAgent_PromoteSucceedsWhenSubdomainOK(t *testing.T) {
 	}
 	if params.Level != 1 {
 		t.Fatalf("level = %d, want 1 after successful promotion", params.Level)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// 邀请链接（推广渠道）自动作废：代理升级为独立档（level>=1）时，该代理名下的全部推广渠道应自动
+// 作废——已作废渠道不再向*新*注册归属（见 attribution_test.go 的 attributeByChannel 覆盖），
+// 已归属的历史用户不受影响。幂等：重复对已是 L1 的代理下发 level=1 是 no-op。
+// ----------------------------------------------------------------------------
+
+// TestHandleAdminUpdateAgent_PromoteVoidsChannels 核心验收：升档 L0→L1 时自动作废该代理名下的
+// 全部推广渠道。
+func TestHandleAdminUpdateAgent_PromoteVoidsChannels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app, tenantID := newPromoteTestApp(t, nil)
+	ctx := context.Background()
+
+	chA := &promotion.Channel{TenantID: tenantID, ChannelCode: "promo_a"}
+	chB := &promotion.Channel{TenantID: tenantID, ChannelCode: "promo_b"}
+	if err := app.PromotionRepo.CreateChannel(ctx, chA); err != nil {
+		t.Fatalf("seed channel a: %v", err)
+	}
+	if err := app.PromotionRepo.CreateChannel(ctx, chB); err != nil {
+		t.Fatalf("seed channel b: %v", err)
+	}
+
+	c, w := adminUpdateAgentCtx(tenantID, `{"level":1}`)
+	app.HandleAdminUpdateAgent(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	gotA, err := app.PromotionRepo.GetChannelByCode(ctx, "promo_a")
+	if err != nil {
+		t.Fatalf("get channel a: %v", err)
+	}
+	gotB, err := app.PromotionRepo.GetChannelByCode(ctx, "promo_b")
+	if err != nil {
+		t.Fatalf("get channel b: %v", err)
+	}
+	if !gotA.Voided || !gotB.Voided {
+		t.Fatalf("channels not voided after promotion: a.Voided=%v b.Voided=%v", gotA.Voided, gotB.Voided)
+	}
+}
+
+// TestHandleAdminUpdateAgent_PromoteDoesNotVoidOtherTenantChannels 只作废*该*代理自己的渠道，
+// 不动别的租户（越权/误伤防线，镜像 gormrepo 的 scopeByTenant 契约）。
+func TestHandleAdminUpdateAgent_PromoteDoesNotVoidOtherTenantChannels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app, tenantID := newPromoteTestApp(t, nil)
+	ctx := context.Background()
+
+	const otherTenantID = int64(999)
+	own := &promotion.Channel{TenantID: tenantID, ChannelCode: "promo_own"}
+	other := &promotion.Channel{TenantID: otherTenantID, ChannelCode: "promo_other"}
+	if err := app.PromotionRepo.CreateChannel(ctx, own); err != nil {
+		t.Fatalf("seed own channel: %v", err)
+	}
+	if err := app.PromotionRepo.CreateChannel(ctx, other); err != nil {
+		t.Fatalf("seed other channel: %v", err)
+	}
+
+	c, w := adminUpdateAgentCtx(tenantID, `{"level":1}`)
+	app.HandleAdminUpdateAgent(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+
+	gotOther, err := app.PromotionRepo.GetChannelByCode(ctx, "promo_other")
+	if err != nil {
+		t.Fatalf("get other channel: %v", err)
+	}
+	if gotOther.Voided {
+		t.Fatal("promoting tenant must not void another tenant's channel")
+	}
+}
+
+// TestHandleAdminUpdateAgent_RepromoteIsIdempotent 再次对已是 L1 的代理下发 level=1（重复升档）
+// 必须是 no-op：不报错，渠道保持已作废状态。
+func TestHandleAdminUpdateAgent_RepromoteIsIdempotent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app, tenantID := newPromoteTestApp(t, nil)
+	ctx := context.Background()
+
+	ch := &promotion.Channel{TenantID: tenantID, ChannelCode: "promo_once"}
+	if err := app.PromotionRepo.CreateChannel(ctx, ch); err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+
+	// 首次升档。
+	c1, w1 := adminUpdateAgentCtx(tenantID, `{"level":1}`)
+	app.HandleAdminUpdateAgent(c1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("first promote code = %d, want 200; body=%s", w1.Code, w1.Body.String())
+	}
+
+	// 再次对已是 L1 的代理下发 level=1。
+	c2, w2 := adminUpdateAgentCtx(tenantID, `{"level":1}`)
+	app.HandleAdminUpdateAgent(c2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("re-promote code = %d, want 200 (idempotent no-op); body=%s", w2.Code, w2.Body.String())
+	}
+
+	got, err := app.PromotionRepo.GetChannelByCode(ctx, "promo_once")
+	if err != nil {
+		t.Fatalf("get channel: %v", err)
+	}
+	if !got.Voided {
+		t.Fatal("channel must stay voided after idempotent re-promote")
 	}
 }

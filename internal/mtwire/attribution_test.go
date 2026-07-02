@@ -222,3 +222,80 @@ func TestAttributeRegistration_NoUserNoop(t *testing.T) {
 		t.Fatalf("registered_count = %d, want 0 (invalid userID must be a noop)", got)
 	}
 }
+
+// TestAttributeRegistration_VoidedChannelFallsBackToHost 渠道已作废（代理升级独立档后自动作废，见
+// mtwire.HandleAdminUpdateAgent）→ 不再按渠道码归属新注册，回落 Host（不静默丢归属）。
+func TestAttributeRegistration_VoidedChannelFallsBackToHost(t *testing.T) {
+	f := newAttribFixture(t)
+	ctx := context.Background()
+	const uid = 1006
+	f.insertUser(t, uid)
+
+	if err := f.pr.VoidChannelsByTenant(ctx, f.tenA); err != nil {
+		t.Fatalf("void channel: %v", err)
+	}
+
+	// 渠道码属于已作废渠道，但 Host 命中租户 B → 应回落到 B，而非渠道所属的 A。
+	f.app.attributeRegistration(ctx, "beta.wedreamhub.com", f.chA, uid)
+
+	tid, cid := f.userAttrib(t, uid)
+	if tid != f.tenB || cid != 0 {
+		t.Fatalf("user attrib = (tenant=%d, channel=%d), want (%d, 0) — voided channel must fall back to host", tid, cid, f.tenB)
+	}
+	if got := f.registeredCount(t, f.chA); got != 0 {
+		t.Fatalf("registered_count = %d, want 0 (voided channel must not be bumped)", got)
+	}
+	if got := f.attributionCount(t, uid); got != 0 {
+		t.Fatalf("attribution rows = %d, want 0 (voided channel must not create an attribution record)", got)
+	}
+}
+
+// TestAttributeRegistration_VoidedChannelNoHostFallback 渠道已作废 + Host 也未命中任何租户（主站根域）
+// → 不归属（tenant_id 保持 0），而不是静默沿用渠道所属租户。
+func TestAttributeRegistration_VoidedChannelNoHostFallback(t *testing.T) {
+	f := newAttribFixture(t)
+	ctx := context.Background()
+	const uid = 1007
+	f.insertUser(t, uid)
+
+	if err := f.pr.VoidChannelsByTenant(ctx, f.tenA); err != nil {
+		t.Fatalf("void channel: %v", err)
+	}
+
+	f.app.attributeRegistration(ctx, "wedreamhub.com", f.chA, uid)
+
+	tid, cid := f.userAttrib(t, uid)
+	if tid != 0 || cid != 0 {
+		t.Fatalf("user attrib = (tenant=%d, channel=%d), want (0, 0)", tid, cid)
+	}
+}
+
+// TestAttributeRegistration_ExistingAttributionUnaffectedByLaterVoid 渠道作废前已归属的用户不受影响：
+// 作废只影响*新*注册，已落库的 tenant_id/promotion_channel_id 与归属记录原样保留（不回滚）。
+func TestAttributeRegistration_ExistingAttributionUnaffectedByLaterVoid(t *testing.T) {
+	f := newAttribFixture(t)
+	ctx := context.Background()
+	const uid = 1008
+	f.insertUser(t, uid)
+
+	// 作废前：正常按渠道码归属。
+	f.app.attributeRegistration(ctx, "wedreamhub.com", f.chA, uid)
+	tid, cid := f.userAttrib(t, uid)
+	if tid != f.tenA || cid != f.chAID {
+		t.Fatalf("pre-void attrib = (%d,%d), want (%d,%d)", tid, cid, f.tenA, f.chAID)
+	}
+
+	// 代理升级为独立档 → 渠道作废。
+	if err := f.pr.VoidChannelsByTenant(ctx, f.tenA); err != nil {
+		t.Fatalf("void channel: %v", err)
+	}
+
+	// 已归属用户的 tenant_id/promotion_channel_id 保持不变；归属记录不被清除。
+	tid2, cid2 := f.userAttrib(t, uid)
+	if tid2 != f.tenA || cid2 != f.chAID {
+		t.Fatalf("post-void attrib = (%d,%d), want unchanged (%d,%d)", tid2, cid2, f.tenA, f.chAID)
+	}
+	if got := f.attributionCount(t, uid); got != 1 {
+		t.Fatalf("attribution rows = %d, want 1 (unaffected by later void)", got)
+	}
+}

@@ -148,7 +148,7 @@ func (a *App) attributeRegistration(ctx context.Context, host, channelCode strin
 
 // attributeByChannel 按渠道码归属：查渠道→UPDATE users(tenant_id,promotion_channel_id)→
 // 落归属记录(幂等 by user_id)→registered_count 原子 +1。命中渠道返回 true（调用方据此不再回落 Host）。
-// 渠道码未知 / 渠道无效租户返回 false（让位 Host 兜底）。任一写失败仅记日志（best-effort）。
+// 渠道码未知 / 渠道无效租户 / 渠道已作废均返回 false（让位 Host 兜底）。任一写失败仅记日志（best-effort）。
 func (a *App) attributeByChannel(ctx context.Context, code string, userID int64) bool {
 	if a.PromotionRepo == nil {
 		return false
@@ -156,6 +156,11 @@ func (a *App) attributeByChannel(ctx context.Context, code string, userID int64)
 	ch, err := a.PromotionRepo.GetChannelByCode(ctx, code)
 	if err != nil || ch == nil || ch.TenantID <= 0 {
 		return false // 未知渠道码 / 无效渠道：回落 Host
+	}
+	if ch.Voided {
+		// 渠道已作废（代理升级为独立档时自动作废，见 HandleAdminUpdateAgent/VoidChannelsByTenant）：
+		// 不再向*新*注册归属，回落 Host/none；已经归属该渠道的历史用户不受影响（此处不触碰 users 表）。
+		return false
 	}
 	// 归属：tenant_id + promotion_channel_id 一次写入（经渠道码注册的权威归属）。
 	if err := a.DB.WithContext(ctx).Table("users").
@@ -688,11 +693,17 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 		curParams.DiscountFloor = *in.DiscountFloor
 	}
 	// 升档 → 独立档：先幂等派生子域名 `<slug>.wedreamhub.com`（resolver 不缓存负结果，无需失效缓存），
-	// 成功后才落 level（原子性：EnsureSubdomain 失败绝不能让代理停在「level=1 但无子域名」——那会
-	// 解锁独立档自助能力却没有可用站点，见复盘 Fix 3）。EnsureSubdomain 本身幂等，对已是 L1 的代理
-	// 重复调用无副作用，故重排序对既有（已是 L1 / 不升档）流程安全。
+	// 再自动作废该代理名下的全部推广渠道（邀请链接不再向*新*注册归属，见 attributeByChannel 的
+	// Voided 跳过分支；已归属的历史用户不受影响，语义见 promotion.PromotionRepo.VoidChannelsByTenant），
+	// 成功后才落 level（原子性：任一步失败绝不能让代理停在「level=1 但基建/清理未完成」——那会解锁
+	// 独立档自助能力却留下不一致状态，见复盘 Fix 3）。两步都幂等，对已是 L1 的代理重复调用无副作用，
+	// 故重排序对既有（已是 L1 / 不升档）流程安全。
 	if in.Level != nil && *in.Level >= 1 {
 		if err := a.TenantService.EnsureSubdomain(ctx, tenantID, t.Slug); err != nil {
+			respondErr(c, err)
+			return
+		}
+		if err := a.Promotion.VoidChannelsByTenant(ctx, tenantID); err != nil {
 			respondErr(c, err)
 			return
 		}
