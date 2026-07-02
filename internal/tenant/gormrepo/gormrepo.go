@@ -252,6 +252,19 @@ func (r *Repo) OwnerUserID(ctx context.Context, tenantID int64) (int64, error) {
 	return row.OwnerUserID, nil
 }
 
+// TenantByOwner 直读某 owner_user_id 拥有的租户（owner→tenant 反查，OwnerUserID 的逆向；
+// 走 idx_tenants_owner 索引）。业务上 owner 1:1 独占一租户（设代理时 ownerTaken 保证唯一）。
+// owner_user_id<=0 直接返回 ErrTenantNotFound（主站/未归属租户默认 owner_user_id=0，绝不被空 session 误匹配）。
+// 无匹配返回 (nil, ErrTenantNotFound)。供 owner-based 代理自助鉴权（AgentOwnerAuthByUser）做 Host 无关解析。
+func (r *Repo) TenantByOwner(ctx context.Context, ownerUserID int64) (*tenant.Tenant, error) {
+	if ownerUserID <= 0 {
+		return nil, tenant.ErrTenantNotFound
+	}
+	var row tenantRow
+	err := r.db.WithContext(ctx).Take(&row, "owner_user_id = ?", ownerUserID).Error
+	return mapTenantResult(&row, err) // ErrRecordNotFound → tenant.ErrTenantNotFound
+}
+
 // ============================================================================
 // 自定义域名持久化（tenant.CustomDomainRepo 实现，§6.2/§6.3）
 // ============================================================================

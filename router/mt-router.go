@@ -71,8 +71,9 @@ func SetMtRouter(router *gin.Engine) {
 		// 返回 {is_agent_owner}（权威判断 = Host 租户 owner == 当前用户），供前端隐藏代理自助菜单 +
 		// 路由 beforeLoad 拦截，避免普通用户/别站代理触发 AGENT_FORBIDDEN。
 		tenantGroup.GET("/agent-context", middleware.UserAuth(), app.HandleAgentContext)
-		// 代理自助（owner 维度）：UserAuth + AgentOwnerAuth（权威校验 Host 租户 owner == 当前用户）。
-		agentSelf := tenantGroup.Group("", middleware.UserAuth(), app.AgentOwnerAuth())
+		// 代理自助（owner 维度）：UserAuth + AgentOwnerAuthByUser（从登录用户「拥有的租户」解析 agentTenantID，
+		// 与 Host 无关 → L0 无子域名也能在主站访问自己的控制台；L1 在子域名同样解析到自己的租户）。
+		agentSelf := tenantGroup.Group("", middleware.UserAuth(), app.AgentOwnerAuthByUser())
 		{
 			agentSelf.POST("/withdrawals", app.HandleAgentRequestWithdrawal)
 			agentSelf.GET("/withdrawals", app.HandleAgentListWithdrawals)

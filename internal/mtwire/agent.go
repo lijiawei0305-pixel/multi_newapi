@@ -348,6 +348,32 @@ func (a *App) AgentOwnerAuth() gin.HandlerFunc {
 	}
 }
 
+// AgentOwnerAuthByUser 是代理自助端点的 owner-based 权威防线：从登录用户「拥有的租户」
+// （tenants.owner_user_id == 当前 session 用户，1:1）解析 agentTenantID，与 Host 无关——
+// 故 L0 无子域名也能在主站访问自己的控制台，L1 在子域名同样解析到自己的租户。
+// 安全不变量：只解析到「当前用户拥有的」那一个租户；绝不接受客户端传 tenant_id；
+// 未登录 / 不拥有任何租户 → 403 中止（不放行）。须挂在 new-api UserAuth 之后。
+// 替代 agent-self 组原先的 Host-based AgentOwnerAuth（后者留作 HandleAgentContext 的 Host 判定，不删）。
+func (a *App) AgentOwnerAuthByUser() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := int64(c.GetInt("id"))
+		if userID <= 0 {
+			respondErr(c, errAgentForbidden)
+			c.Abort()
+			return
+		}
+		t, err := a.TenantRepo.TenantByOwner(c.Request.Context(), userID)
+		if err != nil {
+			// 该用户不拥有任何代理租户（含 ErrTenantNotFound）→ 403，绝不放行、绝不回退 Host。
+			respondErr(c, errAgentForbidden)
+			c.Abort()
+			return
+		}
+		c.Set(ginKeyAgentTenant, t.ID) // handler 只认这个已校验的租户 ID
+		c.Next()
+	}
+}
+
 // agentTenantID 取 AgentOwnerAuth 校验过的租户 ID（0 = 未经校验，handler 应已被中间件挡下）。
 func agentTenantID(c *gin.Context) int64 {
 	if v, ok := c.Get(ginKeyAgentTenant); ok {
