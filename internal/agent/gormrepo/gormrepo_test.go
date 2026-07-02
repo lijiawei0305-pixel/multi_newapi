@@ -68,6 +68,31 @@ func TestGetAgentType_RoundTripsCanAPI(t *testing.T) {
 	}
 }
 
+// TestGetAgentType_RoundTripsBottomPriceRatio 确认 bottom_price_ratio 随资料持久化并读回
+// （spec agent-tiering §9.7：消耗计费底价倍率，独立于 package_discount/discount_floor）。
+func TestGetAgentType_RoundTripsBottomPriceRatio(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	if err := r.SetAgentType(ctx, 5, agent.AgentParams{Level: 1, BottomPriceRatio: 0.7}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got, found, err := r.GetAgentType(ctx, 5)
+	if err != nil || !found {
+		t.Fatalf("get: found=%v err=%v", found, err)
+	}
+	if got.BottomPriceRatio != 0.7 {
+		t.Fatalf("BottomPriceRatio = %v, want 0.7", got.BottomPriceRatio)
+	}
+	// 未配置底价倍率的代理：零值，不是错误（spec §9.7 “0=未配置”）。
+	if err := r.SetAgentType(ctx, 6, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set unconfigured: %v", err)
+	}
+	got2, _, _ := r.GetAgentType(ctx, 6)
+	if got2.BottomPriceRatio != 0 {
+		t.Fatalf("BottomPriceRatio = %v, want 0 (unconfigured)", got2.BottomPriceRatio)
+	}
+}
+
 // TestAppendEarning_IdempotentAndAccrues 是分润幂等核心用例：
 // 同 (tenant, source_type, source_id) 重复入账只动一次钱包；不同来源各自累加。
 func TestAppendEarning_IdempotentAndAccrues(t *testing.T) {

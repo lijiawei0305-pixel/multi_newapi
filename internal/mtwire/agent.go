@@ -468,20 +468,21 @@ type agentContextOut struct {
 }
 
 type agentOut struct {
-	ID              int64   `json:"id"` // = tenant_id
-	OwnerUserID     int64   `json:"owner_user_id"`
-	OwnerUsername   string  `json:"owner_username"`
-	Slug            string  `json:"slug"`
-	Name            string  `json:"name"`
-	Level           int     `json:"level"`
-	CanAPI          bool    `json:"can_api"`
-	CostPriceCNY    float64 `json:"cost_price_cny"`
-	PackageDiscount float64 `json:"package_discount"`
-	CommissionRatio float64 `json:"commission_ratio"`
-	Status          string  `json:"status"`
-	WithdrawableCNY float64 `json:"withdrawable_cny"`
-	FrozenCNY       float64 `json:"frozen_cny"`
-	TotalEarnedCNY  float64 `json:"total_earned_cny"`
+	ID               int64   `json:"id"` // = tenant_id
+	OwnerUserID      int64   `json:"owner_user_id"`
+	OwnerUsername    string  `json:"owner_username"`
+	Slug             string  `json:"slug"`
+	Name             string  `json:"name"`
+	Level            int     `json:"level"`
+	CanAPI           bool    `json:"can_api"`
+	CostPriceCNY     float64 `json:"cost_price_cny"`
+	PackageDiscount  float64 `json:"package_discount"`
+	CommissionRatio  float64 `json:"commission_ratio"`
+	BottomPriceRatio float64 `json:"bottom_price_ratio"`
+	Status           string  `json:"status"`
+	WithdrawableCNY  float64 `json:"withdrawable_cny"`
+	FrozenCNY        float64 `json:"frozen_cny"`
+	TotalEarnedCNY   float64 `json:"total_earned_cny"`
 }
 
 // agentMetricsOut 是 GET /api/admin/agents/:id/metrics 响应：代理升档决策的只读指标
@@ -511,25 +512,27 @@ type earningOut struct {
 
 // agentCreateIn 是 POST /api/admin/agents 入参。
 type agentCreateIn struct {
-	Slug            string  `json:"slug"`
-	Name            string  `json:"name"`
-	OwnerUserID     int64   `json:"owner_user_id"`
-	Level           int     `json:"level"`
-	CostPriceCNY    float64 `json:"cost_price_cny"`
-	PackageDiscount float64 `json:"package_discount"`
-	CommissionRatio float64 `json:"commission_ratio"`
-	DiscountFloor   float64 `json:"discount_floor"`
+	Slug             string  `json:"slug"`
+	Name             string  `json:"name"`
+	OwnerUserID      int64   `json:"owner_user_id"`
+	Level            int     `json:"level"`
+	CostPriceCNY     float64 `json:"cost_price_cny"`
+	PackageDiscount  float64 `json:"package_discount"`
+	CommissionRatio  float64 `json:"commission_ratio"`
+	DiscountFloor    float64 `json:"discount_floor"`
+	BottomPriceRatio float64 `json:"bottom_price_ratio"`
 }
 
 // agentPatchIn 是 PATCH /api/admin/agents/:id 入参（指针支持局部更新）。
 type agentPatchIn struct {
-	Name            *string  `json:"name"`
-	Level           *int     `json:"level"`
-	CostPriceCNY    *float64 `json:"cost_price_cny"`
-	PackageDiscount *float64 `json:"package_discount"`
-	CommissionRatio *float64 `json:"commission_ratio"`
-	DiscountFloor   *float64 `json:"discount_floor"`
-	Status          *string  `json:"status"`
+	Name             *string  `json:"name"`
+	Level            *int     `json:"level"`
+	CostPriceCNY     *float64 `json:"cost_price_cny"`
+	PackageDiscount  *float64 `json:"package_discount"`
+	CommissionRatio  *float64 `json:"commission_ratio"`
+	DiscountFloor    *float64 `json:"discount_floor"`
+	BottomPriceRatio *float64 `json:"bottom_price_ratio"`
+	Status           *string  `json:"status"`
 }
 
 // ============================================================================
@@ -548,11 +551,12 @@ func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 		return
 	}
 	params := agent.AgentParams{
-		CostPrice:       in.CostPriceCNY,
-		PackageDiscount: in.PackageDiscount,
-		CommissionRatio: in.CommissionRatio,
-		Level:           in.Level,
-		DiscountFloor:   in.DiscountFloor,
+		CostPrice:        in.CostPriceCNY,
+		PackageDiscount:  in.PackageDiscount,
+		CommissionRatio:  in.CommissionRatio,
+		Level:            in.Level,
+		DiscountFloor:    in.DiscountFloor,
+		BottomPriceRatio: in.BottomPriceRatio,
 	}
 	// ① 前置强校验（纯函数，不写库）：参数 + 折扣保护线。
 	if err := params.Validate(); err != nil {
@@ -629,20 +633,21 @@ func (a *App) HandleAdminListAgents(c *gin.Context) {
 		}
 		w, _ := a.AgentService.GetWallet(ctx, p.TenantID)
 		out = append(out, agentOut{
-			ID:              p.TenantID,
-			OwnerUserID:     p.UserID,
-			OwnerUsername:   names[p.UserID],
-			Slug:            slug,
-			Name:            name,
-			Level:           p.Level,
-			CanAPI:          p.CanAPI,
-			CostPriceCNY:    p.CostPriceCNY,
-			PackageDiscount: p.PackageDiscount,
-			CommissionRatio: p.CommissionRatio,
-			Status:          status,
-			WithdrawableCNY: walletField(w, func(x *agent.AgentWallet) float64 { return x.WithdrawableBalance }),
-			FrozenCNY:       walletField(w, func(x *agent.AgentWallet) float64 { return x.FrozenWithdrawAmount }),
-			TotalEarnedCNY:  walletField(w, func(x *agent.AgentWallet) float64 { return x.TotalEarned }),
+			ID:               p.TenantID,
+			OwnerUserID:      p.UserID,
+			OwnerUsername:    names[p.UserID],
+			Slug:             slug,
+			Name:             name,
+			Level:            p.Level,
+			CanAPI:           p.CanAPI,
+			CostPriceCNY:     p.CostPriceCNY,
+			PackageDiscount:  p.PackageDiscount,
+			CommissionRatio:  p.CommissionRatio,
+			BottomPriceRatio: p.BottomPriceRatio,
+			Status:           status,
+			WithdrawableCNY:  walletField(w, func(x *agent.AgentWallet) float64 { return x.WithdrawableBalance }),
+			FrozenCNY:        walletField(w, func(x *agent.AgentWallet) float64 { return x.FrozenWithdrawAmount }),
+			TotalEarnedCNY:   walletField(w, func(x *agent.AgentWallet) float64 { return x.TotalEarned }),
 		})
 	}
 	respondOK(c, out)
@@ -686,6 +691,9 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 	}
 	if in.DiscountFloor != nil {
 		curParams.DiscountFloor = *in.DiscountFloor
+	}
+	if in.BottomPriceRatio != nil {
+		curParams.BottomPriceRatio = *in.BottomPriceRatio
 	}
 	// 升档 → 独立档：先幂等派生子域名 `<slug>.wedreamhub.com`（resolver 不缓存负结果，无需失效缓存），
 	// 成功后才落 level（原子性：EnsureSubdomain 失败绝不能让代理停在「level=1 但无子域名」——那会
@@ -896,20 +904,21 @@ func (a *App) reviewWithdrawal(c *gin.Context, approve bool) {
 func (a *App) buildAgentOut(ctx context.Context, tenantID, ownerUserID int64, slug, name, status string, p agent.AgentParams) agentOut {
 	w, _ := a.AgentService.GetWallet(ctx, tenantID)
 	return agentOut{
-		ID:              tenantID,
-		OwnerUserID:     ownerUserID,
-		OwnerUsername:   a.usernamesByIDs(ctx, []int64{ownerUserID})[ownerUserID],
-		Slug:            slug,
-		Name:            name,
-		Level:           p.Level,
-		CanAPI:          p.CanAPI,
-		CostPriceCNY:    p.CostPrice,
-		PackageDiscount: p.PackageDiscount,
-		CommissionRatio: p.CommissionRatio,
-		Status:          status,
-		WithdrawableCNY: walletField(w, func(x *agent.AgentWallet) float64 { return x.WithdrawableBalance }),
-		FrozenCNY:       walletField(w, func(x *agent.AgentWallet) float64 { return x.FrozenWithdrawAmount }),
-		TotalEarnedCNY:  walletField(w, func(x *agent.AgentWallet) float64 { return x.TotalEarned }),
+		ID:               tenantID,
+		OwnerUserID:      ownerUserID,
+		OwnerUsername:    a.usernamesByIDs(ctx, []int64{ownerUserID})[ownerUserID],
+		Slug:             slug,
+		Name:             name,
+		Level:            p.Level,
+		CanAPI:           p.CanAPI,
+		CostPriceCNY:     p.CostPrice,
+		PackageDiscount:  p.PackageDiscount,
+		CommissionRatio:  p.CommissionRatio,
+		BottomPriceRatio: p.BottomPriceRatio,
+		Status:           status,
+		WithdrawableCNY:  walletField(w, func(x *agent.AgentWallet) float64 { return x.WithdrawableBalance }),
+		FrozenCNY:        walletField(w, func(x *agent.AgentWallet) float64 { return x.FrozenWithdrawAmount }),
+		TotalEarnedCNY:   walletField(w, func(x *agent.AgentWallet) float64 { return x.TotalEarned }),
 	}
 }
 

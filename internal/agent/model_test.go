@@ -15,12 +15,14 @@ func TestAgentParams_Validate(t *testing.T) {
 		{"all zero ok", AgentParams{}, ""},
 		{"typical ok", AgentParams{CostPrice: 10, PackageDiscount: 0.9, CommissionRatio: 0.2, Level: 3}, ""},
 		{"boundary ratios ok", AgentParams{CommissionRatio: 1, PackageDiscount: 1}, ""},
+		{"bottom price ratio ok", AgentParams{BottomPriceRatio: 0.7}, ""},
 		{"negative cost", AgentParams{CostPrice: -0.01}, CodeAgentTypeInvalid},
 		{"commission below 0", AgentParams{CommissionRatio: -0.1}, CodeAgentTypeInvalid},
 		{"commission above 1", AgentParams{CommissionRatio: 1.01}, CodeAgentTypeInvalid},
 		{"discount below 0", AgentParams{PackageDiscount: -0.1}, CodeAgentTypeInvalid},
 		{"discount above 1", AgentParams{PackageDiscount: 1.5}, CodeAgentTypeInvalid},
 		{"negative level", AgentParams{Level: -1}, CodeAgentTypeInvalid},
+		{"negative bottom price ratio", AgentParams{BottomPriceRatio: -0.01}, CodeAgentTypeInvalid},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

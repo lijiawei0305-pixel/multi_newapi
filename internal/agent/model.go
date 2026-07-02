@@ -23,6 +23,14 @@ type AgentParams struct {
 	// DiscountFloor 主站折扣/倍率保护下限：设代理时经 PricingGuard 校验 PackageDiscount ≥ DiscountFloor。
 	// 本轮新增字段（design 的 params 仅列 4 项），见报告默认假设。
 	DiscountFloor float64
+	// BottomPriceRatio 消耗计费底价倍率（spec agent-tiering §9.7；管理员按代理设，与上面 PackageDiscount/
+	// DiscountFloor 完全独立——那两个服务 tokenplan 套餐折扣保护线，这个服务「模型消耗」计费的四档价格
+	// 阶梯下限）。0 = 未配置（HandleAgentSetGroupRatio 的地板回退平台基准，见 internal/mtwire/distribution.go
+	// consumeFloorRatio，Task 12）；>0 = 该代理卖价（tenant_groups 覆盖倍率）的下限，同时是差价入账公式
+	// （Task 13 creditRatioMarkup）的减数——两处必须同一口径，否则记账错误（见 consumeFloorRatio 注释）。
+	// 跨全部模型分组统一一个比例（不逐分组设——底价是「对该代理的批发折扣比例」，与逐模型定价的 ModelRatio
+	// 相乘即天然逐模型生效，无需再逐分组重复配置）。
+	BottomPriceRatio float64
 }
 
 // Validate 校验参数合法性；任一非法返回 ErrAgentTypeInvalid（AGENT_TYPE_INVALID）。
@@ -36,6 +44,8 @@ func (p AgentParams) Validate() error {
 	case p.PackageDiscount < 0 || p.PackageDiscount > 1:
 		return ErrAgentTypeInvalid
 	case p.Level < 0:
+		return ErrAgentTypeInvalid
+	case p.BottomPriceRatio < 0:
 		return ErrAgentTypeInvalid
 	default:
 		return nil

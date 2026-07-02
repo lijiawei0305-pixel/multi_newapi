@@ -25,16 +25,17 @@ import (
 // ---- 表 1：agent_profiles —— 代理资料（tenant_id 主键，1:1 独占） ----
 
 type profileRow struct {
-	TenantID        int64     `gorm:"column:tenant_id;primaryKey"`
-	UserID          int64     `gorm:"column:user_id;not null;default:0;index:idx_agent_profiles_user"`
-	Level           int       `gorm:"column:level;not null;default:0"`
-	CanAPI          bool      `gorm:"column:can_api;not null;default:false"`
-	CostPriceCNY    float64   `gorm:"column:cost_price_cny;type:decimal(20,8);not null;default:0"`
-	PackageDiscount float64   `gorm:"column:package_discount;type:decimal(20,8);not null;default:0"`
-	CommissionRatio float64   `gorm:"column:commission_ratio;type:decimal(20,8);not null;default:0"`
-	DiscountFloor   float64   `gorm:"column:discount_floor;type:decimal(20,8);not null;default:0"`
-	CreatedAt       time.Time `gorm:"column:created_at"`
-	UpdatedAt       time.Time `gorm:"column:updated_at"`
+	TenantID         int64     `gorm:"column:tenant_id;primaryKey"`
+	UserID           int64     `gorm:"column:user_id;not null;default:0;index:idx_agent_profiles_user"`
+	Level            int       `gorm:"column:level;not null;default:0"`
+	CanAPI           bool      `gorm:"column:can_api;not null;default:false"`
+	CostPriceCNY     float64   `gorm:"column:cost_price_cny;type:decimal(20,8);not null;default:0"`
+	PackageDiscount  float64   `gorm:"column:package_discount;type:decimal(20,8);not null;default:0"`
+	CommissionRatio  float64   `gorm:"column:commission_ratio;type:decimal(20,8);not null;default:0"`
+	DiscountFloor    float64   `gorm:"column:discount_floor;type:decimal(20,8);not null;default:0"`
+	BottomPriceRatio float64   `gorm:"column:bottom_price_ratio;type:decimal(20,8);not null;default:0"`
+	CreatedAt        time.Time `gorm:"column:created_at"`
+	UpdatedAt        time.Time `gorm:"column:updated_at"`
 }
 
 func (profileRow) TableName() string { return "agent_profiles" }
@@ -108,21 +109,22 @@ func AutoMigrate(db *gorm.DB) error {
 func (r *Repo) SetAgentType(ctx context.Context, tenantID int64, p agent.AgentParams) error {
 	now := r.now()
 	row := profileRow{
-		TenantID:        tenantID,
-		Level:           p.Level,
-		CanAPI:          p.CanAPI,
-		CostPriceCNY:    p.CostPrice,
-		PackageDiscount: p.PackageDiscount,
-		CommissionRatio: p.CommissionRatio,
-		DiscountFloor:   p.DiscountFloor,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		TenantID:         tenantID,
+		Level:            p.Level,
+		CanAPI:           p.CanAPI,
+		CostPriceCNY:     p.CostPrice,
+		PackageDiscount:  p.PackageDiscount,
+		CommissionRatio:  p.CommissionRatio,
+		DiscountFloor:    p.DiscountFloor,
+		BottomPriceRatio: p.BottomPriceRatio,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "tenant_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"level", "can_api", "cost_price_cny", "package_discount",
-			"commission_ratio", "discount_floor", "updated_at",
+			"commission_ratio", "discount_floor", "bottom_price_ratio", "updated_at",
 		}),
 	}).Create(&row).Error
 }
@@ -138,12 +140,13 @@ func (r *Repo) GetAgentType(ctx context.Context, tenantID int64) (agent.AgentPar
 		return agent.AgentParams{}, false, err
 	}
 	return agent.AgentParams{
-		CostPrice:       row.CostPriceCNY,
-		PackageDiscount: row.PackageDiscount,
-		CommissionRatio: row.CommissionRatio,
-		Level:           row.Level,
-		CanAPI:          row.CanAPI,
-		DiscountFloor:   row.DiscountFloor,
+		CostPrice:        row.CostPriceCNY,
+		PackageDiscount:  row.PackageDiscount,
+		CommissionRatio:  row.CommissionRatio,
+		Level:            row.Level,
+		CanAPI:           row.CanAPI,
+		DiscountFloor:    row.DiscountFloor,
+		BottomPriceRatio: row.BottomPriceRatio,
 	}, true, nil
 }
 
@@ -325,13 +328,14 @@ func (r *Repo) EnsureWallet(ctx context.Context, tenantID, userID int64) error {
 
 // AgentRow 是「设代理列表」的一行原始资料（tenant_id + owner + 类型/参数）。
 type AgentRow struct {
-	TenantID        int64
-	UserID          int64
-	Level           int
-	CanAPI          bool
-	CostPriceCNY    float64
-	PackageDiscount float64
-	CommissionRatio float64
+	TenantID         int64
+	UserID           int64
+	Level            int
+	CanAPI           bool
+	CostPriceCNY     float64
+	PackageDiscount  float64
+	CommissionRatio  float64
+	BottomPriceRatio float64
 }
 
 // ListProfiles 列出全部代理资料（每行 = 一个代理租户），供管理端 GET /api/admin/agents 装配。
@@ -343,13 +347,14 @@ func (r *Repo) ListProfiles(ctx context.Context) ([]AgentRow, error) {
 	out := make([]AgentRow, 0, len(rows))
 	for _, p := range rows {
 		out = append(out, AgentRow{
-			TenantID:        p.TenantID,
-			UserID:          p.UserID,
-			Level:           p.Level,
-			CanAPI:          p.CanAPI,
-			CostPriceCNY:    p.CostPriceCNY,
-			PackageDiscount: p.PackageDiscount,
-			CommissionRatio: p.CommissionRatio,
+			TenantID:         p.TenantID,
+			UserID:           p.UserID,
+			Level:            p.Level,
+			CanAPI:           p.CanAPI,
+			CostPriceCNY:     p.CostPriceCNY,
+			PackageDiscount:  p.PackageDiscount,
+			CommissionRatio:  p.CommissionRatio,
+			BottomPriceRatio: p.BottomPriceRatio,
 		})
 	}
 	return out, nil
