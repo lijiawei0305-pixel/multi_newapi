@@ -1795,537 +1795,565 @@ cd /Users/cc/newapi628 && git add web/default/src/features/agents web/default/sr
 
 ---
 
-**Tasks 11-15 (below) implement the money model from spec §9 — L0 提成+9折 / L1 差价 — inside the consumption-billing hook.** 红线 reminder (applies to every task below): this touches the CONSUMPTION BILLING path. Every new code path must be (a) idempotent on `requestID` (no double-charge/double-credit on retry), (b) best-effort / failure-isolated (an error here must never block the user's actual request or the core quota deduction — same `defer recover()` + log-and-continue posture as the existing `creditConsumeCommission`), and (c) computed off **official price** as the base (the 9折 only reduces what the *user* pays; it must never shrink what an L0 agent earns, and the L1 markup base is the platform baseline, not the discounted price). Tasks 12/13/14 all edit `internal/mtwire/agent.go`'s `creditConsumeCommission` in strict sequence (12 → 13 → 14) — same file-ordering discipline as the plan's existing note about Tasks 1/2/4/5. Local gate for Tasks 11-15 is `go test` (no server dependency for red/green); `go build ./internal/... ./service/... ./router/... ./model/... ./setting/... ./controller/...` is the local "does everything still compile" smoke check — **note:** a bare `go build ./...` from repo root currently fails in this checkout on `main.go`'s `//go:embed web/classic/dist` (that directory is a `bun run build` artifact that isn't present locally; per Global Constraints, full builds happen on the server). This is pre-existing and unrelated to Tasks 11-15 — the package-scoped command above covers every package they touch.
+**Tasks 11-15 (below) implement the money model v2 from spec §9 (三线分离：差异化只在消耗计费层；L0 提成 / L1 差价) inside the consumption-billing hook.** This SUPERSEDES the earlier v1 task list (old Tasks 11-15, "L0 提成+9折 / L1 差价") — the 9折/`invite_discount_rate` machinery is dropped entirely, not carried forward. 红线 reminder (applies to every task below): this touches the CONSUMPTION BILLING path. Every new code path must be (a) idempotent on `requestID` (no double-charge/double-credit on retry, via the existing `AgentRepo.AppendEarning` `(tenant_id,source_type,source_id)` unique-index pattern), (b) best-effort / failure-isolated (an error here must never block the user's actual request or the core quota deduction — same `defer recover()` + log-and-continue posture as the existing `creditConsumeCommission`), and (c) structurally incapable of crediting a negative/underflowing markup (卖价 ≥ 底价 is enforced both at set-time, Task 12, and re-checked defensively at credit-time, Task 13). Tasks 13/14 both edit `internal/mtwire/agent.go`'s `creditConsumeCommission` in strict sequence (13 → 14) — same file-ordering discipline as the plan's existing note about Tasks 1/2/4/5. Local gate for Tasks 11-15 is `go test` (no server dependency for red/green); `go build ./internal/... ./service/... ./router/... ./model/... ./setting/... ./controller/...` is the local "does everything still compile" smoke check — **note:** a bare `go build ./...` from repo root currently fails in this checkout on `main.go`'s `//go:embed web/classic/dist` (that directory is a `bun run build` artifact that isn't present locally; per Global Constraints, full builds happen on the server). This is pre-existing and unrelated to Tasks 11-15 — the package-scoped command above covers every package they touch.
 
-### Task 11: Config `invite_discount_rate` (default 0.9), admin-settable, read at billing
+### Task 11: Per-agent 底价倍率 (`AgentParams.BottomPriceRatio`) — schema + admin DTO/handler + validation
 
-Introduces the one new knob the rest of Part 2 depends on. Reuses the **existing** native option machinery (`model/option.go` `InitOptionMap`/`UpdateOption`, exactly the `USDExchangeRate` pattern already used by `consumeCommissionCNY`) instead of inventing a new settings table or a new mtwire HTTP route: `PUT /api/option/` (native, `middleware.RootAuth()`-gated, `router/api-router.go:184-188`) already accepts `{"key":"<Any>","value":...}` and falls through to `model.UpdateOption` unconditionally (`controller/option.go:335`) for any key with no special case — so wiring one switch-case is sufficient for the setting to become admin-settable; no new endpoint. `GET /api/option/` (`controller/option.go:78-108`) already dumps `common.OptionMap` dynamically (sensitive-suffix filter only: Token/Secret/Key/api_key — `InviteDiscountRate` doesn't match), so it will show up there automatically too. New mtwire-owned logic (this task's `effectiveInviteDiscountRate` clamp, and Tasks 12/13's discount/markup code) lives in a **new file** `internal/mtwire/tiering_billing.go` rather than growing the already-large `agent.go` further, mirroring how `grouphook.go`/`modelgroup.go` were split out for the 2D-ratio feature.
-
-**Not in scope (flagged, not silently done):** surfacing `InviteDiscountRate` as a labeled field in the admin **frontend** settings form (`web/default/src/features/system-settings/...`) — `USDExchangeRate` IS wired into an explicit settings form there, confirming that UI is hand-wired per field, not auto-generated from `OptionMap`. This task only makes the rate admin-settable via the existing generic option API (curl/Postman/any authenticated admin client); adding a UI field is a natural follow-up, not requested by this task list.
+Introduces the one new field the rest of Part 2 depends on (spec §9.7): a per-agent, admin-set floor for that agent's consumption-pricing 卖价, independent of the existing `PackageDiscount`/`DiscountFloor` (those two serve the tokenplan package-discount guard in `agentService.SetAgentType` — spec §9.1 line ②, unrelated and untouched). Purely additive: new struct field, new DB column that GORM `AutoMigrate` adds automatically on next boot (same as Task 1's `CanAPI` — no destructive migration, no `information_schema` guard needed). `0` means "not configured"; the fallback-to-platform-baseline behaviour for that case is wired in Task 12 (this task only adds the field itself end-to-end: struct → validation → gormrepo → admin DTOs/handlers).
 
 **Files:**
-- `setting/operation_setting/agent_tiering_setting.go` (NEW) — own file, does not touch `payment_setting_old.go`/`payment_setting.go` (lowest upstream-merge-conflict surface).
-- `model/option.go` (`InitOptionMap` ~84; `UpdateOption` switch, case `"USDExchangeRate"` ~419-420) — 2 additive lines, same pattern as the existing `USDExchangeRate` case.
-- `internal/mtwire/tiering_billing.go` (NEW).
-- `internal/mtwire/tiering_billing_test.go` (NEW).
+- `internal/agent/model.go` (`AgentParams` ~11-26; `Validate()` ~30-43).
+- `internal/agent/model_test.go` (`TestAgentParams_Validate` ~9-30 — extend cases).
+- `internal/agent/gormrepo/gormrepo.go` (`profileRow` ~27-38; `SetAgentType` ~107-128; `GetAgentType` ~131-148; `AgentRow` ~327-335; `ListProfiles` ~338-356).
+- `internal/agent/gormrepo/gormrepo_test.go` (append round-trip test).
+- `internal/mtwire/agent.go` (`agentOut` ~470-485; `agentCreateIn` ~513-522; `agentPatchIn` ~525-533; `HandleAdminCreateAgent` ~544-608; `HandleAdminUpdateAgent` ~653-719, patch block ~675-689; `HandleAdminListAgents` ~611-649; `buildAgentOut` ~896-907).
 
 **Interfaces:**
-- Produces: `operation_setting.InviteDiscountRate float64` (package var, default `0.9`), persisted/read via the existing native option pipeline.
-- Produces: `effectiveInviteDiscountRate() float64` (mtwire-private) — reads the var and clamps to `(0,1]`; out-of-range (admin typo) falls back to `1` (= no discount), never to a value that could inflate a charge or credit money into thin air.
+- Produces: `agent.AgentParams.BottomPriceRatio float64` — `0` = unconfigured (Task 12 falls back to platform baseline); `>0` = admin-set consumption-pricing floor for this agent, uniform across all model groups.
+- No interface/method-signature changes anywhere — `AgentService`/`AgentRepo`/`MemRepo` all pass `AgentParams` through opaquely (whole-struct copy, no field-by-field mapping), so `internal/agent/port.go`, `service.go`, and `repo.go` (MemRepo) need **zero code changes** for this task.
 
-- [ ] **Step 1:** Write the failing test. Create `internal/mtwire/tiering_billing_test.go`:
+- [ ] **Step 1:** Write the failing tests. Extend `internal/agent/model_test.go`'s `TestAgentParams_Validate` cases slice (~15-23):
 ```go
-package mtwire
-
-import (
-	"testing"
-
-	"github.com/QuantumNous/new-api/setting/operation_setting"
-)
-
-// TestEffectiveInviteDiscountRate 覆盖邀请折扣率读取 + 安全夹取：合法区间 (0,1] 原样返回；
-// 越界（≤0 或 >1，管理员误填防御）一律回退 1（=不打折）——宁可少打一次折，也绝不放大扣费或倒找钱。
-func TestEffectiveInviteDiscountRate(t *testing.T) {
-	restore := operation_setting.InviteDiscountRate
-	defer func() { operation_setting.InviteDiscountRate = restore }()
-
 	cases := []struct {
-		set  float64
-		want float64
+		name     string
+		p        AgentParams
+		wantCode string // "" 表示放行
 	}{
-		{0.9, 0.9},
-		{1, 1},
-		{0, 1},
-		{-0.1, 1},
-		{1.01, 1},
+		{"all zero ok", AgentParams{}, ""},
+		{"typical ok", AgentParams{CostPrice: 10, PackageDiscount: 0.9, CommissionRatio: 0.2, Level: 3}, ""},
+		{"boundary ratios ok", AgentParams{CommissionRatio: 1, PackageDiscount: 1}, ""},
+		{"bottom price ratio ok", AgentParams{BottomPriceRatio: 0.7}, ""},
+		{"negative cost", AgentParams{CostPrice: -0.01}, CodeAgentTypeInvalid},
+		{"commission below 0", AgentParams{CommissionRatio: -0.1}, CodeAgentTypeInvalid},
+		{"commission above 1", AgentParams{CommissionRatio: 1.01}, CodeAgentTypeInvalid},
+		{"discount below 0", AgentParams{PackageDiscount: -0.1}, CodeAgentTypeInvalid},
+		{"discount above 1", AgentParams{PackageDiscount: 1.5}, CodeAgentTypeInvalid},
+		{"negative level", AgentParams{Level: -1}, CodeAgentTypeInvalid},
+		{"negative bottom price ratio", AgentParams{BottomPriceRatio: -0.01}, CodeAgentTypeInvalid},
 	}
-	for _, c := range cases {
-		operation_setting.InviteDiscountRate = c.set
-		if got := effectiveInviteDiscountRate(); got != c.want {
-			t.Errorf("set=%v: effectiveInviteDiscountRate() = %v, want %v", c.set, got, c.want)
-		}
+```
+  Note the `"all zero ok"` case is unchanged and MUST keep passing — `BottomPriceRatio: 0` is a legal, meaningful value (spec §9.7: "未配置"), not an error.
+  Append to `internal/agent/gormrepo/gormrepo_test.go`:
+```go
+// TestGetAgentType_RoundTripsBottomPriceRatio 确认 bottom_price_ratio 随资料持久化并读回
+// （spec agent-tiering §9.7：消耗计费底价倍率，独立于 package_discount/discount_floor）。
+func TestGetAgentType_RoundTripsBottomPriceRatio(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	if err := r.SetAgentType(ctx, 5, agent.AgentParams{Level: 1, BottomPriceRatio: 0.7}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got, found, err := r.GetAgentType(ctx, 5)
+	if err != nil || !found {
+		t.Fatalf("get: found=%v err=%v", found, err)
+	}
+	if got.BottomPriceRatio != 0.7 {
+		t.Fatalf("BottomPriceRatio = %v, want 0.7", got.BottomPriceRatio)
+	}
+	// 未配置底价倍率的代理：零值，不是错误（spec §9.7 “0=未配置”）。
+	if err := r.SetAgentType(ctx, 6, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set unconfigured: %v", err)
+	}
+	got2, _, _ := r.GetAgentType(ctx, 6)
+	if got2.BottomPriceRatio != 0 {
+		t.Fatalf("BottomPriceRatio = %v, want 0 (unconfigured)", got2.BottomPriceRatio)
 	}
 }
 ```
 
-- [ ] **Step 2:** Run — expect FAIL (compile error: `operation_setting.InviteDiscountRate` / `effectiveInviteDiscountRate` undefined).
+- [ ] **Step 2:** Run — expect FAIL (compile error: `BottomPriceRatio` undefined).
 ```
-cd /Users/cc/newapi628 && go test ./internal/mtwire/ -run TestEffectiveInviteDiscountRate
+cd /Users/cc/newapi628 && go test ./internal/agent/... -run 'AgentParams_Validate|RoundTripsBottomPriceRatio'
 ```
 
-- [ ] **Step 3:** Add the setting var. Create `setting/operation_setting/agent_tiering_setting.go`:
+- [ ] **Step 3:** Add the field + validation in `internal/agent/model.go`. In `AgentParams` (after `DiscountFloor float64`, ~26):
 ```go
-// 代理分层计费的全局设置（spec agent-tiering §9.1）：邀请 9 折折扣率。独立文件，不改既有
-// payment_setting_old.go / payment_setting.go（降低与上游合并冲突面）。
-package operation_setting
-
-// InviteDiscountRate 是被 L0（普通档）代理邀请的用户，其消耗按此折扣率结算（默认 0.9 = 9 折）；
-// 差额由平台毛利承担，绝不影响代理提成基数（基数恒为官方原价，见 internal/mtwire/tiering_billing.go）。
-// 经 PUT /api/option/ {"key":"InviteDiscountRate","value":0.9} 管理员可改（沿用 USDExchangeRate 同款
-// model/option.go InitOptionMap + UpdateOption 落盘/读回模式，见该文件 ~84/~419-420）。
-// 读取侧一律经 mtwire.effectiveInviteDiscountRate() 夹取到 (0,1]；此处只存管理员配置的原始值。
-var InviteDiscountRate = 0.9
+	// DiscountFloor 主站折扣/倍率保护下限：设代理时经 PricingGuard 校验 PackageDiscount ≥ DiscountFloor。
+	// 本轮新增字段（design 的 params 仅列 4 项），见报告默认假设。
+	DiscountFloor float64
+	// BottomPriceRatio 消耗计费底价倍率（spec agent-tiering §9.7；管理员按代理设，与上面 PackageDiscount/
+	// DiscountFloor 完全独立——那两个服务 tokenplan 套餐折扣保护线，这个服务「模型消耗」计费的四档价格
+	// 阶梯下限）。0 = 未配置（HandleAgentSetGroupRatio 的地板回退平台基准，见 internal/mtwire/distribution.go
+	// consumeFloorRatio，Task 12）；>0 = 该代理卖价（tenant_groups 覆盖倍率）的下限，同时是差价入账公式
+	// （Task 13 creditRatioMarkup）的减数——两处必须同一口径，否则记账错误（见 consumeFloorRatio 注释）。
+	// 跨全部模型分组统一一个比例（不逐分组设——底价是「对该代理的批发折扣比例」，与逐模型定价的 ModelRatio
+	// 相乘即天然逐模型生效，无需再逐分组重复配置）。
+	BottomPriceRatio float64
 ```
-
-- [ ] **Step 4:** Add the clamped getter. Create `internal/mtwire/tiering_billing.go`:
+  In `Validate()` (~30-43), add a case (after the `Level < 0` case):
 ```go
-package mtwire
-
-// 代理分层计费（spec agent-tiering §9）：邀请 9 折退返 + L1 差价入账。集中在本文件（而非并入已很大的
-// agent.go），供 creditConsumeCommission（agent.go）按 level 调用；两条通路共用 requestID 幂等心法，
-// 但落的是两本不同的账（前者退用户 quota，后者入代理钱包）。
-
-import (
-	"github.com/QuantumNous/new-api/setting/operation_setting"
-)
-
-// ============================================================================
-// 邀请 9 折（L0，§9.1）
-// ============================================================================
-
-// effectiveInviteDiscountRate 读取邀请折扣率配置（operation_setting.InviteDiscountRate，经
-// PUT /api/option/ 管理员可改，见 model/option.go）并夹取到安全区间 (0,1]；越界（管理员误填 ≤0
-// 或 >1）一律回退 1（=不打折）——宁可少打一次折，也绝不放大扣费或倒找钱。
-func effectiveInviteDiscountRate() float64 {
-	r := operation_setting.InviteDiscountRate
-	if r <= 0 || r > 1 {
-		return 1
+func (p AgentParams) Validate() error {
+	switch {
+	case p.CostPrice < 0:
+		return ErrAgentTypeInvalid
+	case p.CommissionRatio < 0 || p.CommissionRatio > 1:
+		return ErrAgentTypeInvalid
+	case p.PackageDiscount < 0 || p.PackageDiscount > 1:
+		return ErrAgentTypeInvalid
+	case p.Level < 0:
+		return ErrAgentTypeInvalid
+	case p.BottomPriceRatio < 0:
+		return ErrAgentTypeInvalid
+	default:
+		return nil
 	}
-	return r
 }
 ```
+  Note: deliberately **no upper bound** on `BottomPriceRatio` (unlike `PackageDiscount`'s `[0,1]`) — it's a ratio multiplied against `ModelRatio`, not a discount fraction; a value `>1` is unusual but not structurally invalid, and the spec doesn't ask for a cap here.
 
-- [ ] **Step 5:** Wire the native option pipeline so the rate is admin-settable + persisted. In `model/option.go`:
-  - `InitOptionMap()` — add immediately after the `USDExchangeRate` line (~84):
+- [ ] **Step 4:** Persist `bottom_price_ratio` in the GORM repo. In `internal/agent/gormrepo/gormrepo.go`:
+  - Add the column to `profileRow` (after `DiscountFloor`, ~35):
 ```go
-	common.OptionMap["USDExchangeRate"] = strconv.FormatFloat(operation_setting.USDExchangeRate, 'f', -1, 64)
-	common.OptionMap["InviteDiscountRate"] = strconv.FormatFloat(operation_setting.InviteDiscountRate, 'f', -1, 64)
+	DiscountFloor    float64   `gorm:"column:discount_floor;type:decimal(20,8);not null;default:0"`
+	BottomPriceRatio float64   `gorm:"column:bottom_price_ratio;type:decimal(20,8);not null;default:0"`
 ```
-  - `UpdateOption()` switch — add immediately after `case "USDExchangeRate":` (~419-420):
+  - In `SetAgentType` (~108-128), add `BottomPriceRatio: p.BottomPriceRatio,` to the `profileRow{...}` literal (after `DiscountFloor: p.DiscountFloor,`) and `"bottom_price_ratio"` to the `AssignmentColumns` list:
 ```go
-	case "USDExchangeRate":
-		operation_setting.USDExchangeRate, _ = strconv.ParseFloat(value, 64)
-	case "InviteDiscountRate":
-		operation_setting.InviteDiscountRate, _ = strconv.ParseFloat(value, 64)
+func (r *Repo) SetAgentType(ctx context.Context, tenantID int64, p agent.AgentParams) error {
+	now := r.now()
+	row := profileRow{
+		TenantID:         tenantID,
+		Level:            p.Level,
+		CanAPI:           p.CanAPI,
+		CostPriceCNY:     p.CostPrice,
+		PackageDiscount:  p.PackageDiscount,
+		CommissionRatio:  p.CommissionRatio,
+		DiscountFloor:    p.DiscountFloor,
+		BottomPriceRatio: p.BottomPriceRatio,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "tenant_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"level", "can_api", "cost_price_cny", "package_discount",
+			"commission_ratio", "discount_floor", "bottom_price_ratio", "updated_at",
+		}),
+	}).Create(&row).Error
+}
+```
+  - In `GetAgentType` (~131-148), add `BottomPriceRatio: row.BottomPriceRatio,` to the returned `agent.AgentParams{...}` literal:
+```go
+	return agent.AgentParams{
+		CostPrice:        row.CostPriceCNY,
+		PackageDiscount:  row.PackageDiscount,
+		CommissionRatio:  row.CommissionRatio,
+		Level:            row.Level,
+		CanAPI:           row.CanAPI,
+		DiscountFloor:    row.DiscountFloor,
+		BottomPriceRatio: row.BottomPriceRatio,
+	}, true, nil
+```
+  - `AgentRow` (~327-335) + `ListProfiles` (~338-356): add the field too (Step 6 needs it for `HandleAdminListAgents`):
+```go
+type AgentRow struct {
+	TenantID         int64
+	UserID           int64
+	Level            int
+	CanAPI           bool
+	CostPriceCNY     float64
+	PackageDiscount  float64
+	CommissionRatio  float64
+	BottomPriceRatio float64
+}
+```
+```go
+		out = append(out, AgentRow{
+			TenantID:         p.TenantID,
+			UserID:           p.UserID,
+			Level:            p.Level,
+			CanAPI:           p.CanAPI,
+			CostPriceCNY:     p.CostPriceCNY,
+			PackageDiscount:  p.PackageDiscount,
+			CommissionRatio:  p.CommissionRatio,
+			BottomPriceRatio: p.BottomPriceRatio,
+		})
 ```
 
-- [ ] **Step 6:** Run — expect PASS.
+- [ ] **Step 5:** Run — expect PASS (agent + gormrepo packages).
 ```
-cd /Users/cc/newapi628 && go test ./internal/mtwire/ -run TestEffectiveInviteDiscountRate
-cd /Users/cc/newapi628 && go build ./internal/... ./service/... ./router/... ./model/... ./setting/... ./controller/... && go test ./internal/mtwire/... ./internal/agent/...
-```
-
-- [ ] **Step 7:** Commit.
-```
-cd /Users/cc/newapi628 && git add setting/operation_setting/agent_tiering_setting.go model/option.go internal/mtwire/tiering_billing.go internal/mtwire/tiering_billing_test.go && git commit -m "feat(billing): add admin-settable invite_discount_rate (default 0.9)"
+cd /Users/cc/newapi628 && go test ./internal/agent/...
 ```
 
-- [ ] **Step 8:** SERVER verification (after deploy, against `newapi_test` 3100 — this is the one piece of Task 11 a Go unit test can't cover, the native option round-trip through a live DB):
+- [ ] **Step 6:** Wire the field through the admin HTTP layer in `internal/mtwire/agent.go`:
+  - `agentOut` (~470-485) — add after `CommissionRatio float64 \`json:"commission_ratio"\``:
+```go
+	CommissionRatio  float64 `json:"commission_ratio"`
+	BottomPriceRatio float64 `json:"bottom_price_ratio"`
 ```
-curl -s -b admin.cookies -X PUT http://127.0.0.1:3100/api/option/ -H 'Content-Type: application/json' -d '{"key":"InviteDiscountRate","value":0.85}'
-curl -s -b admin.cookies http://127.0.0.1:3100/api/option/ | grep InviteDiscountRate   # expect "0.85"
+  - `agentCreateIn` (~513-522) — add after `DiscountFloor float64 \`json:"discount_floor"\``:
+```go
+	DiscountFloor    float64 `json:"discount_floor"`
+	BottomPriceRatio float64 `json:"bottom_price_ratio"`
+```
+  - `agentPatchIn` (~525-533) — add after `DiscountFloor *float64 \`json:"discount_floor"\``:
+```go
+	DiscountFloor    *float64 `json:"discount_floor"`
+	BottomPriceRatio *float64 `json:"bottom_price_ratio"`
+```
+  - `HandleAdminCreateAgent` (~550-556) — add `BottomPriceRatio: in.BottomPriceRatio,` to the `params := agent.AgentParams{...}` literal:
+```go
+	params := agent.AgentParams{
+		CostPrice:        in.CostPriceCNY,
+		PackageDiscount:  in.PackageDiscount,
+		CommissionRatio:  in.CommissionRatio,
+		Level:            in.Level,
+		DiscountFloor:    in.DiscountFloor,
+		BottomPriceRatio: in.BottomPriceRatio,
+	}
+```
+  - `HandleAdminUpdateAgent` (~675-689) — add after the `DiscountFloor` patch block:
+```go
+	if in.DiscountFloor != nil {
+		curParams.DiscountFloor = *in.DiscountFloor
+	}
+	if in.BottomPriceRatio != nil {
+		curParams.BottomPriceRatio = *in.BottomPriceRatio
+	}
+```
+  - `HandleAdminListAgents` (~631-646) — add `BottomPriceRatio: p.BottomPriceRatio,` inside the `agentOut{...}` literal (after `CommissionRatio: p.CommissionRatio,`; `p` here is the `agent.AgentRow` from Step 4).
+  - `buildAgentOut` (~896-907) — add `BottomPriceRatio: p.BottomPriceRatio,` to the returned `agentOut{...}` literal (after `CommissionRatio: p.CommissionRatio,`; `p` here is `agent.AgentParams`).
+
+- [ ] **Step 7:** Run full build + agent/mtwire tests — expect PASS.
+```
+cd /Users/cc/newapi628 && go build ./internal/... ./service/... ./router/... ./model/... ./setting/... ./controller/... && go test ./internal/agent/... ./internal/mtwire/...
+```
+
+- [ ] **Step 8:** Commit.
+```
+cd /Users/cc/newapi628 && git add internal/agent internal/mtwire/agent.go && git commit -m "feat(agent): add per-agent BottomPriceRatio field (consumption-pricing floor, spec §9.7)"
 ```
 
 ---
 
-### Task 12: Apply the 9折 at consumption for invited users. Touches `internal/mtwire/wire.go` (SERIAL — see Step 5)
+### Task 12: `HandleAgentSetGroupRatio` floor uses the agent's own 底价, and is gated to level≥1
 
-Implements §9.1's "该次消耗额 × inviteDiscount；差额平台承担". The consuming user's *charge* must actually shrink — not just a bookkeeping note — so this refunds `quotaUnits × (1 − rate)` back onto the user's own wallet quota via the native `model.IncreaseUserQuota`, **after** the (unchanged, official-price) deduction already happened. This is deliberately a post-hoc credit rather than a pre-deduction price cut: the billing-hot-path pricing ratio (`resolveModelGroup2D` / `HandleGroupRatio`, `internal/mtwire/grouphook.go` + `modelgroup.go`) is **not touched** — for an L0 tenant no group-ratio override is possible in the first place (Task 15 gates that to level≥1), so the `quotaUnits` `creditConsumeCommission` already receives for an L0 user *is* the official-price amount; no ratio math is needed to find "official price" for this task. The commission math right below it is therefore **completely unchanged** — same `quotaUnits`, same formula — which is what keeps the commission base pinned to official price per the 红线.
-
-**Idempotency:** a `requestID`-unique table `mt_invite_discount_grants` (new; `AutoMigrate`, no `information_schema` guard needed since it's a brand-new table, not an ALTER of an existing one) — same insert-then-side-effect shape as `agent_earning_logs`' `idem_key` (`internal/agent/gormrepo/gormrepo.go` `AppendEarning`, ~164-216): unique-index insert with `ON CONFLICT DO NOTHING`; only if the insert actually happened (`RowsAffected>0`) does the function call `model.IncreaseUserQuota`. A dedicated table (not reuse of `agent_earning_logs`) is required because this credits a **user's** quota, not a **tenant's** ¥ wallet — routing it through `AgentRepo.AppendEarning` would incorrectly credit the referring agent's withdrawable balance for money the agent never earned.
-
-**Scope boundary (flagged):** the refund only applies when `billingSource != "subscription"`. Subscription/tokenplan consumption is metered against `PostConsumeUserSubscriptionDelta`'s own monthly-allowance bucket (`model/user_subscription.go`), not `users.quota` — crediting `users.quota` for subscription-billed usage would land the refund in the wrong pool entirely, and refunding into the *subscription* bucket would need a `subscriptionID` the current hook signature doesn't carry. L0 commission (`consume_commission`/`tokenplan_commission`) is unaffected by this boundary — it already fires for both buckets today and continues to.
+Closes spec §9.3/§9.7 (卖价 floor = this agent's 底价, not the global baseline) and §9.5 ("L0 cannot set 卖价") together — both are edits to the same handler, and landing only one would leave the other spec requirement unmet. The gate reuses `a.ensureAgentLevel(c, 1)` (Task 3, already implemented — `internal/mtwire/agent.go:390-406`, `errAgentLevelLocked` already declared at `agent.go:41`); no new gate mechanism is introduced. This task also introduces `consumeFloorRatio`, the **single** function both this task's write path (卖价 floor) and Task 13's read path (差价 crediting) call — spec §9.7 is explicit that these two must never disagree about what "this agent's floor" means, or markup crediting silently over-pays the agent relative to what was actually enforced at set-time.
 
 **Files:**
-- `internal/mtwire/tiering_billing.go` (append: `mtDiscountGrantRow`, `migrateInviteDiscountGrants`, `grantInviteDiscount`).
-- `internal/mtwire/tiering_billing_test.go` (append).
-- `internal/mtwire/agent.go` (`creditConsumeCommission` ~172-212 — restructure the early-return so the discount fires independently of `CommissionRatio`).
-- `internal/mtwire/wire.go` (`Migrate()` ~254-316 — wire `migrateInviteDiscountGrants` into the chain; **SERIAL**, see Step 5).
+- `internal/mtwire/distribution.go` (`HandleAgentSetGroupRatio` ~397-435; `HandleAgentListGroups` ~373-395; append `consumeFloorRatio` next to `modelGroupBaseline` ~505-509).
+- `internal/mtwire/distribution_test.go` (`newGroupRatioApp` ~142-160 — extend with `AgentRepo`/`AgentService`; `TestHandleAgentSetGroupRatio` ~162-203 — seed tenant to level 1 so it keeps passing under the new gate; `TestHandleAgentListGroups` ~205-252 — unaffected in assertions, only harness rewiring; append new tests).
 
 **Interfaces:**
-- Produces: `migrateInviteDiscountGrants(db *gorm.DB) error`.
-- Produces: `(a *App) grantInviteDiscount(ctx context.Context, userID, quotaUnits int64, requestID string)` — best-effort, `requestID`-idempotent.
-- Consumes: `effectiveInviteDiscountRate()` (Task 11); native `model.IncreaseUserQuota(id, quota int, db bool) error` (`model/user.go:914`).
+- Consumes: `App.ensureAgentLevel(c *gin.Context, min int) bool` (Task 3, existing, unchanged).
+- Produces: `consumeFloorRatio(bottomPriceRatio float64, group string) float64` (pure function) — `bottomPriceRatio > 0` wins; else falls back to `modelGroupBaseline(group)`. Shared by this task and Task 13.
 
-- [ ] **Step 1:** Write the failing tests. Append to `internal/mtwire/tiering_billing_test.go` (add these imports to the file's import block: `context`, `math`, `gorm.io/gorm`, `github.com/glebarez/sqlite`, `github.com/QuantumNous/new-api/common`, `github.com/QuantumNous/new-api/internal/agent`, `github.com/QuantumNous/new-api/model`):
+- [ ] **Step 1:** Write the failing tests. In `internal/mtwire/distribution_test.go`, add two imports (`"github.com/QuantumNous/new-api/internal/agent"` and `agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"`) to the import block, then replace `newGroupRatioApp` (~142-160):
 ```go
-// newCreditCommissionTestApp 装配可跑 creditConsumeCommission 的最小 App：sqlite(:memory:) +
-// 原生 users(id,tenant_id,quota) + agent 四表（AgentRepo/AgentEarnings）+ model.DB 全局切换
-// （grantInviteDiscount 经 model.IncreaseUserQuota 写原生 users，读的是包级 model.DB —— 同
-// subscription_bridge_test.go 的 model.DB 切换套路，见该文件 ~205-207）。
-func newCreditCommissionTestApp(t *testing.T) *App {
+// newGroupRatioApp 装配 App：sqlite + model_groups + users + tenant_groups + agent 四表 + Repos。
+// AgentRepo/AgentService 供 ensureAgentLevel（level 门禁）+ consumeFloorRatio（该代理底价，Task 12/
+// spec §9.7）用；同一份底层 sqlite 存储，SetAgentType 写入的档位/底价对两者立即可见（无缓存分歧）。
+func newGroupRatioApp(t *testing.T) *App {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("db handle: %v", err)
-	}
+	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)
-	if err := db.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0, quota INTEGER NOT NULL DEFAULT 0)`).Error; err != nil {
-		t.Fatalf("create users table: %v", err)
+	if err := modelgroup.AutoMigrate(db); err != nil {
+		t.Fatalf("model_groups migrate: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0)`).Error; err != nil {
+		t.Fatalf("create users: %v", err)
+	}
+	if err := tenantrepo.AutoMigrate(db); err != nil {
+		t.Fatalf("tenant migrate: %v", err)
 	}
 	if err := agentrepo.AutoMigrate(db); err != nil {
 		t.Fatalf("agent migrate: %v", err)
 	}
-	if err := migrateInviteDiscountGrants(db); err != nil {
-		t.Fatalf("discount grant migrate: %v", err)
-	}
-	prevDB := model.DB
-	model.DB = db
-	t.Cleanup(func() { model.DB = prevDB })
 	ar := agentrepo.New(db)
-	return &App{DB: db, AgentRepo: ar, AgentEarnings: agent.NewEarningSink(ar)}
-}
-
-func seedCommissionUser(t *testing.T, app *App, userID, tenantID, quota int64) {
-	t.Helper()
-	if err := app.DB.Exec(`INSERT INTO users (id, tenant_id, quota) VALUES (?, ?, ?)`, userID, tenantID, quota).Error; err != nil {
-		t.Fatalf("seed user %d: %v", userID, err)
-	}
-}
-
-// TestGrantInviteDiscount_CreditsQuotaIdempotently 验证 9 折退返：quota = charged×(1-rate)，
-// 记入 mt_invite_discount_grants 幂等台账；同 requestID 重复调用不重复退款；rate=1（无折扣）不退款。
-func TestGrantInviteDiscount_CreditsQuotaIdempotently(t *testing.T) {
-	ctx := context.Background()
-	app := newCreditCommissionTestApp(t)
-	seedCommissionUser(t, app, 100, 5, 1000)
-
-	restore := operation_setting.InviteDiscountRate
-	defer func() { operation_setting.InviteDiscountRate = restore }()
-	operation_setting.InviteDiscountRate = 0.9 // 9折：退 10%
-
-	app.grantInviteDiscount(ctx, 100, 1000, "req-disc-1") // 1000×(1-0.9)=100 退返
-	var quota int64
-	if err := app.DB.Raw(`SELECT quota FROM users WHERE id = 100`).Scan(&quota).Error; err != nil {
-		t.Fatalf("read quota: %v", err)
-	}
-	if quota != 1100 {
-		t.Fatalf("quota = %d, want 1100 (1000 + 100 refund)", quota)
-	}
-
-	// 幂等：同 requestID 重复调用不重复退款。
-	app.grantInviteDiscount(ctx, 100, 1000, "req-disc-1")
-	if err := app.DB.Raw(`SELECT quota FROM users WHERE id = 100`).Scan(&quota).Error; err != nil {
-		t.Fatalf("read quota: %v", err)
-	}
-	if quota != 1100 {
-		t.Fatalf("idempotency broken: quota = %d, want 1100", quota)
-	}
-
-	// rate=1（无折扣）：refund 非正，不落库、不退款。
-	operation_setting.InviteDiscountRate = 1
-	app.grantInviteDiscount(ctx, 100, 1000, "req-disc-2")
-	if err := app.DB.Raw(`SELECT quota FROM users WHERE id = 100`).Scan(&quota).Error; err != nil {
-		t.Fatalf("read quota: %v", err)
-	}
-	if quota != 1100 {
-		t.Fatalf("rate=1 must not refund, quota = %d, want 1100", quota)
-	}
-}
-
-// TestCreditConsumeCommission_L0AppliesDiscountAndCommission 是本任务的核心集成用例：L0（level=0）
-// 一次消耗 → 9 折退返(quota) + 官方原价提成(consume_commission) 同时生效、互不影响，都按 requestID 幂等。
-func TestCreditConsumeCommission_L0AppliesDiscountAndCommission(t *testing.T) {
-	ctx := context.Background()
-	app := newCreditCommissionTestApp(t)
-	if err := app.AgentRepo.SetAgentType(ctx, 5, agent.AgentParams{Level: 0, CommissionRatio: 0.2}); err != nil {
-		t.Fatalf("set agent: %v", err)
-	}
-	seedCommissionUser(t, app, 100, 5, 1000)
-	restore := operation_setting.InviteDiscountRate
-	defer func() { operation_setting.InviteDiscountRate = restore }()
-	operation_setting.InviteDiscountRate = 0.9
-
-	quota := int64(2 * common.QuotaPerUnit) // 消耗 = $2
-	app.creditConsumeCommission(100, quota, "req-l0-1", "wallet")
-
-	// 9 折退返：0.1 × quota。
-	var gotQuota int64
-	if err := app.DB.Raw(`SELECT quota FROM users WHERE id = 100`).Scan(&gotQuota).Error; err != nil {
-		t.Fatalf("read quota: %v", err)
-	}
-	wantRefund := int64(float64(quota) * 0.1)
-	if gotQuota != 1000+wantRefund {
-		t.Fatalf("quota after discount = %d, want %d", gotQuota, 1000+wantRefund)
-	}
-	// 提成：commission_ratio(0.2) × 官方原价（quota，未被折扣影响——基数不变，红线要求）。
-	w, err := app.AgentRepo.GetWallet(ctx, 5)
-	if err != nil {
-		t.Fatalf("get wallet: %v", err)
-	}
-	wantCNY := consumeCommissionCNY(quota, 0.2, operation_setting.USDExchangeRate)
-	if math.Abs(w.WithdrawableBalance-wantCNY) > 1e-9 {
-		t.Fatalf("commission = %v, want %v (must use pre-discount quota as base)", w.WithdrawableBalance, wantCNY)
-	}
-
-	// 幂等：同 requestID 重放，quota 与提成都不应二次变动。
-	app.creditConsumeCommission(100, quota, "req-l0-1", "wallet")
-	var gotQuota2 int64
-	if err := app.DB.Raw(`SELECT quota FROM users WHERE id = 100`).Scan(&gotQuota2).Error; err != nil {
-		t.Fatalf("read quota: %v", err)
-	}
-	if gotQuota2 != gotQuota {
-		t.Fatalf("discount idempotency broken on replay: quota = %d, want %d", gotQuota2, gotQuota)
-	}
-	w2, err := app.AgentRepo.GetWallet(ctx, 5)
-	if err != nil {
-		t.Fatalf("get wallet: %v", err)
-	}
-	if w2.WithdrawableBalance != w.WithdrawableBalance {
-		t.Fatalf("commission idempotency broken on replay: %v, want %v", w2.WithdrawableBalance, w.WithdrawableBalance)
-	}
-}
-
-// TestCreditConsumeCommission_L0DiscountSkipsSubscriptionBucket 锁定本任务的范围边界：
-// billingSource="subscription" 不退 quota（订阅额度池是另一本账），但提成（tokenplan_commission）
-// 照常生效——两者相互独立，跳过折扣不影响提成。
-func TestCreditConsumeCommission_L0DiscountSkipsSubscriptionBucket(t *testing.T) {
-	ctx := context.Background()
-	app := newCreditCommissionTestApp(t)
-	if err := app.AgentRepo.SetAgentType(ctx, 5, agent.AgentParams{Level: 0, CommissionRatio: 0.2}); err != nil {
-		t.Fatalf("set agent: %v", err)
-	}
-	seedCommissionUser(t, app, 100, 5, 1000)
-	restore := operation_setting.InviteDiscountRate
-	defer func() { operation_setting.InviteDiscountRate = restore }()
-	operation_setting.InviteDiscountRate = 0.9
-
-	quota := int64(2 * common.QuotaPerUnit)
-	app.creditConsumeCommission(100, quota, "req-l0-sub-1", "subscription")
-
-	var gotQuota int64
-	if err := app.DB.Raw(`SELECT quota FROM users WHERE id = 100`).Scan(&gotQuota).Error; err != nil {
-		t.Fatalf("read quota: %v", err)
-	}
-	if gotQuota != 1000 {
-		t.Fatalf("subscription bucket must not refund wallet quota, got %d, want unchanged 1000", gotQuota)
-	}
-	var count int64
-	app.DB.Table("agent_earning_logs").
-		Where("tenant_id = ? AND source_id = ? AND source_type = ?", 5, "req-l0-sub-1", "tokenplan_commission").
-		Count(&count)
-	if count != 1 {
-		t.Fatalf("tokenplan_commission must still fire for subscription bucket, got %d rows", count)
+	return &App{
+		DB: db, ModelGroupRepo: modelgroup.New(db), TenantRepo: tenantrepo.New(db),
+		AgentRepo: ar, AgentService: agent.NewService(ar, nil),
 	}
 }
 ```
-
-- [ ] **Step 2:** Run — expect FAIL (compile: `agentrepo`/`operation_setting`/`model` unresolved in the test file, `migrateInviteDiscountGrants`/`grantInviteDiscount` undefined).
-```
-cd /Users/cc/newapi628 && go test ./internal/mtwire/ -run 'GrantInviteDiscount|CreditConsumeCommission'
-```
-
-- [ ] **Step 3:** Finish the test file's import block (add the alias used by `newCreditCommissionTestApp`). At the top of `internal/mtwire/tiering_billing_test.go`:
+  Update `TestHandleAgentSetGroupRatio` (~162-165) to seed tenant 7 to level 1 (required now that the gate exists — add right after `const tenantID = int64(7)`, before the existing model-group registration):
 ```go
-package mtwire
-
-import (
-	"context"
-	"math"
-	"testing"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
-
-	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
-
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/internal/agent"
-	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
-)
+func TestHandleAgentSetGroupRatio(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	const tenantID = int64(7)
+	if err := app.AgentService.SetAgentType(ctx, tenantID, agent.AgentParams{Level: 1}); err != nil { // Task 12 门禁：需 L1
+		t.Fatalf("set L1: %v", err)
+	}
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register claude-kiro: %v", err)
+	}
+	// ... rest of the function (the 4 sub-cases) is unchanged ...
 ```
-
-- [ ] **Step 4:** Implement `mtDiscountGrantRow` + `migrateInviteDiscountGrants` + `grantInviteDiscount`. Update `internal/mtwire/tiering_billing.go`'s import block and append below `effectiveInviteDiscountRate`:
+  Append the new level-gate test:
 ```go
-package mtwire
+// TestHandleAgentSetGroupRatio_RequiresLevel1 覆盖分层门禁（spec §9.5）：L0（普通档）设卖价 →
+// 403 AGENT_LEVEL_LOCKED，且不落 tenant_groups；L1（独立档）→ 200 放行（既有校验——下限/仅模型
+// 分组——照常生效）。
+func TestHandleAgentSetGroupRatio_RequiresLevel1(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register claude-kiro: %v", err)
+	}
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios
 
-import (
-	"context"
-	"time"
+	if err := app.AgentService.SetAgentType(ctx, 70, agent.AgentParams{Level: 0}); err != nil {
+		t.Fatalf("set L0: %v", err)
+	}
+	if err := app.AgentService.SetAgentType(ctx, 71, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set L1: %v", err)
+	}
 
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
+	c, rec := newAgentCtx(70, "PUT", `{"ratio":0.4}`, gin.Params{{Key: "group", Value: "claude-kiro"}})
+	app.HandleAgentSetGroupRatio(c)
+	if r := decodeResp(t, rec); r.Success || r.Code != "AGENT_LEVEL_LOCKED" {
+		t.Fatalf("L0 must be locked, got %+v", r)
+	}
+	if _, found, _ := app.TenantRepo.LookupEnabledGroupRatio(ctx, 70, "claude-kiro"); found {
+		t.Fatal("L0 must not have persisted a group override")
+	}
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
-)
-```
-```go
-// mtDiscountGrantRow 是邀请 9 折退返台账（mt_invite_discount_grants，request_id 唯一）：
-// 防止同一次消耗（同 requestID）被重复退款。与 agent_earning_logs 同一幂等模式——唯一索引 +
-// ON CONFLICT DO NOTHING，仅首次插入成功才真正退款。
-type mtDiscountGrantRow struct {
-	ID        int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	UserID    int64     `gorm:"column:user_id;not null;index:idx_mt_discount_grants_user"`
-	RequestID string    `gorm:"column:request_id;type:varchar(128);not null;uniqueIndex:idx_mt_discount_grants_request"`
-	Quota     int64     `gorm:"column:quota;not null"`
-	CreatedAt time.Time `gorm:"column:created_at"`
+	c, rec = newAgentCtx(71, "PUT", `{"ratio":0.4}`, gin.Params{{Key: "group", Value: "claude-kiro"}})
+	app.HandleAgentSetGroupRatio(c)
+	if r := decodeResp(t, rec); !r.Success {
+		t.Fatalf("L1 should be allowed, got %+v", r)
+	}
 }
 
-// TableName 固定表名。
-func (mtDiscountGrantRow) TableName() string { return "mt_invite_discount_grants" }
+// TestHandleAgentSetGroupRatio_FloorUsesAgentBottomPriceRatio 是本任务的核心用例（spec §9.7）：
+// 一旦该代理配置了 BottomPriceRatio，卖价下限改用它而非全局平台基准——即便该值高于平台基准，
+// 曾经合法的加价现在也可能被挡（下限收紧，不是放宽）。
+func TestHandleAgentSetGroupRatio_FloorUsesAgentBottomPriceRatio(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	const tenantID = int64(72)
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register claude-kiro: %v", err)
+	}
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios // claude-kiro 平台基准 = 0.3
 
-// migrateInviteDiscountGrants 建 mt_invite_discount_grants 表。新表、GORM AutoMigrate 幂等，
-// 不改任何既有表，故无需 migrateAgentProfilesDropType 那种 information_schema 守卫。
-func migrateInviteDiscountGrants(db *gorm.DB) error {
-	return db.AutoMigrate(&mtDiscountGrantRow{})
+	// 该代理底价 0.5（高于平台基准 0.3）。
+	if err := app.AgentService.SetAgentType(ctx, tenantID, agent.AgentParams{Level: 1, BottomPriceRatio: 0.5}); err != nil {
+		t.Fatalf("set L1 with bottom price ratio: %v", err)
+	}
+
+	// 0.4：曾经（对平台基准=0.3 而言）合法，但现在 < 该代理底价 0.5 → 拒。
+	c, rec := newAgentCtx(tenantID, "PUT", `{"ratio":0.4}`, gin.Params{{Key: "group", Value: "claude-kiro"}})
+	app.HandleAgentSetGroupRatio(c)
+	if r := decodeResp(t, rec); r.Success || r.Code != "RATIO_BELOW_FLOOR" {
+		t.Fatalf("0.4 must be rejected by the agent's own 0.5 floor, got %+v", r)
+	}
+
+	// 0.5：等于该代理底价 → 放行（边界=允许，同 pricing.Guard.ValidateGroupRatio 的既有语义）。
+	c, rec = newAgentCtx(tenantID, "PUT", `{"ratio":0.5}`, gin.Params{{Key: "group", Value: "claude-kiro"}})
+	app.HandleAgentSetGroupRatio(c)
+	if r := decodeResp(t, rec); !r.Success {
+		t.Fatalf("0.5 (== agent floor) should be admitted, got %+v", r)
+	}
 }
 
-// grantInviteDiscount 幂等地把邀请 9 折差额退回被邀用户的 quota：refund = quotaUnits × (1 − rate)。
-// requestID 幂等（先占 mt_invite_discount_grants 唯一行，仅首次插入成功才真正退款，重复调用直接跳过）。
-// best-effort：调用方（creditConsumeCommission）已有 panic 兜底；本函数自身失败仅记日志，绝不上抛。
+// TestHandleAgentListGroups_FloorReflectsAgentBottomPriceRatio 覆盖 spec §9.7 的展示口径：
+// Floor 字段跟随该代理的 BottomPriceRatio；PlatformRatio 保持平台基准不变（两者语义分离）。
+func TestHandleAgentListGroups_FloorReflectsAgentBottomPriceRatio(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	const tenantID = int64(73)
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register claude-kiro: %v", err)
+	}
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios // claude-kiro 平台基准 = 0.3
+	if err := app.AgentService.SetAgentType(ctx, tenantID, agent.AgentParams{Level: 1, BottomPriceRatio: 0.6}); err != nil {
+		t.Fatalf("set L1 with bottom price ratio: %v", err)
+	}
+
+	c, rec := newAgentCtx(tenantID, "GET", "", nil)
+	app.HandleAgentListGroups(c)
+	r := decodeResp(t, rec)
+	if !r.Success {
+		t.Fatalf("list groups should succeed, got %+v", r)
+	}
+	var rows []modelGroupRatioOut
+	if err := json.Unmarshal(r.Data, &rows); err != nil {
+		t.Fatalf("decode rows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("want 1 model group, got %d (%+v)", len(rows), rows)
+	}
+	row := rows[0]
+	if row.PlatformRatio != 0.3 {
+		t.Fatalf("PlatformRatio must stay at platform baseline, got %v", row.PlatformRatio)
+	}
+	if row.Floor != 0.6 {
+		t.Fatalf("Floor must reflect the agent's own BottomPriceRatio, got %v, want 0.6", row.Floor)
+	}
+	if row.Ratio != 0.3 {
+		t.Fatalf("Ratio (effective price, no override set) must still be platform baseline, got %v", row.Ratio)
+	}
+}
+```
+
+- [ ] **Step 2:** Run — expect FAIL (`TestHandleAgentSetGroupRatio_RequiresLevel1`/`_FloorUsesAgentBottomPriceRatio`/`TestHandleAgentListGroups_FloorReflectsAgentBottomPriceRatio` fail: no gate yet, floor still uses the global baseline; the harness/import changes themselves should already compile since `AgentRepo`/`AgentService` are existing `App` fields).
+```
+cd /Users/cc/newapi628 && go test ./internal/mtwire/ -run 'TestHandleAgentSetGroupRatio|TestHandleAgentListGroups'
+```
+
+- [ ] **Step 3:** Add `consumeFloorRatio` next to `modelGroupBaseline` in `internal/mtwire/distribution.go` (~505-509 area, in the "辅助" section):
+```go
+// modelGroupBaseline 取某模型分组的主站基准倍率（= 无个性化底价时的组合下限）：经 groupRatioOf 包级 seam
+// （默认 ratio_setting.GetGroupRatio；未命中其内部返回 1）。单测可注入 seam 控制基准。
+func modelGroupBaseline(group string) float64 {
+	return groupRatioOf(group)
+}
+
+// consumeFloorRatio 返回「该代理在某模型分组上设卖价」的下限（spec §9.7 四档价格阶梯的地板）：
+// bottomPriceRatio（该代理的 AgentParams.BottomPriceRatio，跨全部模型分组统一一个比例）> 0 时优先；
+// 未配置（<=0）回退平台基准 modelGroupBaseline(group)（历史行为，安全默认——不允许低于官方直客价）。
 //
-// 范围限定：仅钱包桶——订阅桶（tokenplan）的消耗计在用户订阅额度池（PostConsumeUserSubscriptionDelta），
-// 不是 users.quota，退到钱包 quota 会记错池子；订阅桶邀请折扣需要新的"订阅额度退返"通路（需另加
-// subscriptionID 等参数），本轮不做，调用方按 billingSource 门禁（见 creditConsumeCommission）。
-//
-// 已知的窗口（沿用 IncreaseUserQuota 既有风险，未新增）：占位行插入成功后，若进程在
-// model.IncreaseUserQuota 真正落库前崩溃，用户会"占了坑但没退到钱"——与 distribution.go 兑换码
-// 路径的"CAS 已翻但入账失败"是同一类已接受的边界情况，不引入新的资金不守恒风险。
-func (a *App) grantInviteDiscount(ctx context.Context, userID, quotaUnits int64, requestID string) {
-	if userID <= 0 || quotaUnits <= 0 || requestID == "" {
-		return
+// 必须是 HandleAgentSetGroupRatio（写：卖价下限）与 creditRatioMarkup（读：差价入账的减数，Task 13）
+// 共用的唯一口径——两处若各算各的，会出现「卖价被下限挡住却在入账时被当成 0 底价整单算成代理利润」
+// 的记账错误（§9.7 record-keeping 警示）。纯函数，无需 App 接收者。
+func consumeFloorRatio(bottomPriceRatio float64, group string) float64 {
+	if bottomPriceRatio > 0 {
+		return bottomPriceRatio
 	}
-	rate := effectiveInviteDiscountRate()
-	refund := int64(float64(quotaUnits) * (1 - rate))
-	if refund <= 0 {
-		return
-	}
-	res := a.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&mtDiscountGrantRow{
-		UserID: userID, RequestID: requestID, Quota: refund, CreatedAt: time.Now(),
-	})
-	if res.Error != nil {
-		common.SysError("mtwire: record invite discount grant failed: " + res.Error.Error())
-		return
-	}
-	if res.RowsAffected == 0 {
-		return // 幂等：同 requestID 已退款，不重复退
-	}
-	if err := model.IncreaseUserQuota(int(userID), int(refund), false); err != nil {
-		common.SysError("mtwire: grant invite discount quota failed: " + err.Error())
-	}
+	return modelGroupBaseline(group)
 }
 ```
-
-- [ ] **Step 5:** Wire the new migration into `Migrate()`. **SERIAL — `internal/mtwire/wire.go` is a shared/live file** (already mid-edit by the parallel payment-reconciliation work per `git status`; the tail below is the *current* real chain, which already differs from what Task 2 of this plan describes, because reconcile work landed after Task 2 was written). **Before editing, re-read the current tail of `Migrate()` and re-locate `return migrateReconcileHeartbeat(a.DB)` — do not blindly trust the line number.** As of this writing the tail is:
+  Update `HandleAgentSetGroupRatio` (~397-435) — add the level gate as the first line, capture `ctx` once, and swap the floor:
 ```go
-	// 对账记录 + 心跳（reconcile-history）：历史列表 reconcile_runs + 单行心跳 reconcile_heartbeat。
-	if err := migrateReconcileRuns(a.DB); err != nil {
-		return err
-	}
-	return migrateReconcileHeartbeat(a.DB)
-}
-```
-  Change the last line to an `if err :=` block and append the new call:
-```go
-	// 对账记录 + 心跳（reconcile-history）：历史列表 reconcile_runs + 单行心跳 reconcile_heartbeat。
-	if err := migrateReconcileRuns(a.DB); err != nil {
-		return err
-	}
-	if err := migrateReconcileHeartbeat(a.DB); err != nil {
-		return err
-	}
-	// 代理分层计费：邀请 9 折退返幂等台账 mt_invite_discount_grants（request_id 唯一，防重复退款）。
-	return migrateInviteDiscountGrants(a.DB)
-}
-```
-
-- [ ] **Step 6:** Restructure `creditConsumeCommission` so the discount fires independent of `CommissionRatio`. In `internal/mtwire/agent.go`, replace the body (~175-212):
-```go
-func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource string) {
-	defer func() {
-		if r := recover(); r != nil {
-			common.SysError("mtwire: creditConsumeCommission panic recovered")
-		}
-	}()
-	if userID <= 0 || quotaUnits <= 0 || requestID == "" {
+// HandleAgentSetGroupRatio PUT /api/tenant/groups/:group —— 设本租户某模型分组的覆盖倍率（= 卖价）。
+// 校验：① 需 level≥1（spec §9.5：L0 不能自设卖价），否则 AGENT_LEVEL_LOCKED；
+// ② group 必须是已登记的模型分组（IsModelGroup），否则 AGENT_GROUP_NOT_MODEL；
+// ③ ratio ≥ 该代理消耗计费底价（consumeFloorRatio；未配置则回退平台基准，spec §9.7），低于返回
+// RATIO_BELOW_FLOOR（经 pricing.Guard）。
+func (a *App) HandleAgentSetGroupRatio(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
 		return
 	}
-	ctx := context.Background()
-	tenantID := a.userTenantID(ctx, userID)
+	tenantID := agentTenantID(c)
 	if tenantID <= 0 {
-		return // 主站用户 / 未归属：无代理分润
-	}
-	params, found, err := a.AgentRepo.GetAgentType(ctx, tenantID)
-	if err != nil || !found {
-		return // 该租户未设代理
-	}
-	// L0（普通档）邀请 9 折：与提成是否 >0 无关——只要被 L0 邀请就退（§9.1）。仅钱包桶（订阅桶另有
-	// 额度池，见 grantInviteDiscount 注释）。
-	if params.Level == 0 && billingSource != "subscription" {
-		a.grantInviteDiscount(ctx, userID, quotaUnits, requestID)
-	}
-	if params.CommissionRatio <= 0 {
-		return // 分润比例为 0：无提成（9 折已在上面独立处理，不受影响）
-	}
-	cny := consumeCommissionCNY(quotaUnits, params.CommissionRatio, operation_setting.USDExchangeRate)
-	if cny <= 0 {
+		respondErr(c, errAgentForbidden)
 		return
 	}
-	// 钱包桶 → consume_commission；套餐桶 → tokenplan_commission（账目区分；两类均经此单点）。
-	source := agent.SourceConsumeCommission
-	if billingSource == "subscription" {
-		source = agent.SourceTokenplanCommission
+	group := strings.TrimSpace(c.Param("group"))
+	if group == "" {
+		respondErr(c, errAgentInputInvalid)
+		return
 	}
-	if err := a.AgentEarnings.AddEarning(ctx, agent.EarningEntry{
-		TenantID:   tenantID,
-		UserID:     userID,
-		SourceType: source,
-		SourceID:   requestID,
-		Amount:     cny,
-		Remark:     "consume:" + billingSource,
-	}); err != nil {
-		common.SysError("mtwire: credit consume commission failed: " + err.Error())
+	// 仅允许调模型分组的折扣系数；层级名 / 未登记分组一律拒（其 modelFactor 恒为 1，调了无意义且语义混淆）。
+	if !a.ModelGroupRepo.IsModelGroup(group) {
+		respondErr(c, errAgentGroupNotModel)
+		return
 	}
+	var body struct {
+		Ratio float64 `json:"ratio"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	ctx := reqCtx(c)
+	// 卖价下限 = 该代理底价（未配置回退平台基准）；spec §9.7：与 creditRatioMarkup 同一口径。
+	bottom := float64(0)
+	if params, found, err := a.AgentRepo.GetAgentType(ctx, tenantID); err == nil && found {
+		bottom = params.BottomPriceRatio
+	}
+	floor := consumeFloorRatio(bottom, group)
+	if err := pricing.NewGuard().ValidateGroupRatio(body.Ratio, floor); err != nil {
+		respondErr(c, err) // RATIO_BELOW_FLOOR
+		return
+	}
+	if err := a.TenantRepo.UpsertGroup(ctx, tenantID, group, body.Ratio); err != nil {
+		respondErr(c, err)
+		return
+	}
+	respondOK(c, modelGroupRatioOut{
+		GroupName: group, Ratio: body.Ratio, PlatformRatio: modelGroupBaseline(group), Floor: floor, HasOverride: true,
+	})
 }
 ```
-  (This is a pure control-flow split of the existing `err != nil || !found || params.CommissionRatio <= 0` early-return into two checks, with the discount call inserted between them — the commission math itself is untouched.)
+  Note `PlatformRatio` in the response now always reports `modelGroupBaseline(group)` (platform's own reference point), deliberately decoupled from `Floor` (this agent's actual enforced minimum) — before this task the two were always numerically identical, which is why the field split wasn't visible until now.
 
-- [ ] **Step 7:** Run — expect PASS.
+- [ ] **Step 4:** Update `HandleAgentListGroups` (~373-395) to show the same per-agent floor:
+```go
+// HandleAgentListGroups GET /api/tenant/groups —— 本租户可调的模型分组倍率：
+// 列出每个「已登记模型分组」的主站基准（platform_ratio）+ 本租户当前覆盖（ratio/has_override）+
+// 该代理的卖价下限（floor，spec §9.7：未配置底价则回退平台基准，与 HandleAgentSetGroupRatio 同口径）。
+// 仅列模型分组（层级由管理员/代理另设，不在此）。
+func (a *App) HandleAgentListGroups(c *gin.Context) {
+	tenantID := agentTenantID(c)
+	if tenantID <= 0 {
+		respondErr(c, errAgentForbidden)
+		return
+	}
+	ctx := reqCtx(c)
+	bottom := float64(0)
+	if params, found, err := a.AgentRepo.GetAgentType(ctx, tenantID); err == nil && found {
+		bottom = params.BottomPriceRatio
+	}
+	names := a.ModelGroupRepo.ListEnabled() // 已启用模型分组名（升序）
+	out := make([]modelGroupRatioOut, 0, len(names))
+	for _, name := range names {
+		base := modelGroupBaseline(name) // 平台基准（PlatformRatio；未覆盖时的实际生效价）
+		row := modelGroupRatioOut{
+			GroupName: name, Ratio: base, PlatformRatio: base, Floor: consumeFloorRatio(bottom, name),
+		}
+		if override, found, err := a.TenantRepo.LookupEnabledGroupRatio(ctx, tenantID, name); err == nil && found {
+			row.Ratio = override
+			row.HasOverride = true
+		}
+		out = append(out, row)
+	}
+	respondOK(c, out)
+}
 ```
-cd /Users/cc/newapi628 && go test ./internal/mtwire/ -run 'GrantInviteDiscount|CreditConsumeCommission'
+  Note `Ratio`'s no-override default stays `base` (platform baseline) — **not** the agent's floor. Absent an explicit 卖价 override, users are billed at the platform baseline (`resolveModelGroup2D`'s existing behaviour, unchanged); `BottomPriceRatio` is only ever a *ceiling on how low the agent may go*, never an implicit default price.
+
+- [ ] **Step 5:** Run — expect PASS (new tests + pre-existing `TestHandleAgentSetGroupRatio`/`TestHandleAgentListGroups`, both now level-1-seeded / harness-rewired but otherwise unchanged in their assertions).
+```
+cd /Users/cc/newapi628 && go test ./internal/mtwire/ -run 'TestHandleAgentSetGroupRatio|TestHandleAgentListGroups'
 cd /Users/cc/newapi628 && go build ./internal/... ./service/... ./router/... ./model/... ./setting/... ./controller/... && go test ./internal/mtwire/... ./internal/agent/...
 ```
 
-- [ ] **Step 8:** Commit.
+- [ ] **Step 6:** Commit.
 ```
-cd /Users/cc/newapi628 && git add internal/mtwire/tiering_billing.go internal/mtwire/tiering_billing_test.go internal/mtwire/agent.go internal/mtwire/wire.go && git commit -m "feat(billing): apply invite 9折 refund to L0-attributed users at consumption"
+cd /Users/cc/newapi628 && git add internal/mtwire/distribution.go internal/mtwire/distribution_test.go && git commit -m "feat(billing): gate HandleAgentSetGroupRatio to level>=1, floor to agent's own 底价 (spec §9.5/§9.7)"
 ```
 
 ---
 
-### Task 13: L1 markup-delta crediting. Touches the shared billing hook `agenthook.ConsumeCommission` (SERIAL — see Step 5)
+### Task 13: L1 差价入账 (`creditRatioMarkup`) + thread realized pricing data through `ConsumeCommission`. SERIAL — hook signature (Step 6)
 
-Implements §9.2's "差价入账 = (L1倍率 − 官方倍率) × 官方原价消耗额 → L1 钱包". The hard part: **the current `agenthook.ConsumeCommission` hook signature does not carry which model group was billed**, and the markup depends on it (an L1 tenant's override is per model-group — `tenant_groups[tenant_id, group]`, `internal/mtwire/grouphook.go` `resolveTenantGroupRatio`). Confirmed by reading the only two call sites: `service/quota.go:456` and `service/text_quota.go:484` both pass `(userID, quota, requestID, billingSource)` — no group. `relaycommon.RelayInfo` already carries the value we need, `UsingGroup string` (`relay/common/relay_info.go:93`), which is the exact same value `relay/helper/price.go:62`'s `HandleGroupRatio` already passes to `grouphook.ModelGroup2DResolver(userID, userGroup, usingGroup)` when the charge was originally computed — so this task threads it through as a 5th hook parameter rather than duplicating price-computation logic or re-deriving it from something else.
+Implements spec §9.4's `markup = rawUnits × (chargedGroupRatio − 底价) = chargedQuota − rawUnits × 底价` (**2026-07-02 v3 formula fix, Change 2** — the original formula `(卖价−底价)×token数×ModelRatio` silently dropped the realized tier/vip factor, so an agent's own vip discount cost nothing out of their markup, which directly conflicts with Task 16's new "agent can self-set their own vip force" mechanism (Change 1) and its "whoever sets it bears it" premise. The fix substitutes the **realized** combined ratio `chargedGroupRatio` for the tier-less "卖价", so a discount the agent grants their own users is reflected in their own differential.). The hard part: **the current `agenthook.ConsumeCommission` hook signature carries neither which model group was billed nor what ratio was actually applied**, and the markup needs both. Reading the real pricing pipeline (`relay/helper/price.go` `HandleGroupRatio`, `types/price_data.go` `PriceData`/`GroupRatioInfo`) shows `relayInfo.PriceData.GroupRatioInfo.GroupRatio` already holds the **exact combined ratio** (`用户层级优惠 × 分组倍率`, i.e. `tier × modelFactor`) that was multiplied into this specific charge, and `relayInfo.UsingGroup` holds the billed model group — both already computed and sitting on `relayInfo` at the two `agenthook.ConsumeCommission(...)` call sites (`service/quota.go:456`, `service/text_quota.go:484`). Threading `usingGroup` + that realized ratio through lets `token数×ModelRatio` be recovered **exactly** as `quotaUnits ÷ chargedGroupRatio` — no re-deriving `用户层级优惠`/`分组倍率` from a second, potentially-stale lookup (a real risk: an agent could change their 卖价, or Task 16's per-tenant vip force, in the gap between charge-time and settle-time). This is a **deliberate improvement over re-querying** the group ratio at credit time, not just "the same as reading `usingGroup` alone" — see the code comment on `ratioMarkupQuotaUnits` in Step 4. **Note the formula no longer needs the raw `sellRatio` value** (Step 4) — only whether an override exists at all (the "did this agent opt into markup on this group" gate) — since `chargedGroupRatio` already carries whatever ratio was actually charged.
 
-**Why a hook-signature change instead of avoiding it:** without `usingGroup`, there is no way to know which model-group ratio (if any) applied to *this* consumption event, hence no way to compute the delta — silently guessing (e.g. "assume no override") would make L1 markup crediting either always-zero or wrong whenever an agent actually has an override configured, which defeats the feature. The extension is purely additive (one more `string` parameter) and mechanical across exactly 4 files.
+**⚠️ Deployment-ordering note (paired with Task 16, read before shipping either alone):** this task's formula fix, by itself, already makes agent markup sensitive to *whatever* tier ratio landed in `chargedGroupRatio` — and until Task 16 ships, the only possible source of a non-1 tier ratio for an agent's downstream vip user is still the **platform's global** `GroupRatio['vip']` (Task 16 hasn't touched `resolveModelGroup2D` yet). So shipping this task alone, before Task 16, opens a real window where an L1 agent's markup income fluctuates with an admin's platform-wide vip-ratio changes — an outcome the agent didn't cause and can't see coming. That is "platform decides, agent pays," the wrong direction for "whoever sets it bears it." **Tasks 13 and 16 are a logical pair and should ship in the same deployment.** If they must ship separately, confirm with the user whether that transition window is acceptable first.
 
-**Markup math** (`ratioMarkupQuotaUnits`): since the amount already charged is `chargedQuota = base × tier × tenantFactor` and the official amount would have been `officialQuota = base × tier × baselineFactor`, dividing out gives `officialQuota = chargedQuota × baselineFactor / tenantFactor` without needing `base` or `tier` at all — `markupQuota = chargedQuota − officialQuota`. `baselineFactor`/`tenantFactor` are obtained by literally reusing the existing `modelGroupBaseline(group)` (`distribution.go:507`) and `resolveTenantGroupRatio(ctx, userID, group)` (`grouphook.go:27`) — the exact two lookups `resolveModelGroup2D` already does when the charge is computed, so the markup math mirrors the real pricing path instead of approximating it.
+**Why a hook-signature change instead of avoiding it:** without `usingGroup` there's no way to know which model-group override (if any) applies to *this* consumption event; without the realized `chargedGroupRatio` there's no way to recover `token数×ModelRatio` without re-deriving `用户层级优惠` from a fresh, possibly-different-from-charge-time DB lookup. The extension is purely additive (two more parameters) and mechanical across exactly 4 files. This task's body changes to `creditConsumeCommission` are **signature-only** — the function still unconditionally credits L0-style commission after this task (unchanged from today); Task 14 restructures the body into the level-based dispatch.
 
 **Files:**
-- `internal/platform/agenthook/agenthook.go` (`ConsumeCommission` var ~17-21).
-- `service/quota.go` (call site ~456).
-- `service/text_quota.go` (call site ~484).
-- `internal/mtwire/agent.go` (`creditConsumeCommission` signature line only ~175).
-- `internal/agent/model.go` (`EarningSource` consts ~70-92 — add `SourceRatioMarkup`).
-- `internal/agent/model_test.go` (`TestEarningSource_Valid` ~51-69 — extend).
-- `internal/mtwire/tiering_billing.go` (append: `resolveGroupFactors`, `ratioMarkupQuotaUnits`, `creditRatioMarkup`).
-- `internal/mtwire/tiering_billing_test.go` (append).
+- `internal/agent/model.go` (`EarningSource` consts ~50-61; `Valid()` ~64-72 — add `SourceRatioMarkup`).
+- `internal/agent/model_test.go` (`TestEarningSource_Valid` ~32-50 — extend).
+- `internal/mtwire/distribution.go` (consumes `consumeFloorRatio`, Task 12 — no edit here).
+- `internal/mtwire/consume_markup.go` (NEW) — `ratioMarkupQuotaUnits`, `creditRatioMarkup`.
+- `internal/mtwire/consume_markup_test.go` (NEW).
+- `internal/platform/agenthook/agenthook.go` (`ConsumeCommission` var ~17-21). SERIAL.
+- `service/quota.go` (call site ~454-458). SERIAL.
+- `service/text_quota.go` (call site ~483-485). SERIAL.
+- `internal/mtwire/agent.go` (`creditConsumeCommission` signature line only ~198).
 
 **Interfaces:**
-- Changes: `agenthook.ConsumeCommission func(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string)` (was 4 args; `usingGroup` appended).
+- Changes: `agenthook.ConsumeCommission func(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64)` (was 4 args; `usingGroup` and `chargedGroupRatio` appended).
 - Produces: `agent.SourceRatioMarkup EarningSource = "ratio_markup"`.
-- Produces: `(a *App) resolveGroupFactors(ctx, userID int64, usingGroup string) (baseline, tenantRatio float64)`.
-- Produces: `ratioMarkupQuotaUnits(chargedQuota int64, baselineFactor, tenantFactor float64) int64` (pure).
-- Produces: `(a *App) creditRatioMarkup(ctx, tenantID, userID, quotaUnits int64, usingGroup, requestID, billingSource string)` — best-effort, `requestID`-idempotent, credits the L1 tenant's own wallet.
+- Produces: `ratioMarkupQuotaUnits(chargedQuota int64, chargedGroupRatio, bottomRatio float64) int64` (pure; **v3**: no longer takes a `sellRatio` parameter — the formula only needs `chargedGroupRatio` vs `bottomRatio`, see Task intro).
+- Produces: `(a *App) creditRatioMarkup(ctx context.Context, tenantID, userID, quotaUnits int64, usingGroup, requestID, billingSource string, chargedGroupRatio, bottomPriceRatio float64)` — best-effort, `requestID`-idempotent, credits the L1 tenant's own wallet. (Signature unchanged from the original Task 13 draft — only its internal call into `ratioMarkupQuotaUnits` changes, Step 4.)
 
-- [ ] **Step 1:** Write the failing tests. First extend `internal/agent/model_test.go`'s `TestEarningSource_Valid` cases slice (~56-63), adding a case:
+- [ ] **Step 1:** Write the failing tests. First extend `internal/agent/model_test.go`'s `TestEarningSource_Valid` cases slice (~34-44):
 ```go
 	cases := []struct {
 		s    EarningSource
@@ -2341,10 +2369,29 @@ Implements §9.2's "差价入账 = (L1倍率 − 官方倍率) × 官方原价�
 		{EarningSource("bonus"), false},
 	}
 ```
-  Then append to `internal/mtwire/tiering_billing_test.go` (add `modelgroup` and `tenantrepo` to its import block: `"github.com/QuantumNous/new-api/internal/modelgroup"`, `tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"`):
+  Create `internal/mtwire/consume_markup_test.go`:
 ```go
+package mtwire
+
+import (
+	"context"
+	"math"
+	"testing"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
+
+	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
+
+	"github.com/QuantumNous/new-api/internal/agent"
+	"github.com/QuantumNous/new-api/internal/modelgroup"
+	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+)
+
 // newRatioMarkupTestApp 装配最小 App：sqlite(:memory:) + model_groups + tenants/tenant_domains/
-// tenant_groups + agent 四表（AgentRepo/AgentEarnings）+ 原生 users(id,tenant_id)。供「L1 差价入账」用例。
+// tenant_groups + agent 四表（AgentRepo/AgentEarnings）+ 原生 users(id,tenant_id)。供「L1 差价入账」用例；
+// seedUser 复用 grouphook_test.go 的既有 helper（同包）。
 func newRatioMarkupTestApp(t *testing.T) *App {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
@@ -2375,61 +2422,44 @@ func newRatioMarkupTestApp(t *testing.T) *App {
 	}
 }
 
-// TestRatioMarkupQuotaUnits 覆盖差价 quota 计算：markup = charged − charged×baseline/tenant；
-// 无覆盖(tenant==baseline)、覆盖率≤基准(配置漂移防御)、非法参数 → 0。
+// TestRatioMarkupQuotaUnits 覆盖差价的纯函数核心（**v3 修订**，spec §9.4）：rawUnits=charged/chargedGroupRatio
+// 精确反推 token×ModelRatio；markup = charged − rawUnits×bottomRatio。**关键行为变化（v2→v3）**：markup
+// 现在随 chargedGroupRatio 里包含的层级优惠（vip）成比例收缩——同样的 rawUnits，tier 越低（折扣越深），
+// markup 越小（见 "vip tier 0.8" 用例；v2 时代这里曾是 "same raw units, same markup" 的 tier-无关断言，
+// 已被 §9.6.1 的"代理自担 vip"取代，不再成立）。chargedGroupRatio<=bottomRatio（未加价 / 配置漂移 /
+// vip 折扣过深）、非法参数 → 0，恒不为负（MANDATORY safety，Task 15 进一步压测）。
 func TestRatioMarkupQuotaUnits(t *testing.T) {
 	cases := []struct {
-		name             string
-		charged          int64
-		baseline, tenant float64
-		want             int64
+		name              string
+		chargedQuota      int64
+		chargedGroupRatio float64
+		bottomRatio       float64
+		want              int64
 	}{
-		{"20% markup", 1200, 1.0, 1.2, 200}, // charged=1200(=1000@1.2)，官方价=1000，差价=200
-		{"no override (equal)", 1000, 1.0, 1.0, 0},
-		{"tenant below baseline (drift guard)", 800, 1.0, 0.8, 0},
-		{"zero charged", 0, 1.0, 1.2, 0},
-		{"non-positive baseline", 1200, 0, 1.2, 0},
+		{"default tier (no discount): charged=900 @ 0.9, bottom 0.7", 900, 0.9, 0.7, 200},
+		// 0.72=0.8(代理自设 vip 力度)×0.9(卖价)；同样 1000 rawUnits，vip 让 markup 从 200 缩到 20 ——
+		// 代理自担折扣（取代 v2 的 "same raw units, same markup" tier-无关断言）。
+		{"vip tier 0.8 (agent's own override): charged=720 @ 0.72, bottom 0.7", 720, 0.72, 0.7, 20},
+		// 更深的 vip(0.5)进一步压到跌破 bottom → clamp 0，结构上不会为负（Task 15 覆盖更完整的跨 tier 扫描）。
+		{"vip tier 0.5 (deeper discount, drops below bottom): charged=450 @ 0.45, bottom 0.7", 450, 0.45, 0.7, 0},
+		{"at floor exactly (chargedGroupRatio == bottomRatio): no markup", 900, 0.7, 0.7, 0},
+		{"below floor (drift / over-discount): clamps to 0, never negative", 900, 0.6, 0.7, 0},
+		{"zero charged", 0, 0.9, 0.7, 0},
+		{"non-positive chargedGroupRatio", 900, 0, 0.7, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := ratioMarkupQuotaUnits(c.charged, c.baseline, c.tenant); got != c.want {
-				t.Fatalf("ratioMarkupQuotaUnits(%d,%v,%v) = %d, want %d", c.charged, c.baseline, c.tenant, got, c.want)
+			if got := ratioMarkupQuotaUnits(c.chargedQuota, c.chargedGroupRatio, c.bottomRatio); got != c.want {
+				t.Fatalf("ratioMarkupQuotaUnits(%d,%v,%v) = %d, want %d",
+					c.chargedQuota, c.chargedGroupRatio, c.bottomRatio, got, c.want)
 			}
 		})
 	}
 }
 
-// TestResolveGroupFactors 覆盖：命中模型分组覆盖 → (基准,覆盖)；未覆盖 → (基准,基准)；
-// 非模型分组/未登记（如层级名 "default"）→ (1,1)（与 resolveModelGroup2D 的 modelFactor 分支同口径）。
-func TestResolveGroupFactors(t *testing.T) {
-	ctx := context.Background()
-	app := newRatioMarkupTestApp(t)
-	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
-		t.Fatalf("register model group: %v", err)
-	}
-	restore := groupRatioOf
-	defer func() { groupRatioOf = restore }()
-	groupRatioOf = stub2DRatios // 复用 modelgroup_test.go 的桩：claude-kiro=0.3
-
-	seedUser(t, app, 100, 5) // 复用 grouphook_test.go 的 seedUser；用户100 → 租户5
-	if err := app.TenantRepo.UpsertGroup(ctx, 5, "claude-kiro", 0.45); err != nil {
-		t.Fatalf("upsert override: %v", err)
-	}
-
-	if b, tr := app.resolveGroupFactors(ctx, 100, "claude-kiro"); b != 0.3 || tr != 0.45 {
-		t.Fatalf("with override = (%v,%v), want (0.3,0.45)", b, tr)
-	}
-	seedUser(t, app, 200, 9) // 租户9：无覆盖
-	if b, tr := app.resolveGroupFactors(ctx, 200, "claude-kiro"); b != 0.3 || tr != 0.3 {
-		t.Fatalf("no override = (%v,%v), want (0.3,0.3)", b, tr)
-	}
-	if b, tr := app.resolveGroupFactors(ctx, 100, "default"); b != 1 || tr != 1 {
-		t.Fatalf("non-model-group = (%v,%v), want (1,1)", b, tr)
-	}
-}
-
-// TestCreditRatioMarkup_CreditsL1WalletIdempotently 验证差价入账：命中覆盖→按公式入 L1 钱包
-// (source=ratio_markup)；同 requestID 重复调用不重复入账（幂等）；无覆盖→不入账。
+// TestCreditRatioMarkup_CreditsL1WalletIdempotently 验证差价入账：命中卖价覆盖 → 按公式入 L1 钱包
+// (source=ratio_markup)；同 requestID 重复调用不重复入账（幂等）；无卖价覆盖 → 不入账；该代理底价
+// 高于卖价（配置漂移）→ 不入账、不倒扣。
 func TestCreditRatioMarkup_CreditsL1WalletIdempotently(t *testing.T) {
 	ctx := context.Background()
 	app := newRatioMarkupTestApp(t)
@@ -2438,28 +2468,28 @@ func TestCreditRatioMarkup_CreditsL1WalletIdempotently(t *testing.T) {
 	}
 	restore := groupRatioOf
 	defer func() { groupRatioOf = restore }()
-	groupRatioOf = stub2DRatios
+	groupRatioOf = stub2DRatios // claude-kiro 平台基准 = 0.3
 
 	seedUser(t, app, 100, 5)
 	if err := app.TenantRepo.UpsertGroup(ctx, 5, "claude-kiro", 0.45); err != nil {
 		t.Fatalf("upsert override: %v", err)
 	}
 
-	// charged=1200 quota，baseline=0.3，tenant=0.45 → official=800，markup=400 quota。
-	charged := int64(1200)
-	app.creditRatioMarkup(ctx, 5, 100, charged, "claude-kiro", "req-md-1", "wallet")
+	// charged=1200 quota，chargedGroupRatio=0.45（tier=1×卖价 0.45），底价未配置（0）→回退平台基准 0.3。
+	// rawUnits=1200/0.45=2666.67，markup=(0.45-0.3)×2666.67=400。
+	app.creditRatioMarkup(ctx, 5, 100, 1200, "claude-kiro", "req-md-1", "wallet", 0.45, 0)
 
 	w, err := app.AgentRepo.GetWallet(ctx, 5)
 	if err != nil {
 		t.Fatalf("get wallet: %v", err)
 	}
 	wantCNY := consumeCommissionCNY(400, 1, operation_setting.USDExchangeRate)
-	if math.Abs(w.WithdrawableBalance-wantCNY) > 1e-9 {
+	if math.Abs(w.WithdrawableBalance-wantCNY) > 1e-6 {
 		t.Fatalf("withdrawable = %v, want %v", w.WithdrawableBalance, wantCNY)
 	}
 
 	// 幂等：同 requestID 重复调用不重复入账。
-	app.creditRatioMarkup(ctx, 5, 100, charged, "claude-kiro", "req-md-1", "wallet")
+	app.creditRatioMarkup(ctx, 5, 100, 1200, "claude-kiro", "req-md-1", "wallet", 0.45, 0)
 	w2, err := app.AgentRepo.GetWallet(ctx, 5)
 	if err != nil {
 		t.Fatalf("get wallet: %v", err)
@@ -2468,9 +2498,9 @@ func TestCreditRatioMarkup_CreditsL1WalletIdempotently(t *testing.T) {
 		t.Fatalf("idempotency broken: withdrawable = %v, want %v", w2.WithdrawableBalance, w.WithdrawableBalance)
 	}
 
-	// 无覆盖（租户9未设覆盖）：不入账。
+	// 无覆盖（租户 9 未设卖价）：不入账。
 	seedUser(t, app, 200, 9)
-	app.creditRatioMarkup(ctx, 9, 200, charged, "claude-kiro", "req-md-2", "wallet")
+	app.creditRatioMarkup(ctx, 9, 200, 1200, "claude-kiro", "req-md-2", "wallet", 0.3, 0)
 	w9, err := app.AgentRepo.GetWallet(ctx, 9)
 	if err != nil {
 		t.Fatalf("get wallet: %v", err)
@@ -2478,25 +2508,50 @@ func TestCreditRatioMarkup_CreditsL1WalletIdempotently(t *testing.T) {
 	if w9.WithdrawableBalance != 0 {
 		t.Fatalf("no-override tenant must not earn markup, got %v", w9.WithdrawableBalance)
 	}
+
+	// 该代理显式配置的底价（0.5）高于卖价（0.45）：配置漂移场景，防御性跳过，不倒扣、不入账。
+	seedUser(t, app, 300, 11)
+	if err := app.TenantRepo.UpsertGroup(ctx, 11, "claude-kiro", 0.45); err != nil {
+		t.Fatalf("upsert override: %v", err)
+	}
+	app.creditRatioMarkup(ctx, 11, 300, 1200, "claude-kiro", "req-md-3", "wallet", 0.45, 0.5)
+	w11, err := app.AgentRepo.GetWallet(ctx, 11)
+	if err != nil {
+		t.Fatalf("get wallet: %v", err)
+	}
+	if w11.WithdrawableBalance != 0 {
+		t.Fatalf("chargedGroupRatio<=bottomRatio (drift) must not credit anything, got %v", w11.WithdrawableBalance)
+	}
+
+	// 非模型分组（层级名）：即便凑巧有 tenant_groups 行，也不产生差价（IsModelGroup 门禁）。
+	seedUser(t, app, 400, 12)
+	app.creditRatioMarkup(ctx, 12, 400, 1200, "vip", "req-md-4", "wallet", 0.36, 0)
+	w12, err := app.AgentRepo.GetWallet(ctx, 12)
+	if err != nil {
+		t.Fatalf("get wallet: %v", err)
+	}
+	if w12.WithdrawableBalance != 0 {
+		t.Fatalf("non-model-group usingGroup must not credit markup, got %v", w12.WithdrawableBalance)
+	}
 }
 ```
 
-- [ ] **Step 2:** Run — expect FAIL (compile: `SourceRatioMarkup`/`resolveGroupFactors`/`ratioMarkupQuotaUnits`/`creditRatioMarkup` undefined; `modelgroup`/`tenantrepo` unresolved in the test file).
+- [ ] **Step 2:** Run — expect FAIL (compile: `SourceRatioMarkup`/`ratioMarkupQuotaUnits`/`creditRatioMarkup` undefined).
 ```
-cd /Users/cc/newapi628 && go test ./internal/agent/... ./internal/mtwire/ -run 'EarningSource|RatioMarkup|ResolveGroupFactors'
+cd /Users/cc/newapi628 && go test ./internal/agent/... ./internal/mtwire/ -run 'EarningSource|RatioMarkup'
 ```
 
-- [ ] **Step 3:** Add the new earning source. In `internal/agent/model.go`, add after `SourceTokenplanCommission` (~78):
+- [ ] **Step 3:** Add the new earning source. In `internal/agent/model.go`, add after `SourceTokenplanCommission` (~58):
 ```go
 	// SourceTokenplanCommission 套餐内消耗分润。
 	SourceTokenplanCommission EarningSource = "tokenplan_commission"
-	// SourceRatioMarkup 差价入账（L1/独立档：本租户模型分组倍率高于官方基准倍率的部分，
-	// 按官方原价消耗额折算；§9.2）。
+	// SourceRatioMarkup 差价入账（L1/独立档：卖价高于底价的部分，按官方 token×ModelRatio 折算；
+	// spec agent-tiering §9.4）。
 	SourceRatioMarkup EarningSource = "ratio_markup"
 	// SourceManualAdjustment 人工调整（管理员修正，金额可正可负）。
 	SourceManualAdjustment EarningSource = "manual_adjustment"
 ```
-  And extend `Valid()` (~84-92):
+  And extend `Valid()` (~64-72):
 ```go
 func (s EarningSource) Valid() bool {
 	switch s {
@@ -2509,71 +2564,83 @@ func (s EarningSource) Valid() bool {
 }
 ```
 
-- [ ] **Step 4:** Implement `resolveGroupFactors` + `ratioMarkupQuotaUnits` + `creditRatioMarkup`. Update `internal/mtwire/tiering_billing.go`'s import block (add `"github.com/QuantumNous/new-api/internal/agent"`):
+- [ ] **Step 4:** Create `internal/mtwire/consume_markup.go` with the pure math + the crediting orchestration:
 ```go
+package mtwire
+
+// L1（独立档）差价入账实现（spec agent-tiering §9.4/§9.7/§9.9）。独立文件，紧邻 distribution.go 的
+// consumeFloorRatio（Task 12：写路径的卖价地板）——本文件的 creditRatioMarkup 直接复用它，两处必须
+// 同一口径（否则会出现「卖价被地板挡住却在入账时按 0 底价整单算成代理利润」的记账错误）。
+
 import (
 	"context"
-	"time"
-
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agent"
-	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
-```
-  Append below `grantInviteDiscount`:
-```go
-// ============================================================================
-// L1 差价入账（独立档，§9.2）
-// ============================================================================
 
-// resolveGroupFactors 返回 usingGroup 的（平台基准, 本租户实际生效）模型分组倍率系数，与
-// resolveModelGroup2D 的 modelFactor 分支同口径（modelgroup.go ~93-101）：非模型分组（未登记/
-// 已禁用）恒 (1,1)（不产生差价）；已登记则基准=modelGroupBaseline，命中 tenant_groups 覆盖则
-// tenantRatio=覆盖值，否则 tenantRatio=基准（无覆盖，差价天然为 0）。
-func (a *App) resolveGroupFactors(ctx context.Context, userID int64, usingGroup string) (baseline, tenantRatio float64) {
-	if a.ModelGroupRepo == nil || usingGroup == "" || !a.ModelGroupRepo.IsModelGroup(usingGroup) {
-		return 1, 1
-	}
-	baseline = modelGroupBaseline(usingGroup)
-	tenantRatio = baseline
-	if override, hit := a.resolveTenantGroupRatio(ctx, userID, usingGroup); hit {
-		tenantRatio = override
-	}
-	return baseline, tenantRatio
-}
-
-// ratioMarkupQuotaUnits 用「实际扣费额」反推「官方基准扣费额」再作差，得到代理加价差额（quota 单位）：
+// ratioMarkupQuotaUnits 是差价入账的纯函数核心（spec §9.4 **v3 修订**：markup=rawUnits×(chargedGroupRatio−底价)
+// = chargedQuota − rawUnits×底价）：
 //
-//	officialQuota = chargedQuota × baselineFactor / tenantFactor
-//	markupQuota   = chargedQuota − officialQuota
+//	rawUnits = chargedQuota / chargedGroupRatio
+//	markup   = chargedQuota − rawUnits × bottomRatio
 //
-// tenantFactor ≤ baselineFactor（无加价 / 配置漂移）或任一参数非正 → 0（绝不倒扣代理、绝不误判负收益）。
-func ratioMarkupQuotaUnits(chargedQuota int64, baselineFactor, tenantFactor float64) int64 {
-	if chargedQuota <= 0 || baselineFactor <= 0 || tenantFactor <= baselineFactor {
+// chargedGroupRatio 必须是「结算时实际生效的组合倍率」（用户层级优惠×分组倍率，来自
+// relayInfo.PriceData.GroupRatioInfo.GroupRatio；层级优惠现在可能是代理自设的 vip 力度覆盖，spec
+// §9.6.1）——用实际生效值反推 rawUnits，而不是重新查一遍「当前」的层级/分组倍率，从而与代理事后
+// 改卖价/vip 力度的竞态解耦。
+//
+// **v2→v3 关键变化**：公式不再单独接收 sellRatio 参数，直接用 chargedGroupRatio（已经把层级优惠乘
+// 进去）与 bottomRatio 的差值展开——代理自设的 vip 折扣因而**直接体现**在 markup 里（层级优惠越深、
+// markup 越小），不再是 v2 时代"层级优惠已经在 chargedGroupRatio 里被除掉、与 markup 完全无关"的
+// tier-不变量（spec §9.6 曾标注为已知差距，现由 §9.6.1 解决）。
+//
+// chargedGroupRatio<=bottomRatio（未加价；或管理员事后把底价调到卖价之上——配置漂移防御；或代理
+// 自设/调深 vip 力度导致这一单的实际生效价跌破底价——同一类漂移，同一处兜底，不必为此单开分支）或
+// 任一参数非正 → 0：结构上绝不产生负值（MANDATORY safety：无论 chargedGroupRatio 因为哪个原因被
+// 拉低，markup 只会趋近 0，不会为负；这同时是 spec §9.6.1"卖价×vip 力度 ≥ 底价"floor 承诺的结算侧
+// 兜底）。
+func ratioMarkupQuotaUnits(chargedQuota int64, chargedGroupRatio, bottomRatio float64) int64 {
+	if chargedQuota <= 0 || chargedGroupRatio <= 0 || chargedGroupRatio <= bottomRatio {
 		return 0
 	}
-	officialQuota := float64(chargedQuota) * baselineFactor / tenantFactor
-	return int64(float64(chargedQuota) - officialQuota)
+	rawUnits := float64(chargedQuota) / chargedGroupRatio
+	markup := float64(chargedQuota) - rawUnits*bottomRatio
+	if markup <= 0 { // 代数上该分支在上面的 guard 后不可达；保留作 belt-and-suspenders（浮点边界防御）。
+		return 0
+	}
+	return int64(markup)
 }
 
-// creditRatioMarkup 是 L1（level≥1）档「差价入账」实现：markup = 实际扣费额 − 官方基准扣费额，
-// 按 requestID 幂等入账到 L1 自己的钱包（source=ratio_markup）。best-effort：失败不阻断扣费/调用方
-// （由 creditConsumeCommission 的 panic 兜底覆盖）。与 L0 提成互斥——调用方按 level 二选一，绝不
-// 同时调用两者（Task 14）。
-func (a *App) creditRatioMarkup(ctx context.Context, tenantID, userID, quotaUnits int64, usingGroup, requestID, billingSource string) {
-	if tenantID <= 0 || quotaUnits <= 0 || requestID == "" {
+// creditRatioMarkup 是 L1（level≥1）差价入账实现（**v3 修订**，spec §9.4/§9.6.1）：先确认该用户所属
+// 租户在 usingGroup 上是否设了卖价覆盖（tenant_groups；无覆盖则不入账——未设卖价的模型分组，用户按
+// 平台直客价付费，不视为隐式底价加价；命中与否才是"是否入账"的判据，覆盖的具体数值本身 v3 起不再
+// 参与 markup 计算，下方详述）× consumeFloorRatio(bottomPriceRatio, usingGroup)（Task 12 同口径地板）
+// 算出 markup（直接用 chargedGroupRatio——已经把代理自设 vip 力度乘进去的实际生效倍率，§9.6.1——
+// 而不是裸卖价），按 requestID 幂等入账到 L1 自己的钱包（source=ratio_markup）。best-effort：失败
+// 不阻断调用方（由 creditConsumeCommission 的 panic 兜底覆盖，Task 14）。
+//
+// **v2→v3**：旧版本读取 sellRatio（卖价覆盖的具体数值）传入 markup 公式；新公式改用 chargedGroupRatio
+// （已含层级优惠）直接对 bottomRatio 求差，sellRatio 的返回值不再需要——但**查询本身仍必须保留**，
+// 因为它是"这个模型分组是否有卖价覆盖"这个入账资格判据的唯一来源（无覆盖=用户按平台价付费=不产生
+// 差价，即便 chargedGroupRatio 本身合法非零）。
+func (a *App) creditRatioMarkup(ctx context.Context, tenantID, userID, quotaUnits int64, usingGroup, requestID, billingSource string, chargedGroupRatio, bottomPriceRatio float64) {
+	if tenantID <= 0 || quotaUnits <= 0 || requestID == "" || usingGroup == "" || chargedGroupRatio <= 0 {
 		return
 	}
-	baseline, tenantRatio := a.resolveGroupFactors(ctx, userID, usingGroup)
-	markupQuota := ratioMarkupQuotaUnits(quotaUnits, baseline, tenantRatio)
-	if markupQuota <= 0 {
-		return // 无覆盖 / 覆盖未高于基准：无差价，不入账
+	if a.ModelGroupRepo == nil || !a.ModelGroupRepo.IsModelGroup(usingGroup) {
+		return // 非模型分组（层级名等）：无「卖价」概念，不产生差价
 	}
-	// markup 已是「扣费额」口径（quota 单位），直接按 ratio=1 换算 CNY（不再乘任何分润比例）。
+	if _, hit := a.resolveTenantGroupRatio(ctx, userID, usingGroup); !hit {
+		return // 未设卖价覆盖：用户按平台直客价付费，不视为隐式底价加价
+	}
+	bottom := consumeFloorRatio(bottomPriceRatio, usingGroup) // 与 HandleAgentSetGroupRatio 同口径（Task 12）
+	markupQuota := ratioMarkupQuotaUnits(quotaUnits, chargedGroupRatio, bottom)
+	if markupQuota <= 0 {
+		return
+	}
+	// markup 已是「计费额」口径（quota 单位），直接按 ratio=1 换算 CNY（不再乘任何分润比例）。
 	cny := consumeCommissionCNY(markupQuota, 1, operation_setting.USDExchangeRate)
 	if cny <= 0 {
 		return
@@ -2591,70 +2658,78 @@ func (a *App) creditRatioMarkup(ctx context.Context, tenantID, userID, quotaUnit
 }
 ```
 
-- [ ] **Step 5:** Extend the shared billing hook. **SERIAL — this changes a call signature shared by two `service/` call sites; both must be updated in the same commit or the tree won't compile.** In `internal/platform/agenthook/agenthook.go` (~17-21):
+- [ ] **Step 5:** Run — expect PASS (markup math + crediting, in isolation — the hook itself is not yet threaded).
+```
+cd /Users/cc/newapi628 && go test ./internal/agent/... ./internal/mtwire/ -run 'EarningSource|RatioMarkup'
+```
+
+- [ ] **Step 6:** Thread the hook signature. **SERIAL — this changes a call signature shared by two `service/` call sites; both must be updated in the same commit or the tree won't compile.** In `internal/platform/agenthook/agenthook.go` (~17-21):
 ```go
 // ConsumeCommission 在一次成功的 PostConsume 之后被调用，按所属代理档位二选一计佣入账
-// （level==0 → 提成 consume_commission；level≥1 → 差价 ratio_markup；见 mtwire.creditConsumeCommission）。
-// 参数：userID=消费用户；quotaUnits=本次消费的 new-api 内部额度单位（$1=common.QuotaPerUnit，可正可负，
-// 实现侧只对正向消费计佣）；requestID=幂等键来源；billingSource="wallet"|"subscription"（区分钱包桶/
-// 套餐桶）；usingGroup=本次计费实际使用的分组（relayInfo.UsingGroup，供 L1 差价入账反推官方基准倍率）。
+// （level==0 → 提成 consume_commission；level≥1 → 差价 ratio_markup；见 mtwire.creditConsumeCommission，
+// Task 14）。参数：userID=消费用户；quotaUnits=本次消费的 new-api 内部额度单位（$1=common.QuotaPerUnit，
+// 可正可负，实现侧只对正向消费计佣）；requestID=幂等键来源；billingSource="wallet"|"subscription"
+// （区分钱包桶/套餐桶）；usingGroup=本次计费实际使用的分组（relayInfo.UsingGroup）；chargedGroupRatio=
+// 本次计费实际生效的组合倍率（用户层级优惠×分组倍率，relayInfo.PriceData.GroupRatioInfo.GroupRatio）——
+// 后两者供 L1 差价入账精确反推 token×ModelRatio，spec agent-tiering §9.4。
 // nil = 未装配。实现必须自身幂等且 best-effort（失败仅记日志，不返回错误）。
-var ConsumeCommission func(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string)
+var ConsumeCommission func(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64)
 ```
-  In `service/quota.go` (~456):
+  In `service/quota.go` (~454-458):
 ```go
 	if relayInfo != nil && agenthook.ConsumeCommission != nil {
 		if total := int64(quota) + int64(preConsumedQuota); total > 0 {
-			agenthook.ConsumeCommission(int64(relayInfo.UserId), total, relayInfo.RequestId, relayInfo.BillingSource, relayInfo.UsingGroup)
+			agenthook.ConsumeCommission(int64(relayInfo.UserId), total, relayInfo.RequestId, relayInfo.BillingSource,
+				relayInfo.UsingGroup, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
 		}
 	}
 ```
-  In `service/text_quota.go` (~484):
+  In `service/text_quota.go` (~483-485):
 ```go
 	if agenthook.ConsumeCommission != nil && summary.Quota > 0 {
-		agenthook.ConsumeCommission(int64(relayInfo.UserId), int64(summary.Quota), relayInfo.RequestId, relayInfo.BillingSource, relayInfo.UsingGroup)
+		agenthook.ConsumeCommission(int64(relayInfo.UserId), int64(summary.Quota), relayInfo.RequestId, relayInfo.BillingSource,
+			relayInfo.UsingGroup, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
 	}
 ```
-  In `internal/mtwire/agent.go`, change only the `creditConsumeCommission` signature line (~175) — body unchanged, `usingGroup` is accepted but not yet consumed (Task 14 wires it in):
+  In `internal/mtwire/agent.go`, change only the `creditConsumeCommission` signature line (~198) — **body unchanged**, the two new parameters are accepted but not yet consumed (Task 14 wires them in):
 ```go
-func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string) {
+func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64) {
 ```
-  `agenthook.ConsumeCommission = a.creditConsumeCommission` (`agent.go` ~93, inside `InstallHooks`) needs **no textual change** — it's a method-value assignment that now simply refers to the 5-arg method.
+  `agenthook.ConsumeCommission = a.creditConsumeCommission` (`agent.go` `InstallHooks`, ~116) needs **no textual change** — it's a method-value assignment that now simply refers to the 6-arg method.
 
-- [ ] **Step 6:** Run — expect PASS.
+- [ ] **Step 7:** Run — expect PASS (full tree compiles; all mtwire/agent/service tests green).
 ```
-cd /Users/cc/newapi628 && go test ./internal/agent/... ./internal/mtwire/ -run 'EarningSource|RatioMarkup|ResolveGroupFactors'
 cd /Users/cc/newapi628 && go build ./internal/... ./service/... ./router/... ./model/... ./setting/... ./controller/... && go test ./internal/mtwire/... ./internal/agent/... ./service/...
 ```
 
-- [ ] **Step 7:** Verify zero stale 4-arg call sites remain.
+- [ ] **Step 8:** Verify zero stale 4-arg call sites remain.
 ```
-cd /Users/cc/newapi628 && grep -rn "ConsumeCommission(int64(relayInfo" service/ | grep -v UsingGroup || echo "clean"
+cd /Users/cc/newapi628 && grep -rn "ConsumeCommission(int64(relayInfo" service/ | grep -v "UsingGroup\|GroupRatio" || echo "clean"
 ```
   Expect `clean`.
 
-- [ ] **Step 8:** Commit.
+- [ ] **Step 9:** Commit.
 ```
-cd /Users/cc/newapi628 && git add internal/agent/model.go internal/agent/model_test.go internal/platform/agenthook/agenthook.go service/quota.go service/text_quota.go internal/mtwire/agent.go internal/mtwire/tiering_billing.go internal/mtwire/tiering_billing_test.go && git commit -m "feat(billing): thread usingGroup through ConsumeCommission hook + add L1 ratio-markup crediting"
+cd /Users/cc/newapi628 && git add internal/agent/model.go internal/agent/model_test.go internal/mtwire/consume_markup.go internal/mtwire/consume_markup_test.go internal/platform/agenthook/agenthook.go service/quota.go service/text_quota.go internal/mtwire/agent.go && git commit -m "feat(billing): thread usingGroup+chargedGroupRatio through ConsumeCommission hook + add L1 ratio-markup crediting"
 ```
 
 ---
 
-### Task 14: Tier-based earning switch in the commission hook (no-double-credit)
+### Task 14: Tier-based earning dispatch in `creditConsumeCommission` (no-double-credit)
 
-Wires Tasks 12+13 together: `creditConsumeCommission` becomes a thin dispatcher on `params.Level`, extracting the existing L0 body into `creditL0Commission` (symmetric with `creditRatioMarkup`) so the switch itself is a 5-line diff, not a re-derivation. This is the task that makes the mutual-exclusion in §9.3 ("计费入账二选一…不重复给") a tested invariant rather than an assumption.
+Wires Task 13's `creditRatioMarkup` together with the existing L0 commission math: `creditConsumeCommission` becomes a thin dispatcher on `params.Level`, extracting the existing L0 body into `creditL0Commission` (symmetric with `creditRatioMarkup`) so the switch itself is a small diff, not a re-derivation. This is the task that makes spec §9.9's "按档二选一…绝不同时" a **tested invariant**, not an assumption.
 
-**Operational note (flagged, not a code change here):** Task 2 of this plan backfills every *existing* agent's `agent_profiles.level` to `1` (independent) as part of deleting the `type` column. Combined with this task, that means: the moment Tasks 1-10 **and** 11-14 are both deployed, every pre-existing agent tenant instantly stops earning `consume_commission` and starts earning `ratio_markup` instead — which is `0` for any agent that hasn't configured a model-group override via `HandleAgentSetGroupRatio` (most won't have, since that's a newer opt-in feature). This is the *intended* behavior per spec §9.3 ("二选一"), not a bug, but it is a real, immediate earnings-drop for any already-live agent relying on `commission_ratio`. Confirm this is acceptable before deploying Part 2 to a server with real agents on it — no task in this plan changes that outcome, since it's what the spec explicitly asks for.
+**Operational note (flagged, not a code change here):** Task 2 of this plan (already implemented — see `git log`, commit `2f07403`) backfilled every *existing* agent's `agent_profiles.level` to `1` (independent) when the `type` column was dropped. Combined with this task, that means: the moment Tasks 11-14 are deployed, every pre-existing agent tenant instantly stops earning `consume_commission` and starts earning `ratio_markup` instead — which is `0` for any agent that hasn't configured a model-group 卖价 via `HandleAgentSetGroupRatio` (most won't have, since that's a newer opt-in feature, and Task 12 additionally now requires level≥1 *and* clears the new floor). This is the *intended* behavior per spec §9.9 ("二选一"), not a bug, but it is a real, immediate earnings-drop for any already-live agent relying on `commission_ratio`. **Confirm this is acceptable before deploying Part 2 to a server with real agents on it** — no task in this plan changes that outcome, since it's what the spec explicitly asks for.
 
 **Files:**
-- `internal/mtwire/agent.go` (`creditConsumeCommission` ~175-212 — full restructure into a dispatcher + `creditL0Commission`).
+- `internal/mtwire/agent.go` (`creditConsumeCommission` ~198-238 — full restructure into a dispatcher + `creditL0Commission`).
 - `internal/mtwire/agent_tiering_test.go` (NEW).
 
 **Interfaces:**
 - Changes: `creditConsumeCommission`'s body (signature unchanged from Task 13).
-- Produces: `(a *App) creditL0Commission(ctx, tenantID, userID, quotaUnits int64, requestID, billingSource string, commissionRatio float64)` (extracted, same logic Task 12 wrote inline).
+- Produces: `(a *App) creditL0Commission(ctx context.Context, tenantID, userID, quotaUnits int64, requestID, billingSource string, commissionRatio float64)` (extracted, same logic that exists today, unmodified).
 
-- [ ] **Step 1:** Write the failing tests. Create `internal/mtwire/agent_tiering_test.go`:
+- [ ] **Step 1:** Write the failing tests. Create `internal/mtwire/agent_tiering_test.go` (reuses `newRatioMarkupTestApp` + `seedUser` from Task 13's `consume_markup_test.go`, same package):
 ```go
 package mtwire
 
@@ -2665,34 +2740,16 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/agent"
 	"github.com/QuantumNous/new-api/internal/modelgroup"
-	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
 
-// newTieringHookTestApp 在 newCreditCommissionTestApp（tiering_billing_test.go，Task 12）基础上
-// 加 model_groups + tenant_groups（L1 差价入账用例需要）。同 modelgroup_test.go
-// newModelGroup2DTenantApp「基础 app 上加表」的套路。
-func newTieringHookTestApp(t *testing.T) *App {
-	t.Helper()
-	app := newCreditCommissionTestApp(t)
-	if err := modelgroup.AutoMigrate(app.DB); err != nil {
-		t.Fatalf("modelgroup migrate: %v", err)
-	}
-	if err := tenantrepo.AutoMigrate(app.DB); err != nil {
-		t.Fatalf("tenant migrate: %v", err)
-	}
-	app.ModelGroupRepo = modelgroup.New(app.DB)
-	app.TenantRepo = tenantrepo.New(app.DB)
-	return app
-}
-
-// TestCreditConsumeCommission_TierSwitch_NeverBothSources 是核心不变量测试（防双发）：同一次
-// creditConsumeCommission 调用，L0 租户只产生 consume_commission、L1 租户只产生 ratio_markup，
-// 两个 source 绝不同时出现在同一 (tenant_id, source_id) 下 —— 即便 L1 租户也配了 commission_ratio
-// （刻意保留非零值：证明 L1 分支根本不读这个字段，而不只是恰好为 0）。
+// TestCreditConsumeCommission_TierSwitch_NeverBothSources 是核心不变量测试（spec §9.9，防双发）：
+// 同一次 creditConsumeCommission 调用，L0 租户只产生 consume_commission、L1 租户只产生 ratio_markup，
+// 两个 source 绝不同时出现——即便 L1 租户也配了非零 commission_ratio（刻意保留非零值：证明 L1 分支
+// 根本不读这个字段，而不只是恰好为 0）。
 func TestCreditConsumeCommission_TierSwitch_NeverBothSources(t *testing.T) {
 	ctx := context.Background()
-	app := newTieringHookTestApp(t)
+	app := newRatioMarkupTestApp(t)
 	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
 		t.Fatalf("register model group: %v", err)
 	}
@@ -2704,20 +2761,21 @@ func TestCreditConsumeCommission_TierSwitch_NeverBothSources(t *testing.T) {
 	if err := app.AgentRepo.SetAgentType(ctx, 5, agent.AgentParams{Level: 0, CommissionRatio: 0.2}); err != nil {
 		t.Fatalf("set L0 agent: %v", err)
 	}
-	seedCommissionUser(t, app, 100, 5, 1000)
+	seedUser(t, app, 100, 5)
 
-	// L1 租户 9：也配了 commission_ratio=0.2（刻意），且设了 claude-kiro 覆盖倍率 0.45（基准 0.3）；用户 200。
+	// L1 租户 9：也配了 commission_ratio=0.2（刻意）+ claude-kiro 卖价覆盖 0.45（基准 0.3）；用户 200。
 	if err := app.AgentRepo.SetAgentType(ctx, 9, agent.AgentParams{Level: 1, CommissionRatio: 0.2}); err != nil {
 		t.Fatalf("set L1 agent: %v", err)
 	}
 	if err := app.TenantRepo.UpsertGroup(ctx, 9, "claude-kiro", 0.45); err != nil {
 		t.Fatalf("upsert override: %v", err)
 	}
-	seedCommissionUser(t, app, 200, 9, 1000)
+	seedUser(t, app, 200, 9)
 
 	quota := int64(1200)
-	app.creditConsumeCommission(100, quota, "req-tier-l0", "wallet", "claude-kiro")
-	app.creditConsumeCommission(200, quota, "req-tier-l1", "wallet", "claude-kiro")
+	chargedRatio := 0.45 // tier=1（default）× 卖价 0.45
+	app.creditConsumeCommission(100, quota, "req-tier-l0", "wallet", "claude-kiro", chargedRatio)
+	app.creditConsumeCommission(200, quota, "req-tier-l1", "wallet", "claude-kiro", chargedRatio)
 
 	assertSingleSource := func(tenantID int64, requestID, wantSource string) {
 		t.Helper()
@@ -2749,24 +2807,13 @@ func TestCreditConsumeCommission_TierSwitch_NeverBothSources(t *testing.T) {
 	if crossLeak != 0 {
 		t.Fatalf("L1 tenant must never get consume_commission/tokenplan_commission, found %d rows", crossLeak)
 	}
-
-	// 9 折只作用于 L0 邀请的用户；L1 站用户按 L1 倍率付、无 9 折（§9.3）。
-	var q100, q200 int64
-	app.DB.Raw(`SELECT quota FROM users WHERE id = 100`).Scan(&q100)
-	app.DB.Raw(`SELECT quota FROM users WHERE id = 200`).Scan(&q200)
-	if q100 <= 1000 {
-		t.Fatalf("L0 user must receive invite discount refund, quota = %d", q100)
-	}
-	if q200 != 1000 {
-		t.Fatalf("L1 user must NOT receive invite discount refund, quota = %d, want unchanged 1000", q200)
-	}
 }
 
-// TestCreditConsumeCommission_RetrySameRequestID_NoDoubleCredit 覆盖红线要求的「强幂等」：同一
-// requestID 被重复调用（模拟钩子被意外重放）——L1 钱包余额与台账行数都不应二次变动。
+// TestCreditConsumeCommission_RetrySameRequestID_NoDoubleCredit 覆盖红线要求的「强幂等」（both branches）：
+// 同一 requestID 被重复调用（模拟钩子被意外重放）—— L1 差价场景下钱包余额与台账行数都不应二次变动。
 func TestCreditConsumeCommission_RetrySameRequestID_NoDoubleCredit(t *testing.T) {
 	ctx := context.Background()
-	app := newTieringHookTestApp(t)
+	app := newRatioMarkupTestApp(t)
 	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
 		t.Fatalf("register model group: %v", err)
 	}
@@ -2774,23 +2821,24 @@ func TestCreditConsumeCommission_RetrySameRequestID_NoDoubleCredit(t *testing.T)
 	defer func() { groupRatioOf = restore }()
 	groupRatioOf = stub2DRatios
 
-	if err := app.AgentRepo.SetAgentType(ctx, 9, agent.AgentParams{Level: 1, CommissionRatio: 0.2}); err != nil {
+	if err := app.AgentRepo.SetAgentType(ctx, 9, agent.AgentParams{Level: 1}); err != nil {
 		t.Fatalf("set L1 agent: %v", err)
 	}
 	if err := app.TenantRepo.UpsertGroup(ctx, 9, "claude-kiro", 0.45); err != nil {
 		t.Fatalf("upsert override: %v", err)
 	}
-	seedCommissionUser(t, app, 200, 9, 1000)
+	seedUser(t, app, 200, 9)
 
 	for i := 0; i < 3; i++ { // 重放 3 次，同 requestID。
-		app.creditConsumeCommission(200, 1200, "req-retry-1", "wallet", "claude-kiro")
+		app.creditConsumeCommission(200, 1200, "req-retry-1", "wallet", "claude-kiro", 0.45)
 	}
 	w, err := app.AgentRepo.GetWallet(ctx, 9)
 	if err != nil {
 		t.Fatalf("get wallet: %v", err)
 	}
-	wantCNY := consumeCommissionCNY(400, 1, operation_setting.USDExchangeRate) // charged=1200,baseline=0.3,tenant=0.45 → markup=400
-	if math.Abs(w.WithdrawableBalance-wantCNY) > 1e-9 {
+	// charged=1200, chargedGroupRatio=0.45, sellRatio=0.45, bottom=平台基准0.3(未配置) → rawUnits=2666.67, markup=400。
+	wantCNY := consumeCommissionCNY(400, 1, operation_setting.USDExchangeRate)
+	if math.Abs(w.WithdrawableBalance-wantCNY) > 1e-6 {
 		t.Fatalf("after 3x replay: withdrawable = %v, want %v (must credit exactly once)", w.WithdrawableBalance, wantCNY)
 	}
 	var count int64
@@ -2801,36 +2849,32 @@ func TestCreditConsumeCommission_RetrySameRequestID_NoDoubleCredit(t *testing.T)
 }
 
 // TestCreditConsumeCommission_NoTenant_NoAttribution_Unaffected 锁定不回归：主站用户 / 未归属用户
-// （tenant_id=0）— 无论重复调用多少次 — 既不产生任何 earning 行，也不 panic、不阻断。
+// （tenant_id=0）——无论调用多少次——既不产生任何 earning 行，也不 panic、不阻断调用方。
 func TestCreditConsumeCommission_NoTenant_NoAttribution_Unaffected(t *testing.T) {
-	app := newTieringHookTestApp(t)
-	seedCommissionUser(t, app, 300, 0, 1000) // tenant_id=0：主站用户
+	app := newRatioMarkupTestApp(t)
+	seedUser(t, app, 300, 0) // tenant_id=0：主站用户
 
-	app.creditConsumeCommission(300, 1200, "req-main-1", "wallet", "claude-kiro")
+	app.creditConsumeCommission(300, 1200, "req-main-1", "wallet", "claude-kiro", 1.0)
 
 	var count int64
 	app.DB.Table("agent_earning_logs").Count(&count)
 	if count != 0 {
 		t.Fatalf("main-site user must never produce an earning row, got %d", count)
 	}
-	var q int64
-	app.DB.Raw(`SELECT quota FROM users WHERE id = 300`).Scan(&q)
-	if q != 1000 {
-		t.Fatalf("main-site user quota must be untouched, got %d", q)
-	}
 }
 ```
 
-- [ ] **Step 2:** Run — expect FAIL (the tier switch doesn't exist yet: `creditConsumeCommission` still unconditionally uses the L0/`consume_commission` path, so `TestCreditConsumeCommission_TierSwitch_NeverBothSources`'s L1 assertions fail — tenant 9 gets `consume_commission` instead of `ratio_markup`).
+- [ ] **Step 2:** Run — expect FAIL (the tier switch doesn't exist yet: `creditConsumeCommission` still unconditionally uses the L0/`consume_commission` path regardless of `params.Level`, so `TestCreditConsumeCommission_TierSwitch_NeverBothSources`'s L1 assertions fail — tenant 9 gets `consume_commission` instead of `ratio_markup`).
 ```
 cd /Users/cc/newapi628 && go test ./internal/mtwire/ -run 'TierSwitch|NoDoubleCredit|NoTenant_NoAttribution'
 ```
 
-- [ ] **Step 3:** Restructure `creditConsumeCommission` into a dispatcher + extract `creditL0Commission`. In `internal/mtwire/agent.go`, replace the body (~175-212, the Task 12 version):
+- [ ] **Step 3:** Restructure `creditConsumeCommission` into a dispatcher + extract `creditL0Commission`. In `internal/mtwire/agent.go`, replace the body (~198-238, the Task 13 signature-only version):
 ```go
 // creditConsumeCommission 是 agenthook.ConsumeCommission 实现：userId→users.tenant_id→agent
-// level→按档二选一计佣入账（§9.3）。幂等键 = requestID。best-effort：失败不阻断扣费。
-func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string) {
+// level→按档二选一入账（spec agent-tiering §9.9）：level==0 → L0 提成（creditL0Commission）；
+// level≥1 → L1 差价（creditRatioMarkup，Task 13）。幂等键=requestID。best-effort：失败不阻断扣费。
+func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64) {
 	defer func() {
 		if r := recover(); r != nil {
 			common.SysError("mtwire: creditConsumeCommission panic recovered")
@@ -2848,25 +2892,21 @@ func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID,
 	if err != nil || !found {
 		return // 该租户未设代理
 	}
-	// 按档二选一（spec §9.3）：level==0 → L0 提成通路（9 折 + consume_commission）；
-	// level≥1 → L1 差价通路（ratio_markup）。NEVER both —— 两条路径在此分支互斥，绝不重叠调用。
+	// 按档二选一（spec §9.9）：level==0 → L0 提成通路；level≥1 → L1 差价通路。NEVER both——两条路径
+	// 在此分支互斥，绝不重叠调用。
 	if params.Level == 0 {
 		a.creditL0Commission(ctx, tenantID, userID, quotaUnits, requestID, billingSource, params.CommissionRatio)
 		return
 	}
-	a.creditRatioMarkup(ctx, tenantID, userID, quotaUnits, usingGroup, requestID, billingSource)
+	a.creditRatioMarkup(ctx, tenantID, userID, quotaUnits, usingGroup, requestID, billingSource, chargedGroupRatio, params.BottomPriceRatio)
 }
 
-// creditL0Commission 是 L0（普通档）计费通路：邀请 9 折退返（钱包桶，与提成是否 >0 无关）+
-// 官方原价提成（commission_ratio × quotaUnits，基数不受折扣影响，红线要求）。从
-// creditConsumeCommission 抽出以保持按档分支清晰；panic 由调用方的 defer 统一兜底。
+// creditL0Commission 是 L0（普通档）计费通路：官方原价提成（commission_ratio × quotaUnits，公式不变，
+// spec §9.5——v2 不再有邀请 9 折，纯提成）。从 creditConsumeCommission 抽出以保持按档分支清晰；
+// panic 由调用方的 defer 统一兜底。
 func (a *App) creditL0Commission(ctx context.Context, tenantID, userID, quotaUnits int64, requestID, billingSource string, commissionRatio float64) {
-	// 邀请 9 折：仅钱包桶（订阅桶另有额度池，见 grantInviteDiscount 注释）。
-	if billingSource != "subscription" {
-		a.grantInviteDiscount(ctx, userID, quotaUnits, requestID)
-	}
 	if commissionRatio <= 0 {
-		return // 分润比例为 0：无提成（9 折已在上面独立处理，不受影响）
+		return
 	}
 	cny := consumeCommissionCNY(quotaUnits, commissionRatio, operation_setting.USDExchangeRate)
 	if cny <= 0 {
@@ -2898,112 +2938,417 @@ cd /Users/cc/newapi628 && go build ./internal/... ./service/... ./router/... ./m
 
 - [ ] **Step 5:** Commit.
 ```
-cd /Users/cc/newapi628 && git add internal/mtwire/agent.go internal/mtwire/agent_tiering_test.go && git commit -m "feat(billing): tier-based earning switch in creditConsumeCommission (L0 commission XOR L1 markup)"
+cd /Users/cc/newapi628 && git add internal/mtwire/agent.go internal/mtwire/agent_tiering_test.go && git commit -m "feat(billing): tier-based earning dispatch in creditConsumeCommission (L0 commission XOR L1 markup)"
 ```
 
 ---
 
-### Task 15: Gate `HandleAgentSetGroupRatio` to level≥1 (L0 → 403)
+### Task 15: vip 层级优惠交互测试 + MANDATORY safety 不变量 (agent bears its own realized discount, never-negative, floor-respecting)
 
-Closes §9.3's "HandleAgentSetGroupRatio → 要求 level≥1（L0 → 403）" — the last piece that makes "L0 cannot set model multipliers" actually true (today any agent, regardless of level, can call this endpoint). Same one-liner-at-the-top-of-the-handler pattern as Task 3's `custom_domain.go`/`siteconfig.go` depth checks, reusing `ensureAgentLevel` (already exists from Task 3 by the time this task runs). Deliberately scoped to only the **setter** (`HandleAgentSetGroupRatio`) — `HandleAgentListGroups` (read-only) stays open to L0 agents, since seeing the platform baseline isn't a capability leak and the task list only names the setter.
+**2026-07-02 v3 重写（Change 2 落地后，原地改写，不是新增独立任务）：** v2 版本的这个任务测的是"markup 与用户层级无关、platform 兜底"——那是**旧公式**（`(卖价−底价)×token×ModelRatio`，不含层级）的真实推论，且明确标注为一处需用户确认的"谁设谁担"差距（spec §9.6 原文，现已改写）。**Task 13 的公式修订（Change 2）已经推翻这个推论**：新公式用 `chargedGroupRatio`（实际生效的组合倍率，含层级优惠）直接计算，markup **不再是 tier-无关的**。本任务因此整体重写，测的不再是"tier-invariant"而是相反的性质：代理为自己实际发生的折扣买单，同时结构上绝不倒扣。
+
+Closes out spec §9.4（v3 公式）/§9.6.1：`HandleAgentSetUserTier`（代理指定自己名下哪些用户享受 vip）与 `HandleAgentSetTierRatio`（Task 16，代理自设该层级的力度）都不在本任务改动范围——本任务只测已经在 Task 13 改完的 `creditRatioMarkup`/`ratioMarkupQuotaUnits` 这两个纯函数/方法在跨 tier 场景下的行为，不关心 `chargedGroupRatio` 里的层级优惠具体是从哪条轴解析出来的（那是 Task 16 的职责，本任务与它正交）。三件事：(a) markup 随 `chargedGroupRatio`（从而随其中包含的层级优惠）成比例变化——tier 越低（折扣越深），markup 越小，直至地板；(b) "谁承担折扣成本"从 v2 的"platform 恒定兜底"变为"折扣由谁的 `chargedGroupRatio` 承担、就由谁的账面体现"——代理按自己实际发生的折扣比例分成，折扣越深代理分得越少，与 §9.6.1 的"谁设谁担"一致（不是 v2 时代"代理旱涝保收、平台单方面让利"）；(c) MANDATORY safety 性质（"折扣不能让代理实收跌破底价"）在全 tier 范围结构性成立，不只是 Task 13 已覆盖的单个场景。
+
+**⚠️ 部署顺序提醒（不是本任务要解决的，但必须显式标注，避免被误当成本任务已经覆盖）：** 本任务（连同 Task 13/14）运行时，`resolveModelGroup2D` 尚未被 Task 16 修改——也就是说，在 Task 16 上线**之前**，能让 `chargedGroupRatio` 变小的层级优惠**唯一可能的来源仍是平台全局** `GroupRatio['vip']`（任何 L1 代理的下级用户，只要被标记 vip，都在吃这同一个平台全局折扣，§9.6 v2 行为）。这意味着 Task 13 的公式修订一旦单独上线（Task 16 还没上），会产生一个此前不存在的效果——L1 代理的差价收入开始随"平台管理员调整全局 vip 折扣"这个代理完全无法控制、甚至可能毫不知情的动作而波动。这不是"谁设谁担"，是"平台设、代理担"，方向反了。**Task 13 与 Task 16 因此逻辑上是一对，应在同一次上线中一起部署**；若因排期必须分开上线，须在 Task 13 独立上线前与用户确认这段过渡期是否可接受。本任务的测试不模拟这个过渡态（不新增生产代码，只测 Task 13 已实现的纯函数/方法本身跨 tier 的数学性质，与"tier 从哪条轴解析出来"正交）。
+
+**No new production code is expected to be required by this task** — the invariants below fall out of Task 12's floor（卖价≥底价 enforced at set-time）and Task 13's（v3-corrected）`ratioMarkupQuotaUnits`（结构上对 `chargedGroupRatio` 与 `bottomRatio` 的差值 clamp ≥ 0）。Consequently Step 1's tests are expected to **pass immediately** against the Task 11-14 implementation — this is a deliberate characterization/regression-locking step (proving the invariant holds, and pinning it so a future change can't silently break it), not a red→green TDD cycle. If any of these tests unexpectedly fail against your Task 11-14 implementation, that is a real bug in Task 12/13, not a signal to weaken this task's assertions.
 
 **Files:**
-- `internal/mtwire/distribution.go` (`HandleAgentSetGroupRatio` ~397-435).
-- `internal/mtwire/distribution_test.go` (`newGroupRatioApp` ~142-160 — extend; `TestHandleAgentSetGroupRatio` ~162-203 — update seed so it keeps passing under the new gate).
+- `internal/mtwire/consume_markup_test.go` (append/replace — same file as Task 13's markup tests; **replaces** the v2-era `TestCreditRatioMarkup_VipDiscountDoesNotAffectAgentMarkup_PlatformBearsCost`, whose name and assertion are now wrong, not left alongside a new test).
 
 **Interfaces:**
-- Consumes: `App.ensureAgentLevel(c, min int) bool` (Task 3, `internal/mtwire/agent.go`).
+- Consumes only: `ratioMarkupQuotaUnits` (Task 13, pure function, v3 3-arg signature), `(a *App) creditRatioMarkup` (Task 13).
+- Produces: no new production symbols — tests only.
 
-- [ ] **Step 1:** Write the failing test + extend the shared test harness (both needed together since the new test needs `AgentService` on the harness to compile). In `internal/mtwire/distribution_test.go`, add `"github.com/QuantumNous/new-api/internal/agent"` to the import block, then update `newGroupRatioApp` (~142-160):
+- [ ] **Step 1:** Write the tests. In `internal/mtwire/consume_markup_test.go`, **replace** the three v2-era tests appended by the original Task 15 (`TestRatioMarkupQuotaUnits_NeverNegative_AcrossTierRange`, `TestRatioMarkupQuotaUnits_BottomAboveSell_NeverCreditsNegative`, `TestCreditRatioMarkup_VipDiscountDoesNotAffectAgentMarkup_PlatformBearsCost`) with:
 ```go
-func newGroupRatioApp(t *testing.T) *App {
-	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
+// TestRatioMarkupQuotaUnits_NeverNegative_AcrossTierRange 是 MANDATORY safety 的结构性证明（**v3 改写**）：
+// 无论层级优惠（tier，vip 力度深浅）取值如何，markup 恒 >= 0——即便 tier 深到让 chargedGroupRatio 跌破
+// bottomRatio（guard 直接 clamp 到 0，不会算出负数）。**同时新增单调性断言（v3 新性质，取代 v2 的
+// tier-无关断言）**：固定同样的「原始消耗」（rawUnits=1000），tier 越深（折扣越大），markup 非增——
+// 代理自己给出的折扣越深，自己赚的差价只会越少或不变，绝不会更多。
+func TestRatioMarkupQuotaUnits_NeverNegative_AcrossTierRange(t *testing.T) {
+	const sellRatio = 0.9
+	const bottomRatio = 0.7
+	prev := int64(1<<62) // 极大值起步，第一次比较必过
+	for _, tier := range []float64{1, 0.9, 0.8, 0.6, 0.3, 0.05} {
+		chargedGroupRatio := tier * sellRatio
+		charged := int64(1000 * chargedGroupRatio) // 「原始消耗」固定为 1000 个 token×ModelRatio 单位
+		got := ratioMarkupQuotaUnits(charged, chargedGroupRatio, bottomRatio)
+		if got < 0 {
+			t.Fatalf("tier=%v: markup = %d, must never be negative", tier, got)
+		}
+		if got > prev {
+			t.Fatalf("tier=%v: markup = %d > previous (shallower) tier's %d — deeper discount must never increase markup", tier, got, prev)
+		}
+		prev = got
 	}
-	sqlDB, _ := db.DB()
-	sqlDB.SetMaxOpenConns(1)
-	if err := modelgroup.AutoMigrate(db); err != nil {
-		t.Fatalf("model_groups migrate: %v", err)
+}
+
+// TestRatioMarkupQuotaUnits_BottomAboveCharged_NeverCreditsNegative 覆盖两类都会让「实际生效倍率」
+// 跌破底价的漂移——不区分成因，统一走同一个 clamp：markup 必须精确为 0，不是负数，绝不倒扣代理钱包。
+// (a) 管理员在代理已设好卖价之后才把该代理底价调高到卖价之上（原 v2 用例的场景）；
+// (b) 代理自己把 vip 力度设得太深，导致 vip 用户的 chargedGroupRatio 跌破底价（Change 1 新增场景——
+// spec §9.6.1 明确标注"本轮不做设置时刻的穷举预防校验"，本用例锁定"结算时兜底"这条唯一防线确实生效）。
+func TestRatioMarkupQuotaUnits_BottomAboveCharged_NeverCreditsNegative(t *testing.T) {
+	cases := []struct {
+		name              string
+		chargedGroupRatio float64
+		bottomRatio       float64
+	}{
+		{"admin raised bottom above an already-set 卖价 (no vip involved)", 0.45, 0.8},
+		{"agent's own vip 力度 pushed chargedGroupRatio below bottom", 0.45 * 0.5, 0.4}, // 0.225 < 0.4
 	}
-	if err := db.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0)`).Error; err != nil {
-		t.Fatalf("create users: %v", err)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ratioMarkupQuotaUnits(1000, c.chargedGroupRatio, c.bottomRatio)
+			if got != 0 {
+				t.Fatalf("drift (chargedGroupRatio %v <= bottom %v) must yield exactly 0, got %d", c.chargedGroupRatio, c.bottomRatio, got)
+			}
+		})
 	}
-	if err := tenantrepo.AutoMigrate(db); err != nil {
-		t.Fatalf("tenant migrate: %v", err)
+}
+
+// TestCreditRatioMarkup_AgentBearsOwnRealizedDiscount 是 spec §9.4（v3 公式）/§9.6.1 的核心记账断言，
+// **取代 v2 版本的 TestCreditRatioMarkup_VipDiscountDoesNotAffectAgentMarkup_PlatformBearsCost（该测试
+// 名字与断言现在都是错的，已删除，不是新增独立用例）**：对同样的「原始消耗」（rawUnits 相同），vip 用户
+// （chargedGroupRatio 更低）为该代理带来的 markup **严格小于** default 用户（而不是 v2 断言的"完全相等"）
+// ——折扣越深，代理自己的差价收入越少，折扣成本由代理自己的账面吸收，不是平台兜底。
+func TestCreditRatioMarkup_AgentBearsOwnRealizedDiscount(t *testing.T) {
+	ctx := context.Background()
+	app := newRatioMarkupTestApp(t)
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register model group: %v", err)
 	}
-	return &App{
-		DB: db, ModelGroupRepo: modelgroup.New(db), TenantRepo: tenantrepo.New(db),
-		// AgentService 供 ensureAgentLevel（level 门禁，Task 15）用；独立 MemRepo，与本 harness 的
-		// sqlite 表无关（HandleAgentSetGroupRatio 只经 AgentService 读 level，不碰 AgentRepo/agent_profiles）。
-		AgentService: agent.NewService(agent.NewMemRepo(), nil),
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios // claude-kiro 基准 = 0.3
+
+	const sellRatio = 0.9
+	const bottomRatio = 0.7 // 高于平台基准 0.3，模拟已配置底价的代理
+	const rawUnits = 1000.0 // 两个用户「原始消耗」（token×ModelRatio）完全相同
+
+	defaultTier := 1.0
+	defaultCharged := int64(rawUnits * defaultTier * sellRatio) // 900
+	vipTier := 0.8                                              // 代理自设的 vip 力度（§9.6.1；本测试不经 resolveModelGroup2D，直接注入已生效值）
+	vipCharged := int64(rawUnits * vipTier * sellRatio)          // 720，vip 少付
+
+	seedUser(t, app, 100, 5) // default 用户
+	seedUser(t, app, 101, 5) // vip 用户，同一 L1 租户
+	if err := app.TenantRepo.UpsertGroup(ctx, 5, "claude-kiro", sellRatio); err != nil {
+		t.Fatalf("upsert override: %v", err)
+	}
+
+	app.creditRatioMarkup(ctx, 5, 100, defaultCharged, "claude-kiro", "req-vip-default", "wallet", defaultTier*sellRatio, bottomRatio)
+	app.creditRatioMarkup(ctx, 5, 101, vipCharged, "claude-kiro", "req-vip-vip", "wallet", vipTier*sellRatio, bottomRatio)
+
+	var rows []struct {
+		SourceID string
+		Amount   float64
+	}
+	if err := app.DB.Table("agent_earning_logs").
+		Select("source_id, amount").Where("tenant_id = ?", 5).Order("source_id").Find(&rows).Error; err != nil {
+		t.Fatalf("query earnings: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("want 2 markup rows (default + vip), got %d: %+v", len(rows), rows)
+	}
+	// rows[0]="req-vip-default", rows[1]="req-vip-vip"（字典序）。
+	// v3：vip 行必须严格小于 default 行（代理自己吸收折扣），而不是 v2 断言的"两行相等"。
+	if !(rows[1].Amount < rows[0].Amount) {
+		t.Fatalf("agent must bear its own realized discount (vip markup must be strictly less than default's): default=%v vip=%v (rows=%+v)",
+			rows[0].Amount, rows[1].Amount, rows)
+	}
+	// 具体数值锁定（而不仅仅是"更小"）：rawUnits=1000 时，default markup=(0.9-0.7)*1000=200，
+	// vip markup=(0.72-0.7)*1000=20 —— 与 spec §9.4 的确认例子（底价0.5/卖价0.8/vip0.9→0.22 vs 0.3）
+	// 同一套公式、不同数字的再验证。
+	wantDefaultCNY := consumeCommissionCNY(200, 1, operation_setting.USDExchangeRate)
+	wantVipCNY := consumeCommissionCNY(20, 1, operation_setting.USDExchangeRate)
+	if math.Abs(rows[0].Amount-wantDefaultCNY) > 1e-6 {
+		t.Fatalf("default markup = %v, want %v", rows[0].Amount, wantDefaultCNY)
+	}
+	if math.Abs(rows[1].Amount-wantVipCNY) > 1e-6 {
+		t.Fatalf("vip markup = %v, want %v", rows[1].Amount, wantVipCNY)
 	}
 }
 ```
-  Update the existing `TestHandleAgentSetGroupRatio` (~162-165) so tenant 7 stays level≥1 under the new gate (add right after `const tenantID = int64(7)`):
-```go
-func TestHandleAgentSetGroupRatio(t *testing.T) {
-	app := newGroupRatioApp(t)
-	ctx := context.Background()
-	const tenantID = int64(7)
-	if err := app.AgentService.SetAgentType(ctx, tenantID, agent.AgentParams{Level: 1}); err != nil { // Task 15 门禁：需 L1
-		t.Fatalf("set L1: %v", err)
-	}
-	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
-		t.Fatalf("register claude-kiro: %v", err)
-	}
-	// ... rest of the function is unchanged ...
+
+- [ ] **Step 2:** Run — expect PASS immediately (characterization tests against the already-(v3-)corrected Task 12-14 implementation; see this task's intro for why there's no red state here).
 ```
-  Append the new test:
+cd /Users/cc/newapi628 && go test ./internal/mtwire/ -run 'RatioMarkupQuotaUnits|AgentBearsOwnRealizedDiscount'
+cd /Users/cc/newapi628 && go build ./internal/... ./service/... ./router/... ./model/... ./setting/... ./controller/... && go test ./internal/mtwire/... ./internal/agent/... ./service/...
+```
+
+- [ ] **Step 3:** Commit.
+```
+cd /Users/cc/newapi628 && git add internal/mtwire/consume_markup_test.go && git commit -m "test(billing): lock in agent-bears-own-vip-discount markup accounting (spec §9.4 v3/§9.6.1)"
+```
+
+---
+
+### Task 16: 代理自设 per-tenant vip 力度 (`HandleAgentSetTierRatio`/`HandleAgentListTierRatios`) + `resolveModelGroup2D` 层级轴接线. Change 1
+
+**2026-07-02 新增（用户确认三处修订之一）。** 解决 spec §9.6 末尾曾标注、Task 15 曾如实测过的"已知差距"——建一个与既有"代理自设模型分组卖价"（`HandleAgentSetGroupRatio` → `tenant_groups`，Task 12）**同一套机制**的 per-tenant 覆盖，但开在**层级轴**（`userGroup`，不是 `usingGroup`）：代理可以给自己名下的 vip 层级单独设一个折扣力度，命中即用，未设则不打折（**不**回退平台全局 vip 倍率）。存储复用同一张 `tenant_groups` 表 + 同一对 `UpsertGroup`/`LookupEnabledGroupRatio` 方法（不建新表、不建新字段），靠一个 `tier:` 前缀把两条轴的命名空间物理隔开——今天没人会把模型分组取名叫 "vip"，但两条轴共享同一张表 + 同一个 `UNIQUE(tenant_id, group_name)` 键空间，前缀是零成本的永久隔离，不依赖命名约定。
+
+**⚠️ 范围判断（保守方案，已选定并如下实现，但需用户确认；见配套报告）：** "No overlap"（代理下级用户的层级折扣只能来自代理自己的覆盖，不回退平台全局）本任务**只对 level>=1（L1/独立档）代理生效**。L0（普通档）代理没有调用 `HandleAgentSetTierRatio` 的权限（gate `level>=1`，同 `HandleAgentSetGroupRatio`），如果"No overlap"不分 level 一律套用，L0 下级用户会在毫无代理动作的情况下从"吃平台全局 vip 折扣"变成"tier=1，无折扣"——这是纯粹的负面变化（用户付更多、L0 代理也无法弥补，因为它压根没有自设折扣的能力）。本任务选择让**L0 下级用户的层级折扣行为与 Change 1 上线前完全一致**（继续吃平台全局），只让**L1 下级用户**进入"No overlap"的新语义。这是本任务在"如实按用户确认的规则实现"与"不引入未被要求、对 L0 单方面有害的副作用"之间做的判断，不是显而易见的唯一解——另一种同样自洽的替代方案是不分 level 一律套用"No overlap"。**本轮按"对 L0 零影响"的方案实现，请确认是否符合预期。**
+
+**⚠️ 部署顺序提醒（与 Task 13/15 呼应，务必一起看）：** Task 13 的差价公式修订（Change 2）本身，在本任务上线前，就已经让「任何降低 `chargedGroupRatio` 的层级优惠」影响代理差价——而本任务上线前，L1 代理下级 vip 用户唯一可能吃到的层级优惠就是**平台全局** `GroupRatio['vip']`。也就是说：**如果 Task 13 单独上线、本任务还没上，会有一段时间代理的差价收入随平台管理员调整全局 vip 折扣而波动**——这不是"谁设谁担"，是"平台设、代理担"，方向反了。Task 13 与本任务逻辑上是一对，**应在同一次上线中一起部署**；分开上线前须与用户确认这段过渡期是否可接受。
+
+**Files:**
+- `internal/mtwire/distribution.go`（`allowedAgentTiers` ~443；新增 `agentOverridableTier`/`tierGroupKey` 辅助 + `tierRatioOut`/`HandleAgentSetTierRatio`/`HandleAgentListTierRatios`，紧邻 §6 "代理给下级用户设层级"之后）。
+- `internal/mtwire/distribution_test.go`（复用 Task 12 的 `newGroupRatioApp`；新增测试）。
+- `internal/mtwire/grouphook.go`（新增 `resolveTierRatio`，紧邻既有 `resolveTenantGroupRatio`）。
+- `internal/mtwire/modelgroup.go`（`resolveModelGroup2D` ~83-103：层级轴改用 `a.resolveTierRatio`）。
+- `internal/mtwire/modelgroup_test.go`（`newModelGroup2DTenantApp` 加 AgentRepo/AgentService；更新 `TestResolveModelGroup2D_TenantOverride` 的种子数据；新增 `TestResolveModelGroup2D_AgentVipOverride_DefaultsToOne`）。
+- `router/mt-router.go`（`agentSelf` 组，紧邻既有 `/groups`/`groups/:group` 两行之后）。
+
+**Interfaces:**
+- Consumes: `App.ensureAgentLevel`（Task 3）、`AgentService.AgentLevel`（Task 1）、`TenantRepo.UpsertGroup`/`LookupEnabledGroupRatio`（既有，Phase 1）——**零新增持久化方法**。
+- Produces: `agentOverridableTier(tier string) bool`；`tierGroupKey(tier string) string`（= `"tier:" + tier`）；`tierRatioOut` DTO；`(a *App) HandleAgentSetTierRatio(c *gin.Context)`（`PUT /api/tenant/tier-ratio/:tier`，gate level>=1）；`(a *App) HandleAgentListTierRatios(c *gin.Context)`（`GET /api/tenant/tier-ratio`，gate level>=1）；`(a *App) resolveTierRatio(ctx context.Context, userID int64, userGroup string) float64`（纯查询，无 panic 兜底——由调用方 `resolveModelGroup2D` 的 `defer recover()` 统一覆盖）。
+- Changes: `resolveModelGroup2D` 的层级轴解析（`tier := groupRatioOf(userGroup)` → `tier := a.resolveTierRatio(...)`）——**行为变化仅限于**"用户归属某 L1 代理 且 userGroup 是可代理覆盖层级(今仅 vip)"这一种组合；主站直客、L0 代理下级、`default` 层级三种情况数值上与今天完全一致（见上方"范围判断"）。
+
+- [ ] **Step 1：写失败测试。** 先改 `internal/mtwire/modelgroup_test.go` 的共享 harness——在 import 块加两行：
 ```go
-// TestHandleAgentSetGroupRatio_RequiresLevel1 覆盖分层门禁（§9.3）：L0（普通档）设模型分组倍率 →
-// 403 AGENT_LEVEL_LOCKED，且不落 tenant_groups；L1（独立档）→ 200 放行（既有校验——下限/仅模型
-// 分组——照常生效，同 Task 3 的门禁模式）。
-func TestHandleAgentSetGroupRatio_RequiresLevel1(t *testing.T) {
-	app := newGroupRatioApp(t)
+	"github.com/QuantumNous/new-api/internal/agent"
+	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
+```
+  替换 `newModelGroup2DTenantApp`：
+```go
+// newModelGroup2DTenantApp 在 newModelGroup2DApp 基础上加 users(id,tenant_id) + tenant_groups +
+// TenantRepo + agent_profiles + AgentRepo/AgentService，供「代理 per-tenant 覆盖」(模型分组轴，既有)
+// 与「代理自设 vip 力度」(层级轴，Change 1/spec §9.6.1)两类用例共用——resolveModelGroup2D 两条轴都要
+// 解析 userID→租户→level/tenant_groups 覆盖。
+func newModelGroup2DTenantApp(t *testing.T) *App {
+	t.Helper()
+	app := newModelGroup2DApp(t)
+	if err := app.DB.Exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0)`).Error; err != nil {
+		t.Fatalf("create users table: %v", err)
+	}
+	if err := tenantrepo.AutoMigrate(app.DB); err != nil { // tenants/tenant_domains/tenant_groups
+		t.Fatalf("tenant migrate: %v", err)
+	}
+	app.TenantRepo = tenantrepo.New(app.DB)
+	if err := agentrepo.AutoMigrate(app.DB); err != nil { // agent_profiles + agent_earning_logs + wallet
+		t.Fatalf("agent migrate: %v", err)
+	}
+	ar := agentrepo.New(app.DB)
+	app.AgentRepo = ar
+	app.AgentService = agent.NewService(ar, nil)
+	return app
+}
+```
+  在 `TestResolveModelGroup2D_TenantOverride` 里，紧接既有两行 `app.TenantRepo.UpsertGroup(ctx, 7, "claude-kiro", 0.4)` / `UpsertGroup(ctx, 7, "default", 1.5)` 之后，插入：
+```go
+	// Level 门禁 + Change 1(vip 力度覆盖，spec §9.6.1):租户 7 设为 L1，并显式设 vip 覆盖 = 0.8
+	// (与平台全局 vip 基准数值相同，仅为让本测试原有断言在"Default=1"新语义下继续成立——
+	// "未设覆盖时不再回退平台全局"这一新行为由 TestResolveModelGroup2D_AgentVipOverride_DefaultsToOne
+	// 单独覆盖)。
+	if err := app.AgentService.SetAgentType(ctx, 7, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set tenant 7 to L1: %v", err)
+	}
+	if err := app.TenantRepo.UpsertGroup(ctx, 7, tierGroupKey("vip"), 0.8); err != nil {
+		t.Fatalf("upsert vip tier override: %v", err)
+	}
+```
+  追加新测试：
+```go
+// TestResolveModelGroup2D_AgentVipOverride_DefaultsToOne 覆盖 Change 1 的核心新行为(spec agent-tiering
+// §9.6.1):"No overlap" —— L1(独立档)代理下级用户的层级折扣只能来自该代理自己的覆盖，从不回退平台
+// 全局 GroupRatio['vip']；未配置覆盖 → tier=1(无折扣)。与此相对：① 主站直客(tenant_id=0)不受影响，
+// 继续吃平台全局；② L0(普通档)代理下级用户也不受影响，继续吃平台全局(§9.6.1 标注为一处需确认的范围
+// 判断——L0 没有 HandleAgentSetTierRatio 的调用权限，本实现选择让 L0 保持 v2 行为完全不变)。
+func TestResolveModelGroup2D_AgentVipOverride_DefaultsToOne(t *testing.T) {
 	ctx := context.Background()
+	app := newModelGroup2DTenantApp(t)
 	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
 		t.Fatalf("register claude-kiro: %v", err)
 	}
 	restore := groupRatioOf
 	defer func() { groupRatioOf = restore }()
-	groupRatioOf = stub2DRatios
+	groupRatioOf = stub2DRatios // 平台全局 vip=0.8
 
-	if err := app.AgentService.SetAgentType(ctx, 70, agent.AgentParams{Level: 0}); err != nil {
+	if err := app.AgentService.SetAgentType(ctx, 70, agent.AgentParams{Level: 1}); err != nil { // L1，未设 vip 覆盖
+		t.Fatalf("set tenant 70 to L1: %v", err)
+	}
+	if err := app.AgentService.SetAgentType(ctx, 71, agent.AgentParams{Level: 0}); err != nil { // L0
+		t.Fatalf("set tenant 71 to L0: %v", err)
+	}
+	seedUser(t, app, 500, 70) // L1 代理下级，未配置 vip 覆盖
+	seedUser(t, app, 510, 71) // L0 代理下级
+	seedUser(t, app, 600, 0)  // 主站直客
+
+	cases := []struct {
+		userID      int64
+		user, using string
+		want        float64
+		note        string
+	}{
+		{500, "vip", "", 1, "L1 代理下级 vip 用户，代理未设覆盖 → Default=1(不回退平台全局 0.8)"},
+		{510, "vip", "", 0.8, "L0 代理下级：无自设覆盖能力，行为不变，继续吃平台全局 0.8"},
+		{600, "vip", "", 0.8, "主站直客：不受影响，继续吃平台全局 0.8"},
+		{500, "default", "", 1, "default 层级本就不可代理覆盖，行为不变(=1)"},
+		{500, "vip", "claude-kiro", 1 * stub2DRatios("claude-kiro"), "tier=1(未覆盖) × 模型分组基准(claude-kiro 未覆盖)=0.3"},
+	}
+	for _, c := range cases {
+		r, ok := app.resolveModelGroup2D(c.userID, c.user, c.using)
+		if !ok || !almostEqual(r, c.want) {
+			t.Fatalf("resolve(%d,%q,%q) = (%v,%v), want (%v,true) — %s", c.userID, c.user, c.using, r, ok, c.want, c.note)
+		}
+	}
+
+	// 租户 70 随后自设 vip 力度 0.5(比平台全局 0.8 折扣更深)→ 立即生效，且只影响自己的下级。
+	if err := app.TenantRepo.UpsertGroup(ctx, 70, tierGroupKey("vip"), 0.5); err != nil {
+		t.Fatalf("upsert vip tier override: %v", err)
+	}
+	if r, ok := app.resolveModelGroup2D(500, "vip", ""); !ok || !almostEqual(r, 0.5) {
+		t.Fatalf("after override: resolve(500,vip,\"\") = (%v,%v), want (0.5,true)", r, ok)
+	}
+	if r, ok := app.resolveModelGroup2D(510, "vip", ""); !ok || !almostEqual(r, 0.8) {
+		t.Fatalf("L0 tenant 71 must stay unaffected by tenant 70's override: got %v", r)
+	}
+	if r, ok := app.resolveModelGroup2D(600, "vip", ""); !ok || !almostEqual(r, 0.8) {
+		t.Fatalf("main-site user must stay unaffected by tenant 70's override: got %v", r)
+	}
+}
+```
+  再往 `internal/mtwire/distribution_test.go` 追加（复用 Task 12 的 `newGroupRatioApp`，已含 AgentRepo/AgentService；`agent` 包 Task 12 已导入，无需再加 import）：
+```go
+// TestHandleAgentSetTierRatio_RequiresLevel1AndValidTier 覆盖 Change 1 的门禁 + 校验（spec agent-tiering
+// §9.6.1）：L0 → 403 AGENT_LEVEL_LOCKED；"default"/模型分组名 → 400 AGENT_TIER_INVALID；
+// "vip" + L1 → 200，落 tenant_groups[tenant, tierGroupKey("vip")]（与卖价覆盖同表，前缀隔离命名空间）。
+func TestHandleAgentSetTierRatio_RequiresLevel1AndValidTier(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register claude-kiro: %v", err)
+	}
+	if err := app.AgentService.SetAgentType(ctx, 80, agent.AgentParams{Level: 0}); err != nil {
 		t.Fatalf("set L0: %v", err)
 	}
-	if err := app.AgentService.SetAgentType(ctx, 71, agent.AgentParams{Level: 1}); err != nil {
+	if err := app.AgentService.SetAgentType(ctx, 81, agent.AgentParams{Level: 1}); err != nil {
 		t.Fatalf("set L1: %v", err)
 	}
 
-	// L0 → 403 AGENT_LEVEL_LOCKED，且不落 tenant_groups。
-	c, rec := newAgentCtx(70, "PUT", `{"ratio":0.4}`, gin.Params{{Key: "group", Value: "claude-kiro"}})
-	app.HandleAgentSetGroupRatio(c)
+	// L0：锁。
+	c, rec := newAgentCtx(80, "PUT", `{"ratio":0.7}`, gin.Params{{Key: "tier", Value: "vip"}})
+	app.HandleAgentSetTierRatio(c)
 	if r := decodeResp(t, rec); r.Success || r.Code != "AGENT_LEVEL_LOCKED" {
 		t.Fatalf("L0 must be locked, got %+v", r)
 	}
-	if _, found, _ := app.TenantRepo.LookupEnabledGroupRatio(ctx, 70, "claude-kiro"); found {
-		t.Fatal("L0 must not have persisted a group override")
+
+	// L1 + "default"：拒（default 恒 1，不可覆盖）。
+	c, rec = newAgentCtx(81, "PUT", `{"ratio":0.7}`, gin.Params{{Key: "tier", Value: "default"}})
+	app.HandleAgentSetTierRatio(c)
+	if r := decodeResp(t, rec); r.Success || r.Code != "AGENT_TIER_INVALID" {
+		t.Fatalf("default tier must be rejected, got %+v", r)
 	}
 
-	// L1 → 200 放行（组合下限校验照常生效）。
-	c, rec = newAgentCtx(71, "PUT", `{"ratio":0.4}`, gin.Params{{Key: "group", Value: "claude-kiro"}})
-	app.HandleAgentSetGroupRatio(c)
+	// L1 + 模型分组名（"claude-kiro"）：拒（两轴互斥，防串号）。
+	c, rec = newAgentCtx(81, "PUT", `{"ratio":0.7}`, gin.Params{{Key: "tier", Value: "claude-kiro"}})
+	app.HandleAgentSetTierRatio(c)
+	if r := decodeResp(t, rec); r.Success || r.Code != "AGENT_TIER_INVALID" {
+		t.Fatalf("model-group name must be rejected on the tier axis, got %+v", r)
+	}
+
+	// L1 + "vip"：放行，落库到 tierGroupKey 隔离的命名空间。
+	c, rec = newAgentCtx(81, "PUT", `{"ratio":0.7}`, gin.Params{{Key: "tier", Value: "vip"}})
+	app.HandleAgentSetTierRatio(c)
 	if r := decodeResp(t, rec); !r.Success {
-		t.Fatalf("L1 should be allowed, got %+v", r)
+		t.Fatalf("L1 vip should be allowed, got %+v", r)
+	}
+	got, found, err := app.TenantRepo.LookupEnabledGroupRatio(ctx, 81, tierGroupKey("vip"))
+	if err != nil || !found || got != 0.7 {
+		t.Fatalf("tenant_groups[81,%q] = (%v,%v,%v), want (0.7,true,nil)", tierGroupKey("vip"), got, found, err)
+	}
+	// 隔离验证：模型分组轴的裸 "vip" 键必须不存在（两轴不串号）。
+	if _, found, _ := app.TenantRepo.LookupEnabledGroupRatio(ctx, 81, "vip"); found {
+		t.Fatal("bare \"vip\" key must not be written — tier overrides must use the tierGroupKey-prefixed namespace")
+	}
+}
+
+// TestHandleAgentListTierRatios_ReflectsOverrideOrDefaultOne 覆盖列表展示：未覆盖展示 1（不是平台参考
+// 值，避免 UI 暗示"没设=用平台的"）；已覆盖展示覆盖值 + has_override=true。
+func TestHandleAgentListTierRatios_ReflectsOverrideOrDefaultOne(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios // 平台参考 vip=0.8
+	if err := app.AgentService.SetAgentType(ctx, 82, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set L1: %v", err)
+	}
+
+	c, rec := newAgentCtx(82, "GET", "", nil)
+	app.HandleAgentListTierRatios(c)
+	r := decodeResp(t, rec)
+	var rows []tierRatioOut
+	if err := json.Unmarshal(r.Data, &rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Tier != "vip" || rows[0].Ratio != 1 || rows[0].HasOverride {
+		t.Fatalf("no override yet: want [{vip,1,false}], got %+v", rows)
+	}
+
+	if err := app.TenantRepo.UpsertGroup(ctx, 82, tierGroupKey("vip"), 0.6); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	c, rec = newAgentCtx(82, "GET", "", nil)
+	app.HandleAgentListTierRatios(c)
+	r = decodeResp(t, rec)
+	if err := json.Unmarshal(r.Data, &rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Ratio != 0.6 || !rows[0].HasOverride || rows[0].PlatformRatio != 0.8 {
+		t.Fatalf("after override: want [{vip,0.6,true,platform=0.8}], got %+v", rows)
 	}
 }
 ```
 
-- [ ] **Step 2:** Run — expect FAIL (`TestHandleAgentSetGroupRatio_RequiresLevel1`'s L0 case gets 200 instead of 403 AGENT_LEVEL_LOCKED, since the handler doesn't gate on level yet; the harness/import changes themselves should already compile).
+- [ ] **Step 2：跑测试，预期 FAIL**（编译错：`tierGroupKey`/`HandleAgentSetTierRatio`/`HandleAgentListTierRatios`/`tierRatioOut`/`resolveTierRatio` 未定义）。
 ```
-cd /Users/cc/newapi628 && go test ./internal/mtwire/ -run TestHandleAgentSetGroupRatio
+cd /Users/cc/newapi628 && go vet ./internal/mtwire/... 2>&1 | head -30
 ```
 
-- [ ] **Step 3:** Add the gate. In `internal/mtwire/distribution.go`, insert as the first line of `HandleAgentSetGroupRatio`'s body (~400):
+- [ ] **Step 3：在 `internal/mtwire/distribution.go` 加辅助函数 + 两个端点。** 紧接既有 `allowedAgentTiers`（§6 顶部）之后：
 ```go
-func (a *App) HandleAgentSetGroupRatio(c *gin.Context) {
+// agentOverridableTier 报告 tier 是否是代理可自设覆盖的层级(Change 1，spec §9.6.1)：必须在
+// allowedAgentTiers 白名单内，且排除 "default"（恒 1，语义上无需、也不允许覆盖——HandleAgentSetUserTier
+// 允许把用户"分配"到 default，但不允许代理给 default 这个层级本身设折扣力度，两个操作面不同）。
+func agentOverridableTier(tier string) bool {
+	if tier == "" || tier == "default" {
+		return false
+	}
+	_, ok := allowedAgentTiers[tier]
+	return ok
+}
+
+// tierGroupKey 把层级名映射为 tenant_groups 的存储 key：加 "tier:" 前缀。模型分组轴
+// （HandleAgentSetGroupRatio）用裸模型分组名写入同一张表——两条轴共享 tenant_groups 的
+// UNIQUE(tenant_id, group_name) 键空间，前缀是零成本的永久隔离，不依赖"没人把模型分组取名叫 vip"
+// 这种命名约定。
+func tierGroupKey(tier string) string { return "tier:" + tier }
+
+// ============================================================================
+// 6b) 我的层级折扣力度（代理自设 per-tenant vip 覆盖；Change 1，spec agent-tiering §9.6.1）
+// ============================================================================
+//
+// 与 §5 的模型分组卖价覆盖"同一套机制"，开在层级轴：代理可给自己名下某个可覆盖层级
+// （allowedAgentTiers 去掉 default——今仅 vip）单独设折扣力度。命中用覆盖值；未设 → 1（不打折，不回退
+// 平台全局，"No overlap"）。存储复用 tenant_groups，key 加 tierGroupKey 前缀防止与模型分组名串号。
+
+// tierRatioOut 是「我的层级折扣力度」行。platform_ratio 仅供参考（平台全局值，本轴未覆盖时不回退它，
+// 与 modelGroupRatioOut 的 platform_ratio 语义不同——那边未覆盖时 ratio 就是 platform_ratio）。
+type tierRatioOut struct {
+	Tier          string  `json:"tier"`
+	Ratio         float64 `json:"ratio"`
+	PlatformRatio float64 `json:"platform_ratio"`
+	HasOverride   bool    `json:"has_override"`
+}
+
+// HandleAgentListTierRatios GET /api/tenant/tier-ratio —— 本租户可覆盖层级（今仅 vip）的当前状态：
+// 未覆盖展示 1（不是 platform_ratio——No overlap：代理下级用户从不吃平台全局 vip 折扣，UI 不能暗示
+// "没设=用平台的"）；已覆盖展示覆盖值。gate: level>=1（同 HandleAgentSetGroupRatio 的门禁机制）。
+func (a *App) HandleAgentListTierRatios(c *gin.Context) {
 	if !a.ensureAgentLevel(c, 1) {
 		return
 	}
@@ -3012,19 +3357,227 @@ func (a *App) HandleAgentSetGroupRatio(c *gin.Context) {
 		respondErr(c, errAgentForbidden)
 		return
 	}
-	group := strings.TrimSpace(c.Param("group"))
-	// ... rest of the function body is unchanged ...
+	ctx := reqCtx(c)
+	names := make([]string, 0, len(allowedAgentTiers))
+	for t := range allowedAgentTiers {
+		if t == "default" {
+			continue
+		}
+		names = append(names, t)
+	}
+	sort.Strings(names) // 确定性输出（今仅 "vip" 一项，未来扩充时保持稳定顺序）
+	out := make([]tierRatioOut, 0, len(names))
+	for _, tier := range names {
+		row := tierRatioOut{Tier: tier, Ratio: 1, PlatformRatio: groupRatioOf(tier)}
+		if override, found, err := a.TenantRepo.LookupEnabledGroupRatio(ctx, tenantID, tierGroupKey(tier)); err == nil && found {
+			row.Ratio = override
+			row.HasOverride = true
+		}
+		out = append(out, row)
+	}
+	respondOK(c, out)
+}
+
+// HandleAgentSetTierRatio PUT /api/tenant/tier-ratio/:tier —— 设本租户对某可覆盖层级的折扣力度覆盖
+// （Change 1，spec §9.6.1）。校验：① level>=1（复用 ensureAgentLevel，Task 3 既有机制，不新建 gate）；
+// ② tier 必须是可代理覆盖层级（agentOverridableTier：在 allowedAgentTiers 内且非 default），否则
+// AGENT_TIER_INVALID（复用 HandleAgentSetUserTier 的既有错误码，语义一致："不允许的用户层级"）；
+// ③ ratio 结构性校验 > 0（不设上限，与 §9.7 BottomPriceRatio 同哲学）。
+//
+// 本端点不做"卖价×vip 力度 ≥ 底价"的预防性穷举校验（不会在这里反查该代理名下所有已设卖价的模型分组）
+// ——与"管理员改底价"端点本身也不做这种穷举校验是同一个先例（两个独立旋钮谁后设谁可能打破对方前提，
+// 本项目现有选择是"结算时兜底，不在设置时穷举预防"，见 Task 13 creditRatioMarkup 的 clamp）。
+func (a *App) HandleAgentSetTierRatio(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
+		return
+	}
+	tenantID := agentTenantID(c)
+	if tenantID <= 0 {
+		respondErr(c, errAgentForbidden)
+		return
+	}
+	tier := strings.TrimSpace(c.Param("tier"))
+	if !agentOverridableTier(tier) {
+		respondErr(c, errAgentTierInvalid)
+		return
+	}
+	var body struct {
+		Ratio float64 `json:"ratio"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.Ratio <= 0 {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	if err := a.TenantRepo.UpsertGroup(reqCtx(c), tenantID, tierGroupKey(tier), body.Ratio); err != nil {
+		respondErr(c, err)
+		return
+	}
+	respondOK(c, tierRatioOut{Tier: tier, Ratio: body.Ratio, PlatformRatio: groupRatioOf(tier), HasOverride: true})
+}
+```
+  `distribution.go` 顶部 import 块加 `"sort"`。
+
+- [ ] **Step 4：在 `internal/mtwire/grouphook.go` 加 `resolveTierRatio`**，紧接既有 `resolveTenantGroupRatio` 之后：
+```go
+// resolveTierRatio 是层级轴的倍率解析（Change 1，spec agent-tiering §9.6.1）：
+//   - userGroup 不是「可代理覆盖层级」(agentOverridableTier；今仅 vip，default 恒排除) → 平台全局
+//     groupRatioOf(userGroup)（既有行为，不变，不查库）。
+//   - 是可代理覆盖层级，但用户不归属任何 L1（独立档）代理（主站直客 / L0 代理下级 / 未归属）→
+//     平台全局 groupRatioOf(userGroup)（范围限定为仅 level>=1——L0 代理没有 HandleAgentSetTierRatio
+//     的调用权限，因此 L0 下级用户的层级折扣行为与 Change 1 上线前完全一致；这是一处需用户确认的
+//     判断，见 Task 16 顶部"范围判断"）。
+//   - 是可代理覆盖层级 且 归属 L1 代理：该代理为此层级设了 enabled 覆盖 → 用覆盖值（代理自担，
+//     §9.4）；未设置 → 1（"Default=1，no discount"——不回退平台全局，"No overlap"）。
+//
+// 自带 panic 兜底由调用方 resolveModelGroup2D 的 defer/recover 统一覆盖，此处不重复包一层。
+func (a *App) resolveTierRatio(ctx context.Context, userID int64, userGroup string) float64 {
+	baseline := groupRatioOf(userGroup)
+	if !agentOverridableTier(userGroup) {
+		return baseline
+	}
+	tenantID := a.userTenantID(ctx, userID)
+	if tenantID <= 0 {
+		return baseline // 主站直客：平台全局，既有行为不变
+	}
+	if a.AgentService == nil {
+		return baseline // 未装配：安全回退（不查库、不改变现状）
+	}
+	lvl, err := a.AgentService.AgentLevel(ctx, tenantID)
+	if err != nil || lvl < 1 {
+		return baseline // L0 / 非代理 / 查询失败：无自设覆盖能力，沿用平台全局（对 L0 零行为变化）
+	}
+	if a.TenantRepo == nil {
+		return baseline
+	}
+	if override, found, err := a.TenantRepo.LookupEnabledGroupRatio(ctx, tenantID, tierGroupKey(userGroup)); err == nil && found {
+		return override
+	}
+	return 1 // L1 且未配置覆盖：Default=1，不回退平台全局（No overlap）
+}
 ```
 
-- [ ] **Step 4:** Run — expect PASS (both the new gate test and the pre-existing `TestHandleAgentSetGroupRatio`/`TestHandleAgentListGroups`).
+- [ ] **Step 5：接线 `resolveModelGroup2D`（`internal/mtwire/modelgroup.go` ~83-103）**，把层级轴从直接调 `groupRatioOf` 改成调 `a.resolveTierRatio`：
+```go
+	// 层级轴（Change 1，spec §9.6.1）：非「可代理覆盖层级」或用户不归属 L1 代理 → 平台全局
+	// groupRatioOf(userGroup)（既有行为不变）；归属 L1 代理 → 该代理自设的 per-tenant 覆盖（未配置则 1，
+	// 不回退平台全局，"No overlap"）。见 resolveTierRatio（grouphook.go）。
+	tier := a.resolveTierRatio(context.Background(), userID, userGroup)
+	factor := 1.0
+	if usingGroup != "" && a.ModelGroupRepo.IsModelGroup(usingGroup) {
+		factor = groupRatioOf(usingGroup) // 平台基准
+		// 代理 per-tenant 覆盖（仅模型分组）：命中即用覆盖值（写入端已保证 ≥ 基准，代理加价）。
+		if override, hit := a.resolveTenantGroupRatio(context.Background(), userID, usingGroup); hit {
+			factor = override
+		}
+	}
+	return tier * factor, true
 ```
-cd /Users/cc/newapi628 && go test ./internal/mtwire/ -run 'TestHandleAgentSetGroupRatio|TestHandleAgentListGroups'
-cd /Users/cc/newapi628 && go build ./internal/... ./service/... ./router/... ./model/... ./setting/... ./controller/... && go test ./internal/mtwire/... ./internal/agent/...
+  （函数其余部分——签名、开头的 `defer recover()`、`if a.ModelGroupRepo == nil` 早退——不变，只替换原来 `tier := groupRatioOf(userGroup)` 这一行及其后续。）
+
+- [ ] **Step 6：注册路由。** `router/mt-router.go`，紧接既有两行之后（`agentSelf.PUT("/groups/:group", ...)`）：
+```go
+			// 我的层级折扣力度（代理自设 vip 覆盖；Change 1，spec §9.6.1）：列表 / 设覆盖（仅可代理
+			// 覆盖层级——今仅 vip；default 不可覆盖）。
+			agentSelf.GET("/tier-ratio", app.HandleAgentListTierRatios)
+			agentSelf.PUT("/tier-ratio/:tier", app.HandleAgentSetTierRatio)
 ```
 
-- [ ] **Step 5:** Commit.
+- [ ] **Step 7：跑测试，预期 PASS。**
 ```
-cd /Users/cc/newapi628 && git add internal/mtwire/distribution.go internal/mtwire/distribution_test.go && git commit -m "feat(billing): gate HandleAgentSetGroupRatio to level>=1 (L0 -> 403 AGENT_LEVEL_LOCKED)"
+cd /Users/cc/newapi628 && go test ./internal/mtwire/... ./internal/agent/...
+cd /Users/cc/newapi628 && go build ./internal/... ./service/... ./router/... ./model/... ./setting/... ./controller/...
+```
+
+- [ ] **Step 8：提交。**
+```
+cd /Users/cc/newapi628 && git add internal/mtwire router/mt-router.go && git commit -m "feat(billing): agent-settable per-tenant vip tier override (Change 1, spec §9.6.1)"
+```
+
+---
+
+### Task 17: 邀请链接折扣率字段预留 (`promotion.Channel.DiscountRate`) — schema-only，billing 不读. Change 3
+
+**2026-07-02 新增（用户确认三处修订之一）。** 纯 schema 预留：每条推广/邀请渠道（`agent_promotion_channels`，一个代理可建多条）加一个 `discount_rate` 字段，默认 1.0（不打折），供**未来**"不同邀请链接可以有不同折扣力度"这个功能使用。**本轮不激活**——不加任何设置入口、不接入计费公式（§9.2/§9.4 均不读它）、不建退款/折扣通路。与 §9.5 末尾"明确不做邀请 9 折"不矛盾:那条禁止的是 v1 式、全局统一的邀请折扣退款通路;这里只是给"按渠道各自独立"的粒度预先占一个字段位置,避免以后要为这一列单独跑一次破坏性迁移。全程沿用 GORM `AutoMigrate` 自动加列(同 Task 1 的 `can_api`、Task 11 的 `bottom_price_ratio`),无需 `information_schema` 守卫的破坏性迁移脚本。
+
+**Files:**
+- `internal/promotion/model.go`（`Channel` struct）。
+- `internal/promotion/service.go`（`CreateChannel`：新渠道固定写入 1.0）。
+- `internal/promotion/gormrepo/gormrepo.go`（`channelRow` 加列；`CreateChannel`/`toChannel` round-trip）。
+- `internal/promotion/gormrepo/gormrepo_test.go`（round-trip 测试）。
+- `internal/mtwire/distribution.go`（`channelOut`/`toChannelOut`：只读展示，不新增设置端点）。
+
+**Interfaces:**
+- Produces: `promotion.Channel.DiscountRate float64` —— 预留，`1.0` = 不打折（本轮唯一允许的值，没有任何写入路径能把它设成别的值）。
+- 无接口/方法签名变化——`PromotionService.CreateChannel`/`PromotionRepo.CreateChannel` 均不变（`Channel` 是整体传递的 struct，新增字段对调用方透明，同 Task 11 对 `AgentParams` 的处理方式）。
+
+- [ ] **Step 1：写失败测试。** 追加到 `internal/promotion/gormrepo/gormrepo_test.go`（复用本文件既有的 `newTestRepo` helper，不新建）：
+```go
+// TestCreateChannel_DiscountRateRoundTrips 确认 discount_rate 随渠道持久化并读回；新建渠道默认 1.0
+// （Change 3，spec agent-tiering §9.11——预留字段，本轮 billing 不读）。
+func TestCreateChannel_DiscountRateRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	c := &promotion.Channel{TenantID: 1, ChannelCode: "disc_x", DiscountRate: 1}
+	if err := r.CreateChannel(ctx, c); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := r.GetChannelByCode(ctx, "disc_x")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.DiscountRate != 1 {
+		t.Fatalf("DiscountRate = %v, want 1 (reserved default)", got.DiscountRate)
+	}
+}
+```
+
+- [ ] **Step 2：跑测试，预期 FAIL**（编译错：`DiscountRate` 未定义）。
+```
+cd /Users/cc/newapi628 && go test ./internal/promotion/... -run DiscountRate
+```
+
+- [ ] **Step 3：加字段。** `internal/promotion/model.go` 的 `Channel` struct，`RegisteredCount` 之后：
+```go
+	RegisteredCount int64  // 经本渠道注册的用户数
+	// DiscountRate 邀请折扣率（Change 3，spec §9.11：按渠道预留，本轮不激活）。1.0 = 不打折（本轮唯一
+	// 允许的值——没有任何写入路径能把它设成别的值）。billing（§9.2/§9.4）不读这个字段。
+	DiscountRate float64
+```
+  `internal/promotion/gormrepo/gormrepo.go` 的 `channelRow`，`RegisteredCount` 列之后：
+```go
+	RegisteredCount int64     `gorm:"column:registered_count;not null;default:0"`
+	DiscountRate    float64   `gorm:"column:discount_rate;type:decimal(6,4);not null;default:1"`
+```
+  `CreateChannel`（gormrepo）的 `row := channelRow{...}` 字面量加 `DiscountRate: c.DiscountRate,`；`toChannel` 的返回字面量加 `DiscountRate: row.DiscountRate,`。
+
+- [ ] **Step 4：新渠道固定预留值。** `internal/promotion/service.go` `CreateChannel` 的 `c := &Channel{...}` 字面量加 `DiscountRate: 1,`（新渠道一律不打折；本轮没有任何参数可以覆盖这个值）。
+
+- [ ] **Step 5：跑测试，预期 PASS。**
+```
+cd /Users/cc/newapi628 && go test ./internal/promotion/...
+```
+
+- [ ] **Step 6：只读展示（不新增设置端点）。** `internal/mtwire/distribution.go` 的 `channelOut`（§2 推广渠道）加字段：
+```go
+type channelOut struct {
+	ID              int64   `json:"id"`
+	Code            string  `json:"code"`
+	Name            string  `json:"name"`
+	RegisteredCount int64   `json:"registered_count"`
+	// DiscountRate 邀请折扣率（Change 3，预留占位，本轮恒 1.0，billing 不读；见 spec §9.11）。
+	DiscountRate    float64 `json:"discount_rate"`
+}
+```
+  `toChannelOut` 加 `DiscountRate: c.DiscountRate,`。
+
+- [ ] **Step 7：跑全量，预期 PASS。**
+```
+cd /Users/cc/newapi628 && go build ./internal/... ./service/... ./router/... ./model/... ./setting/... ./controller/... && go test ./internal/promotion/... ./internal/mtwire/...
+```
+
+- [ ] **Step 8：提交。**
+```
+cd /Users/cc/newapi628 && git add internal/promotion internal/mtwire/distribution.go && git commit -m "feat(promotion): reserve per-channel discount_rate field (Change 3, spec §9.11) — schema only, not wired into billing"
 ```
 
 ---
@@ -3037,11 +3590,14 @@ cd /Users/cc/newapi628 && git add internal/mtwire/distribution.go internal/mtwir
 - Spec §6 (tests): level gate L0 reject / L1 pass (Task 3 unit + Task 8 E2E); L0 create no subdomain + promotion provisions (Task 4 unit + server); migration level=1 (Task 8 server); `can_api` placeholder does not gate (Task 1 round-trip, never read by any gate); create/edit works after `type` removed (Task 2/6).
 - Deviations flagged: (a) DB `type`-drop co-located with code removal in Task 2 (compile-safety) rather than Task 1; (b) `SetAgentType`/`GetAgentType` names kept; (c) `SkipSubdomain` (default-provision) chosen over `ProvisionSubdomain` to keep existing tenant tests green; (d) new-agent create defaults to level 0 per "base tier" intent; (e) the drawer "key metrics for promotion decision" (spec §5.3.1) is delivered by Task 10 (per-agent promotion metrics 总充值/分润收益/下级用户数, reusing reportrepo aggregates + one thin downstream-count query); (f) the "not unlocked" page reuses `/403` (existing pattern) rather than a bespoke page.
 
-**Part 2 (money model, spec §9 — Tasks 11-15):**
+**Part 2 (money model v2/v3, spec §9 — Tasks 11-17). This supersedes the earlier v1 self-review notes below (which covered the old "L0 提成+9折 / L1 差价" task list, now deleted). 2026-07-02 v3 update: Tasks 13/15 rewritten in place and Tasks 16-17 appended per 3 confirmed changes (Change 1 vip-tier override, Change 2 markup formula fix, Change 3 invite discount_rate reservation) — bullets below reflect the v3 end state, not the superseded v2 draft:**
 
-- §9.1 (L0 提成+邀请9折): discount config (Task 11); 9折 refund at consumption, base unaffected (Task 12); commission math untouched, still `commission_ratio × quotaUnits` (Task 12/14, `creditL0Commission`).
-- §9.2 (L1 差价入账): markup base = official price via `resolveGroupFactors`/`ratioMarkupQuotaUnits`, reusing the real pricing lookups (`modelGroupBaseline`, `resolveTenantGroupRatio`) rather than approximating them (Task 13).
-- §9.3 (按档 gate): `HandleAgentSetGroupRatio` → level≥1 (Task 15); commission vs markup mutually exclusive in `creditConsumeCommission`'s dispatch, tested directly (Task 14 `TestCreditConsumeCommission_TierSwitch_NeverBothSources`); 9折 scoped to L0-attributed users only, tested (Task 14).
-- §9.5 (红线): every new write path (`grantInviteDiscount`, `creditRatioMarkup`, `creditL0Commission`) is `requestID`-idempotent (Tasks 12/13, retested end-to-end in Task 14's `TestCreditConsumeCommission_RetrySameRequestID_NoDoubleCredit`) and wrapped by `creditConsumeCommission`'s existing `defer recover()` (never blocks the request); base is official price everywhere (9折 never shrinks the L0 commission base; markup is computed off the platform baseline, not the discounted price).
-- §9.6 (tests): 9折 applies only to L0-attributed users / rate from config (Task 11/12); L0 commission unaffected by discount (Task 12); L1 markup formula + no-override-no-markup (Task 13); gate L0 403 / L1 pass (Task 15); tier switch on/off (Task 14); idempotency (Tasks 12/13/14).
-- Deviations flagged (Part 2, not silently assumed): (a) the `ConsumeCommission` hook signature gained a 5th parameter (`usingGroup`) — required because the hook previously carried no way to know which model group was billed, which the L1 markup math needs (Task 13); (b) the 9折 refund is scoped to `billingSource=="wallet"` only — subscription-bucket consumption is metered against a different pool (`PostConsumeUserSubscriptionDelta`) that `users.quota` refunds can't reach without a further signature change the task list didn't ask for (Task 12); (c) L1 markup uses a single `SourceRatioMarkup`, not split by wallet/subscription bucket the way L0's `consume_commission`/`tokenplan_commission` is — kept to the one source type the task list specified; `TotalEarnedCNY`/wallet balance still include it correctly (`AppendEarning` sums by tenant regardless of source), only the finance report's per-source breakdown (`reportrepo.go` `earningsByTenant`) doesn't bucket it separately — the **same** already-accepted gap that `tokenplan_commission` has today (verified: `earningsByTenant`'s switch only special-cases `consume_commission`/`tokenplan_spread`/`manual_adjustment`), so this isn't a new class of gap; (d) `InviteDiscountRate` is admin-settable via the existing generic `PUT /api/option/` only — not yet wired into the admin frontend settings form (§9 doesn't ask for a UI, `USDExchangeRate` is the cited precedent and *is* hand-wired in the frontend, so a labeled field is a natural but unrequested follow-up); (e) deploying Part 2 on top of this plan's Task 2 (which backfills all existing agents to level=1) switches every pre-existing agent from commission to markup-delta earning immediately, dropping to $0 new earnings until they configure a group-ratio override — intentional per spec §9.3, flagged operationally in Task 14.
+- §9.1-9.3 (三线分离 · 消耗计费公式 · 四档价格阶梯): recharge/tokenplan lines are untouched — no task in this list touches `recharge_spread` or `Retail.SetListing`; the consumption formula itself (`resolveModelGroup2D`) is reused, with one v3 addition (Task 16's tier-axis `resolveTierRatio`, see §9.6 below — the model-group axis half of the formula is still unmodified by any task); the four-level ladder is realized purely through the new `BottomPriceRatio` field (Task 11) and its floor-wiring into `HandleAgentSetGroupRatio`/`HandleAgentListGroups` (Task 12).
+- §9.4 (L1 差价入账,**v3 修订公式**): `creditRatioMarkup`/`ratioMarkupQuotaUnits` (Task 13, v3-corrected) compute `markup = chargedQuota − rawUnits×底价` directly off `chargedGroupRatio` — the realized, already-applied combined ratio from `relayInfo.PriceData.GroupRatioInfo.GroupRatio` — rather than the original v2 draft's tier-less "卖价" (which silently dropped any vip discount from the differential). `token×ModelRatio` is still recovered the same way (`chargedQuota ÷ chargedGroupRatio`), avoiding a second, race-prone lookup at settle time.
+- §9.5 (L0 提成): formula unchanged (`commission_ratio × quotaUnits`), only extracted into `creditL0Commission` for the dispatch (Task 14); **no** 9折 — v1's `invite_discount_rate` mechanism is explicitly dropped, not carried forward or deprecated-in-place. Not to be confused with Task 17's `discount_rate` (Change 3) — that is an unrelated, unread, per-channel schema placeholder, not a revival of v1's mechanism.
+- §9.6 / §9.6.1 (vip 优惠 / 谁设谁担,**Change 1,resolved**): the v2 draft characterized markup crediting as structurally tier-invariant (platform always bears vip cost) and explicitly flagged that as a gap needing user confirmation. **2026-07-02: confirmed and built.** Task 16 adds a per-tenant tier-axis override (`HandleAgentSetTierRatio`/`HandleAgentListTierRatios`, level≥1-gated, stored in the existing `tenant_groups` table under a `tier:`-prefixed key so it can't collide with the model-group axis) and wires it into `resolveModelGroup2D` via a new `resolveTierRatio` helper. Combined with Task 13's v3 formula, an agent's own vip force now shrinks their own markup (tested directly, Task 15 rewritten in place — `TestCreditRatioMarkup_AgentBearsOwnRealizedDiscount` replaces the v2-era `..._PlatformBearsCost` test, inverted assertion). Two judgment calls made and flagged for confirmation, not silently decided: (a) "No overlap" (agent's downstream vip users never fall back to the platform's global vip ratio) is scoped to **level≥1 tenants only** — L0 agents can't call the new endpoint, so their downstream vip users keep today's platform-global behavior unchanged, rather than silently losing their discount; (b) Task 16 does **not** add a preventive cross-check (agent's vip force vs. every already-configured 卖价 override) at set-time — the floor is enforced only at credit-time, via Task 13's `chargedGroupRatio ≤ 底价` clamp, mirroring this codebase's existing precedent for the analogous 底价-vs-卖价 drift problem (no set-time prevention there either).
+- §9.7 (底价倍率新字段): `AgentParams.BottomPriceRatio` (Task 11); `consumeFloorRatio` (Task 12) is the single shared function both the write path (`HandleAgentSetGroupRatio`'s floor) and the read path (Task 13's `creditRatioMarkup`) call — the spec's explicit record-keeping-error warning ("两处必须同一口径") is satisfied by construction (one function, two call sites), not by convention alone. Task 16's vip-force floor is a corollary of this same clamp (compared against `chargedGroupRatio` post-Change-2), not a second mechanism.
+- §9.9 (按档 gate + 幂等 / 红线): `HandleAgentSetGroupRatio` → level≥1, reusing Task 3's `ensureAgentLevel` (Task 12, no new gate mechanism) — Task 16's `HandleAgentSetTierRatio` reuses the identical gate; commission vs markup are mutually exclusive in `creditConsumeCommission`'s dispatch, tested directly (Task 14 `TestCreditConsumeCommission_TierSwitch_NeverBothSources`, including the "L1 also has a stray non-zero `commission_ratio` configured" adversarial case); every new write path (`creditRatioMarkup`, `creditL0Commission`) is `requestID`-idempotent via the existing `AgentRepo.AppendEarning` unique-index mechanism (retested end-to-end in Task 14's `TestCreditConsumeCommission_RetrySameRequestID_NoDoubleCredit`) and wrapped by `creditConsumeCommission`'s existing `defer recover()` (unchanged, never blocks the request); markup is structurally non-negative everywhere — Task 13's (v3-corrected) `ratioMarkupQuotaUnits` guard plus Task 15's (rewritten) cross-tier and drift characterization tests.
+- §9.10 (tests): `BottomPriceRatio` round-trip + the existing `"all zero ok"` `Validate()` contract preserved (Task 11); floor uses the calling agent's own value and falls back to the platform baseline when unconfigured, `Floor`/`PlatformRatio` semantically split in the list response (Task 12); differential math (v3 formula) + no-override-means-no-credit + config-drift-safety + idempotency (Task 13); tier switch + no-double-credit + main-site-user unaffected (Task 14); **v3**: markup shrinks (non-increasing) across the tier range, never negative, and an agent's own vip force strictly reduces their own markup relative to a default-tier user with identical raw consumption (Task 15, rewritten — replaces the superseded v2 tier-invariance/platform-bears-cost characterization); tier-axis override round-trips + defaults to 1 (not platform baseline) for L1, stays at platform baseline for main-site/L0, and doesn't cross-contaminate the model-group axis's `tenant_groups` rows (Task 16).
+- §9.11 (邀请折扣预留,**Change 3**): `promotion.Channel.DiscountRate` (Task 17) round-trips through `gormrepo`, defaults to `1.0` on every new channel, and is surfaced read-only on `channelOut` — no task in this list (including Task 17 itself) reads it from any billing code path.
+- Deviations flagged (Part 2, not silently assumed): (a) the `ConsumeCommission` hook signature gained **two** new parameters (`usingGroup` *and* `chargedGroupRatio`), not the one a shallower read of "thread the group through" might suggest — recovering `token×ModelRatio` from an already-charged amount needs the *realized* combined ratio (§9.4/§9.6), not a value re-derived from a second, potentially-stale lookup at settle time, which would reopen a real race with an agent changing their own 卖价 (or, post-Task-16, their own vip force) between charge-time and settle-time (Task 13); (b) `HandleAgentListGroups`'s `Floor` field changes *meaning* for any existing consumer of that response — it used to always equal `PlatformRatio`, and now reflects the calling agent's own `BottomPriceRatio` when configured — a genuine, intentional behavior change, not just an internal refactor (Task 12); (c) v1's entire "邀请 9 折" mechanism (`invite_discount_rate` config var, quota-refund crediting, the dedicated `mt_invite_discount_grants` table) is dropped wholesale rather than migrated or deprecated in place — per this task list's own "Step 1" code-audit premise, none of it exists in this repo yet, so there is nothing to clean up; if that ever changes before this plan is executed, re-verify the premise before starting Task 11; (d) deploying Tasks 11-14 on top of this plan's already-implemented Task 2 (which backfilled every pre-existing agent to level=1) switches every such agent from commission-earning to markup-earning immediately, dropping to `$0` new earnings until they configure a 卖价 override — intentional per spec §9.9 ("二选一"), reflagged operationally in Task 14, unchanged from the equivalent v1 caveat; (e) **new, v3**: Tasks 13 and 16 are a deployment pair — shipping Task 13's formula fix alone (before Task 16) opens a window where L1 agents' markup income fluctuates with the platform's global vip ratio, which the agent doesn't control (both Task 13's and Task 16's intros flag this; confirm the transition window is acceptable if they must ship separately); (f) **new, v3**: Task 16's "No overlap" is scoped to level≥1 only (L0 unaffected) and does not add set-time preventive floor validation across an agent's other model-group 卖价 overrides — both are judgment calls made to bound scope/blast-radius, flagged in Task 16's own text for confirmation, not inferred silently.
