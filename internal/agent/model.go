@@ -7,28 +7,6 @@ import (
 
 // ---- 代理类型与参数（detailed-design §2.3 / proposal §5.2、§7）----
 
-// AgentType 是代理类型枚举。
-type AgentType string
-
-const (
-	// AgentTypeNormal 普通代理（基础推广能力）。
-	AgentTypeNormal AgentType = "normal"
-	// AgentTypeOEM OEM 品牌定制代理。
-	AgentTypeOEM AgentType = "oem"
-	// AgentTypeAPI API 开放接入代理。
-	AgentTypeAPI AgentType = "api"
-)
-
-// Valid 判断是否为已知的合法代理类型。
-func (t AgentType) Valid() bool {
-	switch t {
-	case AgentTypeNormal, AgentTypeOEM, AgentTypeAPI:
-		return true
-	default:
-		return false
-	}
-}
-
 // AgentParams 是设代理时的参数（detailed-design §2.3：cost_price、package_discount、commission_ratio、level）。
 type AgentParams struct {
 	// CostPrice 代理进货成本价（¥），强校验 ≥ 0。

@@ -27,7 +27,6 @@ import (
 type profileRow struct {
 	TenantID        int64     `gorm:"column:tenant_id;primaryKey"`
 	UserID          int64     `gorm:"column:user_id;not null;default:0;index:idx_agent_profiles_user"`
-	Type            string    `gorm:"column:type;type:varchar(16);not null;default:normal"`
 	Level           int       `gorm:"column:level;not null;default:0"`
 	CanAPI          bool      `gorm:"column:can_api;not null;default:false"`
 	CostPriceCNY    float64   `gorm:"column:cost_price_cny;type:decimal(20,8);not null;default:0"`
@@ -106,11 +105,10 @@ func AutoMigrate(db *gorm.DB) error {
 // ---- AgentRepo：代理资料 ----
 
 // SetAgentType 按 tenant_id 主键 upsert 代理资料（设代理 / 改代理复用）。
-func (r *Repo) SetAgentType(ctx context.Context, tenantID int64, t agent.AgentType, p agent.AgentParams) error {
+func (r *Repo) SetAgentType(ctx context.Context, tenantID int64, p agent.AgentParams) error {
 	now := r.now()
 	row := profileRow{
 		TenantID:        tenantID,
-		Type:            string(t),
 		Level:           p.Level,
 		CanAPI:          p.CanAPI,
 		CostPriceCNY:    p.CostPrice,
@@ -123,23 +121,23 @@ func (r *Repo) SetAgentType(ctx context.Context, tenantID int64, t agent.AgentTy
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "tenant_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"type", "level", "can_api", "cost_price_cny", "package_discount",
+			"level", "can_api", "cost_price_cny", "package_discount",
 			"commission_ratio", "discount_floor", "updated_at",
 		}),
 	}).Create(&row).Error
 }
 
 // GetAgentType 读取代理资料；found=false 表示该租户尚未设代理。
-func (r *Repo) GetAgentType(ctx context.Context, tenantID int64) (agent.AgentType, agent.AgentParams, bool, error) {
+func (r *Repo) GetAgentType(ctx context.Context, tenantID int64) (agent.AgentParams, bool, error) {
 	var row profileRow
 	err := r.db.WithContext(ctx).Take(&row, "tenant_id = ?", tenantID).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return "", agent.AgentParams{}, false, nil
+			return agent.AgentParams{}, false, nil
 		}
-		return "", agent.AgentParams{}, false, err
+		return agent.AgentParams{}, false, err
 	}
-	return agent.AgentType(row.Type), agent.AgentParams{
+	return agent.AgentParams{
 		CostPrice:       row.CostPriceCNY,
 		PackageDiscount: row.PackageDiscount,
 		CommissionRatio: row.CommissionRatio,
@@ -329,7 +327,6 @@ func (r *Repo) EnsureWallet(ctx context.Context, tenantID, userID int64) error {
 type AgentRow struct {
 	TenantID        int64
 	UserID          int64
-	Type            agent.AgentType
 	Level           int
 	CanAPI          bool
 	CostPriceCNY    float64
@@ -348,7 +345,6 @@ func (r *Repo) ListProfiles(ctx context.Context) ([]AgentRow, error) {
 		out = append(out, AgentRow{
 			TenantID:        p.TenantID,
 			UserID:          p.UserID,
-			Type:            agent.AgentType(p.Type),
 			Level:           p.Level,
 			CanAPI:          p.CanAPI,
 			CostPriceCNY:    p.CostPriceCNY,

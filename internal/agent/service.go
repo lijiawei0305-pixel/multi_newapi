@@ -14,12 +14,9 @@ func NewService(repo AgentRepo, guard PricingGuard) AgentService {
 	return &agentService{repo: repo, guard: guard}
 }
 
-// SetAgentType 校验代理类型与参数后落库；任一非法返回 AGENT_TYPE_INVALID。
+// SetAgentType 校验代理参数后落库；参数非法返回 AGENT_TYPE_INVALID。
 // 折扣若击穿主站保护线，则原样上浮 PricingGuard 的错误码（如 RATIO_BELOW_FLOOR）。
-func (s *agentService) SetAgentType(ctx context.Context, tenantID int64, t AgentType, p AgentParams) error {
-	if !t.Valid() {
-		return ErrAgentTypeInvalid
-	}
+func (s *agentService) SetAgentType(ctx context.Context, tenantID int64, p AgentParams) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
@@ -28,7 +25,7 @@ func (s *agentService) SetAgentType(ctx context.Context, tenantID int64, t Agent
 			return err // 跨模块错误原样上浮（detailed-design §6.4）
 		}
 	}
-	return s.repo.SetAgentType(ctx, tenantID, t, p)
+	return s.repo.SetAgentType(ctx, tenantID, p)
 }
 
 // GetWallet 返回租户维度的代理钱包。键为 tenantID，天然跨租户隔离。
@@ -38,7 +35,7 @@ func (s *agentService) GetWallet(ctx context.Context, tenantID int64) (*AgentWal
 
 // AgentLevel 返回租户代理档位（0=普通 / 1=独立）；未设代理的租户返回 0（非错误），供能力 gate 使用。
 func (s *agentService) AgentLevel(ctx context.Context, tenantID int64) (int, error) {
-	_, p, found, err := s.repo.GetAgentType(ctx, tenantID)
+	p, found, err := s.repo.GetAgentType(ctx, tenantID)
 	if err != nil {
 		return 0, err
 	}

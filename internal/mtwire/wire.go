@@ -312,7 +312,11 @@ func (a *App) Migrate() error {
 	if err := migrateReconcileRuns(a.DB); err != nil {
 		return err
 	}
-	return migrateReconcileHeartbeat(a.DB)
+	if err := migrateReconcileHeartbeat(a.DB); err != nil {
+		return err
+	}
+	// 代理分层：现有代理回填 level=1 + 删废弃 type 列（一次性、information_schema 守卫，见 agent.go）。
+	return migrateAgentProfilesDropType(a.DB)
 }
 
 // ----------------------------------------------------------------------------

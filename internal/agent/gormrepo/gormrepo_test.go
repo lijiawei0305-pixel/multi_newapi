@@ -29,40 +29,37 @@ func newTestRepo(t *testing.T) *Repo {
 	return New(db)
 }
 
-// TestSetAgentType_Upsert 确认按 tenant_id upsert：二次写覆盖参数。
 func TestSetAgentType_Upsert(t *testing.T) {
 	ctx := context.Background()
 	r := newTestRepo(t)
 
 	p1 := agent.AgentParams{CostPrice: 10, PackageDiscount: 0.9, CommissionRatio: 0.2, Level: 1}
-	if err := r.SetAgentType(ctx, 7, agent.AgentTypeNormal, p1); err != nil {
+	if err := r.SetAgentType(ctx, 7, p1); err != nil {
 		t.Fatalf("set1: %v", err)
 	}
 	p2 := agent.AgentParams{CostPrice: 20, PackageDiscount: 0.8, CommissionRatio: 0.3, Level: 2}
-	if err := r.SetAgentType(ctx, 7, agent.AgentTypeOEM, p2); err != nil {
+	if err := r.SetAgentType(ctx, 7, p2); err != nil {
 		t.Fatalf("set2: %v", err)
 	}
-	typ, got, found, err := r.GetAgentType(ctx, 7)
+	got, found, err := r.GetAgentType(ctx, 7)
 	if err != nil || !found {
 		t.Fatalf("get: found=%v err=%v", found, err)
 	}
-	if typ != agent.AgentTypeOEM || got != p2 {
-		t.Fatalf("got (%v,%+v), want (oem,%+v)", typ, got, p2)
+	if got != p2 {
+		t.Fatalf("got %+v, want %+v", got, p2)
 	}
-	// 未设代理的租户 found=false。
-	if _, _, found, _ := r.GetAgentType(ctx, 99); found {
+	if _, found, _ := r.GetAgentType(ctx, 99); found {
 		t.Fatal("tenant 99 must not be an agent")
 	}
 }
 
-// TestGetAgentType_RoundTripsCanAPI 确认 can_api 列随资料持久化并读回。
 func TestGetAgentType_RoundTripsCanAPI(t *testing.T) {
 	ctx := context.Background()
 	r := newTestRepo(t)
-	if err := r.SetAgentType(ctx, 5, agent.AgentTypeNormal, agent.AgentParams{Level: 1, CanAPI: true}); err != nil {
+	if err := r.SetAgentType(ctx, 5, agent.AgentParams{Level: 1, CanAPI: true}); err != nil {
 		t.Fatalf("set: %v", err)
 	}
-	_, got, found, err := r.GetAgentType(ctx, 5)
+	got, found, err := r.GetAgentType(ctx, 5)
 	if err != nil || !found {
 		t.Fatalf("get: found=%v err=%v", found, err)
 	}

@@ -8,7 +8,7 @@ import (
 func TestMemRepo_GetAgentTypeNotFound(t *testing.T) {
 	ctx := context.Background()
 	repo := NewMemRepo()
-	if _, _, found, err := repo.GetAgentType(ctx, 123); err != nil || found {
+	if _, found, err := repo.GetAgentType(ctx, 123); err != nil || found {
 		t.Fatalf("GetAgentType(unknown): found=%v err=%v, want false/nil", found, err)
 	}
 }

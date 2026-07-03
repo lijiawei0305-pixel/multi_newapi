@@ -9,9 +9,9 @@ import "context"
 // 键统一为 tenantID（决策：代理=User+Tenant 1:1，agent_profiles 以 tenant_id 为主键）。
 // owner 用户与租户的映射落在 tenants.owner_user_id，本模块只认 tenantID，天然跨租户隔离。
 type AgentService interface {
-	// SetAgentType 设代理类型/成本价/折扣/分润/等级（经 PricingGuard 校验）。
-	// 非法类型或参数返回 AGENT_TYPE_INVALID；折扣击穿保护线时原样上浮守卫错误。
-	SetAgentType(ctx context.Context, tenantID int64, t AgentType, p AgentParams) error
+	// SetAgentType 设代理成本价/折扣/分润/等级/can_api（经 PricingGuard 校验）。
+	// 参数非法返回 AGENT_TYPE_INVALID；折扣击穿保护线时原样上浮守卫错误。
+	SetAgentType(ctx context.Context, tenantID int64, p AgentParams) error
 	// GetWallet 返回租户维度的代理钱包（API 额度 / 可提现 / 累计收益）。
 	GetWallet(ctx context.Context, tenantID int64) (*AgentWallet, error)
 	// AgentLevel 返回该租户代理档位（能力 gate 的唯一真相）；非代理租户返回 0（非错误）。
@@ -52,9 +52,9 @@ type PricingGuard interface {
 // 读-改-写（detailed-design §6.2 条件 UPDATE / 行锁），以保证并发下的幂等与金额守恒。
 type AgentRepo interface {
 	// SetAgentType 持久化代理资料（按 tenantID 主键 upsert）。
-	SetAgentType(ctx context.Context, tenantID int64, t AgentType, p AgentParams) error
+	SetAgentType(ctx context.Context, tenantID int64, p AgentParams) error
 	// GetAgentType 读取代理资料；found=false 表示该租户尚未设代理。
-	GetAgentType(ctx context.Context, tenantID int64) (t AgentType, p AgentParams, found bool, err error)
+	GetAgentType(ctx context.Context, tenantID int64) (p AgentParams, found bool, err error)
 	// GetWallet 返回租户钱包（不存在则返回该租户的零值钱包，不报错）。
 	GetWallet(ctx context.Context, tenantID int64) (*AgentWallet, error)
 	// AppendEarning 幂等入账：同 (SourceType, SourceID) 已存在则 applied=false 且不重复增余额。

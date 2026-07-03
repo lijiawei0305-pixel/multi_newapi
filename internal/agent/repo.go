@@ -8,7 +8,6 @@ import (
 
 // agentRecord 是代理资料的内部存储结构（按 tenantID）。
 type agentRecord struct {
-	t         AgentType
 	params    AgentParams
 	updatedAt time.Time
 }
@@ -60,21 +59,21 @@ func (r *MemRepo) SeedAPIBalance(tenantID int64, amount float64) {
 	w.UpdatedAt = r.now()
 }
 
-func (r *MemRepo) SetAgentType(_ context.Context, tenantID int64, t AgentType, p AgentParams) error {
+func (r *MemRepo) SetAgentType(_ context.Context, tenantID int64, p AgentParams) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.profiles[tenantID] = agentRecord{t: t, params: p, updatedAt: r.now()}
+	r.profiles[tenantID] = agentRecord{params: p, updatedAt: r.now()}
 	return nil
 }
 
-func (r *MemRepo) GetAgentType(_ context.Context, tenantID int64) (AgentType, AgentParams, bool, error) {
+func (r *MemRepo) GetAgentType(_ context.Context, tenantID int64) (AgentParams, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rec, ok := r.profiles[tenantID]
 	if !ok {
-		return "", AgentParams{}, false, nil
+		return AgentParams{}, false, nil
 	}
-	return rec.t, rec.params, true, nil
+	return rec.params, true, nil
 }
 
 func (r *MemRepo) GetWallet(_ context.Context, tenantID int64) (*AgentWallet, error) {

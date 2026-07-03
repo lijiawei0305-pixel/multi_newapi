@@ -90,12 +90,7 @@ func (a *App) seedDemoAgent(ctx context.Context, tenantID int64) error {
 	if err := a.TenantRepo.SetOwnerUserID(ctx, tenantID, ownerID); err != nil {
 		return err
 	}
-	if err := a.AgentService.SetAgentType(ctx, tenantID, agent.AgentTypeNormal, agent.AgentParams{
-		CostPrice:       50,
-		PackageDiscount: 0.9,
-		CommissionRatio: 0.2,
-		Level:           1,
-	}); err != nil {
+	if err := a.AgentService.SetAgentType(ctx, tenantID, agent.AgentParams{CostPrice: 50, PackageDiscount: 0.9, CommissionRatio: 0.2, Level: 1}); err != nil {
 		return err
 	}
 	return a.AgentRepo.EnsureWallet(ctx, tenantID, ownerID)

@@ -83,6 +83,27 @@ func migrateUsersPromotionChannelID(db *gorm.DB) error {
 	).Error
 }
 
+// migrateAgentProfilesDropType 一次性破坏性迁移：现有代理全部升为独立档（level=1）后删除废弃的 type 列。
+// 幂等：以 type 列是否仍存在为一次性信号——列已删即跳过，绝不重复回填（避免每次启动重置 level）。
+// 与 migrateUsersTenantID 同套路：information_schema 守卫的 raw MySQL；本地 sqlite 不覆盖，服务器验证。
+func migrateAgentProfilesDropType(db *gorm.DB) error {
+	var count int64
+	if err := db.Raw(
+		`SELECT COUNT(*) FROM information_schema.columns
+		 WHERE table_schema = DATABASE() AND table_name = 'agent_profiles' AND column_name = 'type'`,
+	).Scan(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil // type 列已删：一次性迁移已执行，幂等跳过
+	}
+	// 回填：现有代理全部升为独立档（不拉黑已有站点，spec §3 迁移）。仅当 type 列尚存时执行，故只跑一次。
+	if err := db.Exec(`UPDATE agent_profiles SET level = 1`).Error; err != nil {
+		return err
+	}
+	return db.Exec(`ALTER TABLE agent_profiles DROP COLUMN type`).Error
+}
+
 // ============================================================================
 // 钩子装配：把真实实现注入 agenthook 包级变量（原生 service/controller 旁路调用）
 // ============================================================================
@@ -186,7 +207,7 @@ func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID,
 	if tenantID <= 0 {
 		return // 主站用户 / 未归属：无代理分润
 	}
-	_, params, found, err := a.AgentRepo.GetAgentType(ctx, tenantID)
+	params, found, err := a.AgentRepo.GetAgentType(ctx, tenantID)
 	if err != nil || !found || params.CommissionRatio <= 0 {
 		return // 该租户未设代理或分润比例为 0
 	}
@@ -373,7 +394,6 @@ type agentOut struct {
 	OwnerUsername   string  `json:"owner_username"`
 	Slug            string  `json:"slug"`
 	Name            string  `json:"name"`
-	Type            string  `json:"type"`
 	Level           int     `json:"level"`
 	CanAPI          bool    `json:"can_api"`
 	CostPriceCNY    float64 `json:"cost_price_cny"`
@@ -407,7 +427,6 @@ type agentCreateIn struct {
 	Slug            string  `json:"slug"`
 	Name            string  `json:"name"`
 	OwnerUserID     int64   `json:"owner_user_id"`
-	Type            string  `json:"type"`
 	Level           int     `json:"level"`
 	CostPriceCNY    float64 `json:"cost_price_cny"`
 	PackageDiscount float64 `json:"package_discount"`
@@ -418,7 +437,6 @@ type agentCreateIn struct {
 // agentPatchIn 是 PATCH /api/admin/agents/:id 入参（指针支持局部更新）。
 type agentPatchIn struct {
 	Name            *string  `json:"name"`
-	Type            *string  `json:"type"`
 	Level           *int     `json:"level"`
 	CostPriceCNY    *float64 `json:"cost_price_cny"`
 	PackageDiscount *float64 `json:"package_discount"`
@@ -433,7 +451,7 @@ type agentPatchIn struct {
 
 // HandleAdminCreateAgent POST /api/admin/agents —— 设代理。需 AdminAuth。
 //
-// 流程：① 校验类型/参数/折扣（pricing.Guard，失败即返回，不建租户）；② 校验 owner 用户存在且未占用
+// 流程：① 校验参数/折扣（pricing.Guard，失败即返回，不建租户）；② 校验 owner 用户存在且未占用
 // （1:1）；③ 建租户（复用 tenant.Create，自动派生域名）；④ 写 owner_user_id + agent_profile + 钱包。
 // 注：③④ 跨仓储非单一 DB 事务（已前置强校验把常见失败挡在建租户前，详见报告「风险/未决」）。
 func (a *App) HandleAdminCreateAgent(c *gin.Context) {
@@ -442,7 +460,6 @@ func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
-	at := agent.AgentType(in.Type)
 	params := agent.AgentParams{
 		CostPrice:       in.CostPriceCNY,
 		PackageDiscount: in.PackageDiscount,
@@ -450,11 +467,7 @@ func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 		Level:           in.Level,
 		DiscountFloor:   in.DiscountFloor,
 	}
-	// ① 前置强校验（纯函数，不写库）：类型 + 参数 + 折扣保护线。
-	if !at.Valid() {
-		respondErr(c, agent.ErrAgentTypeInvalid)
-		return
-	}
+	// ① 前置强校验（纯函数，不写库）：参数 + 折扣保护线。
 	if err := params.Validate(); err != nil {
 		respondErr(c, err)
 		return
@@ -495,7 +508,7 @@ func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
-	if err := a.AgentService.SetAgentType(ctx, t.ID, at, params); err != nil {
+	if err := a.AgentService.SetAgentType(ctx, t.ID, params); err != nil {
 		respondErr(c, err)
 		return
 	}
@@ -503,7 +516,7 @@ func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
-	respondOK(c, a.buildAgentOut(ctx, t.ID, in.OwnerUserID, t.Slug, t.Name, string(t.Status), at, params))
+	respondOK(c, a.buildAgentOut(ctx, t.ID, in.OwnerUserID, t.Slug, t.Name, string(t.Status), params))
 }
 
 // HandleAdminListAgents GET /api/admin/agents —— 代理列表（含 owner 用户名 + 钱包）。需 AdminAuth。
@@ -533,7 +546,6 @@ func (a *App) HandleAdminListAgents(c *gin.Context) {
 			OwnerUsername:   names[p.UserID],
 			Slug:            slug,
 			Name:            name,
-			Type:            string(p.Type),
 			Level:           p.Level,
 			CanAPI:          p.CanAPI,
 			CostPriceCNY:    p.CostPriceCNY,
@@ -562,7 +574,7 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 		respondErr(c, err) // TENANT_NOT_FOUND
 		return
 	}
-	curType, curParams, _, err := a.AgentRepo.GetAgentType(ctx, tenantID)
+	curParams, _, err := a.AgentRepo.GetAgentType(ctx, tenantID)
 	if err != nil {
 		respondErr(c, err)
 		return
@@ -571,9 +583,6 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 	if err := c.ShouldBindJSON(&in); err != nil {
 		respondErr(c, errAgentInputInvalid)
 		return
-	}
-	if in.Type != nil {
-		curType = agent.AgentType(*in.Type)
 	}
 	if in.Level != nil {
 		curParams.Level = *in.Level
@@ -590,8 +599,8 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 	if in.DiscountFloor != nil {
 		curParams.DiscountFloor = *in.DiscountFloor
 	}
-	// SetAgentType 内含类型 + 参数 + 折扣保护线校验（非法即上浮，不落库）。
-	if err := a.AgentService.SetAgentType(ctx, tenantID, curType, curParams); err != nil {
+	// SetAgentType 内含参数 + 折扣保护线校验（非法即上浮，不落库）。
+	if err := a.AgentService.SetAgentType(ctx, tenantID, curParams); err != nil {
 		respondErr(c, err)
 		return
 	}
@@ -610,7 +619,7 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 		}
 		t.Status = tenant.TenantStatus(*in.Status)
 	}
-	respondOK(c, a.buildAgentOut(ctx, tenantID, t.OwnerUserID, t.Slug, t.Name, string(t.Status), curType, curParams))
+	respondOK(c, a.buildAgentOut(ctx, tenantID, t.OwnerUserID, t.Slug, t.Name, string(t.Status), curParams))
 }
 
 // ============================================================================
@@ -747,7 +756,7 @@ func (a *App) reviewWithdrawal(c *gin.Context, approve bool) {
 // ============================================================================
 
 // buildAgentOut 组装单个代理对象（含 owner 用户名 + 钱包）。
-func (a *App) buildAgentOut(ctx context.Context, tenantID, ownerUserID int64, slug, name, status string, at agent.AgentType, p agent.AgentParams) agentOut {
+func (a *App) buildAgentOut(ctx context.Context, tenantID, ownerUserID int64, slug, name, status string, p agent.AgentParams) agentOut {
 	w, _ := a.AgentService.GetWallet(ctx, tenantID)
 	return agentOut{
 		ID:              tenantID,
@@ -755,7 +764,6 @@ func (a *App) buildAgentOut(ctx context.Context, tenantID, ownerUserID int64, sl
 		OwnerUsername:   a.usernamesByIDs(ctx, []int64{ownerUserID})[ownerUserID],
 		Slug:            slug,
 		Name:            name,
-		Type:            string(at),
 		Level:           p.Level,
 		CanAPI:          p.CanAPI,
 		CostPriceCNY:    p.CostPrice,

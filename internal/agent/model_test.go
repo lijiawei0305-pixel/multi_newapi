@@ -6,25 +6,6 @@ import (
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
-func TestAgentType_Valid(t *testing.T) {
-	cases := []struct {
-		t    AgentType
-		want bool
-	}{
-		{AgentTypeNormal, true},
-		{AgentTypeOEM, true},
-		{AgentTypeAPI, true},
-		{AgentType(""), false},
-		{AgentType("reseller"), false},
-		{AgentType("NORMAL"), false}, // 大小写敏感
-	}
-	for _, c := range cases {
-		if got := c.t.Valid(); got != c.want {
-			t.Errorf("%q.Valid() = %v, want %v", c.t, got, c.want)
-		}
-	}
-}
-
 func TestAgentParams_Validate(t *testing.T) {
 	cases := []struct {
 		name     string
