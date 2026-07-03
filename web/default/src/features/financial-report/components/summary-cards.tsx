@@ -20,11 +20,17 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
   Banknote,
+  Building2,
   Coins,
   CreditCard,
   HandCoins,
+  KeyRound,
+  Landmark,
   Package,
   Percent,
+  PiggyBank,
+  Split,
+  Store,
   TrendingUp,
   Wallet,
 } from 'lucide-react'
@@ -32,7 +38,11 @@ import { useTranslation } from 'react-i18next'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { cny, usd } from '../lib'
-import type { FinanceSummary } from '../types'
+import type {
+  AdminFinanceOverview,
+  AgentFinanceOverview,
+  FinanceSummary,
+} from '../types'
 
 // ============================================================================
 // KPI cards summarising all four lenses of a finance report. SCOPE-AGNOSTIC:
@@ -52,9 +62,39 @@ interface KpiCard {
   icon: LucideIcon
   testid: string
   emphasis?: boolean
+  /** Small muted caveat line rendered under the value (v3 upper-bound notes). */
+  footnote?: string
 }
 
 const CARD_COUNT = 9
+
+/** One KPI tile — shared render used by both `SummaryCards` and `OverviewCards`. */
+function KpiTile({ card }: { card: KpiCard }) {
+  return (
+    <div className='rounded-lg border px-3 py-3 sm:px-4'>
+      <div className='flex items-center gap-2'>
+        <card.icon className='text-muted-foreground/60 size-3.5 shrink-0' />
+        <div className='text-muted-foreground truncate text-xs font-medium tracking-wider uppercase'>
+          {card.label}
+        </div>
+      </div>
+      <div
+        data-testid={card.testid}
+        className={cn(
+          'mt-1.5 font-mono text-lg font-bold tracking-tight break-all tabular-nums sm:text-xl',
+          card.emphasis ? 'text-emerald-600' : 'text-foreground'
+        )}
+      >
+        {card.value}
+      </div>
+      {card.footnote ? (
+        <div className='text-muted-foreground/60 mt-1 text-[11px] leading-snug'>
+          {card.footnote}
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 export function SummaryCards({ summary, loading }: SummaryCardsProps) {
   const { t } = useTranslation()
@@ -139,27 +179,185 @@ export function SummaryCards({ summary, loading }: SummaryCardsProps) {
       data-testid='summary-cards'
     >
       {cards.map((card) => (
-        <div
-          key={card.label}
-          className='rounded-lg border px-3 py-3 sm:px-4'
-        >
-          <div className='flex items-center gap-2'>
-            <card.icon className='text-muted-foreground/60 size-3.5 shrink-0' />
-            <div className='text-muted-foreground truncate text-xs font-medium tracking-wider uppercase'>
-              {card.label}
-            </div>
-          </div>
-          <div
-            data-testid={card.testid}
-            className={cn(
-              'mt-1.5 font-mono text-lg font-bold tracking-tight break-all tabular-nums sm:text-xl',
-              card.emphasis ? 'text-emerald-600' : 'text-foreground'
-            )}
-          >
-            {card.value}
-          </div>
+        <KpiTile key={card.testid} card={card} />
+      ))}
+    </div>
+  )
+}
+
+// ============================================================================
+// v3 概览 (doc/finance-model-report-v3.md §二) — scope-aware headline KPI
+// section, rendered ABOVE `SummaryCards`. Unlike `SummaryCards`, this is NOT
+// scope-agnostic: the agent (4-field) and admin (6-field) overview shapes
+// don't share fields (see `FinanceOverview` in ../types), so callers pass an
+// explicit `scope` discriminant — mirrors how `scope` already threads through
+// `ExportButtons` for the same admin/tenant split.
+// ============================================================================
+
+export type OverviewCardsProps =
+  | { scope: 'agent'; overview?: AgentFinanceOverview; loading?: boolean }
+  | { scope: 'admin'; overview?: AdminFinanceOverview; loading?: boolean }
+
+function OverviewSkeletonGrid({
+  count,
+  gridCols,
+}: {
+  count: number
+  gridCols: string
+}) {
+  return (
+    <div className={cn('grid grid-cols-2 gap-3', gridCols)} data-testid='overview-cards'>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className='rounded-lg border px-3 py-3 sm:px-4'>
+          <Skeleton className='h-3.5 w-20' />
+          <Skeleton className='mt-2 h-6 w-24' />
         </div>
       ))}
     </div>
+  )
+}
+
+export function OverviewCards(props: OverviewCardsProps) {
+  const { t } = useTranslation()
+
+  // Interim caveat (doc/finance-model-report-v3.md; see backend
+  // agentFinanceOverviewOut.ApikeyConsumptionCNY comment): these three
+  // "wallet consumption" fields currently can't exclude tokenplan-bucket
+  // consumption, so they're an upper bound rather than a pure wallet figure.
+  const consumptionCaveat = t('Overview Consumption Caveat', {
+    defaultValue: '*暂含套餐额度消耗,待精确',
+  })
+
+  const heading = (
+    <h3 className='text-base font-semibold'>
+      {t('Finance Report V3 Overview', { defaultValue: 'v3 概览' })}
+    </h3>
+  )
+
+  if (props.scope === 'admin') {
+    const { overview, loading } = props
+
+    if (loading || !overview) {
+      return (
+        <section className='flex flex-col gap-2' data-testid='overview-section'>
+          {heading}
+          <OverviewSkeletonGrid count={6} gridCols='sm:grid-cols-3 xl:grid-cols-6' />
+        </section>
+      )
+    }
+
+    const cards: KpiCard[] = [
+      {
+        label: t('Mainsite Tokenplan Revenue', { defaultValue: '主站套餐收益' }),
+        value: cny(overview.mainsite_tokenplan_revenue_cny),
+        icon: Landmark,
+        testid: 'kpi-overview-mainsite-tokenplan-revenue',
+      },
+      {
+        label: t('Agent Tokenplan Revenue', { defaultValue: '代理站套餐收益' }),
+        value: cny(overview.agent_tokenplan_revenue_cny),
+        icon: Store,
+        testid: 'kpi-overview-agent-tokenplan-revenue',
+      },
+      {
+        label: t('Tokenplan Rebate To Agents', {
+          defaultValue: '给代理的套餐返现',
+        }),
+        value: cny(overview.tokenplan_rebate_cny),
+        icon: HandCoins,
+        testid: 'kpi-overview-tokenplan-rebate',
+      },
+      {
+        label: t('Mainsite Wallet Consumption', {
+          defaultValue: '主站钱包消耗',
+        }),
+        value: cny(overview.mainsite_wallet_consumption_cny),
+        icon: Activity,
+        testid: 'kpi-overview-mainsite-wallet-consumption',
+        footnote: consumptionCaveat,
+      },
+      {
+        label: t('Agent Wallet Consumption', { defaultValue: '代理站钱包消耗' }),
+        value: cny(overview.agent_wallet_consumption_cny),
+        icon: Building2,
+        testid: 'kpi-overview-agent-wallet-consumption',
+        footnote: consumptionCaveat,
+      },
+      {
+        label: t('Agent Api Rebate', {
+          defaultValue: '需返现代理的 api 消耗金额',
+        }),
+        value: cny(overview.agent_api_rebate_cny),
+        icon: Split,
+        testid: 'kpi-overview-agent-api-rebate',
+      },
+    ]
+
+    return (
+      <section className='flex flex-col gap-2' data-testid='overview-section'>
+        {heading}
+        <div
+          className='grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6'
+          data-testid='overview-cards'
+        >
+          {cards.map((card) => (
+            <KpiTile key={card.testid} card={card} />
+          ))}
+        </div>
+      </section>
+    )
+  }
+
+  const { overview, loading } = props
+
+  if (loading || !overview) {
+    return (
+      <section className='flex flex-col gap-2' data-testid='overview-section'>
+        {heading}
+        <OverviewSkeletonGrid count={4} gridCols='sm:grid-cols-4' />
+      </section>
+    )
+  }
+
+  const cards: KpiCard[] = [
+    {
+      label: t('Tokenplan Revenue', { defaultValue: '套餐收益(用户支付金额)' }),
+      value: cny(overview.tokenplan_revenue_cny),
+      icon: Package,
+      testid: 'kpi-overview-tokenplan-revenue',
+    },
+    {
+      label: t('Tokenplan Withdrawable', { defaultValue: '套餐可提现' }),
+      value: cny(overview.tokenplan_withdrawable_cny),
+      icon: PiggyBank,
+      testid: 'kpi-overview-tokenplan-withdrawable',
+    },
+    {
+      label: t('Apikey Consumption Revenue', { defaultValue: 'apikey 消费收益' }),
+      value: cny(overview.apikey_consumption_cny),
+      icon: KeyRound,
+      testid: 'kpi-overview-apikey-consumption',
+      footnote: consumptionCaveat,
+    },
+    {
+      label: t('Consumption Withdrawable', { defaultValue: '消耗可提现' }),
+      value: cny(overview.consumption_withdrawable_cny),
+      icon: HandCoins,
+      testid: 'kpi-overview-consumption-withdrawable',
+    },
+  ]
+
+  return (
+    <section className='flex flex-col gap-2' data-testid='overview-section'>
+      {heading}
+      <div
+        className='grid grid-cols-2 gap-3 sm:grid-cols-4'
+        data-testid='overview-cards'
+      >
+        {cards.map((card) => (
+          <KpiTile key={card.testid} card={card} />
+        ))}
+      </div>
+    </section>
   )
 }

@@ -132,14 +132,67 @@ export interface ExchangeInfo {
   usd_exchange_rate: number
 }
 
-/** `data` of `GET /api/{admin,tenant}/finance/summary`. */
-export interface FinanceSummary {
+// ---------------------------------------------------------------------------
+// v3 Overview (doc/finance-model-report-v3.md §二) — scope-specific KPI totals
+// surfaced at `data.overview`. Agent and admin shapes don't overlap field-for-
+// field (mirrors backend internal/mtwire/report.go agentFinanceOverviewOut /
+// adminFinanceOverviewOut, itself mirroring the `trendOut.Series any` /
+// `TrendResponse<P>` precedent below), so `FinanceSummary` is generic over
+// which one applies instead of one flattened supertype padded with fields the
+// other scope doesn't have.
+// ---------------------------------------------------------------------------
+
+/** Agent self-service overview (4 fields, §二「代理报表」). */
+export interface AgentFinanceOverview {
+  /** 套餐收益(用户支付金额) — Σ 售价，购买时计（同 recharge.subscription_paid_cny）。 */
+  tokenplan_revenue_cny: number
+  /** 套餐可提现 — 代理套餐差价，购买时一次性入账、立即可提现（= Σ tokenplan_spread）。 */
+  tokenplan_withdrawable_cny: number
+  /**
+   * apikey 消费收益 — 用户消耗的钱包余额。
+   * ⚠️ 口径缺口（临时，见后端 agentFinanceOverviewOut 注释）：现有数据无法把钱包桶消耗和套餐桶
+   * 消耗干净分开，本字段当前 = 两者合计（上界，非纯钱包值）。
+   */
+  apikey_consumption_cny: number
+  /**
+   * 消耗可提现 — 代理消耗差价，消耗时逐笔实时入账、立即可提现
+   * （= Σ ratio_markup + consume_commission）。
+   */
+  consumption_withdrawable_cny: number
+}
+
+/** Admin cross-tenant overview (6 fields, §二「管理员报表」，主站/代理站分列). */
+export interface AdminFinanceOverview {
+  /** 主站套餐收益 — 平台直营（platform 租户）用户买套餐的支付总额。 */
+  mainsite_tokenplan_revenue_cny: number
+  /** 代理站套餐收益 — 各代理站用户买套餐的支付总额(合计)。 */
+  agent_tokenplan_revenue_cny: number
+  /** 给代理的套餐返现 — Σ 各代理 tokenplan_spread（不含主站）。 */
+  tokenplan_rebate_cny: number
+  /** 主站钱包消耗 — 同 AgentFinanceOverview.apikey_consumption_cny 口径缺口，当前为上界。 */
+  mainsite_wallet_consumption_cny: number
+  /** 代理站钱包消耗(合计) — 同上口径缺口，当前为上界。 */
+  agent_wallet_consumption_cny: number
+  /** 需返现代理的 api 消耗金额 — Σ 各代理 (ratio_markup + consume_commission)，不含主站。 */
+  agent_api_rebate_cny: number
+}
+
+/** Either scope's overview shape (narrow via which fields are declared). */
+export type FinanceOverview = AgentFinanceOverview | AdminFinanceOverview
+
+/**
+ * `data` of `GET /api/{admin,tenant}/finance/summary`. `O` pins `overview` to
+ * the calling scope's shape (agent vs admin) — callers specify it explicitly
+ * (see `api.ts`) rather than relying on the union default.
+ */
+export interface FinanceSummary<O extends FinanceOverview = FinanceOverview> {
   range: FinanceRange
   earnings: EarningsSummary
   recharge: RechargeSummary
   consumption: ConsumptionSummary
   withdrawals: WithdrawalsSummary
   exchange: ExchangeInfo
+  overview: O
 }
 
 // ---------------------------------------------------------------------------

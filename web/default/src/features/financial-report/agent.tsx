@@ -30,7 +30,7 @@ import { BreakdownBySource } from './components/breakdown-by-source'
 import { DetailTable } from './components/detail-table'
 import { ExportButtons } from './components/export-buttons'
 import { ReportControls } from './components/report-controls'
-import { SummaryCards } from './components/summary-cards'
+import { OverviewCards, SummaryCards } from './components/summary-cards'
 import { TrendChart } from './components/trend-chart'
 import { lensLabel } from './lib'
 import type { Granularity, Lens, RangeParams } from './types'
@@ -126,6 +126,12 @@ export function AgentFinancialReport() {
             onGranularityChange={setGranularity}
             onRefresh={refreshAll}
             refreshing={summaryQuery.isFetching}
+          />
+
+          <OverviewCards
+            scope='agent'
+            overview={summary?.overview}
+            loading={summaryQuery.isLoading}
           />
 
           <SummaryCards summary={summary} loading={summaryQuery.isLoading} />

@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 import type {
+  AdminFinanceOverview,
+  AgentFinanceOverview,
   AgentRankParams,
   AgentRankResponse,
   ApiResponse,
@@ -45,7 +47,7 @@ import type {
 
 export async function getAdminFinanceSummary(
   params: RangeParams
-): Promise<ApiResponse<FinanceSummary>> {
+): Promise<ApiResponse<FinanceSummary<AdminFinanceOverview>>> {
   const res = await api.get('/api/admin/finance/summary', { params })
   return res.data
 }
@@ -77,7 +79,7 @@ export async function getAdminFinanceDetail(
 
 export async function getTenantFinanceSummary(
   params: RangeParams
-): Promise<ApiResponse<FinanceSummary>> {
+): Promise<ApiResponse<FinanceSummary<AgentFinanceOverview>>> {
   const res = await api.get('/api/tenant/finance/summary', { params })
   return res.data
 }
