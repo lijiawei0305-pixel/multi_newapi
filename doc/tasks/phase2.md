@@ -57,7 +57,7 @@
 > - **Track2 充值/支付**：真实支付改为**主站进程内真实 SDK**（`internal/payment/realpay` + `internal/mtwire/payment_inprocess.go`，微信/支付宝凭据存 DB、后台「支付」选项卡表单填写并启用，已落地；早期独立 auth-service mock 已退役）+ `POST /api/tenant/wallet/recharge` + 内网 `POST /api/internal/order/paid`（共享密钥、强幂等、按 order_no 前缀 RCG/SUB 分发）→ 原生 `IncreaseUserQuota`。**实测**：充$1→确认→quota +500000、重复确认 Δ=0（强幂等）✓。充值 UI 进 web/default。
 - [x] **7a 预扣**：复用原生 `BillingSession.preConsume`（转发前预扣、扣不动即拒）—— 零新增；流式按增量结算(`Reserve`)待补
 - [x] **7d 支付基建(mock)**：auth-service 微信/支付宝下单+回调 + 充值→原生quota + tokenplan购买→激活原生订阅，**强幂等全通**
-- [ ] **7d′ 真实凭据**：真实 V3 SDK（`wechatpay-go`/`smartwalle/alipay`）已落地于主站进程内 `internal/payment/realpay`；待补=后台「系统设置 → 支付」选项卡表单填微信/支付宝凭据（存 DB）并启用 → 沙箱→小额真单验收
+- 🟡 **7d′ 真实凭据（代码已就绪，待凭据+沙箱）**：真实 V3 SDK（`wechatpay-go`/`smartwalle/alipay`）已落地于主站**进程内** `internal/payment/realpay`（+ `internal/mtwire/payment_inprocess.go`，凭据存 DB、后台「系统设置 → 支付」选项卡表单填写并启用）；待补=沙箱→小额真单验收。**唯一阻塞=你提供微信/支付宝商户凭据**。（注：早期独立 auth-service 版实现在 `500L` 分支 提交 `493b830`，已被进程内版取代。）
 - [ ] **7b 真实分模型定价**：原生 model_ratio 本就生效；待校准我们套餐桶与分组倍率/成本保护线口径
 - [ ] 🟡 **7c 多档风控（核心已上线）**：✅ 真实 Redis RPM 限流接 relay（`RISK_DEFAULT_RPM`、超限 429、压测原子无超发，提交 cd1cf95）+ 租户状态校验；**待补**：并发/IP allowlist 完整接线、Trial 三维限购、满额分级告警
 - [x] **遗留接线 ①②③④ 完成**：①购买响应 snake_case ✅ ②tokenplan 购买走 auth-service mock(全链路 E2E) ✅ ③代理差价/分润落账(`tokenplan_spread`+`consume_commission` 真实 /v1 E2E) ✅ ④ **RCG/SUB 'paid'卡单对账兜底** ✅：`ReconcileStuckPaid`(扫 RCG paid→重跑 OnPaid 幂等→credited)+`ReconcileStuckSubscriptions`(扫 SUB pending→查 auth-service `/auth/order/status`→已付补激活)；`StartReconcileLoop` 5min 定时扫(master-only)，线上日志确认在跑；TDD 全测，提交 35c5098/c6f8e39/bd25efa/69d2136
