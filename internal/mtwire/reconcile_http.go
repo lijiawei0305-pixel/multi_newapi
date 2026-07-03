@@ -52,26 +52,16 @@ func (a *App) HandleAdminListStuck(c *gin.Context) {
 	respondOK(c, gin.H{"stuck": out, "threshold_secs": int64(reconcileMinAge.Seconds())})
 }
 
-// HandleAdminRunReconcile POST /api/admin/reconcile/run —— 手动立即对账（RCG+SUB），返回结果。
-// 与 5min 定时扫同一逻辑、同样幂等，仅免去等待。AdminAuth。
+// HandleAdminRunReconcile POST /api/admin/reconcile/run —— 手动立即对账，走与 5min 定时同一入口
+// runReconcileAll("manual")：跑全 3 条（RCG-paid ① + RCG-created ② + SUB ③，修早前只跑 ①③ 的 drift）、
+// 更新心跳、落一条历史。返回三路径结果（best-effort：单路径错误折进各自 failed，仍返回 200）。AdminAuth。
 func (a *App) HandleAdminRunReconcile(c *gin.Context) {
 	ctx := reqCtx(c)
 	before := time.Now().Add(-reconcileMinAge)
-	res := gin.H{}
-
-	if a.RechargeGateway != nil {
-		rcg, err := a.RechargeGateway.ReconcileStuckPaid(ctx, before)
-		if err != nil {
-			respondErr(c, err)
-			return
-		}
-		res["rcg"] = gin.H{"scanned": rcg.Scanned, "credited": rcg.Reconciled, "failed": rcg.Failed}
-	}
-	sub, err := a.ReconcileStuckSubscriptions(ctx, before)
-	if err != nil {
-		respondErr(c, err)
-		return
-	}
-	res["sub"] = gin.H{"scanned": sub.Scanned, "activated": sub.Activated, "unpaid": sub.Unpaid, "failed": sub.Failed}
-	respondOK(c, res)
+	paid, created, sub := a.runReconcileAll(ctx, before, "manual")
+	respondOK(c, gin.H{
+		"rcg":         gin.H{"scanned": paid.Scanned, "credited": paid.Reconciled, "failed": paid.Failed},
+		"rcg_created": gin.H{"scanned": created.Scanned, "credited": created.Reconciled, "failed": created.Failed},
+		"sub":         gin.H{"scanned": sub.Scanned, "activated": sub.Activated, "unpaid": sub.Unpaid, "failed": sub.Failed},
+	})
 }
