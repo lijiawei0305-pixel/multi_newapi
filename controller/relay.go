@@ -22,7 +22,6 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -124,23 +123,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
-	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.
+	// Avoid building huge CombineText (strings.Join) when token counting is disabled.
 	var meta *types.TokenCountMeta
-	if needSensitiveCheck || needCountToken {
+	if needCountToken {
 		meta = request.GetTokenCountMeta()
 	} else {
 		meta = fastTokenCountMetaForPricing(request)
-	}
-
-	if needSensitiveCheck && meta != nil {
-		contains, words := service.CheckSensitiveText(meta.CombineText)
-		if contains {
-			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
-			newAPIError = types.NewError(err, types.ErrorCodeSensitiveWordsDetected)
-			return
-		}
 	}
 
 	// 多租户调用前风控（7c · §2.13）：转发前 RPM 限流（+ 租户状态）。命中拦截（429 限流 / 403 IP·状态）。nil = 未装配。
