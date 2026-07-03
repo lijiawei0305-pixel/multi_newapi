@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -30,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { listStuckOrders, runReconcile } from './api'
+import { listHistory, listStuckOrders, runReconcile } from './api'
 
 /** relTime returns a short language-neutral "5m" / "2h" / "3d" string from a unix-seconds timestamp. */
 function relTime(unixSecs: number): string {
@@ -52,6 +53,13 @@ export function PaymentReconcile() {
     placeholderData: (prev) => prev,
   })
   const stuck = data?.stuck || []
+
+  const { data: history = [] } = useQuery({
+    queryKey: ['admin-reconcile-history'],
+    queryFn: () => listHistory(50),
+    placeholderData: (prev) => prev,
+  })
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({})
 
   const hb = data?.heartbeat
   const failedCount = hb?.last_failed_count ?? 0
@@ -82,6 +90,7 @@ export function PaymentReconcile() {
           `SUB ${t('scanned')}${s?.scanned ?? 0}/${t('activated')}${s?.activated?.length ?? 0}/${t('unpaid')}${s?.unpaid?.length ?? 0}/${t('failed')}${Object.keys(s?.failed ?? {}).length}`
       )
       qc.invalidateQueries({ queryKey: ['admin-reconcile-stuck'] })
+      qc.invalidateQueries({ queryKey: ['admin-reconcile-history'] })
     },
   })
 
@@ -165,6 +174,64 @@ export function PaymentReconcile() {
                       {Math.round(o.stuck_secs / 60)}m
                     </TableCell>
                   </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        <h3 className='mt-6 mb-2 text-sm font-medium'>{t('Reconcile History')}</h3>
+        <div className='overflow-hidden rounded-lg border' data-testid='history-table'>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className='w-8'></TableHead>
+                <TableHead>{t('Time')}</TableHead>
+                <TableHead>{t('Trigger')}</TableHead>
+                <TableHead>{t('Summary')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {history.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className='text-muted-foreground text-center'>
+                    {t('No history yet')}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                history.map((run) => (
+                  <Fragment key={run.id}>
+                    <TableRow
+                      className='cursor-pointer'
+                      onClick={() => setExpanded((m) => ({ ...m, [run.id]: !m[run.id] }))}
+                      data-testid={`history-row-${run.id}`}
+                    >
+                      <TableCell>
+                        {expanded[run.id] ? (
+                          <ChevronDown className='size-4' />
+                        ) : (
+                          <ChevronRight className='size-4' />
+                        )}
+                      </TableCell>
+                      <TableCell className='text-sm'>
+                        {new Date(run.ran_at * 1000).toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={run.trigger === 'manual' ? 'default' : 'secondary'}>
+                          {run.trigger === 'manual' ? t('Manual') : t('Scheduled')}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className='text-sm'>{run.summary}</TableCell>
+                    </TableRow>
+                    {expanded[run.id] && (
+                      <TableRow data-testid={`history-detail-${run.id}`}>
+                        <TableCell colSpan={4} className='bg-muted/30'>
+                          <pre className='overflow-x-auto text-xs'>
+                            {JSON.stringify(run.detail, null, 2)}
+                          </pre>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
                 ))
               )}
             </TableBody>

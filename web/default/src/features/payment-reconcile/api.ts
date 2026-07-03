@@ -64,3 +64,17 @@ export async function runReconcile(): Promise<ReconcileRunResult> {
   const res = await api.post('/api/admin/reconcile/run')
   return res.data.data
 }
+
+export interface HistoryRun {
+  id: number
+  ran_at: number // unix seconds
+  trigger: string // 'cron' | 'manual'
+  summary: string
+  detail: unknown // parsed JSON: { paid, created, sub }
+}
+
+/** 列最近对账记录（倒序）。手动全记 + 定时有实事才记。 */
+export async function listHistory(limit = 50): Promise<HistoryRun[]> {
+  const res = await api.get('/api/admin/reconcile/history', { params: { limit } })
+  return res.data.data.runs
+}
