@@ -128,6 +128,12 @@ func (g *Gateway) CreateOrder(ctx context.Context, in OrderInput) (*PayOrder, er
 	return o, nil
 }
 
+// GetByOrderNo 按订单号查单笔订单快照（只读，不改变状态机）。供 order-status 端点（扫码支付后
+// 前端轮询探活）与其他需要直读单笔订单的调用方使用。不存在时原样上浮 repo 的 ErrOrderNotFound。
+func (g *Gateway) GetByOrderNo(ctx context.Context, orderNo string) (*PayOrder, error) {
+	return g.repo.GetByOrderNo(ctx, orderNo)
+}
+
 // defaultOrderNo 生成全局唯一订单号：PAY + 纳秒时间(base36) + 6 字节随机(hex)。
 func defaultOrderNo() string {
 	var b [6]byte

@@ -29,6 +29,7 @@ import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialo
 import { TransferDialog } from './components/dialogs/transfer-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
+import { TENANT_RECHARGE_PAID_EVENT } from './components/tenant-recharge-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
 import { DEFAULT_DISCOUNT_RATE } from './constants'
 import {
@@ -121,6 +122,25 @@ export function Wallet(props: WalletProps) {
 
   useEffect(() => {
     fetchUser()
+  }, [fetchUser])
+
+  // TenantRechargeCard (nested inside RechargeFormCard) dispatches this once a
+  // pending WeChat-native QR order is confirmed paid via status polling — the
+  // QR flow has no server redirect, so this + polling is the only way we learn
+  // the payment landed. Refresh the balance shown by WalletStatsCard.
+  useEffect(() => {
+    const handleTenantRechargePaid = () => {
+      fetchUser()
+    }
+    window.addEventListener(
+      TENANT_RECHARGE_PAID_EVENT,
+      handleTenantRechargePaid
+    )
+    return () =>
+      window.removeEventListener(
+        TENANT_RECHARGE_PAID_EVENT,
+        handleTenantRechargePaid
+      )
   }, [fetchUser])
 
   useEffect(() => {

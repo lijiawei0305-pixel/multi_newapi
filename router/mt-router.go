@@ -61,6 +61,8 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.POST("/tickets/:id/close", middleware.UserAuth(), app.HandleUserCloseTicket)
 		// 充值下单（目标③）：UserAuth + Host 租户；下单 → 调 auth-service → 返支付凭据。
 		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), app.HandleWalletRecharge)
+		// 充值订单状态查询（目标③ 修复）：UserAuth + Host 租户；前端扫码支付后轮询探活，仅本人订单（越权 404）。
+		tenantGroup.GET("/wallet/recharge/status", middleware.UserAuth(), app.HandleWalletRechargeStatus)
 		// 买家可用充值渠道：UserAuth + Host 租户；返回 enabled && configured 的渠道（wxpay/alipay）。
 		tenantGroup.GET("/wallet/recharge/methods", middleware.UserAuth(), app.HandleTenantRechargeMethods)
 		// 用户兑换码（P1-UI-04）：UserAuth + Host 租户（不强制 owner）；单赢家 CAS → 原生 quota 入账。

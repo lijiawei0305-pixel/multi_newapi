@@ -37,6 +37,7 @@ const minRechargeUSD = 1.0
 var (
 	errRechargeAmountTooSmall  = apperr.New("RECHARGE_AMOUNT_TOO_SMALL", fmt.Sprintf("充值金额最低 $%g", minRechargeUSD), http.StatusBadRequest)
 	errRechargeUnauthenticated = apperr.New("RECHARGE_UNAUTHENTICATED", "登录态缺失", http.StatusUnauthorized)
+	errRechargeOrderNoRequired = apperr.New("RECHARGE_ORDER_NO_REQUIRED", "缺少订单号", http.StatusBadRequest)
 )
 
 // rechargeConfig 是主站侧充值装配参数。
@@ -246,5 +247,38 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 		"amount_cny": actualPaid,
 		"provider":   string(provider),
 		"pay":        pay,
+	})
+}
+
+// HandleWalletRechargeStatus GET /api/tenant/wallet/recharge/status?order_no=... —— 充值订单支付状态查询。
+// 需 UserAuth。前端扫码支付（微信 native 无服务端跳转）后靠此端点轮询探活，探到已支付即结束轮询、
+// 刷新余额（修「付完款不跳转」：原先只弹二维码、无状态轮询、无支付后动作）。
+//
+// **越权红线**：订单只可被其归属用户本人查询——跨用户一律回落 payment.ErrOrderNotFound（404），
+// 不区分「订单不存在」与「订单存在但不是你的」，避免通过状态码差异枚举他人 order_no（对齐
+// ticket 模块 HandleUserGetTicket 的 IDOR 处理范式）。
+func (a *App) HandleWalletRechargeStatus(c *gin.Context) {
+	orderNo := strings.TrimSpace(c.Query("order_no"))
+	if orderNo == "" {
+		respondErr(c, errRechargeOrderNoRequired)
+		return
+	}
+	if a.RechargeGateway == nil {
+		respondErr(c, apperr.New("RECHARGE_UNAVAILABLE", "充值服务未装配", http.StatusServiceUnavailable))
+		return
+	}
+	ord, err := a.RechargeGateway.GetByOrderNo(reqCtx(c), orderNo)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	// 越权红线：仅订单归属用户本人可查；不匹配一律当「不存在」处理，绝不泄露他人订单状态。
+	if ord.UserID != int64(c.GetInt("id")) {
+		respondErr(c, payment.ErrOrderNotFound)
+		return
+	}
+	respondOK(c, gin.H{
+		"paid":   ord.Status == payment.OrderPaid || ord.Status == payment.OrderCredited,
+		"status": string(ord.Status),
 	})
 }

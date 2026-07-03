@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -31,6 +31,16 @@ import {
 } from '../hooks/use-tenant-recharge'
 import { RechargeQrDialog } from './dialogs/recharge-qr-dialog'
 
+/**
+ * Fired on `window` once a pending QR order is confirmed paid (see
+ * use-tenant-recharge's status polling). TenantRechargeCard is mounted a couple
+ * of layers below the Wallet page (inside RechargeFormCard, which is out of
+ * scope for this fix), so a DOM event is the least invasive way to let the page
+ * refresh the balance without threading a prop through that intermediate file.
+ * `index.tsx` listens for this event and re-fetches the current user.
+ */
+export const TENANT_RECHARGE_PAID_EVENT = 'mt:tenant-recharge-paid'
+
 type TenantRechargeCardProps = {
   /**
    * Official channels to show — the enabled && configured set (wxpay/alipay)
@@ -40,6 +50,8 @@ type TenantRechargeCardProps = {
    * page can reuse the result. Empty → the whole card is hidden.
    */
   providers: RechargeProvider[]
+  /** Optional: called once when a pending order is confirmed paid (balance refresh hook). */
+  onPaid?: () => void
 }
 
 /**
@@ -51,11 +63,27 @@ type TenantRechargeCardProps = {
  * calls POST /api/tenant/wallet/recharge and settles in-process via the real
  * WeChat/Alipay SDK (notify verify / active query).
  */
-export function TenantRechargeCard({ providers }: TenantRechargeCardProps) {
+export function TenantRechargeCard({
+  providers,
+  onPaid,
+}: TenantRechargeCardProps) {
   const { t } = useTranslation()
   const [amount, setAmount] = useState<string>(String(MIN_RECHARGE_USD))
   const [provider, setProvider] = useState<RechargeProvider>('wxpay')
-  const { submitting, qrState, submit, closeQr } = useTenantRecharge()
+
+  // Bridge payment confirmation up to the Wallet page: call the caller's
+  // onPaid (if wired) and always dispatch the window event, since the current
+  // parent (RechargeFormCard) doesn't pass onPaid through.
+  const handlePaid = useCallback(() => {
+    onPaid?.()
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(TENANT_RECHARGE_PAID_EVENT))
+    }
+  }, [onPaid])
+
+  const { submitting, qrState, submit, closeQr } = useTenantRecharge({
+    onPaid: handlePaid,
+  })
 
   // Keep the selected provider within the configured set (default = first).
   useEffect(() => {
