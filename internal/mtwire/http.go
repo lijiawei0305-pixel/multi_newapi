@@ -548,11 +548,12 @@ type adminSubOut struct {
 }
 
 // HandleAdminListSubscriptions GET /api/admin/subscriptions —— 当前租户全部订阅 + 用量 + 满额预警。
-// 需 AdminAuth；租户取自 Host（TenantMiddleware）。只读：不改额度/状态（惰性过期落库由仓储完成）。
+// 需 AdminAuth；租户取自 Host（TenantMiddleware），主站无租户时回落平台租户（同买家端点，修「订阅监控 租户不存在」）。
+// 只读：不改额度/状态（惰性过期落库由仓储完成）。
 func (a *App) HandleAdminListSubscriptions(c *gin.Context) {
-	t := tenantFrom(c)
-	if t == nil {
-		respondErr(c, tenant.ErrTenantNotFound)
+	t, err := a.resolveBuyerTenant(c)
+	if err != nil {
+		respondErr(c, err)
 		return
 	}
 	ctx := reqCtx(c)
