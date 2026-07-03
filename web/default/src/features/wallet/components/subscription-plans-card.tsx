@@ -382,14 +382,16 @@ export function SubscriptionPlansCard() {
                         : t('Expired at', { defaultValue: '过期于' })}{' '}
                     {new Date(
                       (subscription?.end_time || 0) * 1000
-                    ).toLocaleString()}
+                    ).toLocaleString(undefined, { timeZone: 'Asia/Shanghai' })}
                   </div>
                   {isActive && (subscription?.next_reset_time ?? 0) > 0 && (
                     <div className='text-muted-foreground mt-1'>
                       {t('Next reset', { defaultValue: '下次重置' })}:{' '}
                       {new Date(
                         subscription!.next_reset_time! * 1000
-                      ).toLocaleString()}
+                      ).toLocaleString(undefined, {
+                        timeZone: 'Asia/Shanghai',
+                      })}
                     </div>
                   )}
                   <div className='text-muted-foreground mt-1'>

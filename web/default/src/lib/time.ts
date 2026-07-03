@@ -143,14 +143,14 @@ export function computeTimeRange(
  * Format Unix timestamp (seconds) to YYYY-MM-DD
  */
 export function formatDate(tsSec: number): string {
-  return dayjs(tsSec * 1000).format('YYYY-MM-DD')
+  return dayjs(tsSec * 1000).tz().format('YYYY-MM-DD')
 }
 
 /**
  * Format Date object to YYYY-MM-DD HH:mm:ss
  */
 export function formatDateTimeObject(date: Date): string {
-  return dayjs(date).format('YYYY-MM-DD HH:mm:ss')
+  return dayjs(date).tz().format('YYYY-MM-DD HH:mm:ss')
 }
 
 /**

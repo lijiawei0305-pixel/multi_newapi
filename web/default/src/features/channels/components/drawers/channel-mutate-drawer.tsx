@@ -307,7 +307,9 @@ function parseSettingsRecord(
 function formatUnixTime(timestamp: unknown): string {
   const seconds = Number(timestamp)
   if (!Number.isFinite(seconds) || seconds <= 0) return '-'
-  return new Date(seconds * 1000).toLocaleString()
+  return new Date(seconds * 1000).toLocaleString(undefined, {
+    timeZone: 'Asia/Shanghai',
+  })
 }
 
 function CardHeading({ title, icon }: { title: string; icon?: ReactNode }) {

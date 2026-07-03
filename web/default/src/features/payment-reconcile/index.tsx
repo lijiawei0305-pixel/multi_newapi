@@ -213,7 +213,9 @@ export function PaymentReconcile() {
                         )}
                       </TableCell>
                       <TableCell className='text-sm'>
-                        {new Date(run.ran_at * 1000).toLocaleString()}
+                        {new Date(run.ran_at * 1000).toLocaleString(undefined, {
+                          timeZone: 'Asia/Shanghai',
+                        })}
                       </TableCell>
                       <TableCell>
                         <Badge variant={run.trigger === 'manual' ? 'default' : 'secondary'}>

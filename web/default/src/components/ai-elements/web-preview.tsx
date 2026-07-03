@@ -282,7 +282,7 @@ export const WebPreviewConsole = ({
                 key={`${log.timestamp.getTime()}-${index}`}
               >
                 <span className='text-muted-foreground'>
-                  {dayjs(log.timestamp).format('HH:mm:ss')}
+                  {dayjs(log.timestamp).tz().format('HH:mm:ss')}
                 </span>{' '}
                 {log.message}
               </div>

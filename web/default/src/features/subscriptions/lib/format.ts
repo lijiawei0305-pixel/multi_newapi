@@ -62,5 +62,5 @@ export function formatResetPeriod(
 
 export function formatTimestamp(ts: number): string {
   if (!ts) return '-'
-  return dayjs(ts * 1000).format('YYYY-MM-DD HH:mm:ss')
+  return dayjs(ts * 1000).tz().format('YYYY-MM-DD HH:mm:ss')
 }

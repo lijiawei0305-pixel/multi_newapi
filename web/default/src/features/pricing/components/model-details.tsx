@@ -134,7 +134,11 @@ function formatCatalogYearMonth(value?: string): string {
   const month = Number(monthStr)
   if (!Number.isFinite(year) || !Number.isFinite(month)) return value
   const date = new Date(Date.UTC(year, month - 1, 1))
-  return date.toLocaleString(undefined, { year: 'numeric', month: 'short' })
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    timeZone: 'Asia/Shanghai',
+  })
 }
 
 function normalizeCatalogItems(items?: readonly string[]): string[] {

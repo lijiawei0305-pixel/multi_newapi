@@ -44,8 +44,8 @@ export function fmtDateTime(value: number | string | undefined | null): string {
   if (value === undefined || value === null || value === '') return '-'
   if (typeof value === 'number') {
     const ms = value < 1e12 ? value * 1000 : value
-    return dayjs(ms).format('YYYY-MM-DD HH:mm')
+    return dayjs(ms).tz().format('YYYY-MM-DD HH:mm')
   }
   const d = dayjs(value)
-  return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : String(value)
+  return d.isValid() ? d.tz().format('YYYY-MM-DD HH:mm') : String(value)
 }

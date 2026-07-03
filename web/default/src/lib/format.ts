@@ -142,7 +142,7 @@ export function formatTimestampToDate(
     return '-'
   }
   const ms = unit === 'seconds' ? timestamp * 1000 : timestamp
-  return dayjs(ms).format('YYYY-MM-DD HH:mm:ss')
+  return dayjs(ms).tz().format('YYYY-MM-DD HH:mm:ss')
 }
 
 /**
@@ -187,17 +187,17 @@ export function formatTimestampRelative(
 
 /** Format a Date object to YYYY-MM-DD HH:mm:ss */
 export function formatDateTimeStr(date: Date): string {
-  return dayjs(date).format('YYYY-MM-DD HH:mm:ss')
+  return dayjs(date).tz().format('YYYY-MM-DD HH:mm:ss')
 }
 
 /** Format a Date object to YYYY-MM-DD */
 export function formatDateStr(date: Date): string {
-  return dayjs(date).format('YYYY-MM-DD')
+  return dayjs(date).tz().format('YYYY-MM-DD')
 }
 
 /** Format a Date object to HH:mm:ss */
 export function formatTimeStr(date: Date): string {
-  return dayjs(date).format('HH:mm:ss')
+  return dayjs(date).tz().format('HH:mm:ss')
 }
 
 /**

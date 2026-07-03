@@ -40,11 +40,13 @@ function formatDayLabel(date: string): string {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
+      timeZone: 'Asia/Shanghai',
     })
   }
   return parsed.toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
+    timeZone: 'Asia/Shanghai',
   })
 }
 
