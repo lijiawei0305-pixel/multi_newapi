@@ -28,13 +28,23 @@ export interface StuckOrder {
   stuck_secs: number
 }
 
+export interface ReconcileHeartbeat {
+  last_run_at: number // unix seconds; 0 = never
+  last_trigger: string // 'cron' | 'manual' | ''
+  today_runs: number
+  last_stuck_count: number
+  last_failed_count: number
+}
+
 export interface StuckList {
   stuck: StuckOrder[]
   threshold_secs: number
+  heartbeat?: ReconcileHeartbeat
 }
 
 export interface ReconcileRunResult {
   rcg?: { scanned: number; credited: string[] | null; failed: Record<string, string> }
+  rcg_created?: { scanned: number; credited: string[] | null; failed: Record<string, string> }
   sub?: {
     scanned: number
     activated: string[] | null

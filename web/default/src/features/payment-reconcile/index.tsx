@@ -32,6 +32,15 @@ import {
 } from '@/components/ui/table'
 import { listStuckOrders, runReconcile } from './api'
 
+/** relTime returns a short language-neutral "5m" / "2h" / "3d" string from a unix-seconds timestamp. */
+function relTime(unixSecs: number): string {
+  const diff = Math.max(0, Math.floor(Date.now() / 1000 - unixSecs))
+  if (diff < 60) return `${diff}s`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
+  return `${Math.floor(diff / 86400)}d`
+}
+
 /** Admin page: payment stuck-order reconciliation — view stuck orders + trigger an immediate sweep. */
 export function PaymentReconcile() {
   const { t } = useTranslation()
@@ -44,14 +53,32 @@ export function PaymentReconcile() {
   })
   const stuck = data?.stuck || []
 
+  const hb = data?.heartbeat
+  const failedCount = hb?.last_failed_count ?? 0
+  const statusKind = failedCount > 0 ? 'fail' : stuck.length > 0 ? 'stuck' : 'ok'
+  const statusLabel =
+    statusKind === 'fail'
+      ? t('Has failures')
+      : statusKind === 'stuck'
+        ? t('Has stuck orders')
+        : t('Normal')
+  const statusClass =
+    statusKind === 'fail'
+      ? 'text-red-600'
+      : statusKind === 'stuck'
+        ? 'text-yellow-600'
+        : 'text-green-600'
+
   const [lastResult, setLastResult] = useState('')
   const runMut = useMutation({
     mutationFn: runReconcile,
     onSuccess: (res) => {
       const r = res.rcg
       const s = res.sub
+      const c = res.rcg_created
       setLastResult(
         `RCG ${t('scanned')}${r?.scanned ?? 0}/${t('credited')}${r?.credited?.length ?? 0}/${t('failed')}${Object.keys(r?.failed ?? {}).length} · ` +
+          `RCG-created ${t('scanned')}${c?.scanned ?? 0}/${t('credited')}${c?.credited?.length ?? 0}/${t('failed')}${Object.keys(c?.failed ?? {}).length} · ` +
           `SUB ${t('scanned')}${s?.scanned ?? 0}/${t('activated')}${s?.activated?.length ?? 0}/${t('unpaid')}${s?.unpaid?.length ?? 0}/${t('failed')}${Object.keys(s?.failed ?? {}).length}`
       )
       qc.invalidateQueries({ queryKey: ['admin-reconcile-stuck'] })
@@ -71,6 +98,21 @@ export function PaymentReconcile() {
         </Button>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
+        <div
+          className='bg-muted/40 mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border p-3 text-sm'
+          data-testid='reconcile-heartbeat'
+        >
+          <span>
+            {t('Last reconcile')}:{' '}
+            {hb?.last_run_at ? `${relTime(hb.last_run_at)} ${t('ago')}` : t('Never')}
+          </span>
+          <span>
+            {t('Runs today')}: <span className='tabular-nums'>{hb?.today_runs ?? 0}</span>
+          </span>
+          <span>
+            {t('Status')}: <span className={statusClass}>{statusLabel}</span>
+          </span>
+        </div>
         <p className='text-muted-foreground mb-3 text-sm'>
           {t('Auto-reconcile runs every 5 minutes; only orders stuck past the threshold appear here.')}
         </p>
