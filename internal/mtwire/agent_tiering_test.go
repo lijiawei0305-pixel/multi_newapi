@@ -129,3 +129,68 @@ func TestCreditConsumeCommission_NoTenant_NoAttribution_Unaffected(t *testing.T)
 		t.Fatalf("main-site user must never produce an earning row, got %d", count)
 	}
 }
+
+// TestCreditConsumeCommission_SubscriptionBilling_NoEarningAtAll 锁定
+// doc/finance-model-report-v3.md §一.A：套餐(订阅桶)消耗不再产生任何代理分润——不分 L0/L1。
+// 覆盖两个回归点：① L0 曾在 billingSource=="subscription" 时改发 tokenplan_commission（已删除，
+// 现在什么都不发）；② L1 的 creditRatioMarkup 本身不判断 billingSource，若 creditConsumeCommission
+// 顶部不拦截，命中卖价覆盖的 L1 租户即便是套餐桶消耗也会误发 ratio_markup——本用例的 L1 参数
+// （chargedGroupRatio=0.45、平台基准 0.3、已配卖价覆盖）与 TestCreditRatioMarkup_CreditsL1WalletIdempotently
+// 的"确实会入账"用例同款，用于证明"如果没有这层拦截，这里本该产生 ratio_markup"，而不是恰好凑巧算出 0。
+func TestCreditConsumeCommission_SubscriptionBilling_NoEarningAtAll(t *testing.T) {
+	ctx := context.Background()
+	app := newRatioMarkupTestApp(t)
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register model group: %v", err)
+	}
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios // claude-kiro 平台基准 = 0.3
+
+	// L0 租户 5：commission_ratio=0.2（非零——证明不是"恰好算出 0"，而是压根没走到入账分支）。
+	if err := app.AgentRepo.SetAgentType(ctx, 5, agent.AgentParams{Level: 0, CommissionRatio: 0.2}); err != nil {
+		t.Fatalf("set L0 agent: %v", err)
+	}
+	seedUser(t, app, 100, 5)
+
+	// L1 租户 9：配了 claude-kiro 卖价覆盖 0.45——若无订阅短路，creditRatioMarkup 本会命中入账条件。
+	if err := app.AgentRepo.SetAgentType(ctx, 9, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set L1 agent: %v", err)
+	}
+	if err := app.TenantRepo.UpsertGroup(ctx, 9, "claude-kiro", 0.45); err != nil {
+		t.Fatalf("upsert override: %v", err)
+	}
+	seedUser(t, app, 200, 9)
+
+	const quota, chargedRatio = int64(1200), 0.45
+	app.creditConsumeCommission(100, quota, "req-sub-l0", "subscription", "claude-kiro", chargedRatio)
+	app.creditConsumeCommission(200, quota, "req-sub-l1", "subscription", "claude-kiro", chargedRatio)
+
+	var count int64
+	if err := app.DB.Table("agent_earning_logs").Count(&count).Error; err != nil {
+		t.Fatalf("count earning logs: %v", err)
+	}
+	if count != 0 {
+		var rows []struct {
+			TenantID   int64
+			SourceType string
+		}
+		app.DB.Table("agent_earning_logs").Select("tenant_id, source_type").Find(&rows)
+		t.Fatalf("subscription-billed consumption must never credit any agent earning (L0 or L1), got %d rows: %+v", count, rows)
+	}
+
+	w5, err := app.AgentRepo.GetWallet(ctx, 5)
+	if err != nil {
+		t.Fatalf("get L0 wallet: %v", err)
+	}
+	w9, err := app.AgentRepo.GetWallet(ctx, 9)
+	if err != nil {
+		t.Fatalf("get L1 wallet: %v", err)
+	}
+	if w5.WithdrawableBalance != 0 {
+		t.Fatalf("L0 tenant wallet must stay 0, got %v", w5.WithdrawableBalance)
+	}
+	if w9.WithdrawableBalance != 0 {
+		t.Fatalf("L1 tenant wallet must stay 0, got %v", w9.WithdrawableBalance)
+	}
+}

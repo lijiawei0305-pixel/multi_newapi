@@ -275,6 +275,41 @@ func (r *Repo) WalletTotals(ctx context.Context, tenantID *int64) (WalletAgg, er
 	}, nil
 }
 
+// TenantEarningAgg 是按租户聚合的收益分桶（¥）。财务报表 v3 管理端总览
+// （doc/finance-model-report-v3.md §二，internal/mtwire/report.go handleFinanceSummary 的
+// adminFinanceOverview）与 AgentRanking 排行共用同一底座数据——见 EarningsByTenant。
+type TenantEarningAgg struct {
+	TotalCNY             float64
+	ConsumeCommissionCNY float64
+	RatioMarkupCNY       float64
+	TokenplanSpreadCNY   float64
+	ManualAdjustmentCNY  float64
+}
+
+// EarningsByTenant 按租户聚合收益分桶（跨租户 tenant_id<>0）：total + 四个具名来源分桶
+// （consume_commission/ratio_markup/tokenplan_spread/manual_adjustment）。是 earningsByTenant
+// （AgentRanking 内部用）的导出版本，供财务报表 v3 管理端总览做「主站/代理站」二分求和
+// （按 tenant_id 是否为平台租户，见调用方 internal/mtwire/report.go）。两者查询相同、结果一一对应，
+// 刻意不合并成一个方法：AgentRanking 早于本次改动、已有测试锁定其内部字段名，改法用「新增导出
+// 包装」而非「重命名后更新旧测试」，最小化本次改动半径。
+func (r *Repo) EarningsByTenant(ctx context.Context, start, end int64) (map[int64]TenantEarningAgg, error) {
+	agg, err := r.earningsByTenant(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]TenantEarningAgg, len(agg))
+	for tid, a := range agg {
+		out[tid] = TenantEarningAgg{
+			TotalCNY:             a.total,
+			ConsumeCommissionCNY: a.consume,
+			RatioMarkupCNY:       a.ratioMarkup,
+			TokenplanSpreadCNY:   a.tokenplanSpread,
+			ManualAdjustmentCNY:  a.manualAdj,
+		}
+	}
+	return out, nil
+}
+
 // ============================================================================
 // 透镜 (b)：充值/订单 paid/cost
 // ============================================================================
@@ -483,6 +518,35 @@ func (r *Repo) ConsumptionTrend(ctx context.Context, tenantID *int64, start, end
 			Tokens:      a.tokens,
 			UsedCostCNY: QuotaToCNY(a.quota),
 		})
+	}
+	return out, nil
+}
+
+// TenantConsumptionAgg 是按租户聚合的消耗量（导出版，字段名与内部 tenantConsumption 一一对应）。
+type TenantConsumptionAgg struct {
+	UsedQuota int64
+	Calls     int64
+	Tokens    int64
+}
+
+// ConsumptionByTenant 是按租户聚合的消耗量。财务报表 v3 管理端总览
+// （doc/finance-model-report-v3.md §二 mainsite/agent_wallet_consumption_cny，
+// internal/mtwire/report.go adminFinanceOverview）与 AgentRanking 排行共用同一底座数据——是
+// consumptionByTenant（AgentRanking 内部用）的导出包装，与 EarningsByTenant 同理不重命名旧方法。
+//
+// ⚠️口径：与 ConsumptionCost 同源，按 logs 表全量消耗计——钱包桶与套餐(订阅)桶消耗混在一起，
+// 现有数据没有可靠的结构化字段能把两者分开（唯一候选信号 billing_source 只在文本中继一条路径
+// 的 Other JSON 里写入，image/audio/task/mjproxy/违规扣费等其余写 log 路径都不写这个键，据此过滤
+// 会系统性漏记这些路径的真实钱包消耗——比不分离更糟）。故本聚合口径是「全量消耗」的上界，不是
+// 纯钱包消耗；调用方 internal/mtwire/report.go 已在字段注释与实现报告中明确标注这一点。
+func (r *Repo) ConsumptionByTenant(ctx context.Context, start, end int64) (map[int64]TenantConsumptionAgg, error) {
+	agg, err := r.consumptionByTenant(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]TenantConsumptionAgg, len(agg))
+	for tid, c := range agg {
+		out[tid] = TenantConsumptionAgg{UsedQuota: c.UsedQuota, Calls: c.Calls, Tokens: c.Tokens}
 	}
 	return out, nil
 }

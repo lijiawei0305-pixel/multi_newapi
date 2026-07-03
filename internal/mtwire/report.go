@@ -27,6 +27,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
+	"github.com/QuantumNous/new-api/internal/report/reportrepo"
 	"github.com/QuantumNous/new-api/internal/stats"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
@@ -127,6 +128,57 @@ type exchangeBlockOut struct {
 	USDExchangeRate float64 `json:"usd_exchange_rate"`
 }
 
+// ============================================================================
+// 财务报表 v3 总览（doc/finance-model-report-v3.md §二）：代理 4 项 / 管理员 6 项，经
+// financeSummaryOut.Overview（any）按 scope 二选一装配。两侧字段形状本就不同（代理侧
+// apikey_consumption_cny 是单值；管理端把同一类口径拆成 mainsite/agent 两列），不能共用一个 flat
+// 结构体——那样要么两侧都装一堆对方用不上的 0，要么靠 omitempty 却让「这个 scope 真实为 0」和
+// 「这个 scope 压根没这个字段」无法区分。镜像本文件已有的 trendOut.Series any 先例。
+// ============================================================================
+
+// agentFinanceOverviewOut 是代理自助财务总览（4 项，§二「代理报表」）。
+type agentFinanceOverviewOut struct {
+	// TokenplanRevenueCNY 套餐收益：本代理名下用户为套餐支付的总额（= Σ 零售价，购买时计），
+	// 数据源 = SubscriptionPaidCost(...).PaidCNY（即既有 recharge 区块的 subscription_paid_cny）。
+	TokenplanRevenueCNY float64 `json:"tokenplan_revenue_cny"`
+	// TokenplanWithdrawableCNY 套餐可提现：代理套餐差价，购买时一次性入账、立即可提现
+	// （= Σ source_type=tokenplan_spread，见 internal/tokenplan/subscription.go ActivateFromPayment）。
+	TokenplanWithdrawableCNY float64 `json:"tokenplan_withdrawable_cny"`
+	// ApikeyConsumptionCNY apikey 消费收益：用户消耗的钱包余额。
+	//
+	// ⚠️口径缺口（doc/finance-model-report-v3.md §二「套餐额度的消耗不计入 apikey 消费收益」，
+	// 本字段本应严格排除套餐桶消耗）：现有数据无法把「钱包桶消耗」与「套餐桶消耗」干净分开——
+	// 两者共用同一张 logs 表，唯一候选区分信号是 relayInfo.BillingSource，但它只在文本中继一条
+	// 路径（service/text_quota.go GenerateTextOtherInfo→appendBillingInfo）写入 Other 的 JSON 字段，
+	// image/audio/realtime(wss)/task 计费/违规扣费/Midjourney 代理等其余写 log 路径都不写这个键——
+	// 按它过滤会系统性漏记这些路径的真实钱包消耗，比不区分更糟（会把它们排除在两个桶之外）。
+	// 故本字段当前 = ConsumptionCost(...).UsedCostCNY，即钱包桶 + 套餐桶消耗合计（全量口径的
+	// 「上界」，不是纯钱包值）。若要精确区分，需要在 PostConsumeQuota/BillingSession.Settle 那个
+	// 唯一的 wallet-vs-subscription 分支点新增一张专门的钱包消耗流水（比照 agent_earning_logs 的
+	// 记账粒度），而不是继续从 logs.other 这个展示用途的 JSON 里挖。
+	ApikeyConsumptionCNY float64 `json:"apikey_consumption_cny"`
+	// ConsumptionWithdrawableCNY 消耗可提现：代理消耗差价，消耗时逐笔实时入账、立即可提现
+	// （= Σ source_type IN (ratio_markup, consume_commission)）。Task 1（本次）起两者只在 WALLET
+	// 计费桶产生——套餐桶消耗已不再触发任何一种，故此字段天然只含钱包消耗的分润，无上述口径缺口。
+	ConsumptionWithdrawableCNY float64 `json:"consumption_withdrawable_cny"`
+}
+
+// adminFinanceOverviewOut 是管理端财务总览（6 项，§二「管理员报表」，主站/代理站分列）。
+// 主站 = 平台直销租户（tenants.slug="platform"，见 seed.go platformSlug/isPlatformTenant）；
+// 其余归属租户（tenant_id<>0 且 <> 平台租户 ID）= 代理站；未归属（tenant_id=0）不计入任何一侧
+// （既有跨租户聚合 applyTenantScope 的 tenant_id<>0 约定）。
+type adminFinanceOverviewOut struct {
+	MainsiteTokenplanRevenueCNY float64 `json:"mainsite_tokenplan_revenue_cny"` // 主站套餐收益
+	AgentTokenplanRevenueCNY    float64 `json:"agent_tokenplan_revenue_cny"`    // 代理站套餐收益（各代理合计）
+	TokenplanRebateCNY          float64 `json:"tokenplan_rebate_cny"`           // 给代理的套餐返现：Σ 各代理 tokenplan_spread（不含主站）
+	// MainsiteWalletConsumptionCNY / AgentWalletConsumptionCNY：与 agentFinanceOverviewOut.ApikeyConsumptionCNY
+	// 同一口径缺口——现有数据无法排除套餐桶消耗，当前为该 scope（主站 / 代理站）下的全量消耗口径
+	// （钱包+套餐桶混合，上界而非纯钱包值），详见该字段的长注释。
+	MainsiteWalletConsumptionCNY float64 `json:"mainsite_wallet_consumption_cny"` // 主站钱包消耗
+	AgentWalletConsumptionCNY    float64 `json:"agent_wallet_consumption_cny"`    // 代理站钱包消耗（各代理合计）
+	AgentAPIRebateCNY            float64 `json:"agent_api_rebate_cny"`            // 需返现代理的 api 消耗：Σ 各代理 (ratio_markup+consume_commission)，不含主站
+}
+
 // financeSummaryOut 是 §1.1 / §1.5 汇总响应体（管理端=跨租户，代理=单租户）。
 type financeSummaryOut struct {
 	Range       financeRangeOut     `json:"range"`
@@ -135,6 +187,9 @@ type financeSummaryOut struct {
 	Consumption consumptionBlockOut `json:"consumption"`
 	Withdrawals withdrawalsBlockOut `json:"withdrawals"`
 	Exchange    exchangeBlockOut    `json:"exchange"`
+	// Overview 是财务报表 v3 总览（doc/finance-model-report-v3.md §二）：tenantID!=nil（代理自助）时
+	// 装 agentFinanceOverviewOut（4 项）；tenantID==nil（管理端）时装 adminFinanceOverviewOut（6 项）。
+	Overview any `json:"overview"`
 }
 
 // trendOut 是 §1.2 / §1.6 趋势响应体；series 为按透镜的具体点切片（见下方各 *TrendOut）。
@@ -443,6 +498,25 @@ func (a *App) handleFinanceSummary(c *gin.Context, tenantID *int64) {
 		subCost += v.CostCNY
 	}
 
+	// 财务报表 v3 总览（doc/finance-model-report-v3.md §二）：代理 4 项全部复用上面已查出的数据
+	// （不加查询）；管理端 6 项需要按租户拆分主站/代理站，另经 adminFinanceOverview 装配。
+	var overview any
+	if tenantID != nil {
+		overview = agentFinanceOverviewOut{
+			TokenplanRevenueCNY:        round2(subPaid),
+			TokenplanWithdrawableCNY:   round2(bySrcMap["tokenplan_spread"]),
+			ApikeyConsumptionCNY:       round2(cons.UsedCostCNY),
+			ConsumptionWithdrawableCNY: round2(bySrcMap["ratio_markup"] + bySrcMap["consume_commission"]),
+		}
+	} else {
+		adminOverview, oerr := a.adminFinanceOverview(ctx, start, end)
+		if oerr != nil {
+			respondErr(c, oerr)
+			return
+		}
+		overview = adminOverview
+	}
+
 	respondOK(c, financeSummaryOut{
 		Range: financeRangeOut{StartTimestamp: start, EndTimestamp: end},
 		Earnings: earningsBlockOut{
@@ -479,7 +553,92 @@ func (a *App) handleFinanceSummary(c *gin.Context, tenantID *int64) {
 			QuotaPerUnit:    common.QuotaPerUnit,
 			USDExchangeRate: operation_setting.USDExchangeRate,
 		},
+		Overview: overview,
 	})
+}
+
+// adminFinanceOverview 装配管理端财务总览（6 项，主站/代理站分列；doc/finance-model-report-v3.md
+// §二）。三个透镜均已有跨租户 per-tenant 聚合可复用（SubscriptionPaidCost/EarningsByTenant/
+// ConsumptionByTenant，均已被 AgentRanking 用过），此处只按「租户是否为平台租户」二分求和，不新增查询。
+func (a *App) adminFinanceOverview(ctx context.Context, start, end int64) (adminFinanceOverviewOut, error) {
+	repo := a.ReportRepo
+	platformID := a.resolvePlatformTenantID(ctx)
+
+	subPC, err := repo.SubscriptionPaidCost(ctx, nil, start, end)
+	if err != nil {
+		return adminFinanceOverviewOut{}, err
+	}
+	earn, err := repo.EarningsByTenant(ctx, start, end)
+	if err != nil {
+		return adminFinanceOverviewOut{}, err
+	}
+	cons, err := repo.ConsumptionByTenant(ctx, start, end)
+	if err != nil {
+		return adminFinanceOverviewOut{}, err
+	}
+
+	subPaidByTenant := make(map[int64]float64, len(subPC))
+	for tid, pc := range subPC {
+		subPaidByTenant[tid] = pc.PaidCNY
+	}
+	mainsiteTokenplanRevenue, agentTokenplanRevenue := splitByPlatform(subPaidByTenant, platformID)
+
+	tokenplanSpreadByTenant := make(map[int64]float64, len(earn))
+	apiRebateByTenant := make(map[int64]float64, len(earn))
+	for tid, e := range earn {
+		tokenplanSpreadByTenant[tid] = e.TokenplanSpreadCNY
+		apiRebateByTenant[tid] = e.RatioMarkupCNY + e.ConsumeCommissionCNY
+	}
+	// tokenplan_rebate_cny / agent_api_rebate_cny 口径是「给*代理*的返现/需返现*代理*的消耗」（spec
+	// 原文"各代理"），只取代理站半（丢弃 mainsite 半）——平台不是代理，不给自己发返现；正常配置下
+	// 平台租户本就不会产生 tokenplan_spread/ratio_markup/consume_commission（platform 自身列表的
+	// retail_price 与 plan.AgentCostPrice 相同、且从不为其 SetAgentType/EnsureWallet，见 seed.go），
+	// 这里的排除是双保险，不依赖那个假设也成立。
+	_, tokenplanRebate := splitByPlatform(tokenplanSpreadByTenant, platformID)
+	_, agentAPIRebate := splitByPlatform(apiRebateByTenant, platformID)
+
+	consCNYByTenant := make(map[int64]float64, len(cons))
+	for tid, c := range cons {
+		consCNYByTenant[tid] = reportrepo.QuotaToCNY(c.UsedQuota)
+	}
+	mainsiteWalletConsumption, agentWalletConsumption := splitByPlatform(consCNYByTenant, platformID)
+
+	return adminFinanceOverviewOut{
+		MainsiteTokenplanRevenueCNY:  round2(mainsiteTokenplanRevenue),
+		AgentTokenplanRevenueCNY:     round2(agentTokenplanRevenue),
+		TokenplanRebateCNY:           round2(tokenplanRebate),
+		MainsiteWalletConsumptionCNY: round2(mainsiteWalletConsumption),
+		AgentWalletConsumptionCNY:    round2(agentWalletConsumption),
+		AgentAPIRebateCNY:            round2(agentAPIRebate),
+	}, nil
+}
+
+// resolvePlatformTenantID 解析平台（主站）直销租户 ID（seed.go platformTenant/platformSlug）；
+// 未 seed / 查询失败 / TenantRepo 未装配（如仅挂了 ReportRepo 的最小化测试 App）一律返回 0
+// （best-effort，报表不因此报错——0 是安全哨兵：真实租户 ID 恒 >0，且跨租户聚合已用 tenant_id<>0
+// 排除未归属数据，不会误撞该哨兵值）。
+func (a *App) resolvePlatformTenantID(ctx context.Context) int64 {
+	if a.TenantRepo == nil {
+		return 0
+	}
+	t, err := a.platformTenant(ctx)
+	if err != nil || t == nil {
+		return 0
+	}
+	return t.ID
+}
+
+// splitByPlatform 按 tenant_id==platformID 把 per-tenant 金额 map 二分求和为 (主站合计, 代理站合计)。
+// platformID<=0（平台租户未 seed / 解析失败）时全部计入代理站合计，保守地不误判任何真实租户为主站。
+func splitByPlatform(m map[int64]float64, platformID int64) (mainsite, agentSite float64) {
+	for tid, v := range m {
+		if platformID > 0 && tid == platformID {
+			mainsite += v
+			continue
+		}
+		agentSite += v
+	}
+	return
 }
 
 func (a *App) handleFinanceTrend(c *gin.Context, tenantID *int64) {

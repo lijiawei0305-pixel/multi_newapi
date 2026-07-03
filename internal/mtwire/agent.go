@@ -200,6 +200,13 @@ func (a *App) attributeByHost(ctx context.Context, host string, userID int64) {
 // creditConsumeCommission 是 agenthook.ConsumeCommission 实现：userId→users.tenant_id→agent
 // level→按档二选一入账（spec agent-tiering §9.9）：level==0 → L0 提成（creditL0Commission）；
 // level≥1 → L1 差价（creditRatioMarkup，Task 13）。幂等键=requestID。best-effort：失败不阻断扣费。
+//
+// 套餐(订阅桶)消耗一律不产生代理分润（doc/finance-model-report-v3.md §一.A）：套餐的钱在购买时已
+// 一次性分完（tokenplan_spread，见 internal/tokenplan/subscription.go ActivateFromPayment），后续
+// 消耗套餐额度不再给代理二次分成——不区分 L0/L1，故这个短路挡在按档分支之前统一生效：
+//   - L0 曾经会在此场景改发 tokenplan_commission（现已删除，见下方 creditL0Commission）；
+//   - L1 的 creditRatioMarkup 自身不感知/不判断 billingSource，若不在此拦截，命中卖价覆盖的 L1
+//     租户即便是套餐桶消耗也会误发 ratio_markup——这里统一堵死，两个档位都不再有例外。
 func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -208,6 +215,9 @@ func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID,
 	}()
 	if userID <= 0 || quotaUnits <= 0 || requestID == "" {
 		return
+	}
+	if billingSource == "subscription" {
+		return // 套餐桶消耗：不入账（无论 L0/L1），套餐收益只在购买时结一次（tokenplan_spread）
 	}
 	ctx := context.Background()
 	tenantID := a.userTenantID(ctx, userID)
@@ -230,6 +240,10 @@ func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID,
 // creditL0Commission 是 L0（普通档）计费通路：官方原价提成（commission_ratio × quotaUnits，公式不变，
 // spec §9.5——v2 不再有邀请 9 折，纯提成）。从 creditConsumeCommission 抽出以保持按档分支清晰；
 // panic 由调用方的 defer 统一兜底。
+//
+// 只有钱包桶消耗会走到这里——creditConsumeCommission 已在套餐(订阅)桶消耗时提前返回（见上方），
+// 故 source 恒为 consume_commission；tokenplan_commission 不再从此处（或任何地方）发出
+// （doc/finance-model-report-v3.md §一.A：套餐消耗不再二次分成）。billingSource 仅保留用于备注。
 func (a *App) creditL0Commission(ctx context.Context, tenantID, userID, quotaUnits int64, requestID, billingSource string, commissionRatio float64) {
 	if commissionRatio <= 0 {
 		return
@@ -238,15 +252,10 @@ func (a *App) creditL0Commission(ctx context.Context, tenantID, userID, quotaUni
 	if cny <= 0 {
 		return
 	}
-	// 钱包桶 → consume_commission；套餐桶 → tokenplan_commission（账目区分；两类均经此单点）。
-	source := agent.SourceConsumeCommission
-	if billingSource == "subscription" {
-		source = agent.SourceTokenplanCommission
-	}
 	if err := a.AgentEarnings.AddEarning(ctx, agent.EarningEntry{
 		TenantID:   tenantID,
 		UserID:     userID,
-		SourceType: source,
+		SourceType: agent.SourceConsumeCommission,
 		SourceID:   requestID,
 		Amount:     cny,
 		Remark:     "consume:" + billingSource,
