@@ -117,10 +117,15 @@ type channelOut struct {
 	Code            string `json:"code"`
 	Name            string `json:"name"`
 	RegisteredCount int64  `json:"registered_count"`
+	// DiscountRate 邀请折扣率（Change 3，预留占位，本轮恒 1.0，billing 不读；见 spec §9.11）。
+	DiscountRate float64 `json:"discount_rate"`
 }
 
 func toChannelOut(c promotion.Channel) channelOut {
-	return channelOut{ID: c.ID, Code: c.ChannelCode, Name: c.Name, RegisteredCount: c.RegisteredCount}
+	return channelOut{
+		ID: c.ID, Code: c.ChannelCode, Name: c.Name, RegisteredCount: c.RegisteredCount,
+		DiscountRate: c.DiscountRate,
+	}
 }
 
 // HandleAgentListChannels GET /api/tenant/promotion/channels —— 本租户的推广渠道（scopeByTenant）。

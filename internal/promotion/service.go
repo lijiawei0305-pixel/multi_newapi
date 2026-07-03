@@ -35,11 +35,12 @@ func (s *promotionService) CreateChannel(ctx context.Context, tenantID int64, na
 		return nil, err
 	}
 	c := &Channel{
-		TenantID:    tenantID,
-		Name:        strings.TrimSpace(name),
-		Prefix:      p,
-		ChannelCode: code,
-		SignupURL:   signupURL(code),
+		TenantID:     tenantID,
+		Name:         strings.TrimSpace(name),
+		Prefix:       p,
+		ChannelCode:  code,
+		SignupURL:    signupURL(code),
+		DiscountRate: 1,
 	}
 	if err := s.repo.CreateChannel(ctx, c); err != nil {
 		return nil, err // 含 ErrChannelPrefixDup

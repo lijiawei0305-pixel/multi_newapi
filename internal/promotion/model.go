@@ -16,9 +16,12 @@ type Channel struct {
 	// 自动置 true（VoidChannelsByTenant）。作废语义仅影响*新*注册的归属——mtwire.attributeByChannel
 	// 命中已作废渠道时跳过按渠道归属、回落 Host/none；已经归属到该渠道的历史用户（users.tenant_id /
 	// promotion_channel_id、agent_promotion_attributions）不受影响、不回滚。
-	Voided    bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Voided bool
+	// DiscountRate 邀请折扣率（Change 3，spec §9.11：按渠道预留，本轮不激活）。1.0 = 不打折（本轮唯一
+	// 允许的值——没有任何写入路径能把它设成别的值）。billing（§9.2/§9.4）不读这个字段。
+	DiscountRate float64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // Attribution 是“用户经链接/域名注册 → 归属代理 + 渠道”的绑定记录。

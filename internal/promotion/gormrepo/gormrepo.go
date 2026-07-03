@@ -34,6 +34,7 @@ type channelRow struct {
 	Name            string    `gorm:"column:name;type:varchar(128);not null;default:''"`
 	RegisteredCount int64     `gorm:"column:registered_count;not null;default:0"`
 	Voided          bool      `gorm:"column:voided;not null;default:false"`
+	DiscountRate    float64   `gorm:"column:discount_rate;type:decimal(6,4);not null;default:1"`
 	CreatedAt       time.Time `gorm:"column:created_at"`
 	UpdatedAt       time.Time `gorm:"column:updated_at"`
 }
@@ -80,6 +81,7 @@ func (r *Repo) CreateChannel(ctx context.Context, c *promotion.Channel) error {
 		Code:            c.ChannelCode,
 		Name:            c.Name,
 		RegisteredCount: c.RegisteredCount,
+		DiscountRate:    c.DiscountRate,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
@@ -174,6 +176,7 @@ func toChannel(row *channelRow) *promotion.Channel {
 		ChannelCode:     row.Code,
 		RegisteredCount: row.RegisteredCount,
 		Voided:          row.Voided,
+		DiscountRate:    row.DiscountRate,
 		CreatedAt:       row.CreatedAt,
 		UpdatedAt:       row.UpdatedAt,
 	}

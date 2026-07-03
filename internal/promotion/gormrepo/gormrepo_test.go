@@ -176,3 +176,21 @@ func TestVoidChannelsByTenant_ScopedAndIdempotent(t *testing.T) {
 		t.Fatalf("VoidChannelsByTenant(no channels): %v, want nil", err)
 	}
 }
+
+// TestCreateChannel_DiscountRateRoundTrips 确认 discount_rate 随渠道持久化并读回；新建渠道默认 1.0
+// （Change 3，spec agent-tiering §9.11——预留字段，本轮 billing 不读）。
+func TestCreateChannel_DiscountRateRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	c := &promotion.Channel{TenantID: 1, ChannelCode: "disc_x", DiscountRate: 1}
+	if err := r.CreateChannel(ctx, c); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := r.GetChannelByCode(ctx, "disc_x")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.DiscountRate != 1 {
+		t.Fatalf("DiscountRate = %v, want 1 (reserved default)", got.DiscountRate)
+	}
+}
