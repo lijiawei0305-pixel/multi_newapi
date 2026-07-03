@@ -111,3 +111,54 @@ func TestListSubscriptionsByTenant(t *testing.T) {
 		t.Fatalf("want 0 subs for empty tenant, got %d", len(empty))
 	}
 }
+
+// TestListAllSubscriptions 覆盖：跨租户不过滤（主站订阅监控用）、id 降序、惰性过期落库。
+// 与 TestListSubscriptionsByTenant 用同一批种子数据，唯一差异断言是"tenant 9 的订阅必须出现"。
+func TestListAllSubscriptions(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	now := time.Date(2026, 6, 28, 0, 0, 0, 0, time.UTC)
+
+	// tenant 7：user11 active 未过期；user12 active 已过期（应被惰性翻 expired）。
+	seedSub(t, r, 7, 11, tokenplan.SubActive, 5, 10, now.Add(24*time.Hour))
+	seedSub(t, r, 7, 12, tokenplan.SubActive, 9, 10, now.Add(-1*time.Hour))
+	// tenant 9：与 ListSubscriptionsByTenant 相反的断言——必须出现在跨租户结果中。
+	seedSub(t, r, 9, 13, tokenplan.SubActive, 1, 10, now.Add(24*time.Hour))
+
+	got, err := r.ListAllSubscriptions(ctx, now)
+	if err != nil {
+		t.Fatalf("ListAllSubscriptions: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 subs across all tenants, got %d", len(got))
+	}
+	seenTenants := map[int64]bool{}
+	for _, s := range got {
+		seenTenants[s.TenantID] = true
+	}
+	if !seenTenants[7] || !seenTenants[9] {
+		t.Fatalf("want both tenant 7 and tenant 9 represented, got tenants %v", seenTenants)
+	}
+	// id DESC：后插入的 user13（tenant 9）排最前。
+	if got[0].UserID != 13 || got[0].TenantID != 9 {
+		t.Fatalf("want id DESC head = tenant9/user13, got tenant%d/user%d", got[0].TenantID, got[0].UserID)
+	}
+	// 惰性过期落库：user12（tenant 7，已过期）→ expired。
+	var persisted subRow
+	if err := r.db.WithContext(ctx).Take(&persisted, "tenant_id = ? AND user_id = ?", 7, 12).Error; err != nil {
+		t.Fatalf("reload sub: %v", err)
+	}
+	if persisted.Status != statusExpired {
+		t.Fatalf("lazy expiry not persisted: status=%s", persisted.Status)
+	}
+
+	// 无任何订阅：返回空切片、无错误。
+	empty := newTestRepo(t)
+	emptyGot, err := empty.ListAllSubscriptions(ctx, now)
+	if err != nil {
+		t.Fatalf("empty repo err: %v", err)
+	}
+	if len(emptyGot) != 0 {
+		t.Fatalf("want 0 subs for empty repo, got %d", len(emptyGot))
+	}
+}

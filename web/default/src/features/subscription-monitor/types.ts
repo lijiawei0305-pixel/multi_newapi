@@ -28,6 +28,9 @@ export type AlertLevel = (typeof alertLevelValues)[number]
 
 /** One row of the admin subscription monitor table. */
 export interface MonitorSubscription {
+  /** Owning tenant. On the main site this spans every tenant on the platform. */
+  tenant_id: number
+  tenant_name: string
   user_id: number
   username: string
   plan_code: string

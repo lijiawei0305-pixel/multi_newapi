@@ -534,8 +534,11 @@ type buyerSubOut struct {
 	CreatedAt   string  `json:"created_at"`
 }
 
-// adminSubOut 是管理端「订阅监控」条目（当前租户维度，含满额预警）。
+// adminSubOut 是管理端「订阅监控」条目（含满额预警）。主站 Host 下跨租户汇总，TenantID/TenantName
+// 标注每行归属哪个租户；代理子域隔离视图里每行都是同一租户，字段仍照填。
 type adminSubOut struct {
+	TenantID   int64   `json:"tenant_id"`
+	TenantName string  `json:"tenant_name"`
 	UserID     int64   `json:"user_id"`
 	Username   string  `json:"username"`
 	PlanCode   string  `json:"plan_code"`
@@ -547,31 +550,50 @@ type adminSubOut struct {
 	PeriodEnd  string  `json:"period_end"`
 }
 
-// HandleAdminListSubscriptions GET /api/admin/subscriptions —— 当前租户全部订阅 + 用量 + 满额预警。
-// 需 AdminAuth；租户取自 Host（TenantMiddleware），主站无租户时回落平台租户（同买家端点，修「订阅监控 租户不存在」）。
+// HandleAdminListSubscriptions GET /api/admin/subscriptions —— 订阅 + 用量 + 满额预警。需 AdminAuth。
+//
+// 数据隔离分支（产品侧已确认）：
+//   - 主站 Host（tenant.IsMainSiteHost，见 internal/tenant/resolver.go）—— 管理员视角看全平台，
+//     跨租户汇总全部租户的订阅（ListAllSubscriptions）；
+//   - 代理子域（TenantMiddleware 已按 Host 解析出租户，见 tenantFrom）—— 隔离到本租户
+//     （ListSubscriptionsByTenant），与既有行为一致，不受本次改动影响。
+//
 // 只读：不改额度/状态（惰性过期落库由仓储完成）。
 func (a *App) HandleAdminListSubscriptions(c *gin.Context) {
-	t, err := a.resolveBuyerTenant(c)
-	if err != nil {
-		respondErr(c, err)
-		return
-	}
 	ctx := reqCtx(c)
-	subs, err := a.TokenPlanRepo.ListSubscriptionsByTenant(ctx, t.ID, time.Now())
+
+	var (
+		subs []tokenplan.Subscription
+		err  error
+	)
+	if tenant.IsMainSiteHost(c.Request.Host) {
+		subs, err = a.TokenPlanRepo.ListAllSubscriptions(ctx, time.Now())
+	} else {
+		t := tenantFrom(c)
+		if t == nil {
+			respondErr(c, tenant.ErrTenantNotFound)
+			return
+		}
+		subs, err = a.TokenPlanRepo.ListSubscriptionsByTenant(ctx, t.ID, time.Now())
+	}
 	if err != nil {
 		respondErr(c, err)
 		return
 	}
+
 	plans, err := a.planByID(ctx)
 	if err != nil {
 		respondErr(c, err)
 		return
 	}
 	names := a.usernamesByIDs(ctx, subUserIDs(subs))
+	tenantNames := a.tenantNamesByIDs(ctx, subTenantIDs(subs))
 	out := make([]adminSubOut, 0, len(subs))
 	for _, s := range subs {
 		pct := usagePct(s.UsedUSD, s.MonthLimitUSD)
 		out = append(out, adminSubOut{
+			TenantID:   s.TenantID,
+			TenantName: tenantNames[s.TenantID], // 取不到给空
 			UserID:     s.UserID,
 			Username:   names[s.UserID], // 取不到给空
 			PlanCode:   plans[s.PlanID].Code,
@@ -615,6 +637,21 @@ func subUserIDs(subs []tokenplan.Subscription) []int64 {
 	return ids
 }
 
+// subTenantIDs 提取订阅去重后的 tenant_id 集（供批量回查租户名——主站跨租户视图用，见
+// HandleAdminListSubscriptions）。
+func subTenantIDs(subs []tokenplan.Subscription) []int64 {
+	seen := make(map[int64]struct{}, len(subs))
+	ids := make([]int64, 0, len(subs))
+	for _, s := range subs {
+		if _, ok := seen[s.TenantID]; ok {
+			continue
+		}
+		seen[s.TenantID] = struct{}{}
+		ids = append(ids, s.TenantID)
+	}
+	return ids
+}
+
 // usernamesByIDs 批量回查 new-api users 表的 id→username（只读、单次 IN 查询，避免 N+1）。
 // 直接走共享 *gorm.DB 原始查询，不引入 new-api model 包；查询失败/缺失一律给空（用户名非关键字段）。
 func (a *App) usernamesByIDs(ctx context.Context, ids []int64) map[int64]string {
@@ -633,6 +670,28 @@ func (a *App) usernamesByIDs(ctx context.Context, ids []int64) map[int64]string 
 	}
 	for _, r := range rows {
 		out[r.ID] = r.Username
+	}
+	return out
+}
+
+// tenantNamesByIDs 批量回查 tenants 表的 id→name（只读、单次 IN 查询，避免 N+1），供管理端「订阅监控」
+// 主站跨租户视图标注每行所属租户/代理（见 HandleAdminListSubscriptions）。查询失败/缺失一律给空。
+func (a *App) tenantNamesByIDs(ctx context.Context, ids []int64) map[int64]string {
+	out := make(map[int64]string, len(ids))
+	if len(ids) == 0 {
+		return out
+	}
+	var rows []struct {
+		ID   int64
+		Name string
+	}
+	if err := a.DB.WithContext(ctx).
+		Table("tenants").Select("id, name").
+		Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return out
+	}
+	for _, r := range rows {
+		out[r.ID] = r.Name
 	}
 	return out
 }

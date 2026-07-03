@@ -533,6 +533,29 @@ func (r *Repo) ListSubscriptionsByTenant(ctx context.Context, tenantID int64, no
 	return out, nil
 }
 
+// ListAllSubscriptions 返回全部租户全部用户的订阅（按 id 降序；先持久化惰性过期）。
+// 非 SubscriptionRepo 接口方法——供管理端「订阅监控」handler 在主站 Host（tenant.IsMainSiteHost）
+// 下跨租户汇总展示（见 http.go HandleAdminListSubscriptions）；代理子域仍走 ListSubscriptionsByTenant
+// 保持隔离。除不按 tenant_id 过滤外与 ListSubscriptionsByTenant 完全一致：同样的惰性过期口径、
+// 同样只读投影，不改额度/收益。
+func (r *Repo) ListAllSubscriptions(ctx context.Context, now time.Time) ([]tokenplan.Subscription, error) {
+	if err := r.db.WithContext(ctx).Model(&subRow{}).
+		Where("status = ? AND expire_at <= ?", statusActive, now).
+		Updates(map[string]any{"status": statusExpired, "updated_at": now}).Error; err != nil {
+		return nil, err
+	}
+	var rows []subRow
+	if err := r.db.WithContext(ctx).
+		Order("id DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]tokenplan.Subscription, 0, len(rows))
+	for i := range rows {
+		out = append(out, *toSubscription(&rows[i]))
+	}
+	return out, nil
+}
+
 // ---- 状态字面值（与 tokenplan.SubStatus / PlanStatus 字符串一致）----
 var (
 	statusActive    = string(tokenplan.SubActive)

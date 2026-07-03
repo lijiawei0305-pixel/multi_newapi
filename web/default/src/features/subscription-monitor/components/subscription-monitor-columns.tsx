@@ -31,6 +31,18 @@ export function useSubscriptionMonitorColumns(): ColumnDef<MonitorSubscription>[
   return useMemo(
     (): ColumnDef<MonitorSubscription>[] => [
       {
+        accessorFn: (row) => row.tenant_name || row.tenant_id,
+        id: 'tenant',
+        header: t('Tenant'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => (
+          <span className='text-muted-foreground'>
+            {row.original.tenant_name || `#${row.original.tenant_id}`}
+          </span>
+        ),
+        size: 120,
+      },
+      {
         accessorFn: (row) => row.user_id,
         id: 'user_id',
         header: t('User ID'),
