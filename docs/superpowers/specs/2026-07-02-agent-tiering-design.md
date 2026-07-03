@@ -78,3 +78,40 @@
 - 命名坑重申:代理 `level`(本设计)≠ 用户 `tier`(下级分组,在用)。
 - 与伙伴 reconcile 并行:本设计动 `internal/agent` / `internal/tenant` / `internal/siteconfig` / `custom_domain.go` / 前端 `agents`;reconcile 动 mtwire `reconcile_*` + payment。`router/mt-router.go` 两边都改(不同路由组,冲突可控)。
 - `type` 删除是破坏性 schema 变更 —— 迁移前确认没有其他代码/报表依赖 `agent_profiles.type`。
+
+## 9. 金流模型(L0 提成+9折 / L1 差价 —— 均在消耗计费层)
+
+> 两档盈利**互斥**(L1 替换 L0)。9折 = 可配系统项(默认 0.9,后期可改);提成/差价**基数 = 官方原价**;9折由**平台**承担(毛利出)。L0、L1 **都能提现**(现有提现不改门禁)。
+
+**9.1 L0(level 0)—— 提成 + 邀请9折**
+- 邀请链接(✅)+ 被邀用户挂名(✅ `attributeRegistration` 写 `users.tenant_id`+`promotion_channel_id`)。
+- 被邀用户每次调用(消耗钩子 `service/quota.go`/`text_quota.go` → `agenthook.ConsumeCommission` → `creditConsumeCommission`):
+  - **9折(🆕)**:读该用户邀请归属 → 该次消耗额 × `inviteDiscount`(系统配置,默认 0.9);差额平台承担。
+  - **提成(✅)**:`commission_ratio × 官方原价消耗额` 入 L0 钱包(基数用官方原价,9折不减提成)。
+- **不能**自设倍率(§9.3);`commission_ratio` 管理员按代理设(✅)。
+
+**9.2 L1(level≥1)—— 差价入账**
+- 自设模型倍率(✅ `HandleAgentSetGroupRatio` → `tenant_groups`,`ValidateGroupRatio` 保护线只能加价)。
+- 其站用户每次调用:**差价入账(🆕)** = `(L1倍率 − 官方倍率) × 官方原价消耗额` → L1 钱包。与 L0 提成同钩子、不同算法。
+- **无** 9折、**无** L0 提成。
+
+**9.3 按档 gate(🆕)**
+- `HandleAgentSetGroupRatio` → 要求 `level≥1`(L0 → 403)。
+- 计费入账二选一:`level==0`→ L0 提成;`level≥1`→ 差价入账(不重复给)。
+- 9折只作用于「被 L0 邀请的用户」;L1 站用户按 L1 倍率付、无 9折。
+
+**9.4 缺口(要新建)/ 复用**
+- 🆕 邀请9折(计费钩子接折扣)· L1 差价入账(倍率差→钱包)· 按档 gate 倍率+入账二选一。
+- ✅ 复用:邀请归属 · `consume_commission` 通路 · group ratio+保护线 · 钱包+提现。
+
+**9.5 红线**
+- billing 红线:改消耗钩子必须**强幂等**(现按 `requestID`)、不双扣、失败不阻断用户请求。
+- 9折+提成/差价都从平台毛利出:保证 `0.9×官方 − 提成/差价 ≥ 上游成本`;延用现有 floor,必要时补校验。
+- 统一以「官方原价消耗额」为基数,避免 9折与提成/差价互算。
+
+**9.6 测试(TDD)**
+- 9折:被邀用户 ×0.9、非被邀不打折、折扣率读配置。
+- L0 提成:`ratio×官方原价`,不受 9折影响。
+- L1 差价:`(L1倍率−官方)×官方原价` 入钱包;L1 不触发 `consume_commission`(不双得)。
+- gate:L0 设倍率 403;level 切换→入账通路切换。
+- 幂等:同 requestID 不双记。
