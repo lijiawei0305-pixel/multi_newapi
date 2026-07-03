@@ -2,13 +2,11 @@ package mtwire
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/logger"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -47,7 +45,8 @@ func (a *App) StartReconcileLoop() {
 	})
 }
 
-// runReconcileOnce 跑一轮 RCG + SUB 对账（atomic 防与上一轮重叠：上一轮还没跑完则跳过本次）。
+// runReconcileOnce 跑一轮全 3 路径对账（cron 触发），atomic 防与上一轮重叠：上一轮还没跑完则跳过本次。
+// 编排/日志/心跳/历史统一在 runReconcileAll；手动触发（HandleAdminRunReconcile）共用同一入口。
 func (a *App) runReconcileOnce() {
 	if !reconcileRunning.CompareAndSwap(false, true) {
 		return
@@ -56,35 +55,5 @@ func (a *App) runReconcileOnce() {
 
 	ctx := context.Background()
 	before := time.Now().Add(-reconcileMinAge)
-
-	// RCG 充值卡单：扫 paid 未 credited → 重跑入账（幂等）。
-	if a.RechargeGateway != nil {
-		if res, err := a.RechargeGateway.ReconcileStuckPaid(ctx, before); err != nil {
-			logger.LogWarn(ctx, "reconcile RCG(paid) failed: "+err.Error())
-		} else if len(res.Reconciled) > 0 || len(res.Failed) > 0 {
-			logger.LogInfo(ctx, fmt.Sprintf("reconcile RCG(paid): scanned=%d credited=%d failed=%d",
-				res.Scanned, len(res.Reconciled), len(res.Failed)))
-		}
-	}
-
-	// RCG 充值卡单：扫 created（回调始终未送达）→ 向平台主动查单（进程内）→ 已付补入账。
-	if a.RechargeGateway != nil && a.providerMgr != nil {
-		query := func(ctx context.Context, orderNo, provider string) (bool, error) {
-			return a.providerMgr.QueryOrder(ctx, payment.Provider(provider), orderNo)
-		}
-		if res, err := a.RechargeGateway.ReconcileStuckCreated(ctx, before, reconcileCreatedMaxAge, reconcileCreatedLimit, query); err != nil {
-			logger.LogWarn(ctx, "reconcile RCG(created) failed: "+err.Error())
-		} else if len(res.Reconciled) > 0 || len(res.Failed) > 0 {
-			logger.LogInfo(ctx, fmt.Sprintf("reconcile RCG(created): scanned=%d credited=%d failed=%d",
-				res.Scanned, len(res.Reconciled), len(res.Failed)))
-		}
-	}
-
-	// SUB 套餐卡单：扫 pending → 查单 → 已付则补激活。
-	if res, err := a.ReconcileStuckSubscriptions(ctx, before); err != nil {
-		logger.LogWarn(ctx, "reconcile SUB failed: "+err.Error())
-	} else if len(res.Activated) > 0 || len(res.Failed) > 0 {
-		logger.LogInfo(ctx, fmt.Sprintf("reconcile SUB: scanned=%d activated=%d unpaid=%d failed=%d",
-			res.Scanned, len(res.Activated), len(res.Unpaid), len(res.Failed)))
-	}
+	a.runReconcileAll(ctx, before, "cron")
 }
