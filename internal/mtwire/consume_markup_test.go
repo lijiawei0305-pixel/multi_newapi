@@ -231,7 +231,7 @@ func TestCreditRatioMarkup_AgentBearsOwnRealizedDiscount(t *testing.T) {
 	defaultTier := 1.0
 	defaultCharged := int64(rawUnits * defaultTier * sellRatio) // 900
 	vipTier := 0.8                                              // 代理自设的 vip 力度（§9.6.1；本测试不经 resolveModelGroup2D，直接注入已生效值）
-	vipCharged := int64(rawUnits * vipTier * sellRatio)          // 720，vip 少付
+	vipCharged := int64(rawUnits * vipTier * sellRatio)         // 720，vip 少付
 
 	seedUser(t, app, 100, 5) // default 用户
 	seedUser(t, app, 101, 5) // vip 用户，同一 L1 租户
