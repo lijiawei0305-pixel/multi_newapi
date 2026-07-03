@@ -47,10 +47,13 @@ const maxRangeSeconds int64 = 366 * 24 * 60 * 60
 // reportExportMaxRows 是导出时单次取回的行数上限（非热路径报表；分页 page=1 取全集）。
 const reportExportMaxRows = 100000
 
-// summarySourceOrder 是 summary.earnings.by_source 固定输出的 5 个 source_type（缺则补 0）。
-// 顺序对齐 doc/finance-report-contract.md §1.1 示例响应体。recharge_spread 为幻影来源（恒 0）。
+// summarySourceOrder 是 summary.earnings.by_source 固定输出的 6 个 source_type（缺则补 0）。
+// 顺序对齐 doc/finance-report-contract.md §1.1 示例响应体（该文档写于 ratio_markup 引入之前，
+// 待补录）；ratio_markup 紧邻 consume_commission——两者是 L0/L1 互斥的同类「按消耗计的代理收益」
+// （agent.SourceRatioMarkup，spec agent-tiering §9.4）。recharge_spread 为幻影来源（恒 0）。
 var summarySourceOrder = []string{
 	"consume_commission",
+	"ratio_markup",
 	"tokenplan_spread",
 	"tokenplan_commission",
 	"recharge_spread",
@@ -181,6 +184,7 @@ type agentRankOut struct {
 	OwnerUsername        string  `json:"owner_username"`
 	TotalEarnedCNY       float64 `json:"total_earned_cny"`
 	ConsumeCommissionCNY float64 `json:"consume_commission_cny"`
+	RatioMarkupCNY       float64 `json:"ratio_markup_cny"`
 	TokenplanSpreadCNY   float64 `json:"tokenplan_spread_cny"`
 	ManualAdjustmentCNY  float64 `json:"manual_adjustment_cny"`
 	RechargePaidCNY      float64 `json:"recharge_paid_cny"`
@@ -303,6 +307,7 @@ func (a *App) HandleAdminFinanceAgents(c *gin.Context) {
 			OwnerUsername:        r.OwnerUsername,
 			TotalEarnedCNY:       round2(r.TotalEarnedCNY),
 			ConsumeCommissionCNY: round2(r.ConsumeCommissionCNY),
+			RatioMarkupCNY:       round2(r.RatioMarkupCNY),
 			TokenplanSpreadCNY:   round2(r.TokenplanSpreadCNY),
 			ManualAdjustmentCNY:  round2(r.ManualAdjustmentCNY),
 			RechargePaidCNY:      round2(r.RechargePaidCNY),

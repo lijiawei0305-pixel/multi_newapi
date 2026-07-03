@@ -119,6 +119,7 @@ type AgentRankRow struct {
 	OwnerUsername        string
 	TotalEarnedCNY       float64
 	ConsumeCommissionCNY float64
+	RatioMarkupCNY       float64
 	TokenplanSpreadCNY   float64
 	ManualAdjustmentCNY  float64
 	RechargePaidCNY      float64
@@ -650,6 +651,7 @@ func (r *Repo) AgentRanking(ctx context.Context, start, end int64, sortBy, order
 			OwnerUsername:        meta.OwnerUsername,
 			TotalEarnedCNY:       e.total,
 			ConsumeCommissionCNY: e.consume,
+			RatioMarkupCNY:       e.ratioMarkup,
 			TokenplanSpreadCNY:   e.tokenplanSpread,
 			ManualAdjustmentCNY:  e.manualAdj,
 			RechargePaidCNY:      recharge[tid],
@@ -939,7 +941,7 @@ func (r *Repo) DetailConsumption(ctx context.Context, tenantID *int64, start, en
 // ============================================================================
 
 type earnAgg struct {
-	total, consume, tokenplanSpread, manualAdj float64
+	total, consume, ratioMarkup, tokenplanSpread, manualAdj float64
 }
 
 func (r *Repo) earningsByTenant(ctx context.Context, start, end int64) (map[int64]earnAgg, error) {
@@ -963,6 +965,8 @@ func (r *Repo) earningsByTenant(ctx context.Context, start, end int64) (map[int6
 		switch x.SourceType {
 		case "consume_commission":
 			a.consume += x.Amount
+		case "ratio_markup":
+			a.ratioMarkup += x.Amount
 		case "tokenplan_spread":
 			a.tokenplanSpread += x.Amount
 		case "manual_adjustment":
