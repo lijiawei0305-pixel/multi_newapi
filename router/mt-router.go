@@ -115,6 +115,11 @@ func SetMtRouter(router *gin.Engine) {
 				agentIndependent.GET("/site-config", app.HandleAgentGetSiteConfig)
 				agentIndependent.PUT("/site-config", app.HandleAgentUpdateSiteConfig)
 				agentIndependent.POST("/site-config/logo", app.HandleAgentUploadLogo)
+				// 我的层级折扣力度（代理自设 vip 覆盖；Change 1，spec §9.6.1）：列表 / 设覆盖（仅可代理
+				// 覆盖层级——今仅 vip；default 不可覆盖）。route-level level>=1 门禁 + handler 内 ensureAgentLevel
+				// 双保险（同自定义域名/站点装修的既有模式）。
+				agentIndependent.GET("/tier-ratio", app.HandleAgentListTierRatios)
+				agentIndependent.PUT("/tier-ratio/:tier", app.HandleAgentSetTierRatio)
 			}
 			// 财务报表（代理自助，单租户，tenant_id 取自 AgentOwnerAuth）：汇总 / 趋势 / 明细（?format=csv|pdf 导出）。
 			agentSelf.GET("/finance/summary", app.HandleTenantFinanceSummary)

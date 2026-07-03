@@ -44,3 +44,39 @@ func (a *App) resolveTenantGroupRatio(ctx context.Context, userID int64, group s
 	}
 	return r, true
 }
+
+// resolveTierRatio 是层级轴的倍率解析（Change 1，spec agent-tiering §9.6.1）：
+//   - userGroup 不是「可代理覆盖层级」(agentOverridableTier；今仅 vip，default 恒排除) → 平台全局
+//     groupRatioOf(userGroup)（既有行为，不变，不查库）。
+//   - 是可代理覆盖层级，但用户不归属任何 L1（独立档）代理（主站直客 / L0 代理下级 / 未归属）→
+//     平台全局 groupRatioOf(userGroup)（范围限定为仅 level>=1——L0 代理没有 HandleAgentSetTierRatio
+//     的调用权限，因此 L0 下级用户的层级折扣行为与 Change 1 上线前完全一致；这是一处需用户确认的
+//     判断，见 Task 16 顶部"范围判断"）。
+//   - 是可代理覆盖层级 且 归属 L1 代理：该代理为此层级设了 enabled 覆盖 → 用覆盖值（代理自担，
+//     §9.4）；未设置 → 1（"Default=1，no discount"——不回退平台全局，"No overlap"）。
+//
+// 自带 panic 兜底由调用方 resolveModelGroup2D 的 defer/recover 统一覆盖，此处不重复包一层。
+func (a *App) resolveTierRatio(ctx context.Context, userID int64, userGroup string) float64 {
+	baseline := groupRatioOf(userGroup)
+	if !agentOverridableTier(userGroup) {
+		return baseline
+	}
+	tenantID := a.userTenantID(ctx, userID)
+	if tenantID <= 0 {
+		return baseline // 主站直客：平台全局，既有行为不变
+	}
+	if a.AgentService == nil {
+		return baseline // 未装配：安全回退（不查库、不改变现状）
+	}
+	lvl, err := a.AgentService.AgentLevel(ctx, tenantID)
+	if err != nil || lvl < 1 {
+		return baseline // L0 / 非代理 / 查询失败：无自设覆盖能力，沿用平台全局（对 L0 零行为变化）
+	}
+	if a.TenantRepo == nil {
+		return baseline
+	}
+	if override, found, err := a.TenantRepo.LookupEnabledGroupRatio(ctx, tenantID, tierGroupKey(userGroup)); err == nil && found {
+		return override
+	}
+	return 1 // L1 且未配置覆盖：Default=1，不回退平台全局（No overlap）
+}

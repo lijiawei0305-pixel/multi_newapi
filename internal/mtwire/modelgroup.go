@@ -90,7 +90,10 @@ func (a *App) resolveModelGroup2D(userID int64, userGroup, usingGroup string) (r
 	if a.ModelGroupRepo == nil {
 		return 0, false // 未装配：回退原生倍率
 	}
-	tier := groupRatioOf(userGroup)
+	// 层级轴（Change 1，spec §9.6.1）：非「可代理覆盖层级」或用户不归属 L1 代理 → 平台全局
+	// groupRatioOf(userGroup)（既有行为不变）；归属 L1 代理 → 该代理自设的 per-tenant 覆盖（未配置则 1，
+	// 不回退平台全局，"No overlap"）。见 resolveTierRatio（grouphook.go）。
+	tier := a.resolveTierRatio(context.Background(), userID, userGroup)
 	factor := 1.0
 	if usingGroup != "" && a.ModelGroupRepo.IsModelGroup(usingGroup) {
 		factor = groupRatioOf(usingGroup) // 平台基准

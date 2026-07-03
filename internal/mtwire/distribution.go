@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -514,6 +515,110 @@ func (a *App) setUserGroup(ctx context.Context, userID int64, group string) erro
 	// 失效缓存（best-effort，不影响主流程；Redis 未启用时为空操作）。
 	_ = model.InvalidateUserCache(int(userID))
 	return nil
+}
+
+// agentOverridableTier 报告 tier 是否是代理可自设覆盖的层级(Change 1，spec §9.6.1)：必须在
+// allowedAgentTiers 白名单内，且排除 "default"（恒 1，语义上无需、也不允许覆盖——HandleAgentSetUserTier
+// 允许把用户"分配"到 default，但不允许代理给 default 这个层级本身设折扣力度，两个操作面不同）。
+func agentOverridableTier(tier string) bool {
+	if tier == "" || tier == "default" {
+		return false
+	}
+	_, ok := allowedAgentTiers[tier]
+	return ok
+}
+
+// tierGroupKey 把层级名映射为 tenant_groups 的存储 key：加 "tier:" 前缀。模型分组轴
+// （HandleAgentSetGroupRatio）用裸模型分组名写入同一张表——两条轴共享 tenant_groups 的
+// UNIQUE(tenant_id, group_name) 键空间，前缀是零成本的永久隔离，不依赖"没人把模型分组取名叫 vip"
+// 这种命名约定。
+func tierGroupKey(tier string) string { return "tier:" + tier }
+
+// ============================================================================
+// 6b) 我的层级折扣力度（代理自设 per-tenant vip 覆盖；Change 1，spec agent-tiering §9.6.1）
+// ============================================================================
+//
+// 与 §5 的模型分组卖价覆盖"同一套机制"，开在层级轴：代理可给自己名下某个可覆盖层级
+// （allowedAgentTiers 去掉 default——今仅 vip）单独设折扣力度。命中用覆盖值；未设 → 1（不打折，不回退
+// 平台全局，"No overlap"）。存储复用 tenant_groups，key 加 tierGroupKey 前缀防止与模型分组名串号。
+
+// tierRatioOut 是「我的层级折扣力度」行。platform_ratio 仅供参考（平台全局值，本轴未覆盖时不回退它，
+// 与 modelGroupRatioOut 的 platform_ratio 语义不同——那边未覆盖时 ratio 就是 platform_ratio）。
+type tierRatioOut struct {
+	Tier          string  `json:"tier"`
+	Ratio         float64 `json:"ratio"`
+	PlatformRatio float64 `json:"platform_ratio"`
+	HasOverride   bool    `json:"has_override"`
+}
+
+// HandleAgentListTierRatios GET /api/tenant/tier-ratio —— 本租户可覆盖层级（今仅 vip）的当前状态：
+// 未覆盖展示 1（不是 platform_ratio——No overlap：代理下级用户从不吃平台全局 vip 折扣，UI 不能暗示
+// "没设=用平台的"）；已覆盖展示覆盖值。gate: level>=1（同 HandleAgentSetGroupRatio 的门禁机制）。
+func (a *App) HandleAgentListTierRatios(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
+		return
+	}
+	tenantID := agentTenantID(c)
+	if tenantID <= 0 {
+		respondErr(c, errAgentForbidden)
+		return
+	}
+	ctx := reqCtx(c)
+	names := make([]string, 0, len(allowedAgentTiers))
+	for t := range allowedAgentTiers {
+		if t == "default" {
+			continue
+		}
+		names = append(names, t)
+	}
+	sort.Strings(names) // 确定性输出（今仅 "vip" 一项，未来扩充时保持稳定顺序）
+	out := make([]tierRatioOut, 0, len(names))
+	for _, tier := range names {
+		row := tierRatioOut{Tier: tier, Ratio: 1, PlatformRatio: groupRatioOf(tier)}
+		if override, found, err := a.TenantRepo.LookupEnabledGroupRatio(ctx, tenantID, tierGroupKey(tier)); err == nil && found {
+			row.Ratio = override
+			row.HasOverride = true
+		}
+		out = append(out, row)
+	}
+	respondOK(c, out)
+}
+
+// HandleAgentSetTierRatio PUT /api/tenant/tier-ratio/:tier —— 设本租户对某可覆盖层级的折扣力度覆盖
+// （Change 1，spec §9.6.1）。校验：① level>=1（复用 ensureAgentLevel，Task 3 既有机制，不新建 gate）；
+// ② tier 必须是可代理覆盖层级（agentOverridableTier：在 allowedAgentTiers 内且非 default），否则
+// AGENT_TIER_INVALID（复用 HandleAgentSetUserTier 的既有错误码，语义一致："不允许的用户层级"）；
+// ③ ratio 结构性校验 > 0（不设上限，与 §9.7 BottomPriceRatio 同哲学）。
+//
+// 本端点不做"卖价×vip 力度 ≥ 底价"的预防性穷举校验（不会在这里反查该代理名下所有已设卖价的模型分组）
+// ——与"管理员改底价"端点本身也不做这种穷举校验是同一个先例（两个独立旋钮谁后设谁可能打破对方前提，
+// 本项目现有选择是"结算时兜底，不在设置时穷举预防"，见 Task 13 creditRatioMarkup 的 clamp）。
+func (a *App) HandleAgentSetTierRatio(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
+		return
+	}
+	tenantID := agentTenantID(c)
+	if tenantID <= 0 {
+		respondErr(c, errAgentForbidden)
+		return
+	}
+	tier := strings.TrimSpace(c.Param("tier"))
+	if !agentOverridableTier(tier) {
+		respondErr(c, errAgentTierInvalid)
+		return
+	}
+	var body struct {
+		Ratio float64 `json:"ratio"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.Ratio <= 0 {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	if err := a.TenantRepo.UpsertGroup(reqCtx(c), tenantID, tierGroupKey(tier), body.Ratio); err != nil {
+		respondErr(c, err)
+		return
+	}
+	respondOK(c, tierRatioOut{Tier: tier, Ratio: body.Ratio, PlatformRatio: groupRatioOf(tier), HasOverride: true})
 }
 
 // ============================================================================

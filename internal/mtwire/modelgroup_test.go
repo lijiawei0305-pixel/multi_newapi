@@ -8,6 +8,8 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/QuantumNous/new-api/internal/agent"
+	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
 	"github.com/QuantumNous/new-api/internal/modelgroup"
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
 )
@@ -30,8 +32,10 @@ func newModelGroup2DApp(t *testing.T) *App {
 	return &App{DB: db, ModelGroupRepo: modelgroup.New(db)}
 }
 
-// newModelGroup2DTenantApp 在 newModelGroup2DApp 基础上加 users(id,tenant_id) + tenant_groups + TenantRepo，
-// 供「代理 per-tenant 覆盖」用例（resolveModelGroup2D 解析 userID→租户→tenant_groups 覆盖）。
+// newModelGroup2DTenantApp 在 newModelGroup2DApp 基础上加 users(id,tenant_id) + tenant_groups +
+// TenantRepo + agent_profiles + AgentRepo/AgentService，供「代理 per-tenant 覆盖」(模型分组轴，既有)
+// 与「代理自设 vip 力度」(层级轴，Change 1/spec §9.6.1)两类用例共用——resolveModelGroup2D 两条轴都要
+// 解析 userID→租户→level/tenant_groups 覆盖。
 func newModelGroup2DTenantApp(t *testing.T) *App {
 	t.Helper()
 	app := newModelGroup2DApp(t)
@@ -42,6 +46,12 @@ func newModelGroup2DTenantApp(t *testing.T) *App {
 		t.Fatalf("tenant migrate: %v", err)
 	}
 	app.TenantRepo = tenantrepo.New(app.DB)
+	if err := agentrepo.AutoMigrate(app.DB); err != nil { // agent_profiles + agent_earning_logs + wallet
+		t.Fatalf("agent migrate: %v", err)
+	}
+	ar := agentrepo.New(app.DB)
+	app.AgentRepo = ar
+	app.AgentService = agent.NewService(ar, nil)
 	return app
 }
 
@@ -129,6 +139,16 @@ func TestResolveModelGroup2D_TenantOverride(t *testing.T) {
 	if err := app.TenantRepo.UpsertGroup(ctx, 7, "default", 1.5); err != nil {
 		t.Fatalf("upsert default markup: %v", err)
 	}
+	// Level 门禁 + Change 1(vip 力度覆盖，spec §9.6.1):租户 7 设为 L1，并显式设 vip 覆盖 = 0.8
+	// (与平台全局 vip 基准数值相同，仅为让本测试原有断言在"Default=1"新语义下继续成立——
+	// "未设覆盖时不再回退平台全局"这一新行为由 TestResolveModelGroup2D_AgentVipOverride_DefaultsToOne
+	// 单独覆盖)。
+	if err := app.AgentService.SetAgentType(ctx, 7, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set tenant 7 to L1: %v", err)
+	}
+	if err := app.TenantRepo.UpsertGroup(ctx, 7, tierGroupKey("vip"), 0.8); err != nil {
+		t.Fatalf("upsert vip tier override: %v", err)
+	}
 
 	cases := []struct {
 		userID      int64
@@ -149,6 +169,65 @@ func TestResolveModelGroup2D_TenantOverride(t *testing.T) {
 		if !ok || !almostEqual(r, c.want) {
 			t.Fatalf("resolve(%d,%q,%q) = (%v,%v), want (%v,true) — %s", c.userID, c.user, c.using, r, ok, c.want, c.note)
 		}
+	}
+}
+
+// TestResolveModelGroup2D_AgentVipOverride_DefaultsToOne 覆盖 Change 1 的核心新行为(spec agent-tiering
+// §9.6.1):"No overlap" —— L1(独立档)代理下级用户的层级折扣只能来自该代理自己的覆盖，从不回退平台
+// 全局 GroupRatio['vip']；未配置覆盖 → tier=1(无折扣)。与此相对：① 主站直客(tenant_id=0)不受影响，
+// 继续吃平台全局；② L0(普通档)代理下级用户也不受影响，继续吃平台全局(§9.6.1 标注为一处需确认的范围
+// 判断——L0 没有 HandleAgentSetTierRatio 的调用权限，本实现选择让 L0 保持 v2 行为完全不变)。
+func TestResolveModelGroup2D_AgentVipOverride_DefaultsToOne(t *testing.T) {
+	ctx := context.Background()
+	app := newModelGroup2DTenantApp(t)
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register claude-kiro: %v", err)
+	}
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios // 平台全局 vip=0.8
+
+	if err := app.AgentService.SetAgentType(ctx, 70, agent.AgentParams{Level: 1}); err != nil { // L1，未设 vip 覆盖
+		t.Fatalf("set tenant 70 to L1: %v", err)
+	}
+	if err := app.AgentService.SetAgentType(ctx, 71, agent.AgentParams{Level: 0}); err != nil { // L0
+		t.Fatalf("set tenant 71 to L0: %v", err)
+	}
+	seedUser(t, app, 500, 70) // L1 代理下级，未配置 vip 覆盖
+	seedUser(t, app, 510, 71) // L0 代理下级
+	seedUser(t, app, 600, 0)  // 主站直客
+
+	cases := []struct {
+		userID      int64
+		user, using string
+		want        float64
+		note        string
+	}{
+		{500, "vip", "", 1, "L1 代理下级 vip 用户，代理未设覆盖 → Default=1(不回退平台全局 0.8)"},
+		{510, "vip", "", 0.8, "L0 代理下级：无自设覆盖能力，行为不变，继续吃平台全局 0.8"},
+		{600, "vip", "", 0.8, "主站直客：不受影响，继续吃平台全局 0.8"},
+		{500, "default", "", 1, "default 层级本就不可代理覆盖，行为不变(=1)"},
+		{500, "vip", "claude-kiro", 1 * stub2DRatios("claude-kiro"), "tier=1(未覆盖) × 模型分组基准(claude-kiro 未覆盖)=0.3"},
+	}
+	for _, c := range cases {
+		r, ok := app.resolveModelGroup2D(c.userID, c.user, c.using)
+		if !ok || !almostEqual(r, c.want) {
+			t.Fatalf("resolve(%d,%q,%q) = (%v,%v), want (%v,true) — %s", c.userID, c.user, c.using, r, ok, c.want, c.note)
+		}
+	}
+
+	// 租户 70 随后自设 vip 力度 0.5(比平台全局 0.8 折扣更深)→ 立即生效，且只影响自己的下级。
+	if err := app.TenantRepo.UpsertGroup(ctx, 70, tierGroupKey("vip"), 0.5); err != nil {
+		t.Fatalf("upsert vip tier override: %v", err)
+	}
+	if r, ok := app.resolveModelGroup2D(500, "vip", ""); !ok || !almostEqual(r, 0.5) {
+		t.Fatalf("after override: resolve(500,vip,\"\") = (%v,%v), want (0.5,true)", r, ok)
+	}
+	if r, ok := app.resolveModelGroup2D(510, "vip", ""); !ok || !almostEqual(r, 0.8) {
+		t.Fatalf("L0 tenant 71 must stay unaffected by tenant 70's override: got %v", r)
+	}
+	if r, ok := app.resolveModelGroup2D(600, "vip", ""); !ok || !almostEqual(r, 0.8) {
+		t.Fatalf("main-site user must stay unaffected by tenant 70's override: got %v", r)
 	}
 }
 

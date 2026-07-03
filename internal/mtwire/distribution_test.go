@@ -375,3 +375,93 @@ func TestHandleAgentListGroups_FloorReflectsAgentBottomPriceRatio(t *testing.T) 
 		t.Fatalf("Ratio (effective price, no override set) must still be platform baseline, got %v", row.Ratio)
 	}
 }
+
+// TestHandleAgentSetTierRatio_RequiresLevel1AndValidTier 覆盖 Change 1 的门禁 + 校验（spec agent-tiering
+// §9.6.1）：L0 → 403 AGENT_LEVEL_LOCKED；"default"/模型分组名 → 400 AGENT_TIER_INVALID；
+// "vip" + L1 → 200，落 tenant_groups[tenant, tierGroupKey("vip")]（与卖价覆盖同表，前缀隔离命名空间）。
+func TestHandleAgentSetTierRatio_RequiresLevel1AndValidTier(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	if _, err := app.ModelGroupRepo.Create(ctx, modelgroup.ModelGroup{Name: "claude-kiro", Enabled: true}); err != nil {
+		t.Fatalf("register claude-kiro: %v", err)
+	}
+	if err := app.AgentService.SetAgentType(ctx, 80, agent.AgentParams{Level: 0}); err != nil {
+		t.Fatalf("set L0: %v", err)
+	}
+	if err := app.AgentService.SetAgentType(ctx, 81, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set L1: %v", err)
+	}
+
+	// L0：锁。
+	c, rec := newAgentCtx(80, "PUT", `{"ratio":0.7}`, gin.Params{{Key: "tier", Value: "vip"}})
+	app.HandleAgentSetTierRatio(c)
+	if r := decodeResp(t, rec); r.Success || r.Code != "AGENT_LEVEL_LOCKED" {
+		t.Fatalf("L0 must be locked, got %+v", r)
+	}
+
+	// L1 + "default"：拒（default 恒 1，不可覆盖）。
+	c, rec = newAgentCtx(81, "PUT", `{"ratio":0.7}`, gin.Params{{Key: "tier", Value: "default"}})
+	app.HandleAgentSetTierRatio(c)
+	if r := decodeResp(t, rec); r.Success || r.Code != "AGENT_TIER_INVALID" {
+		t.Fatalf("default tier must be rejected, got %+v", r)
+	}
+
+	// L1 + 模型分组名（"claude-kiro"）：拒（两轴互斥，防串号）。
+	c, rec = newAgentCtx(81, "PUT", `{"ratio":0.7}`, gin.Params{{Key: "tier", Value: "claude-kiro"}})
+	app.HandleAgentSetTierRatio(c)
+	if r := decodeResp(t, rec); r.Success || r.Code != "AGENT_TIER_INVALID" {
+		t.Fatalf("model-group name must be rejected on the tier axis, got %+v", r)
+	}
+
+	// L1 + "vip"：放行，落库到 tierGroupKey 隔离的命名空间。
+	c, rec = newAgentCtx(81, "PUT", `{"ratio":0.7}`, gin.Params{{Key: "tier", Value: "vip"}})
+	app.HandleAgentSetTierRatio(c)
+	if r := decodeResp(t, rec); !r.Success {
+		t.Fatalf("L1 vip should be allowed, got %+v", r)
+	}
+	got, found, err := app.TenantRepo.LookupEnabledGroupRatio(ctx, 81, tierGroupKey("vip"))
+	if err != nil || !found || got != 0.7 {
+		t.Fatalf("tenant_groups[81,%q] = (%v,%v,%v), want (0.7,true,nil)", tierGroupKey("vip"), got, found, err)
+	}
+	// 隔离验证：模型分组轴的裸 "vip" 键必须不存在（两轴不串号）。
+	if _, found, _ := app.TenantRepo.LookupEnabledGroupRatio(ctx, 81, "vip"); found {
+		t.Fatal("bare \"vip\" key must not be written — tier overrides must use the tierGroupKey-prefixed namespace")
+	}
+}
+
+// TestHandleAgentListTierRatios_ReflectsOverrideOrDefaultOne 覆盖列表展示：未覆盖展示 1（不是平台参考
+// 值，避免 UI 暗示"没设=用平台的"）；已覆盖展示覆盖值 + has_override=true。
+func TestHandleAgentListTierRatios_ReflectsOverrideOrDefaultOne(t *testing.T) {
+	app := newGroupRatioApp(t)
+	ctx := context.Background()
+	restore := groupRatioOf
+	defer func() { groupRatioOf = restore }()
+	groupRatioOf = stub2DRatios // 平台参考 vip=0.8
+	if err := app.AgentService.SetAgentType(ctx, 82, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set L1: %v", err)
+	}
+
+	c, rec := newAgentCtx(82, "GET", "", nil)
+	app.HandleAgentListTierRatios(c)
+	r := decodeResp(t, rec)
+	var rows []tierRatioOut
+	if err := json.Unmarshal(r.Data, &rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Tier != "vip" || rows[0].Ratio != 1 || rows[0].HasOverride {
+		t.Fatalf("no override yet: want [{vip,1,false}], got %+v", rows)
+	}
+
+	if err := app.TenantRepo.UpsertGroup(ctx, 82, tierGroupKey("vip"), 0.6); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	c, rec = newAgentCtx(82, "GET", "", nil)
+	app.HandleAgentListTierRatios(c)
+	r = decodeResp(t, rec)
+	if err := json.Unmarshal(r.Data, &rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Ratio != 0.6 || !rows[0].HasOverride || rows[0].PlatformRatio != 0.8 {
+		t.Fatalf("after override: want [{vip,0.6,true,platform=0.8}], got %+v", rows)
+	}
+}
