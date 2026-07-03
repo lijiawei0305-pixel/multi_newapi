@@ -51,7 +51,14 @@ func (a *App) HandleAdminListStuck(c *gin.Context) {
 			Amount: s.AmountCNY, Status: s.Status, StuckSecs: int64(now.Sub(s.UpdatedAt).Seconds()),
 		})
 	}
-	respondOK(c, gin.H{"stuck": out, "threshold_secs": int64(reconcileMinAge.Seconds())})
+	hbOut := reconcileHeartbeatOut{}
+	if hb, ok := a.getReconcileHeartbeat(ctx); ok {
+		hbOut = reconcileHeartbeatOut{
+			LastRunAt: hb.LastRunAt.Unix(), LastTrigger: hb.LastTrigger, TodayRuns: hb.TodayRuns,
+			LastStuckCount: hb.LastStuckCount, LastFailedCount: hb.LastFailedCount,
+		}
+	}
+	respondOK(c, gin.H{"stuck": out, "threshold_secs": int64(reconcileMinAge.Seconds()), "heartbeat": hbOut})
 }
 
 // HandleAdminRunReconcile POST /api/admin/reconcile/run —— 手动立即对账，走与 5min 定时同一入口
@@ -104,4 +111,13 @@ func (a *App) HandleAdminListHistory(c *gin.Context) {
 		})
 	}
 	respondOK(c, gin.H{"runs": out})
+}
+
+// reconcileHeartbeatOut 是 /stuck 响应内嵌的心跳（前端顶部心跳条用）；从未跑过则 last_run_at=0。
+type reconcileHeartbeatOut struct {
+	LastRunAt       int64  `json:"last_run_at"` // unix 秒，0=从未
+	LastTrigger     string `json:"last_trigger"`
+	TodayRuns       int    `json:"today_runs"`
+	LastStuckCount  int    `json:"last_stuck_count"`
+	LastFailedCount int    `json:"last_failed_count"`
 }

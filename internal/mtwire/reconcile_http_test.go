@@ -96,3 +96,35 @@ func TestHandleAdminListHistoryDescAndLimit(t *testing.T) {
 		t.Fatalf("detail should be a JSON object, got %q", string(data.Runs[0].Detail))
 	}
 }
+
+// TestHandleAdminListStuckIncludesHeartbeat /stuck 响应内嵌心跳（前端顶部心跳条用）。
+func TestHandleAdminListStuckIncludesHeartbeat(t *testing.T) {
+	app := newReconcileHistoryApp(t)
+	// listStuckSubscriptions 查 mt_subscription_orders：需建表（无 RechargeGateway → 只查 SUB）。
+	if err := migrateSubscriptionBridge(app.DB); err != nil {
+		t.Fatalf("migrate sub bridge: %v", err)
+	}
+	app.updateReconcileHeartbeat(context.Background(), "cron", 2, 1)
+
+	c, rec := newReconcileCtx("GET", "/api/admin/reconcile/stuck", "")
+	app.HandleAdminListStuck(c)
+	resp := decodeResp(t, rec)
+	if !resp.Success {
+		t.Fatalf("not success: %s", rec.Body.String())
+	}
+	var data struct {
+		Heartbeat struct {
+			TodayRuns       int    `json:"today_runs"`
+			LastTrigger     string `json:"last_trigger"`
+			LastFailedCount int    `json:"last_failed_count"`
+			LastRunAt       int64  `json:"last_run_at"`
+		} `json:"heartbeat"`
+	}
+	if err := json.Unmarshal(resp.Data, &data); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if data.Heartbeat.TodayRuns != 1 || data.Heartbeat.LastTrigger != "cron" ||
+		data.Heartbeat.LastFailedCount != 1 || data.Heartbeat.LastRunAt == 0 {
+		t.Fatalf("heartbeat=%+v, want runs=1 trigger=cron failed=1 lastRunAt>0", data.Heartbeat)
+	}
+}
