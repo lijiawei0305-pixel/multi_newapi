@@ -1,6 +1,9 @@
 package tenant
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 type tenantService struct {
 	repo TenantRepo
@@ -32,15 +35,30 @@ func (s *tenantService) Create(ctx context.Context, in CreateTenantInput) (*Tena
 	if err := s.repo.CreateTenant(ctx, t); err != nil {
 		return nil, err // 含 ErrSlugDuplicate
 	}
-	d := &TenantDomain{
-		TenantID:  t.ID,
-		Domain:    DomainForSlug(in.Slug),
-		IsPrimary: true,
-	}
-	if err := s.repo.CreateDomain(ctx, d); err != nil {
-		return nil, err
+	if !in.SkipSubdomain {
+		d := &TenantDomain{
+			TenantID:  t.ID,
+			Domain:    DomainForSlug(in.Slug),
+			IsPrimary: true,
+		}
+		if err := s.repo.CreateDomain(ctx, d); err != nil {
+			return nil, err
+		}
 	}
 	return t, nil
+}
+
+// EnsureSubdomain 幂等派生二级域名 `<slug>.wedreamhub.com`（管理员升档时调用）。
+// 域名已存在（映射到本租户）时 CreateDomain 返回 ErrSlugDuplicate，视为已就绪 → nil。
+func (s *tenantService) EnsureSubdomain(ctx context.Context, tenantID int64, slug string) error {
+	d := &TenantDomain{TenantID: tenantID, Domain: DomainForSlug(slug), IsPrimary: true}
+	if err := s.repo.CreateDomain(ctx, d); err != nil {
+		if errors.Is(err, ErrSlugDuplicate) {
+			return nil // 已派生：幂等
+		}
+		return err
+	}
+	return nil
 }
 
 // SetStatus 按状态机迁移租户状态；非法目标/迁移返回 ErrStatusTransition；

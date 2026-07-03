@@ -17,6 +17,8 @@ type TenantService interface {
 	Get(ctx context.Context, id int64) (*Tenant, error)
 	// Create 建租户并自动写一条二级域名记录 `<slug>.wedreamhub.com`。
 	Create(ctx context.Context, in CreateTenantInput) (*Tenant, error)
+	// EnsureSubdomain 幂等派生 `<slug>.wedreamhub.com` 域名映射（管理员升档 L0→L1 时调用）；已存在则无操作。
+	EnsureSubdomain(ctx context.Context, tenantID int64, slug string) error
 	SetStatus(ctx context.Context, id int64, s TenantStatus) error
 }
 
@@ -30,6 +32,9 @@ type CreateTenantInput struct {
 	Slug             string
 	Name             string
 	TokenplanEnabled bool
+	// SkipSubdomain=true 时不派生 `<slug>.wedreamhub.com` 域名映射（普通档 L0 代理无独立子域名，
+	// spec §5.2.2）。零值 false = 保持既有行为（派生子域名）。
+	SkipSubdomain bool
 }
 
 // --- 消费者定义的依赖接口（本包声明，main 装配具体实现）---

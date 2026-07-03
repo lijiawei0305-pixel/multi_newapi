@@ -170,3 +170,38 @@ func TestService_Create_DomainError(t *testing.T) {
 		t.Fatalf("err = %v, want sentinel propagated", err)
 	}
 }
+
+func TestService_Create_SkipSubdomain(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newService()
+
+	tn, err := svc.Create(ctx, CreateTenantInput{Slug: "basic", SkipSubdomain: true})
+	if err != nil {
+		t.Fatalf("Create err = %v", err)
+	}
+	// 无子域名：解析该 Host 返回 NotFound（不炸），但租户本身仍可按 id 读到。
+	if _, err := repo.GetTenantByDomain(ctx, "basic.wedreamhub.com"); !errors.Is(err, ErrTenantNotFound) {
+		t.Fatalf("subdomain must NOT be provisioned for L0, got err=%v", err)
+	}
+	if _, err := repo.GetTenant(ctx, tn.ID); err != nil {
+		t.Fatalf("tenant must still resolve by id: %v", err)
+	}
+}
+
+func TestService_EnsureSubdomain_Idempotent(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newService()
+	tn, _ := svc.Create(ctx, CreateTenantInput{Slug: "grow", SkipSubdomain: true})
+
+	if err := svc.EnsureSubdomain(ctx, tn.ID, "grow"); err != nil {
+		t.Fatalf("EnsureSubdomain: %v", err)
+	}
+	got, err := repo.GetTenantByDomain(ctx, "grow.wedreamhub.com")
+	if err != nil || got.ID != tn.ID {
+		t.Fatalf("after ensure, domain must map to tenant: got=%v err=%v", got, err)
+	}
+	// 幂等：再次调用不报错。
+	if err := svc.EnsureSubdomain(ctx, tn.ID, "grow"); err != nil {
+		t.Fatalf("EnsureSubdomain must be idempotent, got %v", err)
+	}
+}

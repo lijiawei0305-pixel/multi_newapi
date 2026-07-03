@@ -133,6 +133,7 @@ func (a *App) ensureDemoTenant(ctx context.Context) (*tenant.Tenant, bool, error
 		Slug:             demoSlug,
 		Name:             demoName,
 		TokenplanEnabled: true,
+		// demo 代理 seed 为 L1（见 seedDemoAgent），保留子域名 tokendream.wedreamhub.com。
 	})
 	if err != nil {
 		return nil, false, err

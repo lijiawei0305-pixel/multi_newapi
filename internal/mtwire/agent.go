@@ -523,6 +523,7 @@ func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 		Slug:             in.Slug,
 		Name:             in.Name,
 		TokenplanEnabled: true,
+		SkipSubdomain:    params.Level < 1, // L0 普通：不发子域名（spec §5.2.2）
 	})
 	if err != nil {
 		respondErr(c, err) // SLUG_INVALID / SLUG_RESERVED / SLUG_DUPLICATE
@@ -635,6 +636,13 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 	if err := a.AgentService.SetAgentType(ctx, tenantID, curParams); err != nil {
 		respondErr(c, err)
 		return
+	}
+	// 升档 → 独立档：幂等派生子域名 `<slug>.wedreamhub.com`（resolver 不缓存负结果，无需失效缓存）。
+	if in.Level != nil && *in.Level >= 1 {
+		if err := a.TenantService.EnsureSubdomain(ctx, tenantID, t.Slug); err != nil {
+			respondErr(c, err)
+			return
+		}
 	}
 	// 可选：更新租户名 / 状态。
 	if in.Name != nil && *in.Name != "" {
