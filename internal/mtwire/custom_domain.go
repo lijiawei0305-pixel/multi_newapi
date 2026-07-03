@@ -62,6 +62,9 @@ func (a *App) customDomainOut(cd *tenant.CustomDomain) gin.H {
 
 // HandleAgentBindCustomDomain POST /api/tenant/custom-domain —— 绑定自定义域名（返回 A + TXT 指引）。
 func (a *App) HandleAgentBindCustomDomain(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
+		return
+	}
 	tenantID := agentTenantID(c)
 	var req bindCustomDomainReq
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -78,6 +81,9 @@ func (a *App) HandleAgentBindCustomDomain(c *gin.Context) {
 
 // HandleAgentGetCustomDomain GET /api/tenant/custom-domain —— 查当前绑定与状态（未绑定返回 {bound:false}）。
 func (a *App) HandleAgentGetCustomDomain(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
+		return
+	}
 	tenantID := agentTenantID(c)
 	cd, err := a.CustomDomains.GetByTenant(c.Request.Context(), tenantID)
 	if err != nil {
@@ -94,6 +100,9 @@ func (a *App) HandleAgentGetCustomDomain(c *gin.Context) {
 // HandleAgentVerifyCustomDomain POST /api/tenant/custom-domain/verify —— 触发 TXT 所有权校验。
 // 通过 → dns_verified（异步发证信号）；失败 → DNS_VERIFY_FAILED（落库已置 failed + last_error，前端再 GET 取详情）。
 func (a *App) HandleAgentVerifyCustomDomain(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
+		return
+	}
 	tenantID := agentTenantID(c)
 	cd, err := a.CustomDomains.VerifyOwnership(c.Request.Context(), tenantID)
 	if err != nil {
@@ -105,6 +114,9 @@ func (a *App) HandleAgentVerifyCustomDomain(c *gin.Context) {
 
 // HandleAgentUnbindCustomDomain DELETE /api/tenant/custom-domain —— 解绑并失效 Host 缓存。
 func (a *App) HandleAgentUnbindCustomDomain(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
+		return
+	}
 	tenantID := agentTenantID(c)
 	domain, err := a.CustomDomains.Unbind(c.Request.Context(), tenantID)
 	if err != nil {

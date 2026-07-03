@@ -102,15 +102,19 @@ func SetMtRouter(router *gin.Engine) {
 			agentSelf.GET("/agent/tickets/:id", app.HandleAgentGetTicket)
 			agentSelf.POST("/agent/tickets/:id/replies", app.HandleAgentReplyTicket)
 			agentSelf.POST("/agent/tickets/:id/status", app.HandleAgentSetTicketStatus)
-			// 自定义域名（OEM，§6.2/§6.3）：绑定（返 A+TXT 指引）/ 查状态 / 触发 TXT 校验 / 解绑（owner 维度）。
-			agentSelf.POST("/custom-domain", app.HandleAgentBindCustomDomain)
-			agentSelf.GET("/custom-domain", app.HandleAgentGetCustomDomain)
-			agentSelf.POST("/custom-domain/verify", app.HandleAgentVerifyCustomDomain)
-			agentSelf.DELETE("/custom-domain", app.HandleAgentUnbindCustomDomain)
-			// 站点装修（OEM 最小版，§5/§9）：读/改装修配置 + 上传 Logo（owner 维度）。
-			agentSelf.GET("/site-config", app.HandleAgentGetSiteConfig)
-			agentSelf.PUT("/site-config", app.HandleAgentUpdateSiteConfig)
-			agentSelf.POST("/site-config/logo", app.HandleAgentUploadLogo)
+			// 独立档能力（level>=1）：自定义域名 + 站点装修。挂 RequireAgentLevel(1)（AgentOwnerAuth 之后）。
+			agentIndependent := agentSelf.Group("", app.RequireAgentLevel(1))
+			{
+				// 自定义域名（OEM，§6.2/§6.3）：绑定 / 查状态 / 触发 TXT 校验 / 解绑（owner + level>=1）。
+				agentIndependent.POST("/custom-domain", app.HandleAgentBindCustomDomain)
+				agentIndependent.GET("/custom-domain", app.HandleAgentGetCustomDomain)
+				agentIndependent.POST("/custom-domain/verify", app.HandleAgentVerifyCustomDomain)
+				agentIndependent.DELETE("/custom-domain", app.HandleAgentUnbindCustomDomain)
+				// 站点装修（OEM 最小版，§5/§9）：读/改装修配置 + 上传 Logo（owner + level>=1）。
+				agentIndependent.GET("/site-config", app.HandleAgentGetSiteConfig)
+				agentIndependent.PUT("/site-config", app.HandleAgentUpdateSiteConfig)
+				agentIndependent.POST("/site-config/logo", app.HandleAgentUploadLogo)
+			}
 			// 财务报表（代理自助，单租户，tenant_id 取自 AgentOwnerAuth）：汇总 / 趋势 / 明细（?format=csv|pdf 导出）。
 			agentSelf.GET("/finance/summary", app.HandleTenantFinanceSummary)
 			agentSelf.GET("/finance/trend", app.HandleTenantFinanceTrend)

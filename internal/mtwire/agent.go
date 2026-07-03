@@ -37,6 +37,7 @@ var (
 	errAgentUserNotFound  = apperr.New("AGENT_USER_NOT_FOUND", "owner 用户不存在", http.StatusBadRequest)
 	errAgentTierInvalid   = apperr.New("AGENT_TIER_INVALID", "不允许的用户层级", http.StatusBadRequest)
 	errAgentGroupNotModel = apperr.New("AGENT_GROUP_NOT_MODEL", "仅可调整模型分组的倍率", http.StatusBadRequest)
+	errAgentLevelLocked   = apperr.New("AGENT_LEVEL_LOCKED", "该能力需升级为独立代理后开启", http.StatusForbidden)
 )
 
 // ============================================================================
@@ -355,6 +356,37 @@ func agentTenantID(c *gin.Context) int64 {
 		}
 	}
 	return 0
+}
+
+// ensureAgentLevel 纵深校验当前代理租户档位 ≥ min：不足以 AGENT_LEVEL_LOCKED 响应并返回 false。
+// 用于路由中间件（RequireAgentLevel）与 handler 入口双保险（spec §5.2.3 纵深）。
+func (a *App) ensureAgentLevel(c *gin.Context, min int) bool {
+	tenantID := agentTenantID(c)
+	if tenantID <= 0 {
+		respondErr(c, errAgentForbidden)
+		return false
+	}
+	lvl, err := a.AgentService.AgentLevel(c.Request.Context(), tenantID)
+	if err != nil {
+		respondErr(c, err)
+		return false
+	}
+	if lvl < min {
+		respondErr(c, errAgentLevelLocked)
+		return false
+	}
+	return true
+}
+
+// RequireAgentLevel 是「独立能力」路由门禁：须挂在 AgentOwnerAuth 之后（依赖其写入的 agentTenantID）。
+func (a *App) RequireAgentLevel(min int) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !a.ensureAgentLevel(c, min) {
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 // isAgentOwner 复用 AgentOwnerAuth 的**权威**判定（Host 解析出的租户 owner_user_id == 当前 session

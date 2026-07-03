@@ -109,6 +109,9 @@ func (a *App) effectiveSiteConfig(ctx context.Context, t *tenant.Tenant) *siteco
 
 // HandleAgentGetSiteConfig GET /api/tenant/site-config —— 读当前租户装修配置（含回退默认）。
 func (a *App) HandleAgentGetSiteConfig(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
+		return
+	}
 	t := tenantFrom(c)
 	if t == nil {
 		respondErr(c, tenant.ErrTenantNotFound)
@@ -119,6 +122,9 @@ func (a *App) HandleAgentGetSiteConfig(c *gin.Context) {
 
 // HandleAgentUpdateSiteConfig PUT /api/tenant/site-config —— 局部更新装修配置（受控字段校验在包内）。
 func (a *App) HandleAgentUpdateSiteConfig(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
+		return
+	}
 	tenantID := agentTenantID(c)
 	var in siteConfigPatchIn
 	if err := c.ShouldBindJSON(&in); err != nil {
@@ -136,6 +142,9 @@ func (a *App) HandleAgentUpdateSiteConfig(c *gin.Context) {
 // HandleAgentUploadLogo POST /api/tenant/site-config/logo —— 上传 Logo（multipart "file"），
 // 经 AssetService 校验类型/大小后内联为 data: URL 并写入 logo_url。
 func (a *App) HandleAgentUploadLogo(c *gin.Context) {
+	if !a.ensureAgentLevel(c, 1) {
+		return
+	}
 	tenantID := agentTenantID(c)
 	fh, err := c.FormFile("file")
 	if err != nil {
