@@ -109,8 +109,27 @@ func (s rechargeQuotaSink) OnPaid(ctx context.Context, o payment.PaidOrder) erro
 		}
 		credited = true
 		// 与台账写入同事务落 users.quota，二者原子：要么都成、要么都回滚。
-		return tx.Model(&model.User{}).Where("id = ?", o.UserID).
-			Update("quota", gorm.Expr("quota + ?", q)).Error
+		if err := tx.Model(&model.User{}).Where("id = ?", o.UserID).
+			Update("quota", gorm.Expr("quota + ?", q)).Error; err != nil {
+			return err
+		}
+		// 账单历史可见性修复：同事务补写一条已完成的原生 model.TopUp，使这笔 MT 充值出现在
+		// GetUserTopUps（GET /api/user/topup/self，钱包「账单历史」数据源）——此前 OnPaid 只写
+		// 幂等台账 + users.quota，从不写 top_ups，充值成功但用户在账单历史里"查无此单"。
+		// 仅展示用途：额度已由上面一次性加好，这里不触发任何二次入账或钩子。
+		// 与台账同事务意味着若这里失败，整个事务（含台账与 quota）一并回滚，下次重试从头
+		// 再来、幂等不受影响；TradeNo 唯一索引对同一 order_no 亦是双保险，防并发下重复写行。
+		return tx.Create(&model.TopUp{
+			UserId:          int(o.UserID),
+			Amount:          int64(math.Round(o.AmountUSD)), // USD，口径同 formatCurrencyFromUSD 的历史 Amount 展示
+			Money:           o.ActualPaid,                   // ¥ 实付（充值差价基准，同订单落库金额，不信回调报文）
+			TradeNo:         o.OrderNo,
+			PaymentMethod:   rechargePaymentMethod(o.Provider), // wxpay_official / alipay_official（与前端 PAYMENT_METHOD_NAMES 同约定）
+			PaymentProvider: string(o.Provider),
+			CreateTime:      time.Now().Unix(),
+			CompleteTime:    time.Now().Unix(),
+			Status:          common.TopUpStatusSuccess,
+		}).Error
 	}); err != nil {
 		return err
 	}
@@ -121,6 +140,15 @@ func (s rechargeQuotaSink) OnPaid(ctx context.Context, o payment.PaidOrder) erro
 		}
 	}
 	return nil
+}
+
+// rechargePaymentMethod 把支付渠道映射为账单历史展示用的 payment_method 取值。
+// "_official" 后缀是既有约定（见 operation_setting.OfficialPayMethodTypes /
+// 前端 features/wallet/lib/billing.ts 的 PAYMENT_METHOD_NAMES），用来把「主站进程内官方
+// 微信/支付宝 SDK」与 Epay 网关的裸 "wxpay"/"alipay" 区分开；前端据此渲染
+// "Official WeChat Pay"/"Official Alipay"（zh 本地化："官方微信支付"/"官方支付宝"）。
+func rechargePaymentMethod(p payment.Provider) string {
+	return string(p) + "_official"
 }
 
 // isDuplicateLedgerErr 报告是否为唯一约束/主键冲突错误（跨 MySQL/sqlite，driver 无关）。
