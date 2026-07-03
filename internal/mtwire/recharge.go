@@ -25,7 +25,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
-	"github.com/QuantumNous/new-api/internal/tenant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
@@ -180,14 +179,16 @@ type rechargeRequest struct {
 	Provider  string  `json:"provider"` // wxpay | alipay
 }
 
-// HandleWalletRecharge POST /api/tenant/wallet/recharge —— 钱包充值下单。需 UserAuth + Host 租户。
+// HandleWalletRecharge POST /api/tenant/wallet/recharge —— 钱包充值下单。需 UserAuth + Host 租户
+// （主站 Host 无租户但命中 tenant.IsMainSiteHost 时回退平台租户，见 http.go resolveBuyerTenant——
+// 产品侧已确认「主站自身也接受终端用户直充」，与买家套餐购买同一 main-site direct-sales 口径）。
 //
 // 流程：校验 amount_usd≥1 与渠道 → 实付¥=usd×汇率 → RechargeGateway.CreateOrder（落库 RCG 订单 +
 // 进程内向平台下单拿支付凭据）→ 返回 {order_no, amount_*, provider, pay:{wxpay_qr|alipay_url}}。
 func (a *App) HandleWalletRecharge(c *gin.Context) {
-	t := tenantFrom(c)
-	if t == nil {
-		respondErr(c, tenant.ErrTenantNotFound)
+	t, err := a.resolveBuyerTenant(c)
+	if err != nil {
+		respondErr(c, err)
 		return
 	}
 	userID := int64(c.GetInt("id"))

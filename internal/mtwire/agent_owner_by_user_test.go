@@ -94,3 +94,25 @@ func TestAgentOwnerAuthByUser_ResolvesOwnedTenantHostIndependent(t *testing.T) {
 		t.Fatalf("non-owner must not have an agent tenant set, got %d", got)
 	}
 }
+
+// TestAgentOwnerAuthByUser_PlatformTenantOwnerForbidden 是平台直销租户排除的回归测试（agent-tiering
+// 主站直销复核提出的关注点）：seedPlatformTenant 把平台租户挂靠给首个管理员（root），若不排除，
+// TenantByOwner 反查会让该管理员"看起来"拥有一个租户，从而被当作 agent-self 组全部端点
+// （提现/收益/推广渠道/站点装修/自定义域名/…）的合法 owner——但平台租户不是可管理的代理。
+// 必须 403 中止，与"不拥有任何租户"同等对待，且不得写 agentTenantID。
+func TestAgentOwnerAuthByUser_PlatformTenantOwnerForbidden(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app := newOwnerAuthTestApp(t)
+	adminID := int64(1)
+	seedOwnedTenant(t, app, platformSlug, adminID) // 镜像 seedPlatformTenant：owner = 首个管理员
+
+	c, w := ownerAuthCtx(t, adminID)
+	app.AgentOwnerAuthByUser()(c)
+
+	if !c.IsAborted() || w.Code != http.StatusForbidden {
+		t.Fatalf("platform-tenant owner (admin): aborted=%v code=%d, want abort/403", c.IsAborted(), w.Code)
+	}
+	if got := agentTenantID(c); got != 0 {
+		t.Fatalf("platform-tenant owner must not have an agent tenant set, got %d", got)
+	}
+}

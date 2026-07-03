@@ -374,8 +374,16 @@ func (a *App) AgentOwnerAuth() gin.HandlerFunc {
 // （tenants.owner_user_id == 当前 session 用户，1:1）解析 agentTenantID，与 Host 无关——
 // 故 L0 无子域名也能在主站访问自己的控制台，L1 在子域名同样解析到自己的租户。
 // 安全不变量：只解析到「当前用户拥有的」那一个租户；绝不接受客户端传 tenant_id；
-// 未登录 / 不拥有任何租户 → 403 中止（不放行）。须挂在 new-api UserAuth 之后。
+// 未登录 / 不拥有任何租户 / 拥有的是平台（主站）直销租户（isPlatformTenant，见 seed.go）→ 403 中止
+// （不放行）。须挂在 new-api UserAuth 之后。
 // 替代 agent-self 组原先的 Host-based AgentOwnerAuth（后者留作 HandleAgentContext 的 Host 判定，不删）。
+//
+// 平台租户排除说明：seedPlatformTenant 把平台租户挂靠给首个管理员（root），使其在
+// TenantByOwner 反查下"看起来"像拥有一个租户。但平台租户不是可管理的代理（无 agent_profiles
+// 行），排除它是这条鉴权真正的安全边界——否则管理员会被当作 agent-self 组全部端点
+// （提现申请/收益台账/推广渠道/站点装修/自定义域名/…）的合法 owner，凭自己的登录态操作
+// "平台租户"这一并非代理的资源。此判定与 callerOwnedTenant（下方，供 HandleAgentContext
+// 门控信号用）保持一致：同一个 isPlatformTenant 排除规则。
 func (a *App) AgentOwnerAuthByUser() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := int64(c.GetInt("id"))
@@ -385,8 +393,9 @@ func (a *App) AgentOwnerAuthByUser() gin.HandlerFunc {
 			return
 		}
 		t, err := a.TenantRepo.TenantByOwner(c.Request.Context(), userID)
-		if err != nil {
-			// 该用户不拥有任何代理租户（含 ErrTenantNotFound）→ 403，绝不放行、绝不回退 Host。
+		if err != nil || isPlatformTenant(t) {
+			// 该用户不拥有任何代理租户（含 ErrTenantNotFound）、或拥有的是平台直销租户 → 403，
+			// 绝不放行、绝不回退 Host。
 			respondErr(c, errAgentForbidden)
 			c.Abort()
 			return
@@ -439,15 +448,23 @@ func (a *App) RequireAgentLevel(min int) gin.HandlerFunc {
 
 // callerOwnedTenant 返回当前 session 用户拥有的租户（owner-based：TenantByOwner，与 Host 无关，
 // 镜像 AgentOwnerAuthByUser 的解析口径）——L0 无子域名、请求打在主站 Host 上时也能命中自己的租户。
-// 未登录 / 不拥有任何租户（含 ErrTenantNotFound）/ 查询失败一律 nil（绝不抛错，调用方保守判非 owner）。
+// 未登录 / 不拥有任何租户（含 ErrTenantNotFound）/ 拥有的是平台（主站）直销租户（isPlatformTenant，
+// 见 seed.go）/ 查询失败一律 nil（绝不抛错，调用方保守判非 owner）。
+//
+// 平台租户排除说明：seedPlatformTenant 把平台租户挂靠给首个管理员（root），若不排除，
+// HandleAgentContext（唯一调用方）会对该管理员返回 is_agent_owner:true——前端据此展示整套
+// 代理自助菜单/路由守卫，而管理员其实只是"拥有"主站直销这一并非代理的记账实体，并非真正的代理。
+// 与 AgentOwnerAuthByUser（真正的后端鉴权防线）用同一 isPlatformTenant 判定，保持口径一致——
+// 门控信号（这里）与实际授权（那里）必须对同一用户给出相同答案，否则会出现"前端隐藏了菜单，
+// 后端却仍会放行"的门面式修复（信号和授权脱节）。
 func (a *App) callerOwnedTenant(c *gin.Context) *tenant.Tenant {
 	userID := int64(c.GetInt("id"))
 	if userID <= 0 {
 		return nil // 未登录
 	}
 	t, err := a.TenantRepo.TenantByOwner(c.Request.Context(), userID)
-	if err != nil {
-		return nil // 不拥有任何租户 / 查询失败：保守判 false
+	if err != nil || isPlatformTenant(t) {
+		return nil // 不拥有任何租户 / 拥有的是平台直销租户 / 查询失败：保守判 false
 	}
 	return t
 }

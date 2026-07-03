@@ -163,3 +163,29 @@ func TestHandleAgentContext_NotLoggedInFalse(t *testing.T) {
 		t.Fatalf("is_agent_owner = true for not-logged-in caller, want false")
 	}
 }
+
+// TestHandleAgentContext_PlatformTenantOwnerNotFlaggedAsAgent 是主站直销复核提出的关注点的回归
+// 测试：seedPlatformTenant 把"平台（主站）直销"租户挂靠给首个管理员（root）。若 callerOwnedTenant
+// 不排除它，TenantByOwner 反查会让该管理员被判定为 is_agent_owner:true，前端就会为管理员展示整套
+// 代理自助菜单/路由守卫——但管理员在主站看到的应该是管理员后台，不是"我是某个代理"的自助视图。
+// 必须 is_agent_owner=false（与非 owner 同等对待），level/can_api 保持零值，且仍 200（fail-safe 契约不变）。
+func TestHandleAgentContext_PlatformTenantOwnerNotFlaggedAsAgent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app := newAgentContextTestApp(t)
+	adminID := int64(1)
+	seedOwnedTenant(t, app, platformSlug, adminID) // 镜像 seedPlatformTenant：owner = 首个管理员
+
+	c, w := agentContextCtx(adminID)
+	app.HandleAgentContext(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200 (always-200 contract); body=%s", w.Code, w.Body.String())
+	}
+	env := decodeAgentContext(t, w)
+	if env.Data.IsAgentOwner {
+		t.Fatalf("is_agent_owner = true for platform-tenant owner (admin), want false — admin must see admin UI, not agent-self UI")
+	}
+	if env.Data.Level != 0 || env.Data.CanAPI {
+		t.Fatalf("got %+v, want zero-value level/can_api for platform-tenant owner", env.Data)
+	}
+}

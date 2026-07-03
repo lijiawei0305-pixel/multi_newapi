@@ -47,6 +47,41 @@ func tenantFrom(c *gin.Context) *tenant.Tenant {
 	return nil
 }
 
+// resolveBuyerTenant 解析买家端点（HandleListTokenPlans/HandlePurchase/HandleListSubscriptions/
+// HandleWalletRecharge/HandleTenantRechargeMethods）当前请求应归属的租户，三分支：
+//  1. TenantMiddleware 已按 Host 解析出租户（tenantFrom(c) != nil）—— 原样返回，代理子域名场景
+//     行为完全不变；
+//  2. 未解析到租户，但 Host 命中主站（tenant.IsMainSiteHost，见 internal/tenant/resolver.go 的
+//     三态判别：apex/www/非平台域→true，*.wedreamhub.com 下未注册子域→false）—— 回退平台租户
+//     （platformTenant，见 seed.go）：产品侧已确认「主站自身也向终端用户直销 tokenplan 套餐 +
+//     接受直充」（platform direct sales），故主站 Host 不应报 TENANT_NOT_FOUND；
+//  3. 都不是（*.wedreamhub.com 下未注册子域 / 站点未开通）—— 维持既有 TENANT_NOT_FOUND
+//     （"租户不存在"），不做任何回退。
+//
+// 命中分支 2 时把平台租户写回 gin ctx + request context（与 TenantMiddleware 对真实租户的注入方式
+// 一致，见上方 TenantMiddleware），使同一请求内后续 tenantFrom(c) / reqCtx(c) 读到一致的 TenantID。
+//
+// 注：本函数刻意不接管 HandleTenantCurrent（主站/站点未开通三态渲染契约由该 handler 自行维护，见
+// doc/domains-ssl.md §6.4，不改）、agent-self 组（AgentOwnerAuthByUser，owner-based、与 Host 无关）、
+// 或任何 AdminAuth 全局路由——只影响这 5 个买家端点的租户解析。
+func (a *App) resolveBuyerTenant(c *gin.Context) (*tenant.Tenant, error) {
+	if t := tenantFrom(c); t != nil {
+		return t, nil
+	}
+	// a.TenantRepo == nil：App 未完整装配（如单测直构零值 App）——按既有 grouphook.go 惯例保守短路，
+	// 不去解析 IsMainSiteHost/platformTenant（后者需要 a.TenantRepo，装配缺失时调用会 nil-panic）。
+	if a.TenantRepo == nil || !tenant.IsMainSiteHost(c.Request.Host) {
+		return nil, tenant.ErrTenantNotFound
+	}
+	t, err := a.platformTenant(c.Request.Context())
+	if err != nil {
+		return nil, err
+	}
+	c.Set(ginKeyTenant, t)
+	c.Request = c.Request.WithContext(tenant.ContextWithTenant(c.Request.Context(), t))
+	return t, nil
+}
+
 // principalFrom 组装请求级 Principal：UserID/Role 取自 new-api 鉴权写入 gin ctx 的 id/role，
 // TenantID 取自 Host 中间件。角色映射：admin（new-api 管理员）> agent_owner（Host 租户 owner==当前用户）> user。
 //
@@ -132,10 +167,11 @@ func (a *App) HandleTenantCurrent(c *gin.Context) {
 }
 
 // HandleListTokenPlans GET /api/tenant/token-plans —— 当前租户已上架套餐（含零售价）。需 UserAuth。
+// 主站 Host（无租户但命中 tenant.IsMainSiteHost）回退平台租户，见 resolveBuyerTenant。
 func (a *App) HandleListTokenPlans(c *gin.Context) {
-	t := tenantFrom(c)
-	if t == nil {
-		respondErr(c, tenant.ErrTenantNotFound)
+	t, err := a.resolveBuyerTenant(c)
+	if err != nil {
+		respondErr(c, err)
 		return
 	}
 	views, err := a.Retail.ListForTenant(reqCtx(c), t.ID)
@@ -159,6 +195,7 @@ type purchaseRequest struct {
 }
 
 // HandlePurchase POST /api/tenant/token-plans/:id/purchase —— 下单（返回支付凭据）。需 UserAuth。
+// 主站 Host（无租户但命中 tenant.IsMainSiteHost）回退平台租户，见 resolveBuyerTenant。
 //
 // 流程：校验套餐/上架/限购 → Purchase 落 SUB 待支付订单 + 购买快照 → 像 recharge 一样经
 // providerManager 进程内向平台下单拿支付凭据 → 返回 snake_case DTO（与充值响应同形）：
@@ -166,9 +203,9 @@ type purchaseRequest struct {
 // 微信端渲染二维码、支付宝端跳转。用户支付 → 平台异步回调 /api/pay/{wechat,alipay}/notify →
 // handlePayNotify 验签 → 按 SUB 前缀分发 → ActivatePaidTokenplanOrder（激活原生订阅，链路已就绪）。
 func (a *App) HandlePurchase(c *gin.Context) {
-	t := tenantFrom(c)
-	if t == nil {
-		respondErr(c, tenant.ErrTenantNotFound)
+	t, err := a.resolveBuyerTenant(c)
+	if err != nil {
+		respondErr(c, err)
 		return
 	}
 	planID, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -252,10 +289,11 @@ func (a *App) subscriptionPayURL(ctx context.Context, ticket *tokenplan.Purchase
 }
 
 // HandleListSubscriptions GET /api/tenant/subscriptions —— 当前用户在本租户的订阅（含历史）。需 UserAuth。
+// 主站 Host（无租户但命中 tenant.IsMainSiteHost）回退平台租户，见 resolveBuyerTenant。
 func (a *App) HandleListSubscriptions(c *gin.Context) {
-	t := tenantFrom(c)
-	if t == nil {
-		respondErr(c, tenant.ErrTenantNotFound)
+	t, err := a.resolveBuyerTenant(c)
+	if err != nil {
+		respondErr(c, err)
 		return
 	}
 	ctx := reqCtx(c)

@@ -18,7 +18,6 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
-	"github.com/QuantumNous/new-api/internal/tenant"
 )
 
 // 支付渠道相关错误码（沿用模块前缀约定）。
@@ -47,11 +46,14 @@ func (a *App) ensureProviderUsable(_ context.Context, provider payment.Provider)
 }
 
 // HandleTenantRechargeMethods GET /api/tenant/wallet/recharge/methods —— 当前租户买家可用充值渠道。
-// 需 UserAuth + Host 租户。可用 = Configured（enabled && 凭据齐全，进程内判断）。
-// 两渠道均不可用时返回空列表（前端据此隐藏整卡）。
+// 需 UserAuth + Host 租户（主站 Host 无租户但命中 tenant.IsMainSiteHost 时回退平台租户，见
+// http.go resolveBuyerTenant）。可用 = Configured（enabled && 凭据齐全，进程内判断，渠道可用性本身
+// 是全站配置、与租户无关——这里只借 resolveBuyerTenant 做"是否已开通站点"的门禁，同 HandleWalletRecharge）。
+// 两渠道均不可用时返回空列表（前端据此隐藏整卡）；前端 useRechargeMethods 把本端点当作充值卡是否渲染
+// 的单一开关（获取失败即回退空集隐藏整卡），故主站与真实租户站点必须同等对待，不能在此处漏修。
 func (a *App) HandleTenantRechargeMethods(c *gin.Context) {
-	if tenantFrom(c) == nil {
-		respondErr(c, tenant.ErrTenantNotFound)
+	if _, err := a.resolveBuyerTenant(c); err != nil {
+		respondErr(c, err)
 		return
 	}
 	methods := make([]string, 0, 2)

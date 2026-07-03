@@ -22,6 +22,13 @@ const (
 	// demo 代理 owner 用户（便于 UI/E2E 有可登录的代理样例）。
 	demoAgentUsername = "demoagent"
 	demoAgentPassword = "demoagent123" // 8-20 位，满足 new-api 校验；演示用，部署后请改。
+
+	// 平台（主站）直销租户：产品侧已确认「主站自身也直销 tokenplan 套餐 + 接受直充」（非仅代理转售），
+	// 见 platformTenant / http.go resolveBuyerTenant。slug 非保留词（见 tenant.ReservedSlugs），可正常
+	// 通过 tenant.Create 校验；自动派生的 platform.wedreamhub.com 域名本身也是一个可正常访问、与主站
+	// Host 兜底等价的合法租户站点，无副作用。
+	platformSlug = "platform"
+	platformName = "主站直销"
 )
 
 // Seed 幂等地写入演示数据（仅 master 节点调用，见 router/mt-router.go）：
@@ -78,7 +85,110 @@ func (a *App) Seed() error {
 			common.SysError("mtwire: seed demo agent failed: " + err.Error())
 		}
 	}
+
+	// 平台（主站）直销租户：失败不影响以上 demo 租户主链路，仅记日志——届时主站买家端点
+	// （HandleListTokenPlans/HandlePurchase/HandleListSubscriptions/HandleWalletRecharge/
+	// HandleTenantRechargeMethods）会继续回退 TENANT_NOT_FOUND，下次启动会重试
+	// （ensurePlatformTenant/EnsurePlan/EnsureListing/SetOwnerUserID 均幂等，见 seedPlatformTenant）。
+	if err := a.seedPlatformTenant(ctx); err != nil {
+		common.SysError("mtwire: seed platform tenant failed: " + err.Error())
+	}
 	return nil
+}
+
+// seedPlatformTenant 幂等地建"平台（主站）直销"租户 + 上架主站基准 6 档套餐 + 挂靠
+// owner=root/首个管理员，供主站 Host（tenant.IsMainSiteHost）买家套餐/充值端点兜底解析
+// （见 http.go resolveBuyerTenant）。
+//
+// 刻意不调用 AgentService.SetAgentType / AgentRepo.EnsureWallet：平台租户不是可管理的「代理」——
+// HandleAdminListAgents 只读 agent_profiles 表（AgentRepo.ListProfiles），没有该表行 = 不会出现在
+// 代理列表；callerOwnedTenant / AgentOwnerAuthByUser 也显式排除它（isPlatformTenant），管理员不会
+// 因"拥有"平台租户被误判为代理 owner（agent-self UI 门控 + owner-based 鉴权两处，见 agent.go）。
+func (a *App) seedPlatformTenant(ctx context.Context) error {
+	pt, _, err := a.ensurePlatformTenant(ctx)
+	if err != nil {
+		return err
+	}
+
+	// 主站基准 6 档套餐同样为平台租户上架（零售价默认取 BasePrice，即主站官方售价——
+	// 平台直销场景下"零售价"与"官方售价"本就是同一个数，不存在代理差价）。
+	for _, p := range tokenplan.SeedPlans() {
+		plan := p
+		planID, err := a.TokenPlanRepo.EnsurePlan(ctx, &plan)
+		if err != nil {
+			return err
+		}
+		if err := a.TokenPlanRepo.EnsureListing(ctx, pt.ID, planID, true, plan.BasePrice); err != nil {
+			return err
+		}
+	}
+
+	if pt.OwnerUserID != 0 {
+		return nil // 已挂靠：尊重既有归属（含后续人工改派），不重新查找/覆盖
+	}
+	ownerID, found, err := a.firstAdminUserID(ctx)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil // 新库 / setup 向导尚未创建管理员：本轮跳过，下次启动 OwnerUserID==0 会重试
+	}
+	return a.TenantRepo.SetOwnerUserID(ctx, pt.ID, ownerID)
+}
+
+// platformTenant 返回已 seed 的"平台（主站）直销"租户；不存在时原样透传 tenant.ErrTenantNotFound
+// （seed 尚未跑过，或曾因 DB 故障失败——调用方按既有"站点未开通/租户不存在"语义处理，见
+// http.go resolveBuyerTenant）。
+func (a *App) platformTenant(ctx context.Context) (*tenant.Tenant, error) {
+	return a.TenantRepo.GetTenantBySlug(ctx, platformSlug)
+}
+
+// ensurePlatformTenant 幂等取/建平台租户；返回 (租户, 是否本次新建, error)。镜像 ensureDemoTenant
+// 的取/建结构，但平台租户没有"首次初始化固化主题/分组"的需要（那是 demo 租户 E2E 演示专属逻辑）。
+func (a *App) ensurePlatformTenant(ctx context.Context) (*tenant.Tenant, bool, error) {
+	t, err := a.platformTenant(ctx)
+	if err == nil {
+		return t, false, nil
+	}
+	if !errors.Is(err, tenant.ErrTenantNotFound) {
+		return nil, false, err
+	}
+	created, err := a.TenantService.Create(ctx, tenant.CreateTenantInput{
+		Slug:             platformSlug,
+		Name:             platformName,
+		TokenplanEnabled: true,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return created, true, nil
+}
+
+// isPlatformTenant 报告 t 是否为"平台（主站）直销"租户（seedPlatformTenant，slug=platformSlug）。
+// 平台租户的 owner 是首个管理员（seedPlatformTenant 挂靠），但它不是可管理的代理——
+// callerOwnedTenant / AgentOwnerAuthByUser（agent.go）据此排除它，防止管理员因"拥有"平台租户
+// 被误判为 agent owner（既影响前端门控信号 HandleAgentContext，也影响 agent-self 组的真实鉴权）。
+func isPlatformTenant(t *tenant.Tenant) bool {
+	return t != nil && t.Slug == platformSlug
+}
+
+// firstAdminUserID 找"root/首个管理员"用户：role >= common.RoleAdminUser（含 RoleRootUser）里
+// id 最小的一个——绝大多数部署中就是 new-api 建库时创建的首个 root 用户。直读共享 *gorm.DB 原始
+// users 表（与 http.go usernamesByIDs / agent.go userTenantIDStrict 同一约定，不引入 new-api model
+// 包；.Select("id") 同 userTenantIDStrict 惯例，避免对宽表做 SELECT *），找不到（新库、setup 向导
+// 尚未完成）返回 (0, false, nil)，非错误。
+func (a *App) firstAdminUserID(ctx context.Context) (int64, bool, error) {
+	var row struct{ ID int64 }
+	err := a.DB.WithContext(ctx).Table("users").Select("id").
+		Where("role >= ?", common.RoleAdminUser).
+		Order("id asc").Limit(1).Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return row.ID, true, nil
 }
 
 // seedDemoAgent 确保 demo 代理用户存在，并把其设为 tenantID 的 owner + 写 agent_profile + 钱包。
