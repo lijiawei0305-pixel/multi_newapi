@@ -29,6 +29,7 @@ type profileRow struct {
 	UserID          int64     `gorm:"column:user_id;not null;default:0;index:idx_agent_profiles_user"`
 	Type            string    `gorm:"column:type;type:varchar(16);not null;default:normal"`
 	Level           int       `gorm:"column:level;not null;default:0"`
+	CanAPI          bool      `gorm:"column:can_api;not null;default:false"`
 	CostPriceCNY    float64   `gorm:"column:cost_price_cny;type:decimal(20,8);not null;default:0"`
 	PackageDiscount float64   `gorm:"column:package_discount;type:decimal(20,8);not null;default:0"`
 	CommissionRatio float64   `gorm:"column:commission_ratio;type:decimal(20,8);not null;default:0"`
@@ -111,6 +112,7 @@ func (r *Repo) SetAgentType(ctx context.Context, tenantID int64, t agent.AgentTy
 		TenantID:        tenantID,
 		Type:            string(t),
 		Level:           p.Level,
+		CanAPI:          p.CanAPI,
 		CostPriceCNY:    p.CostPrice,
 		PackageDiscount: p.PackageDiscount,
 		CommissionRatio: p.CommissionRatio,
@@ -121,7 +123,7 @@ func (r *Repo) SetAgentType(ctx context.Context, tenantID int64, t agent.AgentTy
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "tenant_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"type", "level", "cost_price_cny", "package_discount",
+			"type", "level", "can_api", "cost_price_cny", "package_discount",
 			"commission_ratio", "discount_floor", "updated_at",
 		}),
 	}).Create(&row).Error
@@ -142,6 +144,7 @@ func (r *Repo) GetAgentType(ctx context.Context, tenantID int64) (agent.AgentTyp
 		PackageDiscount: row.PackageDiscount,
 		CommissionRatio: row.CommissionRatio,
 		Level:           row.Level,
+		CanAPI:          row.CanAPI,
 		DiscountFloor:   row.DiscountFloor,
 	}, true, nil
 }
@@ -328,6 +331,7 @@ type AgentRow struct {
 	UserID          int64
 	Type            agent.AgentType
 	Level           int
+	CanAPI          bool
 	CostPriceCNY    float64
 	PackageDiscount float64
 	CommissionRatio float64
@@ -346,6 +350,7 @@ func (r *Repo) ListProfiles(ctx context.Context) ([]AgentRow, error) {
 			UserID:          p.UserID,
 			Type:            agent.AgentType(p.Type),
 			Level:           p.Level,
+			CanAPI:          p.CanAPI,
 			CostPriceCNY:    p.CostPriceCNY,
 			PackageDiscount: p.PackageDiscount,
 			CommissionRatio: p.CommissionRatio,

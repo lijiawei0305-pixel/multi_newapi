@@ -375,6 +375,7 @@ type agentOut struct {
 	Name            string  `json:"name"`
 	Type            string  `json:"type"`
 	Level           int     `json:"level"`
+	CanAPI          bool    `json:"can_api"`
 	CostPriceCNY    float64 `json:"cost_price_cny"`
 	PackageDiscount float64 `json:"package_discount"`
 	CommissionRatio float64 `json:"commission_ratio"`
@@ -534,6 +535,7 @@ func (a *App) HandleAdminListAgents(c *gin.Context) {
 			Name:            name,
 			Type:            string(p.Type),
 			Level:           p.Level,
+			CanAPI:          p.CanAPI,
 			CostPriceCNY:    p.CostPriceCNY,
 			PackageDiscount: p.PackageDiscount,
 			CommissionRatio: p.CommissionRatio,
@@ -755,6 +757,7 @@ func (a *App) buildAgentOut(ctx context.Context, tenantID, ownerUserID int64, sl
 		Name:            name,
 		Type:            string(at),
 		Level:           p.Level,
+		CanAPI:          p.CanAPI,
 		CostPriceCNY:    p.CostPrice,
 		PackageDiscount: p.PackageDiscount,
 		CommissionRatio: p.CommissionRatio,

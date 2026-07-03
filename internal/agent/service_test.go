@@ -99,3 +99,20 @@ func TestGetWallet_UnknownTenantIsZero(t *testing.T) {
 		t.Fatalf("expected zero wallet for tenant 99, got %+v", w)
 	}
 }
+
+func TestAgentLevel_ReturnsProfileLevel(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemRepo()
+	svc := NewService(repo, nil)
+	if err := svc.SetAgentType(ctx, 7, AgentTypeNormal, AgentParams{Level: 1, CanAPI: true}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	lvl, err := svc.AgentLevel(ctx, 7)
+	if err != nil || lvl != 1 {
+		t.Fatalf("AgentLevel(7) = (%d,%v), want (1,nil)", lvl, err)
+	}
+	// 未设代理的租户 → level 0（非错误）。
+	if lvl, err := svc.AgentLevel(ctx, 99); err != nil || lvl != 0 {
+		t.Fatalf("AgentLevel(99) = (%d,%v), want (0,nil)", lvl, err)
+	}
+}

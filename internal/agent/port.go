@@ -14,6 +14,8 @@ type AgentService interface {
 	SetAgentType(ctx context.Context, tenantID int64, t AgentType, p AgentParams) error
 	// GetWallet 返回租户维度的代理钱包（API 额度 / 可提现 / 累计收益）。
 	GetWallet(ctx context.Context, tenantID int64) (*AgentWallet, error)
+	// AgentLevel 返回该租户代理档位（能力 gate 的唯一真相）；非代理租户返回 0（非错误）。
+	AgentLevel(ctx context.Context, tenantID int64) (int, error)
 }
 
 // EarningSink 是收益入账下沉口，被 Billing/Wallet/TokenPlan 调用。

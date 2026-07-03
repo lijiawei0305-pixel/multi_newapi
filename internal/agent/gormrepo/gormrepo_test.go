@@ -55,6 +55,22 @@ func TestSetAgentType_Upsert(t *testing.T) {
 	}
 }
 
+// TestGetAgentType_RoundTripsCanAPI 确认 can_api 列随资料持久化并读回。
+func TestGetAgentType_RoundTripsCanAPI(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	if err := r.SetAgentType(ctx, 5, agent.AgentTypeNormal, agent.AgentParams{Level: 1, CanAPI: true}); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	_, got, found, err := r.GetAgentType(ctx, 5)
+	if err != nil || !found {
+		t.Fatalf("get: found=%v err=%v", found, err)
+	}
+	if !got.CanAPI {
+		t.Fatalf("CanAPI = %v, want true", got.CanAPI)
+	}
+}
+
 // TestAppendEarning_IdempotentAndAccrues 是分润幂等核心用例：
 // 同 (tenant, source_type, source_id) 重复入账只动一次钱包；不同来源各自累加。
 func TestAppendEarning_IdempotentAndAccrues(t *testing.T) {

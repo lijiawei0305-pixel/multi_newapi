@@ -40,6 +40,8 @@ type AgentParams struct {
 	CommissionRatio float64
 	// Level 代理等级，≥ 0。
 	Level int
+	// CanAPI 开放 API 能力占位（本期恒不 gate 任何东西，正交于 level；proposal「开放API」独立后续项目）。
+	CanAPI bool
 	// DiscountFloor 主站折扣/倍率保护下限：设代理时经 PricingGuard 校验 PackageDiscount ≥ DiscountFloor。
 	// 本轮新增字段（design 的 params 仅列 4 项），见报告默认假设。
 	DiscountFloor float64

@@ -35,3 +35,15 @@ func (s *agentService) SetAgentType(ctx context.Context, tenantID int64, t Agent
 func (s *agentService) GetWallet(ctx context.Context, tenantID int64) (*AgentWallet, error) {
 	return s.repo.GetWallet(ctx, tenantID)
 }
+
+// AgentLevel 返回租户代理档位（0=普通 / 1=独立）；未设代理的租户返回 0（非错误），供能力 gate 使用。
+func (s *agentService) AgentLevel(ctx context.Context, tenantID int64) (int, error) {
+	_, p, found, err := s.repo.GetAgentType(ctx, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	if !found {
+		return 0, nil
+	}
+	return p.Level, nil
+}
