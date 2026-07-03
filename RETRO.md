@@ -227,6 +227,14 @@
 - **解决**：复用原生 AC **范式**（模块内自带 `goahocorasick`，不 import 原生 service，§1.4）；在 `internal/moderation` 建多租户/remind/记录；hook 走 **`internal/platform/agenthook`** 包级 var（`ScanUserInput`，原生 relay 调、mtwire `InstallHooks` 注入、nil 回退——避免 native→mtwire import 环）；`controller/relay.go` 原生敏感词检查后加一段调用（小原生改动）。
 - **升级**：①接 /v1 旁路逻辑一律走 `agenthook` 包级 var，别在原生包 import mtwire。②改原生 relay 前先确认 live 链是 `controller/relay.go`（不是休眠的 `internal/relay.Gateway`）。
 
+### [已解决] 主站买家端点(套餐购买/充值)在主站 Host 上报 TENANT_NOT_FOUND —— 主站也直销，不该报错
+- **现象**：管理员/用户在主站（`www.wedreamhub.com`，非租户）点「个人套餐购买」报「租户不存在」；充值同因。`HandleListTokenPlans/HandlePurchase/HandleListSubscriptions/HandleWalletRecharge` 都写死 `tenantFrom(c)==nil → TENANT_NOT_FOUND`，而主站在 `tenant_domains` 里没有对应行。
+- **根因**：这几个买家端点只认 Host 中间件解析出的租户，没有"主站自己也是卖家"这个分支——但产品侧已确认主站自身直销 tokenplan 套餐 + 接受直充。
+- **解决**：新增 `App.resolveBuyerTenant(c)`（`http.go`）：已解析租户→原样返回；未解析但命中 `tenant.IsMainSiteHost`（`internal/tenant/resolver.go`，7e8360b 引入的三态判别）→ 回退到 `seedPlatformTenant`（`seed.go`）幂等建的 "platform" 租户（owner=首个管理员，不建 `agent_profiles`，不出现在代理列表）；都不是→维持 `TENANT_NOT_FOUND`。`HandleTenantRechargeMethods` 未在报告里点名，但前端把它当成充值卡渲染开关（失败即隐藏整卡），同一根因，一并修。
+- **子坑 1（差点漏改的另一半）**：`seedPlatformTenant` 给平台租户挂了个 owner（root），而 `callerOwnedTenant`(→`HandleAgentContext`) 与 `AgentOwnerAuthByUser`(agent-self 路由组真实鉴权闸门) 都靠 `TenantByOwner` 反查"这个用户拥有哪个租户"——两处都会把 root 误判成"拥有一个代理租户"，前端会给管理员展示整套代理自助菜单，后端也会真的放行管理员对平台租户发起提现等 agent-self 操作。**只排除 UI 信号(callerOwnedTenant)、不排除真实鉴权闸门(AgentOwnerAuthByUser)= 门面式修复**——两处必须用同一个 `isPlatformTenant(t)` 判定同时收口。
+- **子坑 2（单测踩过一次的 nil-panic）**：`httptest.NewRequest` 不显式设 `req.Host` 时默认给 `"example.com"`；而 `tenant.IsMainSiteHost` 对"不在 `*.wedreamhub.com` 下的外部域名"有意兜底 `true`（本地直连/开发场景）。二者一叠加，一个零值 `&App{}`（`TenantRepo==nil`）的既有测试走到新加的主站回退分支时对 `nil` 的 `*gormrepo.Repo` 调用方法，直接 panic。修法：`resolveBuyerTenant` 对 `a.TenantRepo==nil` 短路直接判 `TENANT_NOT_FOUND`（沿用 `grouphook.go` 里已有的同款防御惯例），不是改测试凑合过。
+- **升级**：①任何新增/复用"Host 未解析出租户"分支的 handler，都要过一遍 `tenant.IsMainSiteHost` 三态，不能自己再造一版主站判定。②新代码只要调用 `TenantByOwner` 反查"用户拥有的租户"，必须过 `isPlatformTenant` 排除——已有 `callerOwnedTenant`/`AgentOwnerAuthByUser` 两个封装可直接复用，不要绕开它们直连 `TenantRepo.TenantByOwner`。③给这类"主站兜底"逻辑写单测，零值 `&App{}` 一定要么补齐依赖、要么显式设 `req.Host` 避开 `example.com` 默认值。
+
 ---
 
 ## 四、工具链与协作
