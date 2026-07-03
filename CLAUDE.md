@@ -59,11 +59,12 @@
 - 等价：`ssh -i ~/.ssh/newapi628_ed25519 -p 5522 root@64.90.4.114`
 - 私钥在 Mac `~/.ssh/newapi628_ed25519`（**严禁入库**）；服务器已改为仅密钥登录。
 
-**服务器现状**（已核实）：
+**服务器现状**（已核实 · 2026-07-03 收敛为**单栈**）：
 - `64.90.4.114` ｜ Debian 12 ｜ 宝塔面板（:8889）｜ Docker 29 + Compose v2
-- new-api 现以宝塔 Docker 应用 `newapi_YFNf` 运行：`calciumion/new-api:latest` + `redis` + `mysql:8.2`（DB=`new-api`），监听 `127.0.0.1:3000`
-- 域名 `wedreamhub.com`，`api.wedreamhub.com` 已（宝塔 nginx）反代到 3000；**无 auth-service（待建）**
-- compose 路径：`/www/dk_project/dk_app/newapi/newapi_YFNf/`
+- **唯一 newapi = fork 栈 `newapi_test`**（`newapi_test-app` 本机构建 + `redis` + `mysql:8.2`，DB=`new-api-test`），监听 `127.0.0.1:3100`；含微信/支付宝真实 SDK（进程内 `realpay`）+ 全部多租户功能。
+- **三域名全走 fork**：`api` / `www` / `tokendream`.wedreamhub.com 经宝塔 nginx 反代到 3100（`*.wedreamhub.com` 通配 → 3100；`api` 显式 config 已由 3000 改指 3100）。`/auth/` → 8180（mock 支付页，退役中）。
+- **原 stock 栈 `newapi_YFNf`（原版 `calciumion/new-api`，DB `new-api`，:3000）已于 2026-07-03 删除**（空壳：0 渠道 / 0 token / 无 /v1 流量）。回滚料：DB 备份 `/root/stock-newapi-backup.sql`、nginx 备份 `…/api-443-to-origin.wedreamhub.com.conf.bak-before-consolidate`。
+- fork 源码/构建：服务器 `/root/newapi-test/`（**非 git 副本**，rsync 自 Mac）+ `deploy/ops/deploy.sh`；compose `deploy/docker-compose.test.yml`（`docker compose -p newapi_test --env-file /root/newapi-test/.env -f …`）。
 
 > 部署细节见 [`doc/tasks/00-infra.md`](doc/tasks/00-infra.md) 与 [`doc/deployment.md`](doc/deployment.md)。
 
@@ -97,7 +98,7 @@
 - **W2 — 维护 `RETRO.md` 复盘日志。** 踩坑/反复出现的困难按其维护规则记录（现象、根因、是否解决、解决/规避方案）；未解决标 `[未解决]`，已解决标 `[已解决]`。
 - **W3 — 棘轮升级。** `RETRO.md` 中已固化为规则的经验，升级为本文件「部署硬约束」或本节纪律，并在 `RETRO.md` 标注"已升级为规则"及位置。
 - **W4 — Mac 只调试、部署在服务器。** 本项目唯一环境是服务器 `64.90.4.114`（见上「服务器与部署」）；Mac 仅代码编辑/调试，构建/迁移/集成/部署/E2E 一律在服务器执行；私钥不入库。
-- **W5 —** TODO（例如：改 `doc/` 路由文档与代码同步更新）。
+- **W5 — 前端页面文字一律用中文。** 任何面向用户的界面文案（标签 / 按钮 / 提示 / 表头 / 菜单 / toast / 错误码展示文案等）必须是中文，不留英文。i18n 以 `zh.json` 为准；当 `zh.json` 被并行工作区占用不可改时，用 `t('English Key', { defaultValue: '中文' })` 兜底（即时渲染中文、不动锁定文件，日后补 locale 条目会透明覆盖）。新增/改动任何前端前，务必核对最终**显示**出来的是中文。
 - **W6 —** TODO（按需补充）。
 
 ---
@@ -106,6 +107,7 @@
 
 > 「精简」原则的临时例外（用户要求置顶可见）；完成即移除/下沉到 `doc/tasks/phase2.md`。细节见 phase2.md ③ 与 `doc/detailed-design.md`。
 
+- 🔴 **[合作者续修 · 微信支付回调验签] 微信付款成功、回调验签报 `PAY_SIGN_INVALID`、部分套餐单卡 `pending` 不激活** —— 真实微信支付**已「收款成功」**（商户平台确认），但回调验签失败、套餐单卡 `pending` 不激活（测试栈 `mt_subscription_orders` 多笔 6.90 pending；典型单商户号 `SUBE6212E88E073BEBC4F7FA0E8`，付款**台北 07-02 17:40:49**）。**已逐一排除**：时钟（NTP 准）｜ 路由（`POST /api/pay/wechat/notify` handler 已部署、返 400 非 404）｜ 编译部署 ｜ 配置（用户确认对）。**已埋临时诊断**：`internal/payment/realpay/wxpay.go` 的 `verifyNotify` surface `ParseNotifyRequest` 真实报错 + `Wechatpay-Serial` 头（`%w` 保留 `ErrSignInvalid`、不改下游 ack）—— ⚠️ **此诊断只在测试栈服务器 `/root/newapi-test` 上、未提交入 git**，拉代码看不到、需登录服务器看。SDK 校验序：**时间戳 → serial 对 `PublicKeyID` → RSA 签名 → APIv3 解密**。**续修步骤**：① 微信商户平台找卡住的单点「重发结果通知」→ 微信重发回调 ② `docker logs newapi_test-app-1 --since 5m | grep parseNotify` 读**确切错**（定位卡在 serial/签名/解密哪一步）③ 对症修 realpay（**最可能是「微信支付公钥 / `PublicKeyID`」没对上**）④ 修通后**回退临时诊断 + 重建** ⑤ 修通后 pending 单自动重激活（或手动 reconcile）。**注**：并非所有微信付款都失败——单 `SUB6169CC…`（台北 07-02 17:40、wxpay）已成功激活（= 用户保留的真实订阅 sub 18），故 bug 或与特定单/时序相关，诊断日志会给确切原因。
 - 🔴 **[需你提供] 微信/支付宝商户凭据** —— 接真实支付的**唯一外部阻塞**（真实 SDK 已落地：主站进程内 `internal/payment/realpay` + `internal/mtwire/payment_inprocess.go`，凭据存 DB；充值/购买闭环已 E2E 通过）。需：微信 `mch_id`/`app_id`/`api_v3_key`/商户私钥 `apiclient_key.pem`/微信支付公钥+`pub_key_id`；支付宝 `app_id`/应用私钥/应用公钥证书/支付宝公钥证书/根证书。拿到后→后台「系统设置 → 支付 → 微信/支付宝 选项卡」填表单并启用（**单门**：配好即在用户充值页与套餐购买页对买家显示，无需改配置文件/环境变量）→沙箱小额验收（入账侧零改）。
 - 🔴 **[需你后续 · 我以后改] gemini 换上游** —— gemini 渠道（测试栈 channel **id4**，type=24 Google Gemini，分组 `gemini`）上游不出请求 → new-api 跨组回退、报 `no available channel … under group default`。**已逐层验证：token 组=gemini、可用组校验含 gemini、渠道启用、路由 enabled、已配价——分组/调用都没错，纯上游渠道问题。** 换法：控制台「渠道管理」→ gemini 渠道 → 编辑 → 改 **base_url + key**（换成能分发 gemini 的上游）→ 保存（分组/路由/倍率/可选全不动）。换好后若仍回退 default，叫我加调试日志精确定位。
 - ✅ **①+② 买家页端到端闭环（完成）** —— 购买 snake_case + 走 auth-service mock：购买→mock 支付页→确认→激活原生订阅→代理分润(¥23.8)→**/v1 走订阅桶**，全链路 E2E 过。
