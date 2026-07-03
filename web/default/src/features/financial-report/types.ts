@@ -43,6 +43,7 @@ export type { ApiResponse }
 export type SourceType =
   | 'recharge_spread'
   | 'consume_commission'
+  | 'ratio_markup'
   | 'tokenplan_spread'
   | 'tokenplan_commission'
   | 'manual_adjustment'
@@ -202,6 +203,7 @@ export interface AgentRankRow {
   owner_username: string
   total_earned_cny: number
   consume_commission_cny: number
+  ratio_markup_cny: number
   tokenplan_spread_cny: number
   manual_adjustment_cny: number
   recharge_paid_cny: number

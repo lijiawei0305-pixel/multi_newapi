@@ -94,6 +94,14 @@ export function sourceTypeLabel(
       return t('Recharge Spread')
     case 'consume_commission':
       return t('Consumption Commission')
+    case 'ratio_markup':
+      // i18n locale files (zh.json/en.json) are owned by another in-flight,
+      // uncommitted workstream right now, so this label is inlined via
+      // `defaultValue` instead of a new catalog entry to avoid clobbering it.
+      // Once that lands, add a real 'Consumption Spread' key (paired with
+      // 'Consumption Commission' the same way tokenplan_spread pairs with
+      // tokenplan_commission) and this defaultValue becomes a no-op fallback.
+      return t('Consumption Spread', { defaultValue: '消耗差价' })
     case 'tokenplan_spread':
       return t('Subscription Spread')
     case 'tokenplan_commission':
