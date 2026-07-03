@@ -151,6 +151,7 @@ func SetMtRouter(router *gin.Engine) {
 	{
 		adminReconcileGroup.GET("/stuck", app.HandleAdminListStuck)
 		adminReconcileGroup.POST("/run", app.HandleAdminRunReconcile)
+		adminReconcileGroup.GET("/history", app.HandleAdminListHistory)
 	}
 
 	// 管理端订阅监控（当前租户维度，租户来自 Host）。前置 TenantMiddleware + new-api AdminAuth。

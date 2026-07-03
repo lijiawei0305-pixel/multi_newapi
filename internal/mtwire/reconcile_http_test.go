@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -53,5 +54,45 @@ func TestHandleAdminRunReconcileIncludesCreatedPath(t *testing.T) {
 	// 手动总记一条历史。
 	if rows, _ := app.listReconcileRuns(context.Background(), 50); len(rows) != 1 {
 		t.Fatalf("manual run recorded %d history rows, want 1", len(rows))
+	}
+}
+
+// TestHandleAdminListHistoryDescAndLimit /history 倒序 + limit 生效 + detail 为 JSON 对象。
+func TestHandleAdminListHistoryDescAndLimit(t *testing.T) {
+	app := newReconcileHistoryApp(t)
+	ctx := context.Background()
+	r := payment.ReconcileResult{Failed: map[string]string{}}
+	s := ReconcileSubResult{Failed: map[string]string{}}
+	app.recordReconcileRun(ctx, "cron", payment.ReconcileResult{Scanned: 1, Failed: map[string]string{}}, r, s)
+	time.Sleep(2 * time.Millisecond)
+	app.recordReconcileRun(ctx, "manual", r, r, s)
+
+	c, rec := newReconcileCtx("GET", "/api/admin/reconcile/history?limit=1", "")
+	app.HandleAdminListHistory(c)
+	resp := decodeResp(t, rec)
+	if !resp.Success {
+		t.Fatalf("not success: %s", rec.Body.String())
+	}
+	var data struct {
+		Runs []struct {
+			Trigger string          `json:"trigger"`
+			RanAt   int64           `json:"ran_at"`
+			Detail  json.RawMessage `json:"detail"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(resp.Data, &data); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(data.Runs) != 1 {
+		t.Fatalf("limit=1 returned %d runs", len(data.Runs))
+	}
+	if data.Runs[0].Trigger != "manual" {
+		t.Fatalf("first run trigger=%q, want manual (desc)", data.Runs[0].Trigger)
+	}
+	if data.Runs[0].RanAt == 0 {
+		t.Fatalf("ran_at should be unix seconds > 0")
+	}
+	if len(data.Runs[0].Detail) == 0 || string(data.Runs[0].Detail) == "null" {
+		t.Fatalf("detail should be a JSON object, got %q", string(data.Runs[0].Detail))
 	}
 }

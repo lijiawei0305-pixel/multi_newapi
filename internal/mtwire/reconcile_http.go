@@ -1,6 +1,8 @@
 package mtwire
 
 import (
+	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -64,4 +66,42 @@ func (a *App) HandleAdminRunReconcile(c *gin.Context) {
 		"rcg_created": gin.H{"scanned": created.Scanned, "credited": created.Reconciled, "failed": created.Failed},
 		"sub":         gin.H{"scanned": sub.Scanned, "activated": sub.Activated, "unpaid": sub.Unpaid, "failed": sub.Failed},
 	})
+}
+
+// reconcileRunOut 是 admin「对账记录」表的一行（detail 原样透传 JSON，前端展开看三路明细）。
+type reconcileRunOut struct {
+	ID      int64           `json:"id"`
+	RanAt   int64           `json:"ran_at"` // unix 秒
+	Trigger string          `json:"trigger"`
+	Summary string          `json:"summary"`
+	Detail  json.RawMessage `json:"detail"`
+}
+
+// HandleAdminListHistory GET /api/admin/reconcile/history?limit=50 —— 倒序返回对账运行记录
+// （手动全记 + 定时有实事才记）。limit 默认 50、夹到 1..500。AdminAuth。
+func (a *App) HandleAdminListHistory(c *gin.Context) {
+	ctx := reqCtx(c)
+	limit := 50
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	rows, err := a.listReconcileRuns(ctx, limit)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	out := make([]reconcileRunOut, 0, len(rows))
+	for _, r := range rows {
+		detail := r.Detail
+		if detail == "" {
+			detail = "null" // 空 detail 也返回合法 JSON，避免前端 JSON.parse 崩
+		}
+		out = append(out, reconcileRunOut{
+			ID: r.ID, RanAt: r.RanAt.Unix(), Trigger: r.Trigger, Summary: r.Summary,
+			Detail: json.RawMessage(detail),
+		})
+	}
+	respondOK(c, gin.H{"runs": out})
 }
