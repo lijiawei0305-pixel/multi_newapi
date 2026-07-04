@@ -78,3 +78,52 @@ export async function listHistory(limit = 50): Promise<HistoryRun[]> {
   const res = await api.get('/api/admin/reconcile/history', { params: { limit } })
   return res.data.data.runs
 }
+
+// ---- 支付概览（4 态汇总 + 分页订单，doc/payment-overview.md）----
+
+export type PaymentStatus = 'created' | 'paid' | 'credited' | 'failed'
+
+export interface PaymentSummaryItem {
+  status: PaymentStatus
+  count: number
+  amount_cny: number
+}
+
+export interface PaymentOrderItem {
+  order_no: string
+  type: 'recharge' | 'subscription'
+  provider: 'wxpay' | 'alipay'
+  amount_cny: number
+  status: string
+  user_id: number
+  tenant_id: number
+  created_at_ts: number
+}
+
+export interface PaymentOverview {
+  summary: PaymentSummaryItem[]
+  orders: {
+    items: PaymentOrderItem[]
+    total: number
+    page: number
+    page_size: number
+  }
+}
+
+export interface PaymentOverviewParams {
+  start_timestamp: number
+  end_timestamp: number
+  provider?: string
+  type?: string
+  status?: string
+  page?: number
+  page_size?: number
+}
+
+/** 支付概览：按 时间/方式/类型 汇总 4 态（笔数+金额）+ 分页订单列表（可再按 status 筛）。 */
+export async function getPaymentOverview(
+  params: PaymentOverviewParams
+): Promise<PaymentOverview> {
+  const res = await api.get('/api/admin/reconcile/overview', { params })
+  return res.data.data
+}

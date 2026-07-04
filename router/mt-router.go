@@ -183,6 +183,7 @@ func SetMtRouter(router *gin.Engine) {
 		adminReconcileGroup.GET("/stuck", app.HandleAdminListStuck)
 		adminReconcileGroup.POST("/run", app.HandleAdminRunReconcile)
 		adminReconcileGroup.GET("/history", app.HandleAdminListHistory)
+		adminReconcileGroup.GET("/overview", app.HandleAdminPaymentOverview) // 支付概览：4 态汇总 + 分页订单
 	}
 
 	// 管理端订阅监控（当前租户维度，租户来自 Host）。前置 TenantMiddleware + new-api AdminAuth。

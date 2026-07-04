@@ -67,8 +67,10 @@ import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authentica
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedCustomDomainIndexRouteImport } from './routes/_authenticated/custom-domain/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
+import { Route as AuthenticatedBecomeAgentIndexRouteImport } from './routes/_authenticated/become-agent/index'
 import { Route as AuthenticatedAgentsIndexRouteImport } from './routes/_authenticated/agents/index'
 import { Route as AuthenticatedAgentTicketsIndexRouteImport } from './routes/_authenticated/agent-tickets/index'
+import { Route as AuthenticatedAgentPlansIndexRouteImport } from './routes/_authenticated/agent-plans/index'
 import { Route as AuthenticatedAgentListingsIndexRouteImport } from './routes/_authenticated/agent-listings/index'
 import { Route as AuthenticatedAgentEarningsIndexRouteImport } from './routes/_authenticated/agent-earnings/index'
 import { Route as AuthenticatedAdminTicketsIndexRouteImport } from './routes/_authenticated/admin-tickets/index'
@@ -414,6 +416,12 @@ const AuthenticatedChannelsIndexRoute =
     path: '/channels/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedBecomeAgentIndexRoute =
+  AuthenticatedBecomeAgentIndexRouteImport.update({
+    id: '/become-agent/',
+    path: '/become-agent/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAgentsIndexRoute =
   AuthenticatedAgentsIndexRouteImport.update({
     id: '/agents/',
@@ -424,6 +432,12 @@ const AuthenticatedAgentTicketsIndexRoute =
   AuthenticatedAgentTicketsIndexRouteImport.update({
     id: '/agent-tickets/',
     path: '/agent-tickets/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAgentPlansIndexRoute =
+  AuthenticatedAgentPlansIndexRouteImport.update({
+    id: '/agent-plans/',
+    path: '/agent-plans/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedAgentListingsIndexRoute =
@@ -632,8 +646,10 @@ export interface FileRoutesByFullPath {
   '/admin-tickets/': typeof AuthenticatedAdminTicketsIndexRoute
   '/agent-earnings/': typeof AuthenticatedAgentEarningsIndexRoute
   '/agent-listings/': typeof AuthenticatedAgentListingsIndexRoute
+  '/agent-plans/': typeof AuthenticatedAgentPlansIndexRoute
   '/agent-tickets/': typeof AuthenticatedAgentTicketsIndexRoute
   '/agents/': typeof AuthenticatedAgentsIndexRoute
+  '/become-agent/': typeof AuthenticatedBecomeAgentIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
@@ -719,8 +735,10 @@ export interface FileRoutesByTo {
   '/admin-tickets': typeof AuthenticatedAdminTicketsIndexRoute
   '/agent-earnings': typeof AuthenticatedAgentEarningsIndexRoute
   '/agent-listings': typeof AuthenticatedAgentListingsIndexRoute
+  '/agent-plans': typeof AuthenticatedAgentPlansIndexRoute
   '/agent-tickets': typeof AuthenticatedAgentTicketsIndexRoute
   '/agents': typeof AuthenticatedAgentsIndexRoute
+  '/become-agent': typeof AuthenticatedBecomeAgentIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/custom-domain': typeof AuthenticatedCustomDomainIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
@@ -810,8 +828,10 @@ export interface FileRoutesById {
   '/_authenticated/admin-tickets/': typeof AuthenticatedAdminTicketsIndexRoute
   '/_authenticated/agent-earnings/': typeof AuthenticatedAgentEarningsIndexRoute
   '/_authenticated/agent-listings/': typeof AuthenticatedAgentListingsIndexRoute
+  '/_authenticated/agent-plans/': typeof AuthenticatedAgentPlansIndexRoute
   '/_authenticated/agent-tickets/': typeof AuthenticatedAgentTicketsIndexRoute
   '/_authenticated/agents/': typeof AuthenticatedAgentsIndexRoute
+  '/_authenticated/become-agent/': typeof AuthenticatedBecomeAgentIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
@@ -900,8 +920,10 @@ export interface FileRouteTypes {
     | '/admin-tickets/'
     | '/agent-earnings/'
     | '/agent-listings/'
+    | '/agent-plans/'
     | '/agent-tickets/'
     | '/agents/'
+    | '/become-agent/'
     | '/channels/'
     | '/custom-domain/'
     | '/dashboard/'
@@ -987,8 +1009,10 @@ export interface FileRouteTypes {
     | '/admin-tickets'
     | '/agent-earnings'
     | '/agent-listings'
+    | '/agent-plans'
     | '/agent-tickets'
     | '/agents'
+    | '/become-agent'
     | '/channels'
     | '/custom-domain'
     | '/dashboard'
@@ -1077,8 +1101,10 @@ export interface FileRouteTypes {
     | '/_authenticated/admin-tickets/'
     | '/_authenticated/agent-earnings/'
     | '/_authenticated/agent-listings/'
+    | '/_authenticated/agent-plans/'
     | '/_authenticated/agent-tickets/'
     | '/_authenticated/agents/'
+    | '/_authenticated/become-agent/'
     | '/_authenticated/channels/'
     | '/_authenticated/custom-domain/'
     | '/_authenticated/dashboard/'
@@ -1557,6 +1583,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedChannelsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/become-agent/': {
+      id: '/_authenticated/become-agent/'
+      path: '/become-agent'
+      fullPath: '/become-agent/'
+      preLoaderRoute: typeof AuthenticatedBecomeAgentIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/agents/': {
       id: '/_authenticated/agents/'
       path: '/agents'
@@ -1569,6 +1602,13 @@ declare module '@tanstack/react-router' {
       path: '/agent-tickets'
       fullPath: '/agent-tickets/'
       preLoaderRoute: typeof AuthenticatedAgentTicketsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/agent-plans/': {
+      id: '/_authenticated/agent-plans/'
+      path: '/agent-plans'
+      fullPath: '/agent-plans/'
+      preLoaderRoute: typeof AuthenticatedAgentPlansIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/agent-listings/': {
@@ -1868,8 +1908,10 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAdminTicketsIndexRoute: typeof AuthenticatedAdminTicketsIndexRoute
   AuthenticatedAgentEarningsIndexRoute: typeof AuthenticatedAgentEarningsIndexRoute
   AuthenticatedAgentListingsIndexRoute: typeof AuthenticatedAgentListingsIndexRoute
+  AuthenticatedAgentPlansIndexRoute: typeof AuthenticatedAgentPlansIndexRoute
   AuthenticatedAgentTicketsIndexRoute: typeof AuthenticatedAgentTicketsIndexRoute
   AuthenticatedAgentsIndexRoute: typeof AuthenticatedAgentsIndexRoute
+  AuthenticatedBecomeAgentIndexRoute: typeof AuthenticatedBecomeAgentIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedCustomDomainIndexRoute: typeof AuthenticatedCustomDomainIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
@@ -1921,8 +1963,10 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminTicketsIndexRoute: AuthenticatedAdminTicketsIndexRoute,
   AuthenticatedAgentEarningsIndexRoute: AuthenticatedAgentEarningsIndexRoute,
   AuthenticatedAgentListingsIndexRoute: AuthenticatedAgentListingsIndexRoute,
+  AuthenticatedAgentPlansIndexRoute: AuthenticatedAgentPlansIndexRoute,
   AuthenticatedAgentTicketsIndexRoute: AuthenticatedAgentTicketsIndexRoute,
   AuthenticatedAgentsIndexRoute: AuthenticatedAgentsIndexRoute,
+  AuthenticatedBecomeAgentIndexRoute: AuthenticatedBecomeAgentIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedCustomDomainIndexRoute: AuthenticatedCustomDomainIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
