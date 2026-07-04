@@ -49,12 +49,13 @@ import {
 const headerNavSchema = z.object({
   home: z.boolean(),
   console: z.boolean(),
+  playground: z.boolean(),
   pricingEnabled: z.boolean(),
   pricingRequireAuth: z.boolean(),
   rankingsEnabled: z.boolean(),
   rankingsRequireAuth: z.boolean(),
   docs: z.boolean(),
-  about: z.boolean(),
+  agentJoin: z.boolean(),
 })
 
 type HeaderNavFormValues = z.infer<typeof headerNavSchema>
@@ -71,6 +72,10 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
     config.console === undefined
       ? HEADER_NAV_DEFAULT.console
       : Boolean(config.console),
+  playground:
+    config.playground === undefined
+      ? HEADER_NAV_DEFAULT.playground
+      : Boolean(config.playground),
   pricingEnabled:
     config.pricing?.enabled === undefined
       ? HEADER_NAV_DEFAULT.pricing.enabled
@@ -89,10 +94,10 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
       : Boolean(config.rankings.requireAuth),
   docs:
     config.docs === undefined ? HEADER_NAV_DEFAULT.docs : Boolean(config.docs),
-  about:
-    config.about === undefined
-      ? HEADER_NAV_DEFAULT.about
-      : Boolean(config.about),
+  agentJoin:
+    config.agentJoin === undefined
+      ? HEADER_NAV_DEFAULT.agentJoin
+      : Boolean(config.agentJoin),
 })
 
 export function HeaderNavigationSection({
@@ -117,8 +122,9 @@ export function HeaderNavigationSection({
       ...config,
       home: values.home,
       console: values.console,
+      playground: values.playground,
       docs: values.docs,
-      about: values.about,
+      agentJoin: values.agentJoin,
       pricing: {
         ...(config.pricing ?? HEADER_NAV_DEFAULT.pricing),
         enabled: values.pricingEnabled,
@@ -162,14 +168,23 @@ export function HeaderNavigationSection({
       description: t('User dashboard and quota controls.'),
     },
     {
+      key: 'playground',
+      title: t('Playground Nav', { defaultValue: 'Playground' }),
+      description: t('Playground Nav Desc', {
+        defaultValue: '游乐园对话入口，从控制台提升到顶栏。',
+      }),
+    },
+    {
       key: 'docs',
       title: t('Docs'),
       description: t('Documentation or external knowledge base.'),
     },
     {
-      key: 'about',
-      title: t('About'),
-      description: t('Static page describing the platform.'),
+      key: 'agentJoin',
+      title: t('Agent Program', { defaultValue: 'Agent Program' }),
+      description: t('Agent Program Desc', {
+        defaultValue: '代理加盟落地页，面向游客介绍代理政策与申请入口。',
+      }),
     },
   ]
 

@@ -36,10 +36,11 @@ export type TopNavLink = {
  * {
  *   home: true,
  *   console: true,
+ *   playground: true,
  *   pricing: { enabled: true, requireAuth: false },
  *   rankings: { enabled: true, requireAuth: false },
  *   docs: true,
- *   about: true
+ *   agentJoin: true
  * }
  */
 export function useTopNavLinks(): TopNavLink[] {
@@ -71,6 +72,15 @@ export function useTopNavLinks(): TopNavLink[] {
     links.push({ title: t('Console'), href: '/dashboard' })
   }
 
+  // Playground（游乐园）—— 从控制台提升到顶栏（控制台侧栏保留）
+  // 认证路由，未登录点击由路由守卫跳转登录，处理方式与「控制台」一致
+  if (modules?.playground !== false) {
+    links.push({
+      title: t('Playground Nav', { defaultValue: 'Playground' }),
+      href: '/playground',
+    })
+  }
+
   // Pricing
   const pricing = modules?.pricing
   if (pricing && typeof pricing === 'object' && pricing.enabled) {
@@ -94,9 +104,12 @@ export function useTopNavLinks(): TopNavLink[] {
     }
   }
 
-  // About
-  if (modules?.about !== false) {
-    links.push({ title: t('About'), href: '/about' })
+  // Agent Join（代理加盟）—— 公开落地页
+  if (modules?.agentJoin !== false) {
+    links.push({
+      title: t('Agent Program', { defaultValue: 'Agent Program' }),
+      href: '/agent-join',
+    })
   }
 
   return links
