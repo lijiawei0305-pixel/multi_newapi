@@ -9,6 +9,7 @@ package reportrepo
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -269,5 +270,91 @@ func TestTrendEarnings_SplitsWithdrawableBuckets(t *testing.T) {
 	}
 	if d2.ConsumptionWithdrawableCNY != 0 {
 		t.Fatalf("day2 ConsumptionWithdrawableCNY = %v, want 0 (no ratio_markup/consume_commission that day)", d2.ConsumptionWithdrawableCNY)
+	}
+}
+
+// seedSubOrder 造一笔已激活套餐订单（pending_subscription_orders JOIN mt_subscription_orders
+// ON order_id=order_no），供 bucketedSubPaidCost/NetIncomeTrend 聚合订阅实付。
+func seedSubOrder(t *testing.T, db *gorm.DB, orderNo string, tenantID int64, retail, agentCost float64, ts time.Time) {
+	t.Helper()
+	if err := db.Exec(`INSERT INTO pending_subscription_orders (order_id, tenant_id, retail_price, agent_cost_price) VALUES (?,?,?,?)`,
+		orderNo, tenantID, retail, agentCost).Error; err != nil {
+		t.Fatalf("seed pending_subscription_orders: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO mt_subscription_orders (order_no, tenant_id, status, created_at) VALUES (?,?,?,?)`,
+		orderNo, tenantID, "activated", ts).Error; err != nil {
+		t.Fatalf("seed mt_subscription_orders: %v", err)
+	}
+}
+
+// TestNetIncomeTrend_BucketsAndExcludesPlatform 锁定管理端净收入趋势的两条子序列按天桶对齐 + 减法口径，
+// 且 rebate 两块严格排除平台租户（tenant_id<>platformID）——这是趋势区间合计能与 6 卡对账的前提
+// （Σ套餐净 = 卡1+卡2−卡5；Σapi净 = 卡3+卡4−卡6）。day1 主站+代理混合（含一个平台租户的
+// tokenplan_spread/ratio_markup 巨额噪声 + 一个 manual_adjustment，均不得进任一 rebate），day2 只有代理，
+// 覆盖「某桶只有一条子序列、另一条为 0 而非沿用上一天」的对齐场景。
+func TestNetIncomeTrend_BucketsAndExcludesPlatform(t *testing.T) {
+	db := newFinanceTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	day1 := time.Unix(1_700_000_000, 0).UTC()
+	day2 := day1.Add(24 * time.Hour)
+
+	const platformID = int64(1)
+	const agentID = int64(9)
+
+	// 订阅实付（全站含主站）：day1 主站 100 + 代理 60；day2 代理 40。
+	seedSubOrder(t, db, "ORD-MAIN", platformID, 100, 100, day1)
+	seedSubOrder(t, db, "ORD-AGT-1", agentID, 60, 40, day1)
+	seedSubOrder(t, db, "ORD-AGT-2", agentID, 40, 30, day2)
+
+	// 套餐返现（仅代理计入；平台租户的 tokenplan_spread 必须被排除）。
+	seedEarning(t, db, agentID, "tokenplan_spread", 15, day1)
+	seedEarning(t, db, platformID, "tokenplan_spread", 999, day1) // 平台：排除
+	seedEarning(t, db, agentID, "tokenplan_spread", 5, day2)
+
+	// api 返现（仅代理；平台租户 ratio_markup 排除；manual_adjustment 不进任一 rebate）。
+	seedEarning(t, db, agentID, "ratio_markup", 4, day1)
+	seedEarning(t, db, agentID, "consume_commission", 1, day1)
+	seedEarning(t, db, platformID, "ratio_markup", 999, day1)    // 平台：排除
+	seedEarning(t, db, agentID, "manual_adjustment", 50, day1)   // 既不进套餐也不进 api 返现
+
+	// 钱包消耗额度（全站含主站）：day1 主站 200000 + 代理 300000；day2 代理 100000。
+	seedWalletConsume(t, db, platformID, 501, 200000, "w-main-1", day1)
+	seedWalletConsume(t, db, agentID, 502, 300000, "w-agt-1", day1)
+	seedWalletConsume(t, db, agentID, 503, 100000, "w-agt-2", day2)
+
+	start := day1.Add(-time.Hour).Unix()
+	end := day2.Add(time.Hour).Unix()
+	pts, err := repo.NetIncomeTrend(ctx, start, end, "day", platformID)
+	if err != nil {
+		t.Fatalf("NetIncomeTrend: %v", err)
+	}
+	if len(pts) != 2 {
+		t.Fatalf("buckets = %d, want 2 (pts=%+v)", len(pts), pts)
+	}
+	byBucket := map[string]NetIncomeTrendPoint{}
+	for _, p := range pts {
+		byBucket[p.Bucket] = p
+	}
+	d1 := byBucket[day1.Format("2006-01-02")]
+	d2 := byBucket[day2.Format("2006-01-02")]
+
+	// day1 套餐净 = (100+60) − 15 = 145（平台 999 tokenplan_spread 被排除，否则会变 -854）。
+	if d1.TokenplanNetCNY != 145 {
+		t.Fatalf("day1 TokenplanNetCNY = %v, want 145 ((100+60)-15; platform spread must be excluded)", d1.TokenplanNetCNY)
+	}
+	// day1 api净 = QuotaToCNY(200000+300000) − (4+1)（平台 999 ratio_markup + manual_adjustment 50 均排除）。
+	wantApiD1 := QuotaToCNY(500000) - 5
+	if math.Abs(d1.ApiNetCNY-wantApiD1) > 1e-9 {
+		t.Fatalf("day1 ApiNetCNY = %v, want %v (QuotaToCNY(500000)-5; platform/manual excluded)", d1.ApiNetCNY, wantApiD1)
+	}
+	// day2 套餐净 = 40 − 5 = 35。
+	if d2.TokenplanNetCNY != 35 {
+		t.Fatalf("day2 TokenplanNetCNY = %v, want 35", d2.TokenplanNetCNY)
+	}
+	// day2 api净 = QuotaToCNY(100000) − 0。
+	wantApiD2 := QuotaToCNY(100000)
+	if math.Abs(d2.ApiNetCNY-wantApiD2) > 1e-9 {
+		t.Fatalf("day2 ApiNetCNY = %v, want %v (no api rebate that day)", d2.ApiNetCNY, wantApiD2)
 	}
 }

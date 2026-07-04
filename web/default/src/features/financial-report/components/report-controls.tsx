@@ -56,8 +56,14 @@ const RANGE_PRESETS: { value: string; labelKey: string; days: number }[] = [
 export interface ReportControlsProps {
   range: RangeParams
   onRangeChange: (range: RangeParams) => void
-  lens: Lens
-  onLensChange: (lens: Lens) => void
+  /**
+   * Lens tabs are OPTIONAL: rendered only when both `lens` and `onLensChange`
+   * are supplied (the agent/admin lens-driven views). The simplified admin
+   * finance report has no lens switch, so it omits them and only shows
+   * range + granularity + refresh.
+   */
+  lens?: Lens
+  onLensChange?: (lens: Lens) => void
   granularity: Granularity
   onGranularityChange: (granularity: Granularity) => void
   /** Optional manual refresh affordance. */
@@ -100,25 +106,29 @@ export function ReportControls(props: ReportControlsProps) {
     })
   }
 
+  const { lens, onLensChange } = props
+
   return (
     <div className='flex flex-col gap-3' data-testid='report-controls'>
-      <Tabs
-        value={props.lens}
-        onValueChange={(value) => props.onLensChange(value as Lens)}
-      >
-        <TabsList aria-label={t('Data lens')}>
-          {LENS_OPTIONS.map((lens) => (
-            <TabsTrigger
-              key={lens}
-              value={lens}
-              data-testid={`lens-tab-${lens}`}
-              className='px-3 text-xs'
-            >
-              {lensLabel(lens, t)}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+      {lens && onLensChange && (
+        <Tabs
+          value={lens}
+          onValueChange={(value) => onLensChange(value as Lens)}
+        >
+          <TabsList aria-label={t('Data lens')}>
+            {LENS_OPTIONS.map((l) => (
+              <TabsTrigger
+                key={l}
+                value={l}
+                data-testid={`lens-tab-${l}`}
+                className='px-3 text-xs'
+              >
+                {lensLabel(l, t)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
 
       <div className='flex flex-wrap items-end gap-3'>
         <div className='flex flex-col gap-1.5'>

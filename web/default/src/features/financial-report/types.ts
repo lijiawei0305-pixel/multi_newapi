@@ -250,6 +250,27 @@ export interface TrendResponse<P extends TrendPointBase = TrendPoint> {
 }
 
 // ---------------------------------------------------------------------------
+// Admin net-income trend (doc/admin-finance-report-simplify.md §三/§四) — drives
+// the 3-line 净收入趋势图. Two wire series (套餐净 / api净); the third line 「总净收入」
+// is their sum, computed on the client (never carried on the wire). Reconciles
+// with the 6 overview cards over the same window: Σtokenplan_net = 卡1+卡2−卡5,
+// Σapi_net = 卡3+卡4−卡6 (rebate legs exclude the platform tenant server-side).
+// ---------------------------------------------------------------------------
+
+export interface NetIncomeTrendPoint extends TrendPointBase {
+  /** 套餐净收入 = 订阅实付(全站含主站) − 套餐返现(仅代理)。 */
+  tokenplan_net_cny: number
+  /** api净收入 = 钱包消耗(全站含主站) − api返现(仅代理)。 */
+  api_net_cny: number
+}
+
+/** `data` of `GET /api/admin/finance/net-trend` (no lens — not a per-lens view). */
+export interface NetIncomeTrendResponse {
+  granularity: Granularity
+  series: NetIncomeTrendPoint[]
+}
+
+// ---------------------------------------------------------------------------
 // Admin agent ranking (contract §1.3)
 // ---------------------------------------------------------------------------
 

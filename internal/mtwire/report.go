@@ -231,6 +231,20 @@ type withdrawalsTrendOut struct {
 	RejectedCNY  float64 `json:"rejected_cny"`
 }
 
+// netIncomeTrendOut 是管理端「净收入」趋势的一个桶（套餐净/api净；第三条「总净」由前端相加，不入 wire）。
+type netIncomeTrendOut struct {
+	Bucket          string  `json:"bucket"`
+	BucketTS        int64   `json:"bucket_ts"`
+	TokenplanNetCNY float64 `json:"tokenplan_net_cny"`
+	ApiNetCNY       float64 `json:"api_net_cny"`
+}
+
+// netIncomeTrendResp 是 GET /api/admin/finance/net-trend 的 data 信封（无 lens——净收入图非按透镜切换）。
+type netIncomeTrendResp struct {
+	Granularity string              `json:"granularity"`
+	Series      []netIncomeTrendOut `json:"series"`
+}
+
 // agentRankOut 是 §1.3 按代理/租户排行的一行（管理端专用，tenant_id/agent_name 恒在）。
 type agentRankOut struct {
 	TenantID             int64   `json:"tenant_id"`
@@ -388,6 +402,39 @@ func (a *App) HandleAdminFinanceAgents(c *gin.Context) {
 // HandleAdminFinanceDetail GET /api/admin/finance/detail —— 明细（lens 必填，可 ?format=csv|pdf）。需 AdminAuth。
 func (a *App) HandleAdminFinanceDetail(c *gin.Context) {
 	a.handleFinanceDetail(c, nil)
+}
+
+// HandleAdminNetIncomeTrend GET /api/admin/finance/net-trend —— 管理端净收入趋势（跨租户）。返回套餐净/api净
+// 两条按天子序列（总净由前端相加）；入参 start_timestamp/end_timestamp/granularity 同 /finance/trend。需 AdminAuth。
+// platformID 经 resolvePlatformTenantID 解析后传入 repo，rebate 两块据此排除平台租户，与 6 卡总览同口径对账。
+func (a *App) HandleAdminNetIncomeTrend(c *gin.Context) {
+	start, end, err := parseTimeRange(c)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	gran, err := parseGranularity(c)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	ctx := reqCtx(c)
+	platformID := a.resolvePlatformTenantID(ctx)
+	pts, err := a.ReportRepo.NetIncomeTrend(ctx, start, end, gran, platformID)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	series := make([]netIncomeTrendOut, 0, len(pts))
+	for _, p := range pts {
+		series = append(series, netIncomeTrendOut{
+			Bucket:          p.Bucket,
+			BucketTS:        p.BucketTS,
+			TokenplanNetCNY: round2(p.TokenplanNetCNY),
+			ApiNetCNY:       round2(p.ApiNetCNY),
+		})
+	}
+	respondOK(c, netIncomeTrendResp{Granularity: gran, Series: series})
 }
 
 // ============================================================================

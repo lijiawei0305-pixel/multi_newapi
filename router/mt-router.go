@@ -193,6 +193,7 @@ func SetMtRouter(router *gin.Engine) {
 	{
 		financeAdminGroup.GET("/summary", app.HandleAdminFinanceSummary)
 		financeAdminGroup.GET("/trend", app.HandleAdminFinanceTrend)
+		financeAdminGroup.GET("/net-trend", app.HandleAdminNetIncomeTrend) // 净收入趋势（套餐净/api净，总净前端相加）
 		financeAdminGroup.GET("/agents", app.HandleAdminFinanceAgents)
 		financeAdminGroup.GET("/detail", app.HandleAdminFinanceDetail)
 	}

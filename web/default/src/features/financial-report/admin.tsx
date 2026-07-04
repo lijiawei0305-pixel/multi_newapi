@@ -23,33 +23,21 @@ import { SectionPageLayout } from '@/components/layout'
 import { computeTimeRange } from '@/lib/time'
 import {
   getAdminFinanceAgents,
-  getAdminFinanceDetail,
+  getAdminFinanceNetTrend,
   getAdminFinanceSummary,
-  getAdminFinanceTrend,
 } from './api'
 import { AgentRankingTable } from './components/agent-ranking-table'
-import { BreakdownBySource } from './components/breakdown-by-source'
-import { DetailTable } from './components/detail-table'
-import { ExportButtons } from './components/export-buttons'
+import { NetIncomeTrendChart } from './components/net-income-trend-chart'
 import { ReportControls } from './components/report-controls'
-import { OverviewCards, SummaryCards } from './components/summary-cards'
-import { TrendChart } from './components/trend-chart'
-import { lensLabel } from './lib'
-import type {
-  AgentSortBy,
-  Granularity,
-  Lens,
-  RangeParams,
-  SortOrder,
-} from './types'
+import { OverviewCards } from './components/summary-cards'
+import type { AgentSortBy, Granularity, RangeParams, SortOrder } from './types'
 
 // ============================================================================
-// Admin (platform-wide, cross-tenant) financial report. Auth is enforced at the
-// route (role < ROLE.ADMIN -> /403); endpoints are AdminAuth and take NO tenant
-// scope. Controls drive react-query keys; the shared, prop-driven components are
-// reused by the agent page (stage 3) which passes showTenant=false and hides the
-// ranking table. Money/time follow the FROZEN contract (§3): CNY/USD by suffix,
-// epoch-seconds requests, ISO responses.
+// 精简后的管理员财务报表（doc/admin-finance-report-simplify.md）：控件(区间+粒度+刷新，
+// 去掉 lens 透镜) → v3 概览 6 卡 (OverviewCards scope='admin') → 净收入趋势图 3 线
+// (NetIncomeTrendChart) → 跨代理收益排行 (AgentRankingTable，保留原样)。原通用 9 卡/旧
+// lens 趋势图/分项来源/逐笔明细/导出均已移除。Auth 在路由层强制（role<ADMIN → /403）；
+// 端点均 AdminAuth 跨租户，无租户作用域。金额/时间遵循 FROZEN 契约（CNY 后缀、epoch 秒请求）。
 // ============================================================================
 
 const DEFAULT_PAGE_SIZE = 20
@@ -59,13 +47,12 @@ export function AdminFinancialReport() {
   const queryClient = useQueryClient()
 
   const [range, setRange] = useState<RangeParams>(() => computeTimeRange(30))
-  const [lens, setLens] = useState<Lens>('earnings')
   const [granularity, setGranularity] = useState<Granularity>('day')
-  const [detailPage, setDetailPage] = useState(1)
   const [rankPage, setRankPage] = useState(1)
   const [sortBy, setSortBy] = useState<AgentSortBy>('total_earned_cny')
   const [order, setOrder] = useState<SortOrder>('desc')
 
+  // v3 概览 6 卡数据源（管理端 overview）。
   const summaryQuery = useQuery({
     queryKey: ['admin-finance-summary', range],
     queryFn: () => getAdminFinanceSummary(range),
@@ -73,10 +60,12 @@ export function AdminFinancialReport() {
     placeholderData: (prev) => prev,
   })
 
-  const trendParams = { ...range, lens, granularity }
-  const trendQuery = useQuery({
-    queryKey: ['admin-finance-trend', trendParams],
-    queryFn: () => getAdminFinanceTrend(trendParams),
+  // 净收入趋势（套餐净/api净；总净由图组件相加）。区间合计与 6 卡对账：
+  // Σ套餐净=卡1+卡2−卡5，Σapi净=卡3+卡4−卡6（rebate 两块后端已排除主站平台租户）。
+  const netTrendParams = { ...range, granularity }
+  const netTrendQuery = useQuery({
+    queryKey: ['admin-finance-net-trend', netTrendParams],
+    queryFn: () => getAdminFinanceNetTrend(netTrendParams),
     select: (res) => res.data,
     placeholderData: (prev) => prev,
   })
@@ -95,34 +84,15 @@ export function AdminFinancialReport() {
     placeholderData: (prev) => prev,
   })
 
-  const detailParams = {
-    ...range,
-    lens,
-    page: detailPage,
-    page_size: DEFAULT_PAGE_SIZE,
-  }
-  const detailQuery = useQuery({
-    queryKey: ['admin-finance-detail', detailParams],
-    queryFn: () => getAdminFinanceDetail(detailParams),
-    select: (res) => res.data,
-    placeholderData: (prev) => prev,
-  })
-
   const refreshAll = () => {
     queryClient.invalidateQueries({ queryKey: ['admin-finance-summary'] })
-    queryClient.invalidateQueries({ queryKey: ['admin-finance-trend'] })
+    queryClient.invalidateQueries({ queryKey: ['admin-finance-net-trend'] })
     queryClient.invalidateQueries({ queryKey: ['admin-finance-agents'] })
-    queryClient.invalidateQueries({ queryKey: ['admin-finance-detail'] })
   }
 
   const handleRangeChange = (next: RangeParams) => {
     setRange(next)
-    setDetailPage(1)
     setRankPage(1)
-  }
-  const handleLensChange = (next: Lens) => {
-    setLens(next)
-    setDetailPage(1)
   }
   const handleSortChange = (nextSortBy: AgentSortBy, nextOrder: SortOrder) => {
     setSortBy(nextSortBy)
@@ -132,18 +102,10 @@ export function AdminFinancialReport() {
 
   const summary = summaryQuery.data
   const ranking = rankQuery.data
-  const detail = detailQuery.data
 
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Financial Report')}</SectionPageLayout.Title>
-      <SectionPageLayout.Actions>
-        <ExportButtons
-          scope='admin'
-          params={detailParams}
-          disabled={detailQuery.isLoading}
-        />
-      </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div
           className='flex flex-col gap-6'
@@ -152,8 +114,6 @@ export function AdminFinancialReport() {
           <ReportControls
             range={range}
             onRangeChange={handleRangeChange}
-            lens={lens}
-            onLensChange={handleLensChange}
             granularity={granularity}
             onGranularityChange={setGranularity}
             onRefresh={refreshAll}
@@ -166,23 +126,10 @@ export function AdminFinancialReport() {
             loading={summaryQuery.isLoading}
           />
 
-          <SummaryCards summary={summary} loading={summaryQuery.isLoading} />
-
-          <div className='grid grid-cols-1 gap-4 xl:grid-cols-3'>
-            <div className='xl:col-span-2'>
-              <TrendChart
-                lens={lens}
-                granularity={granularity}
-                series={trendQuery.data?.lens === lens ? (trendQuery.data.series ?? []) : []}
-                loading={trendQuery.isLoading}
-              />
-            </div>
-            <BreakdownBySource
-              bySource={summary?.earnings.by_source ?? []}
-              total={summary?.earnings.total_earned_cny}
-              loading={summaryQuery.isLoading}
-            />
-          </div>
+          <NetIncomeTrendChart
+            series={netTrendQuery.data?.series ?? []}
+            loading={netTrendQuery.isLoading}
+          />
 
           <section className='flex flex-col gap-2'>
             <h3 className='text-sm font-semibold'>{t('Agent Ranking')}</h3>
@@ -196,22 +143,6 @@ export function AdminFinancialReport() {
               pageSize={ranking?.page_size ?? DEFAULT_PAGE_SIZE}
               total={ranking?.total ?? 0}
               onPageChange={setRankPage}
-            />
-          </section>
-
-          <section className='flex flex-col gap-2'>
-            <h3 className='text-sm font-semibold'>
-              {t('{{lens}} Details', { lens: lensLabel(lens, t) })}
-            </h3>
-            <DetailTable
-              lens={lens}
-              items={detail?.items ?? []}
-              loading={detailQuery.isLoading}
-              showTenant
-              page={detailPage}
-              pageSize={detail?.page_size ?? DEFAULT_PAGE_SIZE}
-              total={detail?.total ?? 0}
-              onPageChange={setDetailPage}
             />
           </section>
         </div>

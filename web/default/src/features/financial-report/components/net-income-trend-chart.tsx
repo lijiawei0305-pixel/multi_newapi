@@ -18,83 +18,59 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo } from 'react'
 import { VChart } from '@visactor/react-vchart'
-import type { TFunction } from 'i18next'
 import { TrendingUp } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cny } from '@/features/financial-report/lib'
+import type { NetIncomeTrendPoint } from '@/features/financial-report/types'
 import { useChartTheme } from '@/lib/use-chart-theme'
 import { VCHART_OPTION } from '@/lib/vchart'
-import { cny, lensLabel } from '../lib'
-import type { Granularity, Lens, TrendPoint } from '../types'
 
 // ============================================================================
-// Multi-series trend line chart (VChart, mirrors the dashboard's chart usage).
-// Each lens maps to one or more CNY metric fields (contract §1.2); the chart
-// is melted to long-format `{ bucket, series, value }` rows. The y-axis is
-// always CNY so currencies never mix. SCOPE-AGNOSTIC: admin/agent feed the same
-// `series` shape. Do NOT add recharts — VChart only (contract §5).
+// Dedicated 3-line trend chart for the simplified ADMIN 财务报表 page
+// (doc/admin-finance-report-simplify.md §三): 套餐净收入 (tokenplan_net_cny) /
+// api净收入 (api_net_cny) / 总净收入 (their sum, computed here — the wire contract
+// never carries a combined field). Same structure/theme/tooltip as the agent's
+// earnings-trend-chart (VChart only — no recharts). Its window total reconciles
+// with the 6 overview cards: Σ套餐净 = 卡1+卡2−卡5, Σapi净 = 卡3+卡4−卡6.
 // ============================================================================
 
-export interface TrendChartProps {
-  lens: Lens
-  granularity: Granularity
-  series: TrendPoint[]
+export interface NetIncomeTrendChartProps {
+  series: NetIncomeTrendPoint[]
   loading?: boolean
 }
 
-interface MetricDef {
-  key: string
-  label: string
-}
-
-function metricsForLens(lens: Lens, t: TFunction): MetricDef[] {
-  switch (lens) {
-    case 'recharge':
-      return [
-        { key: 'recharge_paid_cny', label: t('Recharge Paid') },
-        { key: 'subscription_paid_cny', label: t('Subscription Paid') },
-        { key: 'subscription_cost_cny', label: t('Subscription Cost') },
-        { key: 'subscription_spread_cny', label: t('Subscription Spread') },
-      ]
-    case 'withdrawals':
-      return [
-        { key: 'pending_cny', label: t('Pending') },
-        { key: 'withdrawn_cny', label: t('Withdrawn') },
-        { key: 'rejected_cny', label: t('Rejected') },
-      ]
-    case 'consumption':
-      return [{ key: 'used_cost_cny', label: t('Consumption Cost') }]
-    case 'earnings':
-    default:
-      return [{ key: 'amount_cny', label: t('Earnings') }]
-  }
-}
-
-export function TrendChart({
-  lens,
-  granularity,
+export function NetIncomeTrendChart({
   series,
   loading,
-}: TrendChartProps) {
+}: NetIncomeTrendChartProps) {
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
 
-  const metrics = useMemo(() => metricsForLens(lens, t), [lens, t])
+  const tokenplanLabel = t('Tokenplan Net Income', {
+    defaultValue: '套餐净收入',
+  })
+  const apiLabel = t('Apikey Net Income', { defaultValue: 'api净收入' })
+  // NOT the bare 'Total' key — zh.json already binds it to '总计' (a different
+  // existing feature), which would silently shadow this chart's defaultValue.
+  // Use a distinct, unclaimed key so the Chinese defaultValue always applies.
+  const totalLabel = t('Total Net Income', { defaultValue: '总净收入' })
 
   const values = useMemo(() => {
     const out: { bucket: string; series: string; value: number }[] = []
     for (const point of series) {
-      const rec = point as unknown as Record<string, number | string>
-      for (const metric of metrics) {
-        out.push({
-          bucket: String(point.bucket),
-          series: metric.label,
-          value: Number(rec[metric.key]) || 0,
-        })
-      }
+      const tokenplan = Number(point.tokenplan_net_cny) || 0
+      const apiNet = Number(point.api_net_cny) || 0
+      out.push({ bucket: point.bucket, series: tokenplanLabel, value: tokenplan })
+      out.push({ bucket: point.bucket, series: apiLabel, value: apiNet })
+      out.push({
+        bucket: point.bucket,
+        series: totalLabel,
+        value: tokenplan + apiNet,
+      })
     }
     return out
-  }, [series, metrics])
+  }, [series, tokenplanLabel, apiLabel, totalLabel])
 
   const chartTextColor =
     resolvedTheme === 'dark'
@@ -108,11 +84,11 @@ export function TrendChart({
   const spec = useMemo(
     () => ({
       type: 'line' as const,
-      data: [{ id: 'finance-trend', values }],
+      data: [{ id: 'admin-net-income-trend', values }],
       xField: 'bucket',
       yField: 'value',
       seriesField: 'series',
-      legends: { visible: metrics.length > 1 },
+      legends: { visible: true },
       point: { visible: false },
       line: { style: { lineWidth: 2, curveType: 'monotone' } },
       axes: [
@@ -166,20 +142,20 @@ export function TrendChart({
       },
       background: { fill: 'transparent' },
     }),
-    [values, metrics, chartTextColor, chartGridColor]
+    [values, chartTextColor, chartGridColor]
   )
 
-  const chartKey = `finance-trend-${lens}-${granularity}-${resolvedTheme}-${series.length}`
+  const chartKey = `admin-net-income-trend-${resolvedTheme}-${series.length}`
 
   return (
     <section
       className='bg-card flex h-full flex-col overflow-hidden rounded-lg border'
-      data-testid='trend-chart'
+      data-testid='net-income-trend-chart'
     >
       <header className='flex items-center gap-2 border-b px-4 py-3'>
         <TrendingUp className='text-muted-foreground/60 size-4 shrink-0' />
         <h3 className='text-sm font-semibold'>
-          {t('{{lens}} Trend', { lens: lensLabel(lens, t) })}
+          {t('Net Income Trend', { defaultValue: '净收入趋势' })}
         </h3>
       </header>
       <div className='h-64 p-2 sm:h-72'>

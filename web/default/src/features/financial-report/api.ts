@@ -23,11 +23,9 @@ import type {
   AgentRankParams,
   AgentRankResponse,
   ApiResponse,
-  DetailItem,
-  DetailParams,
-  DetailResponse,
-  ExportFormat,
   FinanceSummary,
+  Granularity,
+  NetIncomeTrendResponse,
   RangeParams,
   TrendParams,
   TrendResponse,
@@ -66,10 +64,12 @@ export async function getAdminFinanceAgents(
   return res.data
 }
 
-export async function getAdminFinanceDetail(
-  params: DetailParams
-): Promise<ApiResponse<DetailResponse<DetailItem>>> {
-  const res = await api.get('/api/admin/finance/detail', { params })
+// Admin net-income trend (3-line chart source): 套餐净 / api净 series; the total
+// line is summed client-side. Same range/granularity params as `/finance/trend`.
+export async function getAdminFinanceNetTrend(
+  params: RangeParams & { granularity: Granularity }
+): Promise<ApiResponse<NetIncomeTrendResponse>> {
+  const res = await api.get('/api/admin/finance/net-trend', { params })
   return res.data
 }
 
@@ -89,77 +89,4 @@ export async function getTenantFinanceTrend(
 ): Promise<ApiResponse<TrendResponse>> {
   const res = await api.get('/api/tenant/finance/trend', { params })
   return res.data
-}
-
-export async function getTenantFinanceDetail(
-  params: DetailParams
-): Promise<ApiResponse<DetailResponse<DetailItem>>> {
-  const res = await api.get('/api/tenant/finance/detail', { params })
-  return res.data
-}
-
-// ---------------------------------------------------------------------------
-// Export download. The `detail` endpoints stream a file when `format` is set
-// (the ONE documented exception to the JSON envelope, contract §1). We bypass
-// the business-error interceptor (`skipBusinessError`) since the body is a
-// Blob, then trigger a browser download from the response.
-// ---------------------------------------------------------------------------
-
-const DETAIL_URL: Record<'admin' | 'tenant', string> = {
-  admin: '/api/admin/finance/detail',
-  tenant: '/api/tenant/finance/detail',
-}
-
-export async function downloadFinanceDetail(
-  scope: 'admin' | 'tenant',
-  params: DetailParams,
-  format: ExportFormat
-): Promise<void> {
-  const res = await api.get(DETAIL_URL[scope], {
-    params: { ...params, format },
-    responseType: 'blob',
-    skipBusinessError: true,
-    skipErrorHandler: true,
-  })
-
-  const blob = res.data as Blob
-  const filename =
-    filenameFromContentDisposition(
-      (res.headers?.['content-disposition'] ??
-        res.headers?.['Content-Disposition']) as string | undefined
-    ) ??
-    `finance-${params.lens}-${params.start_timestamp}-${params.end_timestamp}.${format}`
-
-  triggerBlobDownload(blob, filename)
-}
-
-/** Parse a filename out of a `Content-Disposition` header (RFC 5987 aware). */
-function filenameFromContentDisposition(
-  header: string | undefined
-): string | undefined {
-  if (!header) return undefined
-  // Prefer the RFC 5987 `filename*=UTF-8''...` extended form.
-  const star = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(header)
-  if (star?.[1]) {
-    const raw = star[1].trim().replace(/^"|"$/g, '')
-    try {
-      return decodeURIComponent(raw)
-    } catch {
-      return raw
-    }
-  }
-  const plain = /filename="?([^";]+)"?/i.exec(header)
-  return plain?.[1]?.trim()
-}
-
-/** Create a temporary object URL + anchor to save the blob, then clean up. */
-function triggerBlobDownload(blob: Blob, filename: string): void {
-  const url = window.URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  window.URL.revokeObjectURL(url)
 }

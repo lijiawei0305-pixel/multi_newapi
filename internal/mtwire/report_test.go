@@ -510,3 +510,89 @@ func TestHandleTenantFinanceTrend_EarningsLens_SplitsWithdrawableBuckets(t *test
 		t.Fatalf("consumption_withdrawable_cny = %v, want 10 (7 ratio_markup + 3 consume_commission)", pt.ConsumptionWithdrawableCNY)
 	}
 }
+
+// TestHandleAdminNetIncomeTrend_EnvelopeRound2AndPlatformExclusion 覆盖 GET /api/admin/finance/net-trend：
+// data.series 每桶 {bucket, bucket_ts, tokenplan_net_cny, api_net_cny}，金额 round2；rebate 两块严格排除
+// 平台租户（tenant_id<>platformID，与 6 卡总览同口径）。造 1 桶：主站+代理订阅实付、代理套餐/api 返现
+// （含一笔平台租户巨额噪声 + 一笔 manual_adjustment，均不得进任一 rebate）、主站+代理钱包消耗（+1 quota
+// 制造 >2 位小数以证明 round2 真的四舍五入）。总净由前端相加，不在此端点断言。
+func TestHandleAdminNetIncomeTrend_EnvelopeRound2AndPlatformExclusion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app := newFinanceOverviewTestApp(t)
+	ctx := context.Background()
+
+	platform := &tenant.Tenant{Slug: "platform", Name: "主站直销"}
+	if err := app.TenantRepo.CreateTenant(ctx, platform); err != nil {
+		t.Fatalf("create platform tenant: %v", err)
+	}
+	agentT := &tenant.Tenant{Slug: "acme", Name: "Acme代理"}
+	if err := app.TenantRepo.CreateTenant(ctx, agentT); err != nil {
+		t.Fatalf("create agent tenant: %v", err)
+	}
+
+	base := time.Unix(1_700_000_000, 0).UTC()
+	start := base.Add(-time.Hour).Unix()
+	end := base.Add(time.Hour).Unix()
+
+	// 订阅实付（全站含主站）：主站 100 + 代理 60。
+	seedSubscriptionOrder(t, app.DB, "ORD-MAIN", platform.ID, 100, 100, base)
+	seedSubscriptionOrder(t, app.DB, "ORD-AGENT", agentT.ID, 60, 40, base)
+	// 套餐返现：代理 15（计入），平台 999（必须排除）。
+	seedFinanceEarning(t, app, agentT.ID, "tokenplan_spread", 15, base)
+	seedFinanceEarning(t, app, platform.ID, "tokenplan_spread", 999, base)
+	// api 返现：代理 ratio_markup 4 + consume_commission 1（计入 5）；平台 999（排除）；manual 50（不计）。
+	seedFinanceEarning(t, app, agentT.ID, "ratio_markup", 4, base)
+	seedFinanceEarning(t, app, agentT.ID, "consume_commission", 1, base)
+	seedFinanceEarning(t, app, platform.ID, "ratio_markup", 999, base)
+	seedFinanceEarning(t, app, agentT.ID, "manual_adjustment", 50, base)
+	// 钱包消耗（全站含主站）：主站 2*QuotaPerUnit + 代理 (3*QuotaPerUnit + 1)（+1 制造 >2 位小数）。
+	seedWalletConsume(t, app, platform.ID, 701, int64(2*common.QuotaPerUnit), "w-main", base)
+	seedWalletConsume(t, app, agentT.ID, 702, int64(3*common.QuotaPerUnit)+1, "w-agent", base)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet,
+		fmt.Sprintf("/api/admin/finance/net-trend?start_timestamp=%d&end_timestamp=%d&granularity=day", start, end), nil)
+	app.HandleAdminNetIncomeTrend(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var env struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Granularity string `json:"granularity"`
+			Series      []struct {
+				Bucket          string  `json:"bucket"`
+				BucketTS        int64   `json:"bucket_ts"`
+				TokenplanNetCNY float64 `json:"tokenplan_net_cny"`
+				ApiNetCNY       float64 `json:"api_net_cny"`
+			} `json:"series"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, w.Body.String())
+	}
+	if !env.Success {
+		t.Fatalf("success=false; body=%s", w.Body.String())
+	}
+	if env.Data.Granularity != "day" {
+		t.Fatalf("granularity = %q, want day", env.Data.Granularity)
+	}
+	if len(env.Data.Series) != 1 {
+		t.Fatalf("series = %d, want 1; body=%s", len(env.Data.Series), w.Body.String())
+	}
+	pt := env.Data.Series[0]
+	if pt.BucketTS == 0 {
+		t.Fatalf("bucket_ts should be non-zero (bucket start epoch); pt=%+v", pt)
+	}
+	// 套餐净 = (100+60) − 15 = 145（平台 999 tokenplan_spread 排除，否则会变负）。
+	if pt.TokenplanNetCNY != 145 {
+		t.Fatalf("tokenplan_net_cny = %v, want 145 ((100+60)-15; platform spread must be excluded)", pt.TokenplanNetCNY)
+	}
+	// api净 = round2(QuotaToCNY(5*QuotaPerUnit + 1) − 5)（平台 999 + manual 50 均排除；+1 使原值 >2 位小数）。
+	wantApi := round2(reportrepo.QuotaToCNY(int64(5*common.QuotaPerUnit)+1) - 5)
+	if math.Abs(pt.ApiNetCNY-wantApi) > 1e-9 {
+		t.Fatalf("api_net_cny = %v, want %v (QuotaToCNY(5*QuotaPerUnit+1)-5, round2; platform/manual excluded)", pt.ApiNetCNY, wantApi)
+	}
+}
