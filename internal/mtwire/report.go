@@ -549,7 +549,7 @@ func (a *App) handleFinanceSummary(c *gin.Context, tenantID *int64) {
 		Withdrawals: withdrawalsBlockOut{
 			PendingCNY:   round2(wd["pending"]),
 			FrozenCNY:    round2(wallet.FrozenCNY),
-			WithdrawnCNY: round2(wd["approved"]),
+			WithdrawnCNY: round2(wd["paid"]),
 			RejectedCNY:  round2(wd["rejected"]),
 		},
 		Exchange: exchangeBlockOut{

@@ -366,7 +366,7 @@ func (r *Repo) SubscriptionPaidCost(ctx context.Context, tenantID *int64, start,
 // 透镜 (d)：提现 by status
 // ============================================================================
 
-// Withdrawals 按状态汇总提现金额（¥）：status ∈ pending/approved/rejected。
+// Withdrawals 按状态汇总提现金额（¥）：status ∈ pending/approved/paid/rejected（withdrawn 口径=paid，即真正打款出账）。
 // frozen 口径由 WalletTotals.FrozenCNY 提供（= SUM(agent_wallets.frozen_withdraw_amount)）。
 func (r *Repo) Withdrawals(ctx context.Context, tenantID *int64, start, end int64) (map[string]float64, error) {
 	type stRow struct {
@@ -600,7 +600,7 @@ func (r *Repo) TrendRecharge(ctx context.Context, tenantID *int64, start, end in
 	return out, nil
 }
 
-// TrendWithdrawals 按日历桶汇总提现（pending/approved→withdrawn/rejected）。
+// TrendWithdrawals 按日历桶汇总提现（pending/paid→withdrawn/rejected；paid=真正打款出账）。
 func (r *Repo) TrendWithdrawals(ctx context.Context, tenantID *int64, start, end int64, granularity string) ([]WithdrawalsTrendPoint, error) {
 	granularity = normGranularity(granularity)
 	m, err := r.bucketedStatusSum(ctx, "agent_withdrawals", "created_at", tenantID, start, end, granularity)
@@ -614,7 +614,7 @@ func (r *Repo) TrendWithdrawals(ctx context.Context, tenantID *int64, start, end
 			Bucket:       label,
 			BucketTS:     bucketStartTS(granularity, label),
 			PendingCNY:   st["pending"],
-			WithdrawnCNY: st["approved"],
+			WithdrawnCNY: st["paid"],
 			RejectedCNY:  st["rejected"],
 		})
 	}
@@ -1039,7 +1039,7 @@ func (r *Repo) withdrawByTenant(ctx context.Context, start, end int64) (map[int6
 	for _, x := range rows {
 		a := out[x.TenantID]
 		switch x.Status {
-		case "approved":
+		case "paid":
 			a.withdrawn += x.Amount
 		case "pending":
 			a.pending += x.Amount
