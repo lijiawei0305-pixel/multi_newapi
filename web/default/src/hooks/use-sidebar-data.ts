@@ -253,6 +253,11 @@ export function useSidebarData(): SidebarData {
             icon: Package,
           },
           {
+            title: t('Agent Plans Admin', { defaultValue: '代理套餐' }),
+            url: '/agent-plans',
+            icon: Tags,
+          },
+          {
             title: t('Subscription Monitor'),
             url: '/subscription-monitor',
             icon: Gauge,
