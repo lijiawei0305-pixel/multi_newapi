@@ -45,7 +45,7 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
       {
         accessorFn: (row) => row.owner_username,
         id: 'owner_username',
-        header: t('Owner'),
+        header: t('Owner', { defaultValue: '所属用户' }),
         meta: { mobileTitle: true },
         cell: ({ row }) => (
           <span className='font-medium'>{row.original.owner_username}</span>
@@ -55,7 +55,7 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
       {
         accessorFn: (row) => row.name,
         id: 'name',
-        header: t('Agent Name'),
+        header: t('Agent Name', { defaultValue: '代理名称' }),
         cell: ({ row }) => (
           <span className='truncate'>{row.original.name}</span>
         ),
@@ -64,7 +64,7 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
       {
         accessorFn: (row) => row.level,
         id: 'level',
-        header: t('Level'),
+        header: t('Level', { defaultValue: '等级' }),
         meta: { mobileBadge: true },
         cell: ({ row }) => (
           <StatusBadge
@@ -92,7 +92,7 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
       {
         accessorFn: (row) => row.commission_ratio,
         id: 'commission_ratio',
-        header: t('Commission Ratio'),
+        header: t('Commission Ratio', { defaultValue: '分润比例' }),
         meta: { mobileHidden: true },
         cell: ({ row }) => (
           <span className='text-muted-foreground tabular-nums'>
@@ -104,7 +104,7 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
       {
         accessorFn: (row) => row.status,
         id: 'status',
-        header: t('Status'),
+        header: t('Status', { defaultValue: '状态' }),
         meta: { mobileBadge: true },
         cell: ({ row }) => {
           const meta = agentStatusMeta(row.original.status, t)
@@ -122,7 +122,7 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
       {
         accessorFn: (row) => row.withdrawable_cny,
         id: 'withdrawable_cny',
-        header: t('Withdrawable (¥)'),
+        header: t('Withdrawable (¥)', { defaultValue: '可提现（¥）' }),
         cell: ({ row }) => (
           <span className='font-semibold text-emerald-600 tabular-nums'>
             {cny(row.original.withdrawable_cny)}
@@ -132,7 +132,7 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
       },
       {
         id: 'actions',
-        header: () => t('Actions'),
+        header: () => t('Actions', { defaultValue: '操作' }),
         cell: ({ row }) => <DataTableRowActions row={row} />,
         meta: { pinned: 'right' as const },
       },

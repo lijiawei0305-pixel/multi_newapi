@@ -52,8 +52,10 @@ export function AgentsTable() {
       table={table}
       columns={columns}
       isLoading={isLoading}
-      emptyTitle={t('No agents yet')}
-      emptyDescription={t('Click "Create Agent" to add your first sub-agent')}
+      emptyTitle={t('No agents yet', { defaultValue: '暂无代理' })}
+      emptyDescription={t('Click "Create Agent" to add your first sub-agent', {
+        defaultValue: '点击「新建代理」添加第一个子代理',
+      })}
       skeletonKeyPrefix='agents-skeleton'
       applyHeaderSize
     />

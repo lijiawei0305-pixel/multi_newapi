@@ -37,7 +37,9 @@ export const num = (v: number | undefined) => {
 
 /** i18n label for an agent level (0=普通/basic, 1=独立/independent). */
 export function agentLevelLabel(level: number, t: TFunction): string {
-  return level >= 1 ? t('Independent Agent') : t('Basic Agent')
+  return level >= 1
+    ? t('Independent Agent', { defaultValue: '独立代理' })
+    : t('Basic Agent', { defaultValue: '基础代理' })
 }
 
 /** Badge styling + i18n label for an agent status (tolerant of backend values). */
@@ -49,14 +51,14 @@ export function agentStatusMeta(
     case 'disabled':
     case 'suspended':
     case 'banned':
-      return { variant: 'danger', label: t('Disabled') }
+      return { variant: 'danger', label: t('Disabled', { defaultValue: '已禁用' }) }
     case 'pending':
-      return { variant: 'warning', label: t('Pending') }
+      return { variant: 'warning', label: t('Pending', { defaultValue: '待审核' }) }
     case '':
     case undefined:
     case null as unknown as string:
-      return { variant: 'success', label: t('Enabled') }
+      return { variant: 'success', label: t('Enabled', { defaultValue: '已启用' }) }
     default:
-      return { variant: 'success', label: t('Enabled') }
+      return { variant: 'success', label: t('Enabled', { defaultValue: '已启用' }) }
   }
 }

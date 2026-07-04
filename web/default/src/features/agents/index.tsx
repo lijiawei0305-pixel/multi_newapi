@@ -30,7 +30,7 @@ function AgentsContent() {
     <>
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>
-          {t('Sub-Agent Management')}
+          {t('Sub-Agent Management', { defaultValue: '子代理管理' })}
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
           <AgentsPrimaryButtons />

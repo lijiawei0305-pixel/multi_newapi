@@ -25,9 +25,13 @@ export function getAgentFormSchema(t: TFunction) {
     owner_user_id: z.coerce
       .number()
       .int()
-      .min(1, t('Please select an owner user')),
-    slug: z.string().min(1, t('Please enter a slug')),
-    name: z.string().min(1, t('Please enter agent name')),
+      .min(1, t('Please select an owner user', { defaultValue: '请选择所属用户' })),
+    slug: z
+      .string()
+      .min(1, t('Please enter a slug', { defaultValue: '请填写标识 Slug' })),
+    name: z
+      .string()
+      .min(1, t('Please enter agent name', { defaultValue: '请填写代理名称' })),
     commission_ratio: z.coerce.number().min(0),
     discount_ratio: z.coerce.number().min(0),
     level: z.coerce.number().int().min(0),

@@ -32,7 +32,7 @@ export function AgentsPrimaryButtons() {
         data-testid='agent-create-btn'
       >
         <Plus className='h-4 w-4' />
-        {t('Create Agent')}
+        {t('Create Agent', { defaultValue: '新建代理' })}
       </Button>
     </div>
   )

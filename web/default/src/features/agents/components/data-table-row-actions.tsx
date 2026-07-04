@@ -50,14 +50,14 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
               variant='ghost'
               size='icon-sm'
               onClick={handleEdit}
-              aria-label={t('Edit')}
+              aria-label={t('Edit', { defaultValue: '编辑' })}
               data-testid={`agent-edit-${row.original.id}`}
             />
           }
         >
           <Pencil />
         </TooltipTrigger>
-        <TooltipContent>{t('Edit')}</TooltipContent>
+        <TooltipContent>{t('Edit', { defaultValue: '编辑' })}</TooltipContent>
       </Tooltip>
     </div>
   )

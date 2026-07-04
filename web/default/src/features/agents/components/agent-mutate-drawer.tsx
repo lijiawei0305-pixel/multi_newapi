@@ -135,14 +135,18 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
             })
           : await createAgent(payload)
       if (res.success) {
-        toast.success(isEdit ? t('Update succeeded') : t('Create succeeded'))
+        toast.success(
+          isEdit
+            ? t('Update succeeded', { defaultValue: '更新成功' })
+            : t('Create succeeded', { defaultValue: '创建成功' })
+        )
         onOpenChange(false)
         triggerRefresh()
       }
       // Business failures (success === false) are surfaced by the shared
       // axios interceptor reading `message`/`code`.
     } catch {
-      toast.error(t('Request failed'))
+      toast.error(t('Request failed', { defaultValue: '请求失败' }))
     } finally {
       setIsSubmitting(false)
     }
@@ -159,12 +163,18 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
       <SheetContent className={sideDrawerContentClassName('sm:max-w-[600px]')}>
         <SheetHeader className={sideDrawerHeaderClassName()}>
           <SheetTitle>
-            {isEdit ? t('Update agent') : t('Create new agent')}
+            {isEdit
+              ? t('Update agent', { defaultValue: '编辑代理' })
+              : t('Create new agent', { defaultValue: '新建代理' })}
           </SheetTitle>
           <SheetDescription>
             {isEdit
-              ? t('Modify the agent configuration')
-              : t('Fill in the fields to create a new agent')}
+              ? t('Modify the agent configuration', {
+                  defaultValue: '修改代理配置',
+                })
+              : t('Fill in the fields to create a new agent', {
+                  defaultValue: '填写以下字段以创建新代理',
+                })}
           </SheetDescription>
         </SheetHeader>
         <Form {...form}>
@@ -177,7 +187,7 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
             <SideDrawerSection>
               <h3 className='flex items-center gap-2 text-sm font-medium'>
                 <UserCog className='h-4 w-4' />
-                {t('Identity')}
+                {t('Identity', { defaultValue: '身份' })}
               </h3>
 
               <FormField
@@ -185,7 +195,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                 name='owner_user_id'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t('Owner User')}</FormLabel>
+                    <FormLabel>
+                      {t('Owner User', { defaultValue: '所属用户' })}
+                    </FormLabel>
                     <FormControl>
                       {isEdit ? (
                         <Input
@@ -201,7 +213,7 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                           }
                         >
                           <NativeSelectOption value=''>
-                            {t('Select a user')}
+                            {t('Select a user', { defaultValue: '选择用户' })}
                           </NativeSelectOption>
                           {(users || []).map((u) => (
                             <NativeSelectOption key={u.id} value={String(u.id)}>
@@ -213,7 +225,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                       )}
                     </FormControl>
                     <FormDescription>
-                      {t('The user account this agent belongs to.')}
+                      {t('The user account this agent belongs to.', {
+                        defaultValue: '该代理归属的用户账号。',
+                      })}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -226,7 +240,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   name='slug'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Slug')}</FormLabel>
+                      <FormLabel>
+                        {t('Slug', { defaultValue: '标识 Slug' })}
+                      </FormLabel>
                       <FormControl>
                         <Input
                           {...field}
@@ -235,7 +251,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('Unique tenant identifier; used in links.')}
+                        {t('Unique tenant identifier; used in links.', {
+                          defaultValue: '租户唯一标识，用于生成链接域名。',
+                        })}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -247,9 +265,16 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   name='name'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Agent Name')}</FormLabel>
+                      <FormLabel>
+                        {t('Agent Name', { defaultValue: '代理名称' })}
+                      </FormLabel>
                       <FormControl>
-                        <Input {...field} placeholder={t('e.g. Acme')} />
+                        <Input
+                          {...field}
+                          placeholder={t('e.g. Acme', {
+                            defaultValue: '如：某某代理',
+                          })}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -261,7 +286,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   name='level'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Agent Level')}</FormLabel>
+                      <FormLabel>
+                        {t('Agent Level', { defaultValue: '代理等级' })}
+                      </FormLabel>
                       <FormControl>
                         <NativeSelect
                           value={String(field.value ?? 0)}
@@ -270,16 +297,20 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                           }
                         >
                           <NativeSelectOption value='0'>
-                            {t('Basic Agent')}
+                            {t('Basic Agent', { defaultValue: '基础代理' })}
                           </NativeSelectOption>
                           <NativeSelectOption value='1'>
-                            {t('Independent Agent')}
+                            {t('Independent Agent', { defaultValue: '独立代理' })}
                           </NativeSelectOption>
                         </NativeSelect>
                       </FormControl>
                       <FormDescription>
                         {t(
-                          'Independent unlocks subdomain, custom domain and site branding. Promote manually when the agent performs well.'
+                          'Independent unlocks subdomain, custom domain and site branding. Promote manually when the agent performs well.',
+                          {
+                            defaultValue:
+                              '独立代理解锁子域名、自定义域名与站点品牌装修；代理表现良好时再手动升级。',
+                          }
                         )}
                       </FormDescription>
                       <FormMessage />
@@ -293,12 +324,12 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
               <SideDrawerSection>
                 <h3 className='flex items-center gap-2 text-sm font-medium'>
                   <TrendingUp className='h-4 w-4' />
-                  {t('Promotion metrics')}
+                  {t('Promotion metrics', { defaultValue: '升级参考指标' })}
                 </h3>
                 <div className='grid grid-cols-3 gap-3'>
                   <div className='rounded-md border p-3'>
                     <div className='text-xs text-muted-foreground'>
-                      {t('Total recharge (¥)')}
+                      {t('Total recharge (¥)', { defaultValue: '累计充值（¥）' })}
                     </div>
                     <div className='text-lg font-semibold'>
                       {metrics ? cny(metrics.recharge_total_cny) : '—'}
@@ -306,7 +337,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   </div>
                   <div className='rounded-md border p-3'>
                     <div className='text-xs text-muted-foreground'>
-                      {t('Commission earned (¥)')}
+                      {t('Commission earned (¥)', {
+                        defaultValue: '累计分润（¥）',
+                      })}
                     </div>
                     <div className='text-lg font-semibold'>
                       {metrics ? cny(metrics.commission_earned_cny) : '—'}
@@ -314,7 +347,7 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   </div>
                   <div className='rounded-md border p-3'>
                     <div className='text-xs text-muted-foreground'>
-                      {t('Downstream users')}
+                      {t('Downstream users', { defaultValue: '下级用户数' })}
                     </div>
                     <div className='text-lg font-semibold'>
                       {metrics ? String(metrics.downstream_user_count) : '—'}
@@ -323,7 +356,11 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                 </div>
                 <FormDescription>
                   {t(
-                    'Lifetime totals to help you decide whether to promote this agent to independent (level 1).'
+                    'Lifetime totals to help you decide whether to promote this agent to independent (level 1).',
+                    {
+                      defaultValue:
+                        '累计数据，帮助你判断是否将该代理升级为独立档（等级 1）。',
+                    }
                   )}
                 </FormDescription>
               </SideDrawerSection>
@@ -333,7 +370,7 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
             <SideDrawerSection>
               <h3 className='flex items-center gap-2 text-sm font-medium'>
                 <CreditCard className='h-4 w-4' />
-                {t('Commercials')}
+                {t('Commercials', { defaultValue: '商务配置' })}
               </h3>
 
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
@@ -370,7 +407,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   name='commission_ratio'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Commission Ratio')}</FormLabel>
+                      <FormLabel>
+                        {t('Commission Ratio', { defaultValue: '分润比例' })}
+                      </FormLabel>
                       <FormControl>
                         <Input
                           {...field}
@@ -381,7 +420,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('Share of consumption revenue, e.g. 0.1.')}
+                        {t('Share of consumption revenue, e.g. 0.1.', {
+                          defaultValue: '消耗分润比例（L0 基础档提成），如 0.1。',
+                        })}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -393,7 +434,7 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
         </Form>
         <SheetFooter className={sideDrawerFooterClassName()}>
           <SheetClose render={<Button variant='outline' />}>
-            {t('Close')}
+            {t('Close', { defaultValue: '关闭' })}
           </SheetClose>
           <Button
             form='agent-form'
@@ -401,7 +442,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
             disabled={isSubmitting}
             data-testid='agent-form-save'
           >
-            {isSubmitting ? t('Saving...') : t('Save changes')}
+            {isSubmitting
+              ? t('Saving...', { defaultValue: '保存中…' })
+              : t('Save changes', { defaultValue: '保存' })}
           </Button>
         </SheetFooter>
       </SheetContent>
