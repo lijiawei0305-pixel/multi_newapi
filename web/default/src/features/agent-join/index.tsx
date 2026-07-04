@@ -42,6 +42,7 @@ import { useTranslation } from 'react-i18next'
 import { AnimateInView } from '@/components/animate-in-view'
 import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -389,6 +390,59 @@ export function AgentJoin() {
     t('Agent Join Rule 4', { defaultValue: '系统抽成 10%。' }),
   ]
 
+  // 代理合作方案（四档，对应本项目普通用户 / 普通代理 / OEM 代理 / API 代理）。
+  // 静态营销数据,集中于此便于日后接入后台代理套餐接口。
+  const plans = [
+    {
+      tier: t('Agent Join Plan Tier User', { defaultValue: '普通用户' }),
+      name: t('Agent Join Plan Name One', { defaultValue: '套餐一' }),
+      desc: t('Agent Join Plan Desc One', {
+        defaultValue: '个人或团队直接使用',
+      }),
+      currency: '¥',
+      anchor: '50.00',
+      price: '47.50',
+      discount: t('Agent Join Plan Discount 95', { defaultValue: '9.5 折优惠' }),
+      recommended: false,
+    },
+    {
+      tier: t('Agent Join Plan Tier Agent', { defaultValue: '普通代理' }),
+      name: t('Agent Join Plan Name Two', { defaultValue: '套餐二' }),
+      desc: t('Agent Join Plan Desc Two', {
+        defaultValue: '适合个人或小团队，快速开始销售 AI 服务',
+      }),
+      currency: '¥',
+      anchor: '100.00',
+      price: '95.00',
+      discount: t('Agent Join Plan Discount 95', { defaultValue: '9.5 折优惠' }),
+      recommended: true,
+    },
+    {
+      tier: t('Agent Join Plan Tier Oem', { defaultValue: 'OEM 代理' }),
+      name: t('Agent Join Plan Name Three', { defaultValue: '套餐三' }),
+      desc: t('Agent Join Plan Desc Three', {
+        defaultValue: '品牌定制，搭建专属 AI 平台',
+      }),
+      currency: '¥',
+      anchor: '500.00',
+      price: '450.00',
+      discount: t('Agent Join Plan Discount 90', { defaultValue: '9.0 折优惠' }),
+      recommended: false,
+    },
+    {
+      tier: t('Agent Join Plan Tier Api', { defaultValue: 'API 代理' }),
+      name: t('Agent Join Plan Name Four', { defaultValue: '套餐四' }),
+      desc: t('Agent Join Plan Desc Four', {
+        defaultValue: '开放接口，为合作方提供 AI 能力',
+      }),
+      currency: '$',
+      anchor: '1000.00',
+      price: '900.00',
+      discount: t('Agent Join Plan Discount 90', { defaultValue: '9.0 折优惠' }),
+      recommended: false,
+    },
+  ]
+
   return (
     <PublicLayout showMainContainer={false}>
       {/* ===== Hero ===== */}
@@ -605,6 +659,86 @@ export function AgentJoin() {
               )
             })}
           </div>
+        </div>
+      </section>
+
+      {/* ===== 代理合作方案 ===== */}
+      <section className='border-border/40 relative z-10 border-t px-6 py-20 md:py-28'>
+        <div className='mx-auto max-w-6xl'>
+          <SectionHeading
+            eyebrow={t('Agent Join Plans Eyebrow', {
+              defaultValue: '代理合作方案',
+            })}
+            title={t('Agent Join Plans Title', {
+              defaultValue: '选择适合你的代理类型，开始销售 AI 服务',
+            })}
+          />
+          <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+            {plans.map((plan, i) => (
+              <AnimateInView
+                key={plan.name}
+                delay={i * 80}
+                animation='fade-up'
+                className='h-full'
+              >
+                <Card
+                  className={
+                    plan.recommended
+                      ? 'border-primary/40 relative h-full shadow-lg'
+                      : 'relative h-full'
+                  }
+                >
+                  {plan.recommended ? (
+                    <Badge className='absolute end-4 -top-2.5'>
+                      {t('Agent Join Plan Recommended', {
+                        defaultValue: '推荐',
+                      })}
+                    </Badge>
+                  ) : null}
+                  <CardHeader>
+                    <span className='text-muted-foreground text-xs'>
+                      {plan.tier}
+                    </span>
+                    <CardTitle className='mt-1'>{plan.name}</CardTitle>
+                    <CardDescription>{plan.desc}</CardDescription>
+                  </CardHeader>
+                  <CardContent className='space-y-4'>
+                    <div>
+                      <p className='text-muted-foreground text-sm line-through'>
+                        {plan.currency}
+                        {plan.anchor}
+                      </p>
+                      <p className='flex items-baseline gap-1'>
+                        <span className='text-3xl font-bold tracking-tight'>
+                          {plan.currency}
+                          {plan.price}
+                        </span>
+                        <span className='text-muted-foreground text-sm'>
+                          {t('Agent Join Plan Per Month', {
+                            defaultValue: '/1 月',
+                          })}
+                        </span>
+                      </p>
+                      <p className='mt-1 text-xs font-medium text-emerald-600 dark:text-emerald-400'>
+                        {plan.discount}
+                      </p>
+                    </div>
+                    <Button
+                      className='w-full'
+                      render={<Link to='/register' />}
+                    >
+                      {t('Agent Join Plan CTA', { defaultValue: '立即开通' })}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </AnimateInView>
+            ))}
+          </div>
+          <p className='text-muted-foreground/70 mt-6 text-center text-xs'>
+            {t('Agent Join Plans Footnote', {
+              defaultValue: '最终价格与折扣以后台实际配置为准。',
+            })}
+          </p>
         </div>
       </section>
 
