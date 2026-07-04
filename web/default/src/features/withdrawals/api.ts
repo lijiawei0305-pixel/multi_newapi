@@ -36,10 +36,29 @@ export async function approveWithdrawal(id: number): Promise<ApiResponse> {
   return res.data
 }
 
+// Field aligned to what the backend binds (payout closure #3): `remark`, not
+// `reason` — the mismatch used to silently drop the rejection reason.
 export async function rejectWithdrawal(
   id: number,
-  reason: string
+  remark: string
 ): Promise<ApiResponse> {
-  const res = await api.post(`/api/admin/withdrawals/${id}/reject`, { reason })
+  const res = await api.post(`/api/admin/withdrawals/${id}/reject`, { remark })
+  return res.data
+}
+
+/**
+ * Mark an approved withdrawal as paid (approved -> paid, CAS on the backend).
+ * `skipErrorHandler` so the dialog can special-case `PAYOUT_REF_REQUIRED`
+ * (400) and `WITHDRAW_NOT_APPROVED` (409 — status changed concurrently).
+ */
+export async function markPaidWithdrawal(
+  id: number,
+  payoutRef: string
+): Promise<ApiResponse> {
+  const res = await api.post(
+    `/api/admin/withdrawals/${id}/mark-paid`,
+    { payout_ref: payoutRef },
+    { skipErrorHandler: true }
+  )
   return res.data
 }

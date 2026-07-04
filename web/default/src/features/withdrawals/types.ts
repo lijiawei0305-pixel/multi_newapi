@@ -42,6 +42,17 @@ export interface Withdrawal {
   /** 提现金额 (¥). */
   amount_cny: number
   status: string
+  /** Review/reject remark (payout closure #3 — standardized field name). */
+  remark?: string
+  /** Payout destination snapshot taken at request time (empty until set). */
+  payout_method?: string
+  payout_account?: string
+  payout_name?: string
+  payout_bank?: string
+  /** Payout reference/receipt — set once marked paid via mark-paid. */
+  payout_ref?: string
+  /** Paid time — set once marked paid (empty string until then). */
+  paid_at?: number | string
   /** Request time — unix seconds, unix ms, or ISO string (formatter tolerant). */
   created_at?: number | string
   /** Review time — set once approved/rejected. */
@@ -56,4 +67,4 @@ export interface ApiResponse<T = unknown> {
   data?: T
 }
 
-export type WithdrawalAction = 'approve' | 'reject'
+export type WithdrawalAction = 'approve' | 'reject' | 'mark-paid'

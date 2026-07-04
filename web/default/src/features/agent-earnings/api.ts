@@ -17,7 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
-import type { ApiResponse, MyWithdrawal } from './types'
+import type {
+  ApiResponse,
+  MyWithdrawal,
+  PayoutAccount,
+  PayoutAccountInput,
+} from './types'
 
 // ============================================================================
 // Agent self-service endpoints. Auth is carried by new-api's shared axios
@@ -41,11 +46,33 @@ export async function getMyWithdrawals(): Promise<ApiResponse<MyWithdrawal[]>> {
   return res.data
 }
 
+/**
+ * `skipErrorHandler` so `WithdrawDialog` can special-case
+ * `PAYOUT_ACCOUNT_REQUIRED` (surface the payout-account settings entry)
+ * instead of just toasting the raw backend message (see getApiErrorCode).
+ */
 export async function requestWithdrawal(
   amountCny: number
 ): Promise<ApiResponse> {
-  const res = await api.post('/api/tenant/withdrawals', {
-    amount_cny: amountCny,
+  const res = await api.post(
+    '/api/tenant/withdrawals',
+    { amount_cny: amountCny },
+    { skipErrorHandler: true }
+  )
+  return res.data
+}
+
+export async function getPayoutAccount(): Promise<ApiResponse<PayoutAccount>> {
+  const res = await api.get('/api/tenant/payout-account')
+  return res.data
+}
+
+/** `skipErrorHandler` so the dialog can map PAYOUT_ACCOUNT_INVALID to a localized message. */
+export async function updatePayoutAccount(
+  input: PayoutAccountInput
+): Promise<ApiResponse<PayoutAccount>> {
+  const res = await api.put('/api/tenant/payout-account', input, {
+    skipErrorHandler: true,
   })
   return res.data
 }

@@ -87,7 +87,9 @@ export function sourceTypeLabel(source: string | undefined, t: TFunction): strin
   }
 }
 
-/** Badge styling + i18n label for a withdrawal status. */
+/** Badge styling + i18n label for a withdrawal status. Each of the 4 statuses
+ * gets a visually distinct variant (approved=info vs. paid=success) so the
+ * (now non-terminal) `approved` state reads clearly different from `paid`. */
 export function withdrawalStatusMeta(
   status: string | undefined,
   t: TFunction
@@ -96,12 +98,27 @@ export function withdrawalStatusMeta(
     case 'pending':
       return { variant: 'warning', label: t('Pending'), pulse: true }
     case 'approved':
-      return { variant: 'success', label: t('Approved') }
+      return { variant: 'info', label: t('Approved') }
     case 'paid':
       return { variant: 'success', label: t('Paid') }
     case 'rejected':
       return { variant: 'danger', label: t('Rejected') }
     default:
       return { variant: 'neutral', label: status || '-' }
+  }
+}
+
+/** i18n label for a payout method (tolerant of unknown/empty values). */
+export function payoutMethodLabel(
+  method: string | undefined,
+  t: TFunction
+): string {
+  switch (method) {
+    case 'alipay':
+      return t('Alipay', { defaultValue: '支付宝' })
+    case 'bank':
+      return t('Bank Card', { defaultValue: '银行卡' })
+    default:
+      return '-'
   }
 }

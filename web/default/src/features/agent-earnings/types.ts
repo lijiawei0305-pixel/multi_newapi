@@ -45,8 +45,40 @@ export interface MyWithdrawal {
   id: number
   amount_cny: number
   status: string
+  /** Review/reject remark (payout closure #3 — standardized field name). */
+  remark?: string
+  /** Payout destination snapshot taken at request time. */
+  payout_method?: string
+  payout_account?: string
+  payout_name?: string
+  payout_bank?: string
+  /** Payout reference/receipt — set once the admin marks the withdrawal paid. */
+  payout_ref?: string
+  /** Paid time — set once marked paid (empty string until then). */
+  paid_at?: number | string
   created_at?: number | string
   reviewed_at?: number | string
+}
+
+/**
+ * Agent's payout (收款) destination. Backed by `/api/tenant/payout-account`.
+ * `configured: false` means the agent has not set one yet — the withdrawal
+ * request endpoint then rejects with `PAYOUT_ACCOUNT_REQUIRED`.
+ */
+export interface PayoutAccount {
+  configured: boolean
+  payout_method: 'alipay' | 'bank' | ''
+  payout_account: string
+  payout_name: string
+  payout_bank: string
+}
+
+/** Payload for `PUT /api/tenant/payout-account`. */
+export interface PayoutAccountInput {
+  payout_method: 'alipay' | 'bank'
+  payout_account: string
+  payout_name: string
+  payout_bank: string
 }
 
 /** Unified new-api control-plane envelope: `{ success, message, data }`. */

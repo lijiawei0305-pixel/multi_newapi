@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { getApiErrorCode } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -40,9 +41,18 @@ interface Props {
   /** Maximum withdrawable balance (¥). */
   max: number
   onSuccess: () => void
+  /** Fired when the request bounces with PAYOUT_ACCOUNT_REQUIRED so the
+   * parent page can surface the payout-account settings entry. */
+  onPayoutAccountRequired?: () => void
 }
 
-export function WithdrawDialog({ open, onOpenChange, max, onSuccess }: Props) {
+export function WithdrawDialog({
+  open,
+  onOpenChange,
+  max,
+  onSuccess,
+  onPayoutAccountRequired,
+}: Props) {
   const { t } = useTranslation()
   const [amount, setAmount] = useState<number>(0)
   const [submitting, setSubmitting] = useState(false)
@@ -66,8 +76,25 @@ export function WithdrawDialog({ open, onOpenChange, max, onSuccess }: Props) {
         onOpenChange(false)
         onSuccess()
       }
-    } catch {
-      toast.error(t('Request failed'))
+    } catch (err) {
+      const code = getApiErrorCode(err)
+      if (code === 'PAYOUT_ACCOUNT_REQUIRED') {
+        toast.error(
+          t('Please set your payout account before requesting a withdrawal', {
+            defaultValue: '请先设置收款账户，再申请提现',
+          })
+        )
+        onOpenChange(false)
+        onPayoutAccountRequired?.()
+      } else if (code === 'WITHDRAW_INSUFFICIENT') {
+        toast.error(
+          t('Withdrawal amount exceeds withdrawable balance', {
+            defaultValue: '提现金额超过可提现余额',
+          })
+        )
+      } else {
+        toast.error(t('Request failed'))
+      }
     } finally {
       setSubmitting(false)
     }

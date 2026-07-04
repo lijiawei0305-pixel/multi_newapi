@@ -26,13 +26,20 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { cny, formatDateTime, withdrawalStatusMeta } from '../lib'
+import {
+  cny,
+  formatDateTime,
+  payoutMethodLabel,
+  withdrawalStatusMeta,
+} from '../lib'
 import type { MyWithdrawal } from '../types'
 
 interface Props {
   items: MyWithdrawal[]
   loading?: boolean
 }
+
+const COLUMN_COUNT = 7
 
 export function MyWithdrawalsTable({ items, loading }: Props) {
   const { t } = useTranslation()
@@ -43,20 +50,35 @@ export function MyWithdrawalsTable({ items, loading }: Props) {
         <TableRow>
           <TableHead>{t('ID')}</TableHead>
           <TableHead>{t('Amount (¥)')}</TableHead>
+          <TableHead>
+            {t('Payout Account', { defaultValue: '收款账户' })}
+          </TableHead>
           <TableHead>{t('Status')}</TableHead>
+          <TableHead>
+            {t('Remark / Rejection Reason', { defaultValue: '备注/驳回原因' })}
+          </TableHead>
+          <TableHead>
+            {t('Payout Reference', { defaultValue: '打款凭证' })}
+          </TableHead>
           <TableHead>{t('Created At')}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {loading ? (
           <TableRow>
-            <TableCell colSpan={4} className='text-muted-foreground text-center'>
+            <TableCell
+              colSpan={COLUMN_COUNT}
+              className='text-muted-foreground text-center'
+            >
               {t('Loading...')}
             </TableCell>
           </TableRow>
         ) : items.length === 0 ? (
           <TableRow>
-            <TableCell colSpan={4} className='text-muted-foreground text-center'>
+            <TableCell
+              colSpan={COLUMN_COUNT}
+              className='text-muted-foreground text-center'
+            >
               {t('No withdrawals')}
             </TableCell>
           </TableRow>
@@ -71,6 +93,16 @@ export function MyWithdrawalsTable({ items, loading }: Props) {
                 <TableCell className='font-semibold tabular-nums'>
                   {cny(row.amount_cny)}
                 </TableCell>
+                <TableCell className='text-sm'>
+                  {row.payout_account ? (
+                    <span>
+                      {payoutMethodLabel(row.payout_method, t)}{' '}
+                      {row.payout_account}
+                    </span>
+                  ) : (
+                    <span className='text-muted-foreground'>-</span>
+                  )}
+                </TableCell>
                 <TableCell>
                   <StatusBadge
                     label={meta.label}
@@ -78,6 +110,26 @@ export function MyWithdrawalsTable({ items, loading }: Props) {
                     pulse={meta.pulse}
                     copyable={false}
                   />
+                </TableCell>
+                <TableCell
+                  className='text-muted-foreground max-w-48 truncate text-sm'
+                  title={row.remark || undefined}
+                >
+                  {row.remark || '-'}
+                </TableCell>
+                <TableCell className='text-sm'>
+                  {row.status === 'paid' && (row.payout_ref || row.paid_at) ? (
+                    <div className='flex flex-col'>
+                      {row.payout_ref && <span>{row.payout_ref}</span>}
+                      {row.paid_at && (
+                        <span className='text-muted-foreground text-xs'>
+                          {formatDateTime(row.paid_at)}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className='text-muted-foreground'>-</span>
+                  )}
                 </TableCell>
                 <TableCell className='text-muted-foreground text-sm'>
                   {formatDateTime(row.created_at)}
