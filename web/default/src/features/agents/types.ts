@@ -44,6 +44,8 @@ export interface Agent {
   package_discount: number
   /** 分润比例 — share of consumption revenue (e.g. 0.1). */
   commission_ratio: number
+  /** 折扣系数 — 全线批发折扣 = 主站价 × 系数（消耗按分组基准、套餐按主站价）；0/空 = 不打折。 */
+  discount_ratio: number
   status: string
   /** 可提现余额 (¥). */
   withdrawable_cny: number
@@ -69,6 +71,7 @@ export interface AgentPayload {
   cost_price_cny: number
   package_discount: number
   commission_ratio: number
+  discount_ratio: number
   level: number
 }
 

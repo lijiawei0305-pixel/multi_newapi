@@ -81,13 +81,19 @@ func (s *subscriptionService) Purchase(ctx context.Context, in PurchaseInput) (*
 		return nil, err
 	}
 
+	// 代理进货成本价：设了折扣系数就按「主站官方售价 BasePrice × 系数」得 per-agent 成本；否则回退套餐
+	// 自带的 AgentCostPrice（对所有代理一样，现状）。差价 = 零售 − 此成本，在 ActivateFromPayment 结算。
+	agentCost := plan.AgentCostPrice
+	if in.DiscountRatio > 0 {
+		agentCost = plan.BasePrice * in.DiscountRatio
+	}
 	if err := s.subs.SavePendingPurchase(ctx, &PendingPurchase{
 		OrderID:        order.OrderID,
 		TenantID:       in.TenantID,
 		UserID:         in.UserID,
 		PlanID:         in.PlanID,
 		RetailPrice:    listing.RetailPrice,
-		AgentCostPrice: plan.AgentCostPrice,
+		AgentCostPrice: agentCost,
 		MonthLimitUSD:  plan.MonthLimitUSD,
 		ValidDays:      plan.ValidDays,
 	}); err != nil {

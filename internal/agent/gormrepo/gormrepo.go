@@ -34,6 +34,7 @@ type profileRow struct {
 	CommissionRatio  float64 `gorm:"column:commission_ratio;type:decimal(20,8);not null;default:0"`
 	DiscountFloor    float64 `gorm:"column:discount_floor;type:decimal(20,8);not null;default:0"`
 	BottomPriceRatio float64 `gorm:"column:bottom_price_ratio;type:decimal(20,8);not null;default:0"`
+	DiscountRatio    float64 `gorm:"column:discount_ratio;type:decimal(20,8);not null;default:0"`
 	// PayoutMethod/PayoutAccount/PayoutName/PayoutBank：代理收款账户（提现闭环补强 #1）。
 	// 代理自助设置/修改（GetPayoutAccount/SetPayoutAccount，不经 AgentParams/SetAgentType）；
 	// 申请提现时整份快照进 agent_withdrawals（见 withdrawalRow 同名字段）。
@@ -133,6 +134,7 @@ func (r *Repo) SetAgentType(ctx context.Context, tenantID int64, p agent.AgentPa
 		CommissionRatio:  p.CommissionRatio,
 		DiscountFloor:    p.DiscountFloor,
 		BottomPriceRatio: p.BottomPriceRatio,
+		DiscountRatio:    p.DiscountRatio,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -140,13 +142,18 @@ func (r *Repo) SetAgentType(ctx context.Context, tenantID int64, p agent.AgentPa
 		Columns: []clause.Column{{Name: "tenant_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"level", "can_api", "cost_price_cny", "package_discount",
-			"commission_ratio", "discount_floor", "bottom_price_ratio", "updated_at",
+			"commission_ratio", "discount_floor", "bottom_price_ratio", "discount_ratio", "updated_at",
 		}),
 	}).Create(&row).Error
 }
 
 // GetAgentType 读取代理资料；found=false 表示该租户尚未设代理。
+// r==nil（仓储未注入，如只测买家主站回落路径的最小 App）时按「未设代理」处理——调用方据此取零折扣/回退，
+// 与「主站无代理」的真实语义一致，不 panic。
 func (r *Repo) GetAgentType(ctx context.Context, tenantID int64) (agent.AgentParams, bool, error) {
+	if r == nil {
+		return agent.AgentParams{}, false, nil
+	}
 	var row profileRow
 	err := r.db.WithContext(ctx).Take(&row, "tenant_id = ?", tenantID).Error
 	if err != nil {
@@ -163,6 +170,7 @@ func (r *Repo) GetAgentType(ctx context.Context, tenantID int64) (agent.AgentPar
 		CanAPI:           row.CanAPI,
 		DiscountFloor:    row.DiscountFloor,
 		BottomPriceRatio: row.BottomPriceRatio,
+		DiscountRatio:    row.DiscountRatio,
 	}, true, nil
 }
 
@@ -441,6 +449,7 @@ type AgentRow struct {
 	PackageDiscount  float64
 	CommissionRatio  float64
 	BottomPriceRatio float64
+	DiscountRatio    float64
 }
 
 // ListProfiles 列出全部代理资料（每行 = 一个代理租户），供管理端 GET /api/admin/agents 装配。
@@ -460,6 +469,7 @@ func (r *Repo) ListProfiles(ctx context.Context) ([]AgentRow, error) {
 			PackageDiscount:  p.PackageDiscount,
 			CommissionRatio:  p.CommissionRatio,
 			BottomPriceRatio: p.BottomPriceRatio,
+			DiscountRatio:    p.DiscountRatio,
 		})
 	}
 	return out, nil

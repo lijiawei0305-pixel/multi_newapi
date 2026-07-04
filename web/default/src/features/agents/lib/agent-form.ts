@@ -31,6 +31,7 @@ export function getAgentFormSchema(t: TFunction) {
     cost_price_cny: z.coerce.number().min(0, t('Please enter amount')),
     package_discount: z.coerce.number().min(0),
     commission_ratio: z.coerce.number().min(0),
+    discount_ratio: z.coerce.number().min(0),
     level: z.coerce.number().int().min(0),
   })
 }
@@ -44,6 +45,7 @@ export const AGENT_FORM_DEFAULTS: AgentFormValues = {
   cost_price_cny: 0,
   package_discount: 1,
   commission_ratio: 0,
+  discount_ratio: 0,
   level: 0,
 }
 
@@ -55,6 +57,7 @@ export function agentToFormValues(agent: Agent): AgentFormValues {
     cost_price_cny: Number(agent.cost_price_cny || 0),
     package_discount: Number(agent.package_discount ?? 1),
     commission_ratio: Number(agent.commission_ratio || 0),
+    discount_ratio: Number(agent.discount_ratio || 0),
     level: Number(agent.level || 0),
   }
 }
@@ -67,6 +70,7 @@ export function formValuesToPayload(values: AgentFormValues): AgentPayload {
     cost_price_cny: Number(values.cost_price_cny || 0),
     package_discount: Number(values.package_discount || 0),
     commission_ratio: Number(values.commission_ratio || 0),
+    discount_ratio: Number(values.discount_ratio || 0),
     level: Number(values.level || 0),
   }
 }

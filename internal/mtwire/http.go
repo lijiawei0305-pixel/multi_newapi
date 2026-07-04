@@ -232,12 +232,18 @@ func (a *App) HandlePurchase(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
+	// 解析该购买租户对应代理的全线折扣系数（主站平台租户/未设代理 → found=false → 0 → 套餐回退原成本）。
+	var discountRatio float64
+	if p, found, err := a.AgentRepo.GetAgentType(ctx, t.ID); err == nil && found {
+		discountRatio = p.DiscountRatio
+	}
 	ticket, err := a.Subscriptions.Purchase(ctx, tokenplan.PurchaseInput{
-		TenantID:   t.ID,
-		UserID:     int64(c.GetInt("id")),
-		PlanID:     planID,
-		DeviceID:   body.DeviceID,
-		RealNameID: body.RealNameID,
+		TenantID:      t.ID,
+		UserID:        int64(c.GetInt("id")),
+		PlanID:        planID,
+		DeviceID:      body.DeviceID,
+		RealNameID:    body.RealNameID,
+		DiscountRatio: discountRatio,
 	})
 	if err != nil {
 		respondErr(c, err)

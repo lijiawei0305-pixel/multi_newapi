@@ -57,7 +57,7 @@ func ratioMarkupQuotaUnits(chargedQuota int64, chargedGroupRatio, bottomRatio fl
 // （已含层级优惠）直接对 bottomRatio 求差，sellRatio 的返回值不再需要——但**查询本身仍必须保留**，
 // 因为它是"这个模型分组是否有卖价覆盖"这个入账资格判据的唯一来源（无覆盖=用户按平台价付费=不产生
 // 差价，即便 chargedGroupRatio 本身合法非零）。
-func (a *App) creditRatioMarkup(ctx context.Context, tenantID, userID, quotaUnits int64, usingGroup, requestID, billingSource string, chargedGroupRatio, bottomPriceRatio float64) {
+func (a *App) creditRatioMarkup(ctx context.Context, tenantID, userID, quotaUnits int64, usingGroup, requestID, billingSource string, chargedGroupRatio, discountRatio, bottomPriceRatio float64) {
 	if tenantID <= 0 || quotaUnits <= 0 || requestID == "" || usingGroup == "" || chargedGroupRatio <= 0 {
 		return
 	}
@@ -67,7 +67,7 @@ func (a *App) creditRatioMarkup(ctx context.Context, tenantID, userID, quotaUnit
 	if _, hit := a.resolveTenantGroupRatio(ctx, userID, usingGroup); !hit {
 		return // 未设卖价覆盖：用户按平台直客价付费，不视为隐式底价加价
 	}
-	bottom := consumeFloorRatio(bottomPriceRatio, usingGroup) // 与 HandleAgentSetGroupRatio 同口径（Task 12）
+	bottom := consumeFloorRatio(discountRatio, bottomPriceRatio, usingGroup) // 与 HandleAgentSetGroupRatio 同口径（Task 12）
 	markupQuota := ratioMarkupQuotaUnits(quotaUnits, chargedGroupRatio, bottom)
 	if markupQuota <= 0 {
 		return

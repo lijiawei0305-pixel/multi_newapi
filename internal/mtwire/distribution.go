@@ -388,15 +388,17 @@ func (a *App) HandleAgentListGroups(c *gin.Context) {
 	}
 	ctx := reqCtx(c)
 	bottom := float64(0)
+	discount := float64(0)
 	if params, found, err := a.AgentRepo.GetAgentType(ctx, tenantID); err == nil && found {
 		bottom = params.BottomPriceRatio
+		discount = params.DiscountRatio
 	}
 	names := a.ModelGroupRepo.ListEnabled() // 已启用模型分组名（升序）
 	out := make([]modelGroupRatioOut, 0, len(names))
 	for _, name := range names {
 		base := modelGroupBaseline(name) // 平台基准（PlatformRatio；未覆盖时的实际生效价）
 		row := modelGroupRatioOut{
-			GroupName: name, Ratio: base, PlatformRatio: base, Floor: consumeFloorRatio(bottom, name),
+			GroupName: name, Ratio: base, PlatformRatio: base, Floor: consumeFloorRatio(discount, bottom, name),
 		}
 		if override, found, err := a.TenantRepo.LookupEnabledGroupRatio(ctx, tenantID, name); err == nil && found {
 			row.Ratio = override
@@ -441,10 +443,12 @@ func (a *App) HandleAgentSetGroupRatio(c *gin.Context) {
 	ctx := reqCtx(c)
 	// 卖价下限 = 该代理底价（未配置回退平台基准）；spec §9.7：与 creditRatioMarkup 同一口径。
 	bottom := float64(0)
+	discount := float64(0)
 	if params, found, err := a.AgentRepo.GetAgentType(ctx, tenantID); err == nil && found {
 		bottom = params.BottomPriceRatio
+		discount = params.DiscountRatio
 	}
-	floor := consumeFloorRatio(bottom, group)
+	floor := consumeFloorRatio(discount, bottom, group)
 	if err := pricing.NewGuard().ValidateGroupRatio(body.Ratio, floor); err != nil {
 		respondErr(c, err) // RATIO_BELOW_FLOOR
 		return
@@ -637,13 +641,18 @@ func modelGroupBaseline(group string) float64 {
 }
 
 // consumeFloorRatio 返回「该代理在某模型分组上设卖价」的下限（spec §9.7 四档价格阶梯的地板）：
-// bottomPriceRatio（该代理的 AgentParams.BottomPriceRatio，跨全部模型分组统一一个比例）> 0 时优先；
-// 未配置（<=0）回退平台基准 modelGroupBaseline(group)（历史行为，安全默认——不允许低于官方直客价）。
+// discountRatio（该代理的 AgentParams.DiscountRatio，全线批发折扣系数）> 0 时最优先：返回
+// modelGroupBaseline(group) × discountRatio（相对缩放、按分组自动伸缩，见 doc/agent-wholesale-discount.md）。
+// 否则退回 bottomPriceRatio（旧的绝对底价，向后兼容）> 0 时优先；两者皆未配置（<=0）回退平台基准
+// modelGroupBaseline(group)（历史行为，安全默认——不允许低于官方直客价）。
 //
 // 必须是 HandleAgentSetGroupRatio（写：卖价下限）与 creditRatioMarkup（读：差价入账的减数，Task 13）
 // 共用的唯一口径——两处若各算各的，会出现「卖价被下限挡住却在入账时被当成 0 底价整单算成代理利润」
 // 的记账错误（§9.7 record-keeping 警示）。纯函数，无需 App 接收者。
-func consumeFloorRatio(bottomPriceRatio float64, group string) float64 {
+func consumeFloorRatio(discountRatio, bottomPriceRatio float64, group string) float64 {
+	if discountRatio > 0 {
+		return modelGroupBaseline(group) * discountRatio
+	}
 	if bottomPriceRatio > 0 {
 		return bottomPriceRatio
 	}

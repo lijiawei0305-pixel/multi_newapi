@@ -108,7 +108,7 @@ func TestCreditRatioMarkup_CreditsL1WalletIdempotently(t *testing.T) {
 
 	// charged=1200 quota，chargedGroupRatio=0.45（tier=1×卖价 0.45），底价未配置（0）→回退平台基准 0.3。
 	// rawUnits=1200/0.45=2666.67，markup=(0.45-0.3)×2666.67=400。
-	app.creditRatioMarkup(ctx, 5, 100, 1200, "claude-kiro", "req-md-1", "wallet", 0.45, 0)
+	app.creditRatioMarkup(ctx, 5, 100, 1200, "claude-kiro", "req-md-1", "wallet", 0.45, 0, 0)
 
 	w, err := app.AgentRepo.GetWallet(ctx, 5)
 	if err != nil {
@@ -120,7 +120,7 @@ func TestCreditRatioMarkup_CreditsL1WalletIdempotently(t *testing.T) {
 	}
 
 	// 幂等：同 requestID 重复调用不重复入账。
-	app.creditRatioMarkup(ctx, 5, 100, 1200, "claude-kiro", "req-md-1", "wallet", 0.45, 0)
+	app.creditRatioMarkup(ctx, 5, 100, 1200, "claude-kiro", "req-md-1", "wallet", 0.45, 0, 0)
 	w2, err := app.AgentRepo.GetWallet(ctx, 5)
 	if err != nil {
 		t.Fatalf("get wallet: %v", err)
@@ -131,7 +131,7 @@ func TestCreditRatioMarkup_CreditsL1WalletIdempotently(t *testing.T) {
 
 	// 无覆盖（租户 9 未设卖价）：不入账。
 	seedUser(t, app, 200, 9)
-	app.creditRatioMarkup(ctx, 9, 200, 1200, "claude-kiro", "req-md-2", "wallet", 0.3, 0)
+	app.creditRatioMarkup(ctx, 9, 200, 1200, "claude-kiro", "req-md-2", "wallet", 0.3, 0, 0)
 	w9, err := app.AgentRepo.GetWallet(ctx, 9)
 	if err != nil {
 		t.Fatalf("get wallet: %v", err)
@@ -145,7 +145,7 @@ func TestCreditRatioMarkup_CreditsL1WalletIdempotently(t *testing.T) {
 	if err := app.TenantRepo.UpsertGroup(ctx, 11, "claude-kiro", 0.45); err != nil {
 		t.Fatalf("upsert override: %v", err)
 	}
-	app.creditRatioMarkup(ctx, 11, 300, 1200, "claude-kiro", "req-md-3", "wallet", 0.45, 0.5)
+	app.creditRatioMarkup(ctx, 11, 300, 1200, "claude-kiro", "req-md-3", "wallet", 0.45, 0, 0.5)
 	w11, err := app.AgentRepo.GetWallet(ctx, 11)
 	if err != nil {
 		t.Fatalf("get wallet: %v", err)
@@ -156,13 +156,30 @@ func TestCreditRatioMarkup_CreditsL1WalletIdempotently(t *testing.T) {
 
 	// 非模型分组（层级名）：即便凑巧有 tenant_groups 行，也不产生差价（IsModelGroup 门禁）。
 	seedUser(t, app, 400, 12)
-	app.creditRatioMarkup(ctx, 12, 400, 1200, "vip", "req-md-4", "wallet", 0.36, 0)
+	app.creditRatioMarkup(ctx, 12, 400, 1200, "vip", "req-md-4", "wallet", 0.36, 0, 0)
 	w12, err := app.AgentRepo.GetWallet(ctx, 12)
 	if err != nil {
 		t.Fatalf("get wallet: %v", err)
 	}
 	if w12.WithdrawableBalance != 0 {
 		t.Fatalf("non-model-group usingGroup must not credit markup, got %v", w12.WithdrawableBalance)
+	}
+
+	// 折扣系数(discountRatio=0.8)：底价 = 平台基准 × 0.8 = 0.3×0.8 = 0.24（相对缩放，取代绝对底价，
+	// 优先级高于 bottomPriceRatio）。charged=1200,chargedGroupRatio=0.45,rawUnits≈2666.67,
+	// markup=(0.45-0.24)×2666.67=560。
+	seedUser(t, app, 500, 13)
+	if err := app.TenantRepo.UpsertGroup(ctx, 13, "claude-kiro", 0.45); err != nil {
+		t.Fatalf("upsert override: %v", err)
+	}
+	app.creditRatioMarkup(ctx, 13, 500, 1200, "claude-kiro", "req-md-5", "wallet", 0.45, 0.8, 0)
+	w13, err := app.AgentRepo.GetWallet(ctx, 13)
+	if err != nil {
+		t.Fatalf("get wallet: %v", err)
+	}
+	wantCNY5 := consumeCommissionCNY(560, 1, operation_setting.USDExchangeRate)
+	if math.Abs(w13.WithdrawableBalance-wantCNY5) > 1e-6 {
+		t.Fatalf("discount-factor markup = %v, want %v (bottom=0.3*0.8=0.24)", w13.WithdrawableBalance, wantCNY5)
 	}
 }
 
@@ -243,8 +260,8 @@ func TestCreditRatioMarkup_AgentBearsOwnRealizedDiscount(t *testing.T) {
 		t.Fatalf("upsert override: %v", err)
 	}
 
-	app.creditRatioMarkup(ctx, 5, 100, defaultCharged, "claude-kiro", "req-vip-default", "wallet", defaultTier*sellRatio, bottomRatio)
-	app.creditRatioMarkup(ctx, 5, 101, vipCharged, "claude-kiro", "req-vip-vip", "wallet", vipTier*sellRatio, bottomRatio)
+	app.creditRatioMarkup(ctx, 5, 100, defaultCharged, "claude-kiro", "req-vip-default", "wallet", defaultTier*sellRatio, 0, bottomRatio)
+	app.creditRatioMarkup(ctx, 5, 101, vipCharged, "claude-kiro", "req-vip-vip", "wallet", vipTier*sellRatio, 0, bottomRatio)
 
 	var rows []struct {
 		SourceID string

@@ -263,6 +263,9 @@ type PurchaseInput struct {
 	PlanID     int64
 	DeviceID   string // 设备指纹（Trial 限购维度之一）
 	RealNameID string // 实名标识（Trial 限购维度之一）
+	// DiscountRatio 该租户代理的全线折扣系数（doc/agent-wholesale-discount.md）：>0 时代理套餐进货价 =
+	// plan.BasePrice × DiscountRatio；<=0（主站/未设代理）回退 plan.AgentCostPrice（现状）。由 http 层解析后传入。
+	DiscountRatio float64
 }
 
 // PurchaseTicket 是下单结果（含支付跳转信息），用户据此完成支付。

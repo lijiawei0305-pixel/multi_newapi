@@ -240,7 +240,7 @@ func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID,
 		a.creditL0Commission(ctx, tenantID, userID, quotaUnits, requestID, billingSource, params.CommissionRatio)
 		return
 	}
-	a.creditRatioMarkup(ctx, tenantID, userID, quotaUnits, usingGroup, requestID, billingSource, chargedGroupRatio, params.BottomPriceRatio)
+	a.creditRatioMarkup(ctx, tenantID, userID, quotaUnits, usingGroup, requestID, billingSource, chargedGroupRatio, params.DiscountRatio, params.BottomPriceRatio)
 }
 
 // creditL0Commission 是 L0（普通档）计费通路：官方原价提成（commission_ratio × quotaUnits，公式不变，
@@ -532,6 +532,7 @@ type agentOut struct {
 	PackageDiscount  float64 `json:"package_discount"`
 	CommissionRatio  float64 `json:"commission_ratio"`
 	BottomPriceRatio float64 `json:"bottom_price_ratio"`
+	DiscountRatio    float64 `json:"discount_ratio"`
 	Status           string  `json:"status"`
 	WithdrawableCNY  float64 `json:"withdrawable_cny"`
 	FrozenCNY        float64 `json:"frozen_cny"`
@@ -612,6 +613,7 @@ type agentCreateIn struct {
 	CommissionRatio  float64 `json:"commission_ratio"`
 	DiscountFloor    float64 `json:"discount_floor"`
 	BottomPriceRatio float64 `json:"bottom_price_ratio"`
+	DiscountRatio    float64 `json:"discount_ratio"`
 }
 
 // agentPatchIn 是 PATCH /api/admin/agents/:id 入参（指针支持局部更新）。
@@ -623,6 +625,7 @@ type agentPatchIn struct {
 	CommissionRatio  *float64 `json:"commission_ratio"`
 	DiscountFloor    *float64 `json:"discount_floor"`
 	BottomPriceRatio *float64 `json:"bottom_price_ratio"`
+	DiscountRatio    *float64 `json:"discount_ratio"`
 	Status           *string  `json:"status"`
 }
 
@@ -648,6 +651,7 @@ func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 		Level:            in.Level,
 		DiscountFloor:    in.DiscountFloor,
 		BottomPriceRatio: in.BottomPriceRatio,
+		DiscountRatio:    in.DiscountRatio,
 	}
 	// ① 前置强校验（纯函数，不写库）：参数 + 折扣保护线。
 	if err := params.Validate(); err != nil {
@@ -735,6 +739,7 @@ func (a *App) HandleAdminListAgents(c *gin.Context) {
 			PackageDiscount:  p.PackageDiscount,
 			CommissionRatio:  p.CommissionRatio,
 			BottomPriceRatio: p.BottomPriceRatio,
+			DiscountRatio:    p.DiscountRatio,
 			Status:           status,
 			WithdrawableCNY:  walletField(w, func(x *agent.AgentWallet) float64 { return x.WithdrawableBalance }),
 			FrozenCNY:        walletField(w, func(x *agent.AgentWallet) float64 { return x.FrozenWithdrawAmount }),
@@ -785,6 +790,9 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 	}
 	if in.BottomPriceRatio != nil {
 		curParams.BottomPriceRatio = *in.BottomPriceRatio
+	}
+	if in.DiscountRatio != nil {
+		curParams.DiscountRatio = *in.DiscountRatio
 	}
 	// 升档 → 独立档：先幂等派生子域名 `<slug>.wedreamhub.com`（resolver 不缓存负结果，无需失效缓存），
 	// 再自动作废该代理名下的全部推广渠道（邀请链接不再向*新*注册归属，见 attributeByChannel 的
@@ -1087,6 +1095,7 @@ func (a *App) buildAgentOut(ctx context.Context, tenantID, ownerUserID int64, sl
 		PackageDiscount:  p.PackageDiscount,
 		CommissionRatio:  p.CommissionRatio,
 		BottomPriceRatio: p.BottomPriceRatio,
+		DiscountRatio:    p.DiscountRatio,
 		Status:           status,
 		WithdrawableCNY:  walletField(w, func(x *agent.AgentWallet) float64 { return x.WithdrawableBalance }),
 		FrozenCNY:        walletField(w, func(x *agent.AgentWallet) float64 { return x.FrozenWithdrawAmount }),

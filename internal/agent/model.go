@@ -32,6 +32,12 @@ type AgentParams struct {
 	// 跨全部模型分组统一一个比例（不逐分组设——底价是「对该代理的批发折扣比例」，与逐模型定价的 ModelRatio
 	// 相乘即天然逐模型生效，无需再逐分组重复配置）。
 	BottomPriceRatio float64
+	// DiscountRatio 全线批发折扣系数（doc/agent-wholesale-discount.md）：管理员按代理设一个系数（如 0.8），
+	// >0 时全线生效——消耗侧代理成本 = 主站分组基准 × DiscountRatio（相对缩放，见 mtwire.consumeFloorRatio）；
+	// 套餐侧代理进货价 = 套餐主站价 BasePrice × DiscountRatio（见 tokenplan.Purchase）。<=0 = 未设/无折扣，
+	// 两侧均回退现状行为（消耗回退 BottomPriceRatio→平台基准；套餐回退 plan.AgentCostPrice）。
+	// 按用户明确要求「不做任何成本保护」：不接 PricingGuard、无上下限，仅拒绝 <0 的非法值。
+	DiscountRatio float64
 }
 
 // Validate 校验参数合法性；任一非法返回 ErrAgentTypeInvalid（AGENT_TYPE_INVALID）。
@@ -47,6 +53,8 @@ func (p AgentParams) Validate() error {
 	case p.Level < 0:
 		return ErrAgentTypeInvalid
 	case p.BottomPriceRatio < 0:
+		return ErrAgentTypeInvalid
+	case p.DiscountRatio < 0:
 		return ErrAgentTypeInvalid
 	default:
 		return nil
