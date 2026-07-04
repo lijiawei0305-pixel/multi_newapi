@@ -129,8 +129,6 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
         isEdit && currentRow?.id
           ? await updateAgent(currentRow.id, {
               name: payload.name,
-              cost_price_cny: payload.cost_price_cny,
-              package_discount: payload.package_discount,
               commission_ratio: payload.commission_ratio,
               discount_ratio: payload.discount_ratio,
               level: payload.level,
@@ -341,30 +339,12 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
               <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
                 <FormField
                   control={form.control}
-                  name='cost_price_cny'
+                  name='discount_ratio'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Cost Price (¥)')}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type='number'
-                          step='0.01'
-                          min={0}
-                          onChange={numberChange(field.onChange)}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name='package_discount'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Package Discount')}</FormLabel>
+                      <FormLabel>
+                        {t('Agent Discount Ratio', { defaultValue: '折扣系数' })}
+                      </FormLabel>
                       <FormControl>
                         <Input
                           {...field}
@@ -375,7 +355,10 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('Multiplier on plan retail price, e.g. 0.85.')}
+                        {t('Agent Discount Ratio Hint', {
+                          defaultValue:
+                            '全线批发折扣 = 主站价 × 系数（如 0.8 即八折）。消耗按分组基准倍率、套餐按主站价缩放；留空或 0 = 不打折。',
+                        })}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -399,34 +382,6 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                       </FormControl>
                       <FormDescription>
                         {t('Share of consumption revenue, e.g. 0.1.')}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name='discount_ratio'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>
-                        {t('Agent Discount Ratio', { defaultValue: '折扣系数' })}
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type='number'
-                          step='0.01'
-                          min={0}
-                          onChange={numberChange(field.onChange)}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {t('Agent Discount Ratio Hint', {
-                          defaultValue:
-                            '全线批发折扣 = 主站价 × 系数（如 0.8 即八折）。消耗按分组基准倍率、套餐按主站价缩放；留空或 0 = 不打折。',
-                        })}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

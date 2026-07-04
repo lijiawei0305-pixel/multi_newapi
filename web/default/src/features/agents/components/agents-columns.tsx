@@ -76,39 +76,6 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
         size: 110,
       },
       {
-        accessorFn: (row) => row.cost_price_cny,
-        id: 'cost_price_cny',
-        header: t('Cost Price (¥)'),
-        cell: ({ row }) => (
-          <span className='tabular-nums'>{cny(row.original.cost_price_cny)}</span>
-        ),
-        size: 110,
-      },
-      {
-        accessorFn: (row) => row.package_discount,
-        id: 'package_discount',
-        header: t('Package Discount'),
-        meta: { mobileHidden: true },
-        cell: ({ row }) => (
-          <span className='text-muted-foreground tabular-nums'>
-            {num(row.original.package_discount)}
-          </span>
-        ),
-        size: 110,
-      },
-      {
-        accessorFn: (row) => row.commission_ratio,
-        id: 'commission_ratio',
-        header: t('Commission Ratio'),
-        meta: { mobileHidden: true },
-        cell: ({ row }) => (
-          <span className='text-muted-foreground tabular-nums'>
-            {num(row.original.commission_ratio)}
-          </span>
-        ),
-        size: 110,
-      },
-      {
         accessorFn: (row) => row.discount_ratio,
         id: 'discount_ratio',
         header: t('Agent Discount Ratio', { defaultValue: '折扣系数' }),
@@ -121,6 +88,18 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
           </span>
         ),
         size: 100,
+      },
+      {
+        accessorFn: (row) => row.commission_ratio,
+        id: 'commission_ratio',
+        header: t('Commission Ratio'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => (
+          <span className='text-muted-foreground tabular-nums'>
+            {num(row.original.commission_ratio)}
+          </span>
+        ),
+        size: 110,
       },
       {
         accessorFn: (row) => row.status,

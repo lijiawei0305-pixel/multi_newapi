@@ -22,7 +22,7 @@ For commercial licensing, please contact support@quantumnous.com
 //
 // Mirrors the field contract aligned with the backend Worker (snake_case):
 //   id / owner_user_id / owner_username / slug / name / level /
-//   cost_price_cny / package_discount / commission_ratio / status /
+//   commission_ratio / discount_ratio / status /
 //   withdrawable_cny / frozen_cny / total_earned_cny
 // Backed by GET/POST/PATCH /api/admin/agents[/:id]. Auth is carried by
 // new-api's shared axios instance (session cookie + New-Api-User header),
@@ -38,10 +38,6 @@ export interface Agent {
   slug: string
   name: string
   level: number
-  /** 成本价 — main-site cost basis for this agent (¥). */
-  cost_price_cny: number
-  /** 套餐折扣 — multiplier applied to plan retail price (e.g. 0.85). */
-  package_discount: number
   /** 分润比例 — share of consumption revenue (e.g. 0.1). */
   commission_ratio: number
   /** 折扣系数 — 全线批发折扣 = 主站价 × 系数（消耗按分组基准、套餐按主站价）；0/空 = 不打折。 */
@@ -68,8 +64,6 @@ export interface AgentPayload {
   owner_user_id: number
   slug: string
   name: string
-  cost_price_cny: number
-  package_discount: number
   commission_ratio: number
   discount_ratio: number
   level: number
