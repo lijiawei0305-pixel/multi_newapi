@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   ArrowRight,
@@ -54,6 +55,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { useStatus } from '@/hooks/use-status'
 
+import { getPublicAgentPlans } from './api'
 import { HeroIllustration } from './hero-illustration'
 
 /**
@@ -76,6 +78,19 @@ import { HeroIllustration } from './hero-illustration'
 const COMMISSION_RATE = 0.1
 /** 成本保护线：代理设置的售价必须高于成本的倍数。 */
 const MIN_MARKUP = 1.11
+
+/** 代理合作方案卡片的统一展示形状（静态兜底与后端动态代理套餐共用）。 */
+type PlanCard = {
+  tier: string
+  name: string
+  desc: string
+  currency: string
+  anchor: string
+  price: string
+  period: string
+  discount: string
+  recommended: boolean
+}
 
 function EarningsCalculator() {
   const { t } = useTranslation()
@@ -390,58 +405,79 @@ export function AgentJoin() {
     t('Agent Join Rule 4', { defaultValue: '系统抽成 10%。' }),
   ]
 
-  // 代理合作方案（四档，对应本项目普通用户 / 普通代理 / OEM 代理 / API 代理）。
-  // 静态营销数据,集中于此便于日后接入后台代理套餐接口。
-  const plans = [
+  // 代理合作方案 = 代理套餐（一次性 + 有效期）。真实数据来自公开只读端点
+  // /api/agent-plans/public（后台可配的三档：普通代理 / OEM 代理 / API 代理）；
+  // 拉取失败或后台未配置时回退到这份兜底文案，保证公开落地页永不空白。
+  const fallbackPlans: PlanCard[] = [
     {
-      tier: t('Agent Join Plan Tier User', { defaultValue: '普通用户' }),
-      name: t('Agent Join Plan Name One', { defaultValue: '套餐一' }),
-      desc: t('Agent Join Plan Desc One', {
-        defaultValue: '个人或团队直接使用',
-      }),
-      currency: '¥',
-      anchor: '50.00',
-      price: '47.50',
-      discount: t('Agent Join Plan Discount 95', { defaultValue: '9.5 折优惠' }),
-      recommended: false,
-    },
-    {
-      tier: t('Agent Join Plan Tier Agent', { defaultValue: '普通代理' }),
-      name: t('Agent Join Plan Name Two', { defaultValue: '套餐二' }),
-      desc: t('Agent Join Plan Desc Two', {
+      tier: '',
+      name: t('Agent Join Plan Name Basic', { defaultValue: '普通代理' }),
+      desc: t('Agent Join Plan Desc Basic', {
         defaultValue: '适合个人或小团队，快速开始销售 AI 服务',
       }),
       currency: '¥',
-      anchor: '100.00',
-      price: '95.00',
-      discount: t('Agent Join Plan Discount 95', { defaultValue: '9.5 折优惠' }),
+      anchor: '1,980',
+      price: '990',
+      period: t('Agent Join Plan Validity Year', { defaultValue: '有效期 365 天' }),
+      discount: t('Agent Join Plan Discount 50', { defaultValue: '5 折优惠' }),
       recommended: true,
     },
     {
-      tier: t('Agent Join Plan Tier Oem', { defaultValue: 'OEM 代理' }),
-      name: t('Agent Join Plan Name Three', { defaultValue: '套餐三' }),
-      desc: t('Agent Join Plan Desc Three', {
-        defaultValue: '品牌定制，搭建专属 AI 平台',
+      tier: '',
+      name: t('Agent Join Plan Name Oem', { defaultValue: 'OEM 代理' }),
+      desc: t('Agent Join Plan Desc Oem', {
+        defaultValue: '品牌定制、独立域名，搭建专属 AI 平台',
       }),
       currency: '¥',
-      anchor: '500.00',
-      price: '450.00',
-      discount: t('Agent Join Plan Discount 90', { defaultValue: '9.0 折优惠' }),
+      anchor: '9,980',
+      price: '4,990',
+      period: t('Agent Join Plan Validity Year', { defaultValue: '有效期 365 天' }),
+      discount: t('Agent Join Plan Discount 50', { defaultValue: '5 折优惠' }),
       recommended: false,
     },
     {
-      tier: t('Agent Join Plan Tier Api', { defaultValue: 'API 代理' }),
-      name: t('Agent Join Plan Name Four', { defaultValue: '套餐四' }),
-      desc: t('Agent Join Plan Desc Four', {
+      tier: '',
+      name: t('Agent Join Plan Name Api', { defaultValue: 'API 代理' }),
+      desc: t('Agent Join Plan Desc Api', {
         defaultValue: '开放接口，为合作方提供 AI 能力',
       }),
-      currency: '$',
-      anchor: '1000.00',
-      price: '900.00',
-      discount: t('Agent Join Plan Discount 90', { defaultValue: '9.0 折优惠' }),
+      currency: '¥',
+      anchor: '19,980',
+      price: '9,990',
+      period: t('Agent Join Plan Validity Year', { defaultValue: '有效期 365 天' }),
+      discount: t('Agent Join Plan Discount 50', { defaultValue: '5 折优惠' }),
       recommended: false,
     },
   ]
+
+  // 拉取主站公开代理套餐（无需登录，仅 enabled 展示字段）；失败或空 → 回退 fallbackPlans。
+  const { data: livePlans } = useQuery({
+    queryKey: ['agent-join', 'public-agent-plans'],
+    queryFn: getPublicAgentPlans,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const fmtPrice = (n: number) =>
+    Number.isFinite(n) ? n.toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : ''
+
+  const plans: PlanCard[] =
+    livePlans && livePlans.length > 0
+      ? [...livePlans]
+          .sort((a, b) => a.sort - b.sort)
+          .map((p) => ({
+            tier: p.badge,
+            name: p.name,
+            desc: p.description,
+            currency: '¥',
+            anchor:
+              p.anchor_price_cny > p.price_cny ? fmtPrice(p.anchor_price_cny) : '',
+            price: fmtPrice(p.price_cny),
+            period:
+              p.valid_days > 0 ? `有效期 ${p.valid_days} 天` : '',
+            discount: p.discount_label,
+            recommended: p.is_recommended,
+          }))
+      : fallbackPlans
 
   return (
     <PublicLayout showMainContainer={false}>
@@ -689,41 +725,49 @@ export function AgentJoin() {
                   }
                 >
                   <CardHeader>
-                    <div className='flex items-center justify-between gap-2'>
-                      <span className='text-muted-foreground text-xs'>
-                        {plan.tier}
-                      </span>
-                      {plan.recommended ? (
-                        <Badge className='shrink-0'>
-                          {t('Agent Join Plan Recommended', {
-                            defaultValue: '推荐',
-                          })}
-                        </Badge>
-                      ) : null}
-                    </div>
+                    {plan.tier || plan.recommended ? (
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='text-muted-foreground text-xs'>
+                          {plan.tier}
+                        </span>
+                        {plan.recommended ? (
+                          <Badge className='shrink-0'>
+                            {t('Agent Join Plan Recommended', {
+                              defaultValue: '推荐',
+                            })}
+                          </Badge>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <CardTitle className='mt-1'>{plan.name}</CardTitle>
-                    <CardDescription>{plan.desc}</CardDescription>
+                    {plan.desc ? (
+                      <CardDescription>{plan.desc}</CardDescription>
+                    ) : null}
                   </CardHeader>
                   <CardContent className='space-y-4'>
                     <div>
-                      <p className='text-muted-foreground text-sm line-through'>
-                        {plan.currency}
-                        {plan.anchor}
-                      </p>
+                      {plan.anchor ? (
+                        <p className='text-muted-foreground text-sm line-through'>
+                          {plan.currency}
+                          {plan.anchor}
+                        </p>
+                      ) : null}
                       <p className='flex items-baseline gap-1'>
                         <span className='text-3xl font-bold tracking-tight'>
                           {plan.currency}
                           {plan.price}
                         </span>
-                        <span className='text-muted-foreground text-sm'>
-                          {t('Agent Join Plan Per Month', {
-                            defaultValue: '/1 月',
-                          })}
-                        </span>
                       </p>
-                      <p className='mt-1 text-xs font-medium text-emerald-600 dark:text-emerald-400'>
-                        {plan.discount}
-                      </p>
+                      {plan.period ? (
+                        <p className='text-muted-foreground mt-1 text-xs'>
+                          {plan.period}
+                        </p>
+                      ) : null}
+                      {plan.discount ? (
+                        <p className='mt-1 text-xs font-medium text-emerald-600 dark:text-emerald-400'>
+                          {plan.discount}
+                        </p>
+                      ) : null}
                     </div>
                     <Button
                       className='w-full'
