@@ -10,6 +10,9 @@ import (
 
 // AgentParams 是设代理时的参数（detailed-design §2.3：cost_price、package_discount、commission_ratio、level）。
 type AgentParams struct {
+	// UserID 代理 owner 用户 ID（>0）。建代理时写入 agent_profiles.user_id，供代理列表解析「所属用户」；
+	// owner 建后不可改——SetAgentType 的 OnConflict 不把 user_id 列入更新集，故更新代理不动它。
+	UserID int64
 	// CostPrice 代理进货成本价（¥），强校验 ≥ 0。
 	CostPrice float64
 	// PackageDiscount 套餐折扣倍率（如 0.9 = 9 折），∈[0,1]；

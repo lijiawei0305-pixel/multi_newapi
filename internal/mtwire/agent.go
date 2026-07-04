@@ -645,6 +645,7 @@ func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 		return
 	}
 	params := agent.AgentParams{
+		UserID:           in.OwnerUserID,
 		CostPrice:        in.CostPriceCNY,
 		PackageDiscount:  in.PackageDiscount,
 		CommissionRatio:  in.CommissionRatio,

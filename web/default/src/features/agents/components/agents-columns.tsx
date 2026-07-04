@@ -109,6 +109,20 @@ export function useAgentsColumns(): ColumnDef<Agent>[] {
         size: 110,
       },
       {
+        accessorFn: (row) => row.discount_ratio,
+        id: 'discount_ratio',
+        header: t('Agent Discount Ratio', { defaultValue: '折扣系数' }),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => (
+          <span className='tabular-nums'>
+            {row.original.discount_ratio
+              ? num(row.original.discount_ratio)
+              : '—'}
+          </span>
+        ),
+        size: 100,
+      },
+      {
         accessorFn: (row) => row.status,
         id: 'status',
         header: t('Status'),

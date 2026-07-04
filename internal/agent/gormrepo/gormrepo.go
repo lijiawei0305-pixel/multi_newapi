@@ -127,6 +127,7 @@ func (r *Repo) SetAgentType(ctx context.Context, tenantID int64, p agent.AgentPa
 	now := r.now()
 	row := profileRow{
 		TenantID:         tenantID,
+		UserID:           p.UserID,
 		Level:            p.Level,
 		CanAPI:           p.CanAPI,
 		CostPriceCNY:     p.CostPrice,
@@ -163,6 +164,7 @@ func (r *Repo) GetAgentType(ctx context.Context, tenantID int64) (agent.AgentPar
 		return agent.AgentParams{}, false, err
 	}
 	return agent.AgentParams{
+		UserID:           row.UserID,
 		CostPrice:        row.CostPriceCNY,
 		PackageDiscount:  row.PackageDiscount,
 		CommissionRatio:  row.CommissionRatio,
