@@ -224,6 +224,12 @@ func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID,
 	if tenantID <= 0 {
 		return // 主站用户 / 未归属：无代理分润
 	}
+	// 钱包桶消耗台账（display-only；不产生收益、不动额度，与下方按档分润完全正交）：上方已短路套餐桶
+	// 消耗（billingSource=="subscription" 直接 return），故此处必为钱包桶，quotaUnits 即本次全额走钱包桶
+	// 的消耗额度（单事件资金来源单一，见 service/billing_session.go）。tenant 复用刚解析的 userTenantID，
+	// 与消耗透镜 users.tenant_id 同口径，保证财务报表主站/代理站拆分不变。写在 GetAgentType 之前——
+	// 平台租户/无 agent_profile 的租户也要记其钱包消耗（否则「主站钱包消耗」永远为 0）。best-effort 幂等。
+	a.recordWalletConsume(ctx, tenantID, userID, quotaUnits, requestID)
 	params, found, err := a.AgentRepo.GetAgentType(ctx, tenantID)
 	if err != nil || !found {
 		return // 该租户未设代理

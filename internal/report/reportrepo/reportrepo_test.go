@@ -40,6 +40,7 @@ func newFinanceTestDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE tenants (id INTEGER PRIMARY KEY, name TEXT, owner_user_id INTEGER)`,
 		`CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME)`,
 		`CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, type INTEGER, quota INTEGER, prompt_tokens INTEGER, completion_tokens INTEGER, created_at INTEGER)`,
+		`CREATE TABLE mt_wallet_consume_log (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL, user_id INTEGER NOT NULL DEFAULT 0, wallet_quota INTEGER NOT NULL DEFAULT 0, request_id TEXT NOT NULL, created_at DATETIME NOT NULL)`,
 	}
 	for _, s := range stmts {
 		if err := db.Exec(s).Error; err != nil {

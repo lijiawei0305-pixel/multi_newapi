@@ -315,6 +315,11 @@ func (a *App) Migrate() error {
 	if err := migrateReconcileHeartbeat(a.DB); err != nil {
 		return err
 	}
+	// 钱包消耗台账 mt_wallet_consume_log（财务报表 v3「钱包消耗」精确口径；(user_id,request_id) 幂等，
+	// (tenant_id,created_at) 覆盖区间扫描，见 wallet_consume_log.go）。
+	if err := migrateWalletConsumeLog(a.DB); err != nil {
+		return err
+	}
 	// 代理分层：现有代理回填 level=1 + 删废弃 type 列（一次性、information_schema 守卫，见 agent.go）。
 	return migrateAgentProfilesDropType(a.DB)
 }

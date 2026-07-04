@@ -55,6 +55,11 @@ func newFinanceReportTestApp(t *testing.T) *App {
 			t.Fatalf("create table: %v\nSQL: %s", err, s)
 		}
 	}
+	// 钱包消耗台账（财务报表 v3「钱包消耗」口径的数据源）：用真实迁移建表，顺带在 sqlite 上验证
+	// AutoMigrate + (user_id,request_id) 唯一索引可用。
+	if err := migrateWalletConsumeLog(db); err != nil {
+		t.Fatalf("wallet consume migrate: %v", err)
+	}
 	return &App{DB: db, ReportRepo: reportrepo.New(db)}
 }
 
@@ -219,7 +224,23 @@ func newFinanceOverviewTestApp(t *testing.T) *App {
 			t.Fatalf("create table: %v\nSQL: %s", err, s)
 		}
 	}
+	// 钱包消耗台账（overview 的「主站/代理站钱包消耗」精确口径的数据源）。
+	if err := migrateWalletConsumeLog(db); err != nil {
+		t.Fatalf("wallet consume migrate: %v", err)
+	}
 	return &App{DB: db, ReportRepo: reportrepo.New(db), TenantRepo: tenantrepo.New(db)}
+}
+
+// seedWalletConsume 造一条钱包桶消耗流水（mt_wallet_consume_log），供 overview 的钱包消耗字段聚合。
+// 这是「纯钱包消耗」的唯一数据源——套餐桶消耗不写此表，故不会出现在这里。
+func seedWalletConsume(t *testing.T, app *App, tenantID, userID, walletQuota int64, requestID string, ts time.Time) {
+	t.Helper()
+	if err := app.DB.Exec(
+		`INSERT INTO mt_wallet_consume_log (tenant_id, user_id, wallet_quota, request_id, created_at) VALUES (?,?,?,?,?)`,
+		tenantID, userID, walletQuota, requestID, ts,
+	).Error; err != nil {
+		t.Fatalf("seed wallet consume (tenant=%d req=%s): %v", tenantID, requestID, err)
+	}
 }
 
 // seedSubscriptionOrder 造一笔已激活套餐订单（pending_subscription_orders JOIN mt_subscription_orders
@@ -249,8 +270,9 @@ func seedConsumeLog(t *testing.T, db *gorm.DB, userID int64, quota int64, ts tim
 // 覆盖（doc/finance-model-report-v3.md §二，6 项，主站/代理站分列）：造 1 笔主站(平台租户)套餐销售
 // （售价=代理成本价，spread=0，真实 ActivateFromPayment 行为下主站不会给自己发 tokenplan_spread）
 // + 1 笔代理站套餐销售（售价 100/代理成本 60→差价 40，对应一条 tokenplan_spread 收益）+ 代理站钱包
-// 消耗差价/提成（ratio_markup 20 + consume_commission 5）+ 主站/代理站各一笔 logs 消耗，断言 6 个
-// admin overview 字段精确拆分、互不串号。
+// 消耗差价/提成（ratio_markup 20 + consume_commission 5）+ 主站/代理站各一笔钱包桶消耗流水
+// （mt_wallet_consume_log），并给代理站叠加一笔更大的 logs 全量消耗，断言 6 个 admin overview 字段
+// 精确拆分、互不串号，且钱包消耗只读钱包台账（排除套餐桶，不取 logs 上界）。
 func TestHandleAdminFinanceSummary_OverviewV3_MainsiteVsAgentSplit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	app := newFinanceOverviewTestApp(t)
@@ -282,15 +304,16 @@ func TestHandleAdminFinanceSummary_OverviewV3_MainsiteVsAgentSplit(t *testing.T)
 	seedFinanceEarning(t, app, agentT.ID, "ratio_markup", 20, base)
 	seedFinanceEarning(t, app, agentT.ID, "consume_commission", 5, base)
 
-	// 消耗（logs）：主站用户 501 消耗 $2、代理站用户 502 消耗 $3。
-	if err := app.DB.Exec(`INSERT INTO users (id, tenant_id) VALUES (?,?)`, 501, platform.ID).Error; err != nil {
-		t.Fatalf("seed main user: %v", err)
-	}
+	// 钱包桶消耗（overview 钱包消耗字段的唯一数据源 = mt_wallet_consume_log）：主站(平台租户)钱包消耗 $2、
+	// 代理站钱包消耗 $3。
+	seedWalletConsume(t, app, platform.ID, 501, int64(2*common.QuotaPerUnit), "req-main-wallet", base)
+	seedWalletConsume(t, app, agentT.ID, 502, int64(3*common.QuotaPerUnit), "req-agent-wallet", base)
+	// 关键：再给代理站叠加一笔更大的 logs 全量消耗（$10 = $3 钱包 + $7 套餐桶，套餐桶不写钱包台账），
+	// 断言 overview 代理站钱包消耗仍 = $3——证明已精确排除套餐桶消耗，不再取 logs 全量上界。
 	if err := app.DB.Exec(`INSERT INTO users (id, tenant_id) VALUES (?,?)`, 502, agentT.ID).Error; err != nil {
 		t.Fatalf("seed agent user: %v", err)
 	}
-	seedConsumeLog(t, app.DB, 501, int64(2*common.QuotaPerUnit), base)
-	seedConsumeLog(t, app.DB, 502, int64(3*common.QuotaPerUnit), base)
+	seedConsumeLog(t, app.DB, 502, int64(10*common.QuotaPerUnit), base)
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -344,9 +367,10 @@ func TestHandleAdminFinanceSummary_OverviewV3_MainsiteVsAgentSplit(t *testing.T)
 }
 
 // TestHandleTenantFinanceSummary_OverviewV3_AgentFourFields 覆盖代理自助总览（4 项）：套餐收益
-// （subscription_paid）、套餐可提现（tokenplan_spread）、apikey 消费收益（当前口径 = 全量 logs
-// 消耗，见 agentFinanceOverviewOut.ApikeyConsumptionCNY 的口径说明）、消耗可提现
-// （ratio_markup+consume_commission），单租户 scope 下互不干扰其他租户的数据。
+// （subscription_paid）、套餐可提现（tokenplan_spread）、apikey 消费收益（= 纯钱包桶消耗
+// mt_wallet_consume_log，严格排除套餐桶；见 agentFinanceOverviewOut.ApikeyConsumptionCNY）、消耗可提现
+// （ratio_markup+consume_commission），单租户 scope 下互不干扰其他租户的数据；并叠加更大的 logs 全量消耗
+// 证明 apikey 消费收益只读钱包台账、不取 logs 上界。
 func TestHandleTenantFinanceSummary_OverviewV3_AgentFourFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	app := newFinanceOverviewTestApp(t)
@@ -369,15 +393,19 @@ func TestHandleTenantFinanceSummary_OverviewV3_AgentFourFields(t *testing.T) {
 	seedFinanceEarning(t, app, agentT.ID, "tokenplan_spread", 40, base)
 	seedFinanceEarning(t, app, agentT.ID, "ratio_markup", 20, base)
 	seedFinanceEarning(t, app, agentT.ID, "consume_commission", 5, base)
+	// apikey 消费收益 = 纯钱包桶消耗（mt_wallet_consume_log）：acme 钱包消耗 $4。再叠加一笔更大的 logs
+	// 全量消耗（$12 = $4 钱包 + $8 套餐桶）证明 overview 只读钱包台账、排除套餐桶。
+	seedWalletConsume(t, app, agentT.ID, 601, int64(4*common.QuotaPerUnit), "req-acme-wallet", base)
 	if err := app.DB.Exec(`INSERT INTO users (id, tenant_id) VALUES (?,?)`, 601, agentT.ID).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	seedConsumeLog(t, app.DB, 601, int64(4*common.QuotaPerUnit), base)
+	seedConsumeLog(t, app.DB, 601, int64(12*common.QuotaPerUnit), base)
 
-	// 另一个租户的数据：必须完全不泄漏进 acme 的单租户 scope。
+	// 另一个租户的数据：必须完全不泄漏进 acme 的单租户 scope（钱包台账同样按 tenant 隔离）。
 	seedSubscriptionOrder(t, app.DB, "ORD-OTHER-1", other.ID, 999, 999, base)
 	seedFinanceEarning(t, app, other.ID, "tokenplan_spread", 999, base)
 	seedFinanceEarning(t, app, other.ID, "ratio_markup", 999, base)
+	seedWalletConsume(t, app, other.ID, 602, int64(999*common.QuotaPerUnit), "req-other-wallet", base)
 	if err := app.DB.Exec(`INSERT INTO users (id, tenant_id) VALUES (?,?)`, 602, other.ID).Error; err != nil {
 		t.Fatalf("seed other user: %v", err)
 	}

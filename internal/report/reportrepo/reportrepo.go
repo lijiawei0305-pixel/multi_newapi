@@ -522,34 +522,10 @@ func (r *Repo) ConsumptionTrend(ctx context.Context, tenantID *int64, start, end
 	return out, nil
 }
 
-// TenantConsumptionAgg 是按租户聚合的消耗量（导出版，字段名与内部 tenantConsumption 一一对应）。
-type TenantConsumptionAgg struct {
-	UsedQuota int64
-	Calls     int64
-	Tokens    int64
-}
-
-// ConsumptionByTenant 是按租户聚合的消耗量。财务报表 v3 管理端总览
-// （doc/finance-model-report-v3.md §二 mainsite/agent_wallet_consumption_cny，
-// internal/mtwire/report.go adminFinanceOverview）与 AgentRanking 排行共用同一底座数据——是
-// consumptionByTenant（AgentRanking 内部用）的导出包装，与 EarningsByTenant 同理不重命名旧方法。
-//
-// ⚠️口径：与 ConsumptionCost 同源，按 logs 表全量消耗计——钱包桶与套餐(订阅)桶消耗混在一起，
-// 现有数据没有可靠的结构化字段能把两者分开（唯一候选信号 billing_source 只在文本中继一条路径
-// 的 Other JSON 里写入，image/audio/task/mjproxy/违规扣费等其余写 log 路径都不写这个键，据此过滤
-// 会系统性漏记这些路径的真实钱包消耗——比不分离更糟）。故本聚合口径是「全量消耗」的上界，不是
-// 纯钱包消耗；调用方 internal/mtwire/report.go 已在字段注释与实现报告中明确标注这一点。
-func (r *Repo) ConsumptionByTenant(ctx context.Context, start, end int64) (map[int64]TenantConsumptionAgg, error) {
-	agg, err := r.consumptionByTenant(ctx, start, end)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[int64]TenantConsumptionAgg, len(agg))
-	for tid, c := range agg {
-		out[tid] = TenantConsumptionAgg{UsedQuota: c.UsedQuota, Calls: c.Calls, Tokens: c.Tokens}
-	}
-	return out, nil
-}
+// 注：财务报表 v3 管理端总览的「主站/代理站钱包消耗」曾复用 ConsumptionByTenant（logs 全量消耗、钱包+
+// 套餐桶混合的上界）；本次改为专门的钱包消耗台账聚合 WalletConsumptionByTenant（wallet_consume.go，纯钱包
+// 桶），口径精确后该导出包装已无调用方，随之删除。内部 consumptionByTenant（AgentRanking 排行用，全量消耗
+// 口径，见 ConsumptionCost/consumption 透镜）保留不变。
 
 // ============================================================================
 // 趋势：收益 / 充值 / 提现（主库 DATETIME 台账）

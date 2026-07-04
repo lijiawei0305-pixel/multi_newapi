@@ -42,6 +42,10 @@ func newRatioMarkupTestApp(t *testing.T) *App {
 	if err := agentrepo.AutoMigrate(db); err != nil {
 		t.Fatalf("agent migrate: %v", err)
 	}
+	// 钱包消耗台账（creditConsumeCommission 旁路写入 mt_wallet_consume_log，见 wallet_consume_log.go）。
+	if err := migrateWalletConsumeLog(db); err != nil {
+		t.Fatalf("wallet consume migrate: %v", err)
+	}
 	ar := agentrepo.New(db)
 	return &App{
 		DB: db, ModelGroupRepo: modelgroup.New(db), TenantRepo: tenantrepo.New(db),

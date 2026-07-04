@@ -144,18 +144,13 @@ type agentFinanceOverviewOut struct {
 	// TokenplanWithdrawableCNY 套餐可提现：代理套餐差价，购买时一次性入账、立即可提现
 	// （= Σ source_type=tokenplan_spread，见 internal/tokenplan/subscription.go ActivateFromPayment）。
 	TokenplanWithdrawableCNY float64 `json:"tokenplan_withdrawable_cny"`
-	// ApikeyConsumptionCNY apikey 消费收益：用户消耗的钱包余额。
+	// ApikeyConsumptionCNY apikey 消费收益：用户消耗的钱包余额（严格排除套餐桶消耗，
+	// doc/finance-model-report-v3.md §二「套餐额度的消耗不计入 apikey 消费收益」）。
 	//
-	// ⚠️口径缺口（doc/finance-model-report-v3.md §二「套餐额度的消耗不计入 apikey 消费收益」，
-	// 本字段本应严格排除套餐桶消耗）：现有数据无法把「钱包桶消耗」与「套餐桶消耗」干净分开——
-	// 两者共用同一张 logs 表，唯一候选区分信号是 relayInfo.BillingSource，但它只在文本中继一条
-	// 路径（service/text_quota.go GenerateTextOtherInfo→appendBillingInfo）写入 Other 的 JSON 字段，
-	// image/audio/realtime(wss)/task 计费/违规扣费/Midjourney 代理等其余写 log 路径都不写这个键——
-	// 按它过滤会系统性漏记这些路径的真实钱包消耗，比不区分更糟（会把它们排除在两个桶之外）。
-	// 故本字段当前 = ConsumptionCost(...).UsedCostCNY，即钱包桶 + 套餐桶消耗合计（全量口径的
-	// 「上界」，不是纯钱包值）。若要精确区分，需要在 PostConsumeQuota/BillingSession.Settle 那个
-	// 唯一的 wallet-vs-subscription 分支点新增一张专门的钱包消耗流水（比照 agent_earning_logs 的
-	// 记账粒度），而不是继续从 logs.other 这个展示用途的 JSON 里挖。
+	// 精确口径（本次落地）：= repo.WalletConsumption(该租户, 区间) 经 QuotaToCNY 换算。数据源是专门的
+	// 钱包消耗台账 mt_wallet_consume_log（internal/mtwire/wallet_consume_log.go），只记 billingSource==
+	// wallet 的消耗额度——套餐(订阅)桶消耗根本不写入该表，故此字段是「纯钱包消耗」而非此前的 logs 全量
+	// 上界。单事件资金来源单一（见 service/billing_session.go），钱包事件的全额即钱包消耗，无需再劈分。
 	ApikeyConsumptionCNY float64 `json:"apikey_consumption_cny"`
 	// ConsumptionWithdrawableCNY 消耗可提现：代理消耗差价，消耗时逐笔实时入账、立即可提现
 	// （= Σ source_type IN (ratio_markup, consume_commission)）。Task 1（本次）起两者只在 WALLET
@@ -171,9 +166,10 @@ type adminFinanceOverviewOut struct {
 	MainsiteTokenplanRevenueCNY float64 `json:"mainsite_tokenplan_revenue_cny"` // 主站套餐收益
 	AgentTokenplanRevenueCNY    float64 `json:"agent_tokenplan_revenue_cny"`    // 代理站套餐收益（各代理合计）
 	TokenplanRebateCNY          float64 `json:"tokenplan_rebate_cny"`           // 给代理的套餐返现：Σ 各代理 tokenplan_spread（不含主站）
-	// MainsiteWalletConsumptionCNY / AgentWalletConsumptionCNY：与 agentFinanceOverviewOut.ApikeyConsumptionCNY
-	// 同一口径缺口——现有数据无法排除套餐桶消耗，当前为该 scope（主站 / 代理站）下的全量消耗口径
-	// （钱包+套餐桶混合，上界而非纯钱包值），详见该字段的长注释。
+	// MainsiteWalletConsumptionCNY / AgentWalletConsumptionCNY：精确的纯钱包桶消耗（与
+	// agentFinanceOverviewOut.ApikeyConsumptionCNY 同源）——数据源 mt_wallet_consume_log 只记
+	// billingSource==wallet 的消耗，套餐桶消耗不入表；此处按 tenant 是否为平台租户二分求和
+	// （splitByPlatform）得主站/代理站两列。
 	MainsiteWalletConsumptionCNY float64 `json:"mainsite_wallet_consumption_cny"` // 主站钱包消耗
 	AgentWalletConsumptionCNY    float64 `json:"agent_wallet_consumption_cny"`    // 代理站钱包消耗（各代理合计）
 	AgentAPIRebateCNY            float64 `json:"agent_api_rebate_cny"`            // 需返现代理的 api 消耗：Σ 各代理 (ratio_markup+consume_commission)，不含主站
@@ -502,10 +498,17 @@ func (a *App) handleFinanceSummary(c *gin.Context, tenantID *int64) {
 	// （不加查询）；管理端 6 项需要按租户拆分主站/代理站，另经 adminFinanceOverview 装配。
 	var overview any
 	if tenantID != nil {
+		// apikey 消费收益 = 纯钱包桶消耗（mt_wallet_consume_log），严格排除套餐桶消耗；不再取 cons.UsedCostCNY
+		// （那是 logs 全量上界）。cons 仍供上面的 Consumption 区块（全量消耗口径，不变）。
+		walletQuota, werr := repo.WalletConsumption(ctx, tenantID, start, end)
+		if werr != nil {
+			respondErr(c, werr)
+			return
+		}
 		overview = agentFinanceOverviewOut{
 			TokenplanRevenueCNY:        round2(subPaid),
 			TokenplanWithdrawableCNY:   round2(bySrcMap["tokenplan_spread"]),
-			ApikeyConsumptionCNY:       round2(cons.UsedCostCNY),
+			ApikeyConsumptionCNY:       round2(reportrepo.QuotaToCNY(walletQuota)),
 			ConsumptionWithdrawableCNY: round2(bySrcMap["ratio_markup"] + bySrcMap["consume_commission"]),
 		}
 	} else {
@@ -558,8 +561,9 @@ func (a *App) handleFinanceSummary(c *gin.Context, tenantID *int64) {
 }
 
 // adminFinanceOverview 装配管理端财务总览（6 项，主站/代理站分列；doc/finance-model-report-v3.md
-// §二）。三个透镜均已有跨租户 per-tenant 聚合可复用（SubscriptionPaidCost/EarningsByTenant/
-// ConsumptionByTenant，均已被 AgentRanking 用过），此处只按「租户是否为平台租户」二分求和，不新增查询。
+// §二）。套餐收益/收益分润复用既有跨租户 per-tenant 聚合（SubscriptionPaidCost/EarningsByTenant，
+// AgentRanking 也用它们）；钱包消耗改取专门的 per-tenant 钱包消耗台账聚合（WalletConsumptionByTenant，
+// 纯钱包桶、排除套餐桶）。此处只按「租户是否为平台租户」二分求和（splitByPlatform）。
 func (a *App) adminFinanceOverview(ctx context.Context, start, end int64) (adminFinanceOverviewOut, error) {
 	repo := a.ReportRepo
 	platformID := a.resolvePlatformTenantID(ctx)
@@ -572,7 +576,7 @@ func (a *App) adminFinanceOverview(ctx context.Context, start, end int64) (admin
 	if err != nil {
 		return adminFinanceOverviewOut{}, err
 	}
-	cons, err := repo.ConsumptionByTenant(ctx, start, end)
+	walletCons, err := repo.WalletConsumptionByTenant(ctx, start, end)
 	if err != nil {
 		return adminFinanceOverviewOut{}, err
 	}
@@ -597,9 +601,9 @@ func (a *App) adminFinanceOverview(ctx context.Context, start, end int64) (admin
 	_, tokenplanRebate := splitByPlatform(tokenplanSpreadByTenant, platformID)
 	_, agentAPIRebate := splitByPlatform(apiRebateByTenant, platformID)
 
-	consCNYByTenant := make(map[int64]float64, len(cons))
-	for tid, c := range cons {
-		consCNYByTenant[tid] = reportrepo.QuotaToCNY(c.UsedQuota)
+	consCNYByTenant := make(map[int64]float64, len(walletCons))
+	for tid, q := range walletCons {
+		consCNYByTenant[tid] = reportrepo.QuotaToCNY(q)
 	}
 	mainsiteWalletConsumption, agentWalletConsumption := splitByPlatform(consCNYByTenant, platformID)
 
