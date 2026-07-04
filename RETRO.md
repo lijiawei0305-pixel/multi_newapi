@@ -286,3 +286,9 @@
 - **根因**：子 Agent 落盘时把「工具调用包裹标签」误写进了文件内容尾部（生成产物污染），系统性出现在**每个**新建文件。
 - **解决/规避**：Verify 阶段 Agent 用锚定 `sed '/^<\/content>$/d'` 逐文件删除（每文件唯一、恒在末行）；主控二次核验 `grep -rlE '</?content>|^\x60\x60\x60|<file>'` 新增文件 → 0 残留。
 - **升级**：**多 Agent 生成/落盘一批文件后，主控必须做「产物完整性扫描」**（stray XML 包裹标签 / ``` 代码围栏 / `<file>` 标签）再进构建门；本机无 go/node 时更要用 grep 静态兜住，别等服务器 typecheck 才发现。
+
+### [已解决] 服务器非 git 副本按「显式文件清单」部署会静默漏文件 → 包内不一致，被后续部署撞出
+- **现象**：部署「代理折扣系数」时服务器 `go build` 报 `undefined: ErrPayoutAccountInvalid`（internal/agent/model.go 引用），但本机 `go build` 全过。本机每个包自洽，服务器却缺定义。
+- **根因**：服务器 `/root/newapi-test` 是非 git 的 rsync/tar 副本，历来用 `git archive HEAD <显式文件列表> | tar x` 部署——**只覆盖列表内文件，从不删也不补漏**。更早的「提现闭环」把 `internal/agent` 的一批文件（errors.go/service.go/withdrawal.go/port.go/repo.go）改了跨文件符号，但那次部署的显式清单**漏掉了这些文件**，服务器一直是「旧 errors.go（无 ErrPayoutAccountInvalid）+ 旧 model.go（不引用它）」的自洽旧态、能编译。本次我把 model.go 单独推到 HEAD（引用了该符号），而 errors.go 仍是旧的 → 包内不一致 → 编译炸。文件 sha 对比坐实：errors/service/withdrawal/port/repo 五个文件服务器全落后于 HEAD，仅 earning.go 一致。
+- **解决**：整目录同步 `git archive HEAD internal/agent | ssh … tar x`（该目录无锁定文件，安全），使包在 HEAD 自洽 → rebuild 通过、health 200、`discount_ratio` 列 AutoMigrate 建好。
+- **升级**：**当一次改动新增/改动了某包内跨文件符号（新 error/新导出/改签名），部署要推整个受影响包目录，而非只推自己改的那几个文件**；遇到服务器 `undefined: X`/`could not import` 先按 `git show HEAD:<file> | shasum` vs 服务器 `shasum` 逐文件比对锁定漂移范围。锁定文件（payment_inprocess.go/realpay/*/option.go/payment_wxpay_alipay.go——含未入库 WIP）**不可**整目录 `archive HEAD` 覆盖（会回退 WIP），只能单推自己确需的文件。参见 [[feature-finance-report 工作树落后于服务器]]。
