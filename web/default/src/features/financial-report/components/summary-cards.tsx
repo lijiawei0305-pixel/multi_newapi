@@ -325,7 +325,6 @@ export function OverviewCards(props: OverviewCardsProps) {
       value: cny(overview.apikey_consumption_cny),
       icon: KeyRound,
       testid: 'kpi-overview-apikey-consumption',
-      footnote: consumptionCaveat,
     },
     {
       label: t('Consumption Withdrawable', { defaultValue: '消耗可提现' }),
