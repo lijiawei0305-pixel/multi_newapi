@@ -684,21 +684,23 @@ export function AgentJoin() {
                 <Card
                   className={
                     plan.recommended
-                      ? 'border-primary/40 relative h-full shadow-lg'
-                      : 'relative h-full'
+                      ? 'border-primary/40 h-full shadow-lg'
+                      : 'h-full'
                   }
                 >
-                  {plan.recommended ? (
-                    <Badge className='absolute end-4 -top-2.5'>
-                      {t('Agent Join Plan Recommended', {
-                        defaultValue: '推荐',
-                      })}
-                    </Badge>
-                  ) : null}
                   <CardHeader>
-                    <span className='text-muted-foreground text-xs'>
-                      {plan.tier}
-                    </span>
+                    <div className='flex items-center justify-between gap-2'>
+                      <span className='text-muted-foreground text-xs'>
+                        {plan.tier}
+                      </span>
+                      {plan.recommended ? (
+                        <Badge className='shrink-0'>
+                          {t('Agent Join Plan Recommended', {
+                            defaultValue: '推荐',
+                          })}
+                        </Badge>
+                      ) : null}
+                    </div>
                     <CardTitle className='mt-1'>{plan.name}</CardTitle>
                     <CardDescription>{plan.desc}</CardDescription>
                   </CardHeader>
