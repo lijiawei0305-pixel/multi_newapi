@@ -39,6 +39,7 @@ var (
 	errAgentTierInvalid   = apperr.New("AGENT_TIER_INVALID", "不允许的用户层级", http.StatusBadRequest)
 	errAgentGroupNotModel = apperr.New("AGENT_GROUP_NOT_MODEL", "仅可调整模型分组的倍率", http.StatusBadRequest)
 	errAgentLevelLocked   = apperr.New("AGENT_LEVEL_LOCKED", "该能力需升级为独立代理后开启", http.StatusForbidden)
+	errAgentUnsettled     = apperr.New("AGENT_HAS_UNSETTLED_BALANCE", "该代理钱包尚有未提现/冻结中收益，请先结清再删除", http.StatusConflict)
 )
 
 // ============================================================================
@@ -534,6 +535,7 @@ type agentOut struct {
 	BottomPriceRatio float64 `json:"bottom_price_ratio"`
 	DiscountRatio    float64 `json:"discount_ratio"`
 	Status           string  `json:"status"`
+	Subdomain        string  `json:"subdomain"`
 	WithdrawableCNY  float64 `json:"withdrawable_cny"`
 	FrozenCNY        float64 `json:"frozen_cny"`
 	TotalEarnedCNY   float64 `json:"total_earned_cny"`
@@ -727,6 +729,9 @@ func (a *App) HandleAdminListAgents(c *gin.Context) {
 		if terr == nil && t != nil {
 			slug, name, status = t.Slug, t.Name, string(t.Status)
 		}
+		if status == string(tenant.StatusDeleted) {
+			continue // 已删除(归档)代理默认不在列表显示
+		}
 		w, _ := a.AgentService.GetWallet(ctx, p.TenantID)
 		out = append(out, agentOut{
 			ID:               p.TenantID,
@@ -742,12 +747,86 @@ func (a *App) HandleAdminListAgents(c *gin.Context) {
 			BottomPriceRatio: p.BottomPriceRatio,
 			DiscountRatio:    p.DiscountRatio,
 			Status:           status,
+			Subdomain:        a.TenantRepo.GetPrimaryDomain(ctx, p.TenantID),
 			WithdrawableCNY:  walletField(w, func(x *agent.AgentWallet) float64 { return x.WithdrawableBalance }),
 			FrozenCNY:        walletField(w, func(x *agent.AgentWallet) float64 { return x.FrozenWithdrawAmount }),
 			TotalEarnedCNY:   walletField(w, func(x *agent.AgentWallet) float64 { return x.TotalEarned }),
 		})
 	}
 	respondOK(c, out)
+}
+
+// HandleAdminSetAgentDomain PUT /api/admin/agents/:id/domain —— 管理员给代理设子域名（label）。需 AdminAuth。
+// 入参 {label} → `<label>.wedreamhub.com`（校验格式/保留词 + 全局查重 + 替换该代理现有主子域名）→ 失效 Host 缓存。
+// 通配 nginx 已反代到 app,故插一条 tenant_domains 即建站生效（doc/agent-subdomain-and-delete.md §一）。
+func (a *App) HandleAdminSetAgentDomain(c *gin.Context) {
+	tenantID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	ctx := reqCtx(c)
+	if _, err := a.TenantService.Get(ctx, tenantID); err != nil {
+		respondErr(c, err) // TENANT_NOT_FOUND
+		return
+	}
+	var in struct {
+		Label string `json:"label"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	domain, removed, err := a.TenantService.AddSubdomain(ctx, tenantID, strings.ToLower(strings.TrimSpace(in.Label)))
+	if err != nil {
+		respondErr(c, err) // SLUG_INVALID / SLUG_RESERVED / DOMAIN_TAKEN
+		return
+	}
+	for _, h := range removed {
+		a.tenantCache.Invalidate(ctx, h)
+	}
+	a.tenantCache.Invalidate(ctx, domain)
+	respondOK(c, gin.H{"subdomain": domain})
+}
+
+// HandleAdminDeleteAgent DELETE /api/admin/agents/:id —— 删除代理（归档软删,doc/agent-subdomain-and-delete.md §二）。需 AdminAuth。
+// 结算闸门(未提现/冻结收益>0 拒删) → status=deleted → 回收子域名+解绑自定义域名+失效缓存 → 终端用户迁回主站(tenant_id=0)。
+// 数据留存归档,不硬删。
+func (a *App) HandleAdminDeleteAgent(c *gin.Context) {
+	tenantID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	ctx := reqCtx(c)
+	if _, err := a.TenantService.Get(ctx, tenantID); err != nil {
+		respondErr(c, err) // TENANT_NOT_FOUND
+		return
+	}
+	// 结算闸门：钱包尚有未提现/冻结中收益 → 拒删（避免钱蒸发）。
+	if w, werr := a.AgentService.GetWallet(ctx, tenantID); werr == nil && w != nil &&
+		w.WithdrawableBalance+w.FrozenWithdrawAmount > 0 {
+		respondErr(c, errAgentUnsettled)
+		return
+	}
+	// 软删：active/suspended → deleted。
+	if err := a.TenantService.SetStatus(ctx, tenantID, tenant.StatusDeleted); err != nil {
+		respondErr(c, err) // STATUS_TRANSITION / TENANT_NOT_FOUND
+		return
+	}
+	// 回收子域名 + 失效缓存（删了站点即不再解析，配合 getActiveTenant 的 status 过滤双保险）。
+	if removed, derr := a.TenantRepo.DeleteDomainsByTenant(ctx, tenantID); derr == nil {
+		for _, h := range removed {
+			a.tenantCache.Invalidate(ctx, h)
+		}
+	}
+	// 解绑自定义域名（若有）。
+	if dom, uerr := a.CustomDomains.Unbind(ctx, tenantID); uerr == nil && dom != "" {
+		a.tenantCache.Invalidate(ctx, dom)
+	}
+	// 终端用户迁回主站：tenant_id=0，账号/余额/历史留存、并入主站继续用。
+	a.DB.WithContext(ctx).Exec("UPDATE users SET tenant_id = 0 WHERE tenant_id = ?", tenantID)
+	respondOK(c, gin.H{"id": tenantID, "status": string(tenant.StatusDeleted)})
 }
 
 // HandleAdminUpdateAgent PATCH /api/admin/agents/:id —— 改代理（id = tenant_id）。需 AdminAuth。
@@ -1098,6 +1177,7 @@ func (a *App) buildAgentOut(ctx context.Context, tenantID, ownerUserID int64, sl
 		BottomPriceRatio: p.BottomPriceRatio,
 		DiscountRatio:    p.DiscountRatio,
 		Status:           status,
+		Subdomain:        a.TenantRepo.GetPrimaryDomain(ctx, tenantID),
 		WithdrawableCNY:  walletField(w, func(x *agent.AgentWallet) float64 { return x.WithdrawableBalance }),
 		FrozenCNY:        walletField(w, func(x *agent.AgentWallet) float64 { return x.FrozenWithdrawAmount }),
 		TotalEarnedCNY:   walletField(w, func(x *agent.AgentWallet) float64 { return x.TotalEarned }),

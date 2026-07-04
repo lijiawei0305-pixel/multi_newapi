@@ -43,6 +43,8 @@ export interface Agent {
   /** 折扣系数 — 全线批发折扣 = 主站价 × 系数（消耗按分组基准、套餐按主站价）；0/空 = 不打折。 */
   discount_ratio: number
   status: string
+  /** 子域名 — <label>.wedreamhub.com（管理员开通；空=未开通）。 */
+  subdomain?: string
   /** 可提现余额 (¥). */
   withdrawable_cny: number
   /** 冻结中余额 (¥). */

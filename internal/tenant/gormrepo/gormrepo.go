@@ -187,7 +187,7 @@ func (r *Repo) GetTenantByDomain(ctx context.Context, domain string) (*tenant.Te
 	var d domainRow
 	err := r.db.WithContext(ctx).Take(&d, "domain = ?", domain).Error
 	if err == nil {
-		return r.GetTenant(ctx, d.TenantID)
+		return r.getActiveTenant(ctx, d.TenantID)
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -201,7 +201,53 @@ func (r *Repo) GetTenantByDomain(ctx context.Context, domain string) (*tenant.Te
 		}
 		return nil, cerr
 	}
-	return r.GetTenant(ctx, cd.TenantID)
+	return r.getActiveTenant(ctx, cd.TenantID)
+}
+
+// getActiveTenant 读租户，但已软删（status=deleted）的按「不存在」处理——删除代理后其残留域名绝不再
+// 解析到站点（修补软删漏洞：Host 解析此前不看 status，删了站点仍能打开）。
+func (r *Repo) getActiveTenant(ctx context.Context, id int64) (*tenant.Tenant, error) {
+	t, err := r.GetTenant(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if t.Status == tenant.StatusDeleted {
+		return nil, tenant.ErrTenantNotFound
+	}
+	return t, nil
+}
+
+// DeleteDomainsByTenant 删除某租户全部 tenant_domains 子域名记录，返回被删域名（供失效 Host 缓存）。
+func (r *Repo) DeleteDomainsByTenant(ctx context.Context, tenantID int64) ([]string, error) {
+	var rows []domainRow
+	if err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	if err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Delete(&domainRow{}).Error; err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.Domain)
+	}
+	return out, nil
+}
+
+// GetPrimaryDomain 返回某租户的主子域名（is_primary，取最近一条）；无则空串。admin 列表/详情回显用。
+func (r *Repo) GetPrimaryDomain(ctx context.Context, tenantID int64) string {
+	if r == nil {
+		return ""
+	}
+	var row domainRow
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND is_primary = ?", tenantID, true).
+		Order("id desc").Take(&row).Error; err != nil {
+		return ""
+	}
+	return row.Domain
 }
 
 // mapTenantResult 把一次 Take 的结果统一翻译为 domain 模型或 tenant 包错误码。

@@ -19,6 +19,9 @@ type TenantService interface {
 	Create(ctx context.Context, in CreateTenantInput) (*Tenant, error)
 	// EnsureSubdomain 幂等派生 `<slug>.wedreamhub.com` 域名映射（管理员升档 L0→L1 时调用）；已存在则无操作。
 	EnsureSubdomain(ctx context.Context, tenantID int64, slug string) error
+	// AddSubdomain 管理员为租户设一个指定 label 的子域名 `<label>.wedreamhub.com`（校验 label + 全局查重 +
+	// 替换该租户现有主子域名）。返回新域名与被替换掉的旧域名列表（供装配层失效 Host 缓存）。
+	AddSubdomain(ctx context.Context, tenantID int64, label string) (domain string, removed []string, err error)
 	SetStatus(ctx context.Context, id int64, s TenantStatus) error
 }
 
@@ -50,6 +53,8 @@ type TenantRepo interface {
 	// CreateDomain 写入域名映射并回填 d.ID；域名冲突返回 ErrSlugDuplicate。
 	CreateDomain(ctx context.Context, d *TenantDomain) error
 	GetTenantByDomain(ctx context.Context, domain string) (*Tenant, error)
+	// DeleteDomainsByTenant 删除某租户在 tenant_domains 的全部子域名记录，返回被删域名（供失效 Host 缓存）。
+	DeleteDomainsByTenant(ctx context.Context, tenantID int64) ([]string, error)
 }
 
 // Cache 是 Host->Tenant 的解析缓存抽象。本轮提供内存假实现（MemCache）；

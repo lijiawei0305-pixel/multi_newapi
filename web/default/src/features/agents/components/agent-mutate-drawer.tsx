@@ -55,7 +55,7 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
-import { createAgent, getAgentMetrics, updateAgent } from '../api'
+import { createAgent, getAgentMetrics, setAgentDomain, updateAgent } from '../api'
 import {
   AGENT_FORM_DEFAULTS,
   agentToFormValues,
@@ -88,6 +88,8 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
   const isEdit = !!currentRow?.id
   const { triggerRefresh } = useAgents()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [domainLabel, setDomainLabel] = useState('')
+  const [settingDomain, setSettingDomain] = useState(false)
 
   // Owner candidates — only needed when creating a brand-new agent.
   const { data: users } = useQuery({
@@ -149,6 +151,25 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
       toast.error(t('Request failed', { defaultValue: '请求失败' }))
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  // 开通/更新子域名是独立于表单提交的动作（PUT /api/admin/agents/:id/domain）。
+  const handleSetDomain = async () => {
+    const label = domainLabel.trim().toLowerCase()
+    if (!currentRow?.id || !label) return
+    setSettingDomain(true)
+    try {
+      const res = await setAgentDomain(currentRow.id, label)
+      if (res.success) {
+        toast.success(t('Subdomain opened', { defaultValue: '子域名已开通' }))
+        setDomainLabel('')
+        triggerRefresh()
+      }
+    } catch {
+      toast.error(t('Request failed', { defaultValue: '请求失败' }))
+    } finally {
+      setSettingDomain(false)
     }
   }
 
@@ -318,6 +339,54 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   )}
                 />
               </div>
+
+              {isEdit && (
+                <div className='flex flex-col gap-1.5'>
+                  <label className='text-sm font-medium'>
+                    {t('Subdomain', { defaultValue: '子域名' })}
+                  </label>
+                  {currentRow?.subdomain ? (
+                    <div className='text-muted-foreground text-sm'>
+                      {t('Current', { defaultValue: '当前' })}:{' '}
+                      <a
+                        href={`https://${currentRow.subdomain}`}
+                        target='_blank'
+                        rel='noreferrer'
+                        className='text-primary underline'
+                      >
+                        {currentRow.subdomain}
+                      </a>
+                    </div>
+                  ) : null}
+                  <div className='flex items-center gap-2'>
+                    <Input
+                      value={domainLabel}
+                      onChange={(e) => setDomainLabel(e.target.value)}
+                      placeholder='acme'
+                    />
+                    <span className='text-muted-foreground text-sm whitespace-nowrap'>
+                      .wedreamhub.com
+                    </span>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={handleSetDomain}
+                      disabled={settingDomain || !domainLabel.trim()}
+                    >
+                      {settingDomain
+                        ? t('Saving...', { defaultValue: '保存中…' })
+                        : t('Open subdomain', { defaultValue: '开通' })}
+                    </Button>
+                  </div>
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Subdomain hint', {
+                      defaultValue:
+                        '输入 label 开通 <label>.wedreamhub.com 代理站；更新会替换旧子域名。',
+                    })}
+                  </p>
+                </div>
+              )}
             </SideDrawerSection>
 
             {isEdit && (

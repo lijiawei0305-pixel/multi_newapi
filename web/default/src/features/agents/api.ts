@@ -49,6 +49,23 @@ export async function updateAgent(
   return res.data
 }
 
+// 管理员为代理开通/更新子域名（label → <label>.wedreamhub.com）。
+export async function setAgentDomain(
+  id: number,
+  label: string
+): Promise<ApiResponse<{ subdomain: string }>> {
+  const res = await api.put(`/api/admin/agents/${id}/domain`, { label })
+  return res.data
+}
+
+// 删除代理（归档软删：回收子域名 + 用户迁回主站 + 数据留存）。
+export async function deleteAgent(
+  id: number
+): Promise<ApiResponse<unknown>> {
+  const res = await api.delete(`/api/admin/agents/${id}`)
+  return res.data
+}
+
 export async function getAgentMetrics(
   id: number
 ): Promise<ApiResponse<AgentMetrics>> {

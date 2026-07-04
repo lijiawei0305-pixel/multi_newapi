@@ -44,6 +44,10 @@ func (f *failingSubdomainTenantService) EnsureSubdomain(_ context.Context, _ int
 	return f.subErr
 }
 
+func (f *failingSubdomainTenantService) AddSubdomain(_ context.Context, _ int64, _ string) (string, []string, error) {
+	return "", nil, errors.New("unexpected AddSubdomain call in test stub")
+}
+
 func (f *failingSubdomainTenantService) SetStatus(_ context.Context, _ int64, _ tenant.TenantStatus) error {
 	return errors.New("unexpected SetStatus call in test stub")
 }

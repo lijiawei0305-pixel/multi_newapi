@@ -61,6 +61,34 @@ func (s *tenantService) EnsureSubdomain(ctx context.Context, tenantID int64, slu
 	return nil
 }
 
+// AddSubdomain 管理员为租户设一个指定 label 的子域名（doc/agent-subdomain-and-delete.md §一）：
+// 校验 label（格式/保留词）→ 全局查重（已被他租户占用 → ErrDomainTaken；已是本租户该域名 → 幂等返回）
+// → 替换本租户现有主子域名（删旧建新）。返回新域名 + 被删旧域名（装配层据此失效 Host 缓存）。
+func (s *tenantService) AddSubdomain(ctx context.Context, tenantID int64, label string) (string, []string, error) {
+	if err := s.slug.Validate(label); err != nil {
+		return "", nil, err
+	}
+	domain := DomainForSlug(label)
+	existing, err := s.repo.GetTenantByDomain(ctx, domain)
+	if err == nil && existing != nil {
+		if existing.ID == tenantID {
+			return domain, nil, nil // 已是本租户该子域名：幂等
+		}
+		return "", nil, ErrDomainTaken
+	}
+	if err != nil && !errors.Is(err, ErrTenantNotFound) {
+		return "", nil, err
+	}
+	removed, err := s.repo.DeleteDomainsByTenant(ctx, tenantID)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := s.repo.CreateDomain(ctx, &TenantDomain{TenantID: tenantID, Domain: domain, IsPrimary: true}); err != nil {
+		return "", nil, err
+	}
+	return domain, removed, nil
+}
+
 // SetStatus 按状态机迁移租户状态；非法目标/迁移返回 ErrStatusTransition；
 // 租户不存在返回 ErrTenantNotFound。
 func (s *tenantService) SetStatus(ctx context.Context, id int64, next TenantStatus) error {

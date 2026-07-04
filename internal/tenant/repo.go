@@ -111,6 +111,23 @@ func (r *MemRepo) GetTenantByDomain(_ context.Context, domain string) (*Tenant, 
 	if !ok {
 		return nil, ErrTenantNotFound
 	}
+	if t.Status == StatusDeleted {
+		return nil, ErrTenantNotFound
+	}
 	cp := t
 	return &cp, nil
+}
+
+// DeleteDomainsByTenant 删除某租户全部子域名映射，返回被删域名（内存实现，接口一致性 + 单测）。
+func (r *MemRepo) DeleteDomainsByTenant(_ context.Context, tenantID int64) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var removed []string
+	for domain, tid := range r.domainIndex {
+		if tid == tenantID {
+			removed = append(removed, domain)
+			delete(r.domainIndex, domain)
+		}
+	}
+	return removed, nil
 }

@@ -136,8 +136,8 @@ func SetMtRouter(router *gin.Engine) {
 	internalDomainGroup := router.Group("/api/internal/domain")
 	internalDomainGroup.Use(app.InternalSecretAuth())
 	{
-		internalDomainGroup.GET("/pending-cert", app.HandleInternalListPendingCert)   // 列待发证（dns_verified）域名
-		internalDomainGroup.POST("/cert-issued", app.HandleInternalCertIssued)        // 证书就绪 → active + 失效缓存
+		internalDomainGroup.GET("/pending-cert", app.HandleInternalListPendingCert) // 列待发证（dns_verified）域名
+		internalDomainGroup.POST("/cert-issued", app.HandleInternalCertIssued)      // 证书就绪 → active + 失效缓存
 	}
 
 	// 支付平台异步回调（目标③，支付重构后）：微信/支付宝 POST 到此，handler 内验签（无 UserAuth/TenantMiddleware）。
@@ -183,7 +183,9 @@ func SetMtRouter(router *gin.Engine) {
 		adminAgentGroup.GET("", app.HandleAdminListAgents)
 		adminAgentGroup.POST("", app.HandleAdminCreateAgent)
 		adminAgentGroup.PATCH("/:id", app.HandleAdminUpdateAgent)
-		adminAgentGroup.GET("/:id/metrics", app.HandleAdminAgentMetrics) // 升档决策指标（只读）
+		adminAgentGroup.PUT("/:id/domain", app.HandleAdminSetAgentDomain) // 设子域名（label → <label>.wedreamhub.com）
+		adminAgentGroup.DELETE("/:id", app.HandleAdminDeleteAgent)        // 删除代理（归档软删 + 迁用户回主站）
+		adminAgentGroup.GET("/:id/metrics", app.HandleAdminAgentMetrics)  // 升档决策指标（只读）
 	}
 
 	// 主站财务报表（全局跨租户，非 Host 维度）：汇总 / 趋势 / 代理排行 / 明细（明细支持 ?format=csv|pdf 导出）。
