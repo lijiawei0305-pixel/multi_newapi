@@ -546,14 +546,52 @@ type agentMetricsOut struct {
 	DownstreamUserCount int64   `json:"downstream_user_count"`
 }
 
+// withdrawalOut 是提现单响应（代理自助列表 + 管理端列表共用）。Payout* 是申请那一刻从代理收款账户
+// 快照下来的打款目标（提现闭环补强 #1，记录不可变）；PayoutRef/PaidAt 由 mark-paid 填充（#2）；
+// Remark 是审核备注/驳回理由（#3：标准字段名 remark，见 reviewWithdrawal）。
 type withdrawalOut struct {
-	ID         int64   `json:"id"`
-	TenantID   int64   `json:"tenant_id"`
-	AgentName  string  `json:"agent_name"`
-	AmountCNY  float64 `json:"amount_cny"`
-	Status     string  `json:"status"`
-	CreatedAt  string  `json:"created_at"`
-	ReviewedAt string  `json:"reviewed_at"`
+	ID            int64   `json:"id"`
+	TenantID      int64   `json:"tenant_id"`
+	AgentName     string  `json:"agent_name"`
+	AmountCNY     float64 `json:"amount_cny"`
+	Status        string  `json:"status"`
+	Remark        string  `json:"remark"`
+	PayoutMethod  string  `json:"payout_method"`
+	PayoutAccount string  `json:"payout_account"`
+	PayoutName    string  `json:"payout_name"`
+	PayoutBank    string  `json:"payout_bank"`
+	PayoutRef     string  `json:"payout_ref"`
+	PaidAt        string  `json:"paid_at"`
+	CreatedAt     string  `json:"created_at"`
+	ReviewedAt    string  `json:"reviewed_at"`
+}
+
+// payoutAccountIn 是 PUT /api/tenant/payout-account 入参。
+type payoutAccountIn struct {
+	PayoutMethod  string `json:"payout_method"`
+	PayoutAccount string `json:"payout_account"`
+	PayoutName    string `json:"payout_name"`
+	PayoutBank    string `json:"payout_bank"`
+}
+
+// payoutAccountOut 是收款账户响应（GET/PUT 共用）。Configured=false 表示尚未设置
+// （此时其余字段均为空串，前端据此提示「请先设置收款账户」）。
+type payoutAccountOut struct {
+	Configured    bool   `json:"configured"`
+	PayoutMethod  string `json:"payout_method"`
+	PayoutAccount string `json:"payout_account"`
+	PayoutName    string `json:"payout_name"`
+	PayoutBank    string `json:"payout_bank"`
+}
+
+func toPayoutAccountOut(p agent.PayoutAccount, found bool) payoutAccountOut {
+	return payoutAccountOut{
+		Configured:    found,
+		PayoutMethod:  string(p.Method),
+		PayoutAccount: p.Account,
+		PayoutName:    p.Name,
+		PayoutBank:    p.Bank,
+	}
 }
 
 type earningOut struct {
@@ -831,7 +869,8 @@ func (a *App) HandleAdminAgentMetrics(c *gin.Context) {
 // ============================================================================
 
 // HandleAgentRequestWithdrawal POST /api/tenant/withdrawals —— 申请提现（冻结可提现余额）。
-// 租户取自 AgentOwnerAuth 校验过的 ctx，绝不接受客户端 tenant_id。
+// 租户取自 AgentOwnerAuth 校验过的 ctx，绝不接受客户端 tenant_id。尚未设置收款账户时拒绝
+// （PAYOUT_ACCOUNT_REQUIRED，提现闭环补强 #1）；通过则把当前收款账户整份快照进提现单。
 func (a *App) HandleAgentRequestWithdrawal(c *gin.Context) {
 	tenantID := agentTenantID(c)
 	if tenantID <= 0 {
@@ -851,7 +890,7 @@ func (a *App) HandleAgentRequestWithdrawal(c *gin.Context) {
 		Amount:   body.AmountCNY,
 	})
 	if err != nil {
-		respondErr(c, err) // WITHDRAW_INSUFFICIENT
+		respondErr(c, err) // WITHDRAW_INSUFFICIENT / PAYOUT_ACCOUNT_REQUIRED
 		return
 	}
 	respondOK(c, a.toWithdrawalOut(reqCtx(c), *wd))
@@ -910,6 +949,53 @@ func (a *App) HandleAgentListEarnings(c *gin.Context) {
 }
 
 // ============================================================================
+// 代理自助：收款账户（提现闭环补强 #1；AgentOwnerAuth 校验 owner == 当前用户）
+// ============================================================================
+
+// HandleAgentGetPayoutAccount GET /api/tenant/payout-account —— 返回当前收款账户；
+// configured=false 表示尚未设置（申请提现前必须先设置，见 HandleAgentRequestWithdrawal /
+// agent.WithdrawalService.Request 的 PAYOUT_ACCOUNT_REQUIRED 拦截）。
+func (a *App) HandleAgentGetPayoutAccount(c *gin.Context) {
+	tenantID := agentTenantID(c)
+	if tenantID <= 0 {
+		respondErr(c, errAgentForbidden)
+		return
+	}
+	p, found, err := a.AgentService.GetPayoutAccount(reqCtx(c), tenantID)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	respondOK(c, toPayoutAccountOut(p, found))
+}
+
+// HandleAgentSetPayoutAccount PUT /api/tenant/payout-account —— 设置/修改收款账户
+// （方式∈{alipay,bank}、账号/姓名非空、bank 方式下开户行必填，见 agent.PayoutAccount.Validate）。
+func (a *App) HandleAgentSetPayoutAccount(c *gin.Context) {
+	tenantID := agentTenantID(c)
+	if tenantID <= 0 {
+		respondErr(c, errAgentForbidden)
+		return
+	}
+	var in payoutAccountIn
+	if err := c.ShouldBindJSON(&in); err != nil {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	p := agent.PayoutAccount{
+		Method:  agent.PayoutMethod(in.PayoutMethod),
+		Account: in.PayoutAccount,
+		Name:    in.PayoutName,
+		Bank:    in.PayoutBank,
+	}
+	if err := a.AgentService.SetPayoutAccount(reqCtx(c), tenantID, p); err != nil {
+		respondErr(c, err) // PAYOUT_ACCOUNT_INVALID
+		return
+	}
+	respondOK(c, toPayoutAccountOut(p, true))
+}
+
+// ============================================================================
 // 主站管理：提现审核（AdminAuth）
 // ============================================================================
 
@@ -934,6 +1020,10 @@ func (a *App) HandleAdminApproveWithdrawal(c *gin.Context) {
 }
 
 // HandleAdminRejectWithdrawal POST /api/admin/withdrawals/:id/reject —— 拒绝（解冻退回）。需 AdminAuth。
+//
+// 驳回理由字段名标准化为 remark（提现闭环补强 #3：前端统一发 remark，与后端绑定字段对齐，
+// 不再走会丢理由的 reason/remark 不匹配）；已持久化进 agent_withdrawals.remark，并经
+// withdrawalOut.Remark 在代理自助列表 + 管理端列表中一并返回。
 func (a *App) HandleAdminRejectWithdrawal(c *gin.Context) {
 	a.reviewWithdrawal(c, false)
 }
@@ -950,6 +1040,29 @@ func (a *App) reviewWithdrawal(c *gin.Context, approve bool) {
 	_ = c.ShouldBindJSON(&body) // remark 可选
 	if err := a.Withdrawals.Review(reqCtx(c), id, approve, body.Remark); err != nil {
 		respondErr(c, err) // WITHDRAW_NOT_PENDING / WITHDRAW_NOT_FOUND
+		return
+	}
+	respondOK(c, gin.H{"id": id})
+}
+
+// HandleAdminMarkPaidWithdrawal POST /api/admin/withdrawals/:id/mark-paid —— 标记已打款
+// （提现闭环补强 #2：approved→paid，CAS(WHERE status='approved')；扣减冻结资金，真正出账；
+// 记打款单号/凭证 + 打款时间）。payout_ref 必填。需 AdminAuth。
+func (a *App) HandleAdminMarkPaidWithdrawal(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	var body struct {
+		PayoutRef string `json:"payout_ref"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
+	if err := a.Withdrawals.MarkPaid(reqCtx(c), id, body.PayoutRef); err != nil {
+		respondErr(c, err) // PAYOUT_REF_REQUIRED / WITHDRAW_NOT_APPROVED / WITHDRAW_NOT_FOUND
 		return
 	}
 	respondOK(c, gin.H{"id": id})
@@ -981,20 +1094,28 @@ func (a *App) buildAgentOut(ctx context.Context, tenantID, ownerUserID int64, sl
 	}
 }
 
-// toWithdrawalOut 映射提现单（agent_name 取租户名）。
+// toWithdrawalOut 映射提现单（agent_name 取租户名；收款快照/打款凭证/驳回理由一并带出，
+// 提现闭环补强 #1/#2/#3）。
 func (a *App) toWithdrawalOut(ctx context.Context, w agent.Withdrawal) withdrawalOut {
 	name := ""
 	if t, err := a.TenantService.Get(ctx, w.TenantID); err == nil && t != nil {
 		name = t.Name
 	}
 	return withdrawalOut{
-		ID:         w.ID,
-		TenantID:   w.TenantID,
-		AgentName:  name,
-		AmountCNY:  w.Amount,
-		Status:     string(w.Status),
-		CreatedAt:  isoUTC(w.CreatedAt),
-		ReviewedAt: isoUTC(w.ReviewedAt),
+		ID:            w.ID,
+		TenantID:      w.TenantID,
+		AgentName:     name,
+		AmountCNY:     w.Amount,
+		Status:        string(w.Status),
+		Remark:        w.Remark,
+		PayoutMethod:  string(w.PayoutMethod),
+		PayoutAccount: w.PayoutAccount,
+		PayoutName:    w.PayoutName,
+		PayoutBank:    w.PayoutBank,
+		PayoutRef:     w.PayoutRef,
+		PaidAt:        isoUTC(w.PaidAt),
+		CreatedAt:     isoUTC(w.CreatedAt),
+		ReviewedAt:    isoUTC(w.ReviewedAt),
 	}
 }
 

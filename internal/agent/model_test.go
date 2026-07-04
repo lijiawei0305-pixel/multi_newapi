@@ -93,9 +93,10 @@ func TestWithdrawStatus_Valid(t *testing.T) {
 	}{
 		{WithdrawPending, true},
 		{WithdrawApproved, true},
+		{WithdrawPaid, true},
 		{WithdrawRejected, true},
 		{WithdrawStatus(""), false},
-		{WithdrawStatus("paid"), false},
+		{WithdrawStatus("unknown"), false},
 	}
 	for _, c := range cases {
 		if got := c.s.Valid(); got != c.want {
@@ -104,6 +105,11 @@ func TestWithdrawStatus_Valid(t *testing.T) {
 	}
 }
 
+// TestWithdrawStatus_CanTransitionTo 锁定提现闭环补强 #2 的状态机：
+//
+//	pending -> approved | rejected
+//	approved -> paid   （approved 不再是终态）
+//	paid / rejected 为终态（不可迁出）。
 func TestWithdrawStatus_CanTransitionTo(t *testing.T) {
 	cases := []struct {
 		from WithdrawStatus
@@ -113,17 +119,26 @@ func TestWithdrawStatus_CanTransitionTo(t *testing.T) {
 		// 合法迁移
 		{WithdrawPending, WithdrawApproved, true},
 		{WithdrawPending, WithdrawRejected, true},
+		{WithdrawApproved, WithdrawPaid, true},
 		// same->same 非法
 		{WithdrawPending, WithdrawPending, false},
 		{WithdrawApproved, WithdrawApproved, false},
 		{WithdrawRejected, WithdrawRejected, false},
-		// 终态不可迁出
+		{WithdrawPaid, WithdrawPaid, false},
+		// approved 不再是终态，但只能迁去 paid，不能迁去 pending/rejected
 		{WithdrawApproved, WithdrawRejected, false},
 		{WithdrawApproved, WithdrawPending, false},
+		// pending 不能跳级直接到 paid（须先 approved）
+		{WithdrawPending, WithdrawPaid, false},
+		// rejected / paid 终态不可迁出
 		{WithdrawRejected, WithdrawApproved, false},
 		{WithdrawRejected, WithdrawPending, false},
+		{WithdrawRejected, WithdrawPaid, false},
+		{WithdrawPaid, WithdrawApproved, false},
+		{WithdrawPaid, WithdrawPending, false},
+		{WithdrawPaid, WithdrawRejected, false},
 		// 未知目标
-		{WithdrawPending, WithdrawStatus("paid"), false},
+		{WithdrawPending, WithdrawStatus("unknown"), false},
 	}
 	for _, c := range cases {
 		if got := c.from.CanTransitionTo(c.to); got != c.want {
@@ -143,11 +158,65 @@ func TestErrorCodes(t *testing.T) {
 		{ErrWithdrawNotPending, "WITHDRAW_NOT_PENDING"},
 		{ErrWithdrawNotFound, "WITHDRAW_NOT_FOUND"},
 		{ErrEarningInvalid, "EARNING_INVALID"},
+		{ErrWithdrawNotApproved, "WITHDRAW_NOT_APPROVED"},
+		{ErrPayoutAccountRequired, "PAYOUT_ACCOUNT_REQUIRED"},
+		{ErrPayoutAccountInvalid, "PAYOUT_ACCOUNT_INVALID"},
+		{ErrPayoutRefRequired, "PAYOUT_REF_REQUIRED"},
 	}
 	for _, c := range cases {
 		if got := apperr.CodeOf(c.err); got != c.code {
 			t.Errorf("CodeOf = %q, want %q", got, c.code)
 		}
+	}
+}
+
+// ---- 收款账户（提现闭环补强 #1）----
+
+func TestPayoutMethod_Valid(t *testing.T) {
+	cases := []struct {
+		m    PayoutMethod
+		want bool
+	}{
+		{PayoutAlipay, true},
+		{PayoutBank, true},
+		{PayoutMethod(""), false},
+		{PayoutMethod("wechat"), false},
+	}
+	for _, c := range cases {
+		if got := c.m.Valid(); got != c.want {
+			t.Errorf("%q.Valid() = %v, want %v", c.m, got, c.want)
+		}
+	}
+}
+
+func TestPayoutAccount_Validate(t *testing.T) {
+	cases := []struct {
+		name     string
+		p        PayoutAccount
+		wantCode string // "" 表示放行
+	}{
+		{"valid alipay", PayoutAccount{Method: PayoutAlipay, Account: "alice@example.com", Name: "Alice"}, ""},
+		{"valid bank", PayoutAccount{Method: PayoutBank, Account: "6222000000", Name: "Alice", Bank: "ICBC"}, ""},
+		{"unknown method", PayoutAccount{Method: "wechat", Account: "a", Name: "b"}, CodePayoutAccountInvalid},
+		{"empty method", PayoutAccount{Account: "a", Name: "b"}, CodePayoutAccountInvalid},
+		{"empty account", PayoutAccount{Method: PayoutAlipay, Name: "Alice"}, CodePayoutAccountInvalid},
+		{"empty name", PayoutAccount{Method: PayoutAlipay, Account: "a"}, CodePayoutAccountInvalid},
+		{"bank missing bank name", PayoutAccount{Method: PayoutBank, Account: "6222000000", Name: "Alice"}, CodePayoutAccountInvalid},
+		{"alipay does not require bank", PayoutAccount{Method: PayoutAlipay, Account: "a", Name: "b", Bank: ""}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assertCode(t, c.p.Validate(), c.wantCode)
+		})
+	}
+}
+
+func TestPayoutAccount_IsZero(t *testing.T) {
+	if !(PayoutAccount{}).IsZero() {
+		t.Fatal("zero-value PayoutAccount must report IsZero() true")
+	}
+	if (PayoutAccount{Method: PayoutAlipay, Account: "a", Name: "b"}).IsZero() {
+		t.Fatal("configured PayoutAccount must report IsZero() false")
 	}
 }
 

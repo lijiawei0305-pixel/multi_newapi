@@ -6,9 +6,11 @@ import (
 	"time"
 )
 
-// agentRecord 是代理资料的内部存储结构（按 tenantID）。
+// agentRecord 是代理资料的内部存储结构（按 tenantID）。payout 与 params 是同一条 profile 记录里
+// 互不干扰的两组字段（镜像 gormrepo profileRow 的 AgentParams 列 + payout_* 列同表布局）。
 type agentRecord struct {
 	params    AgentParams
+	payout    PayoutAccount
 	updatedAt time.Time
 }
 
@@ -59,10 +61,15 @@ func (r *MemRepo) SeedAPIBalance(tenantID int64, amount float64) {
 	w.UpdatedAt = r.now()
 }
 
+// SetAgentType upsert 代理业务参数（AgentParams 列）；只读改写 params 字段，绝不touch 同一 profile
+// 记录里的 payout 字段（镜像 gormrepo SetAgentType 的 OnConflict DoUpdates 只列业务参数列的行为）。
 func (r *MemRepo) SetAgentType(_ context.Context, tenantID int64, p AgentParams) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.profiles[tenantID] = agentRecord{params: p, updatedAt: r.now()}
+	rec := r.profiles[tenantID] // 不存在则零值（含零值 payout），存在则保留其 payout 不被覆盖
+	rec.params = p
+	rec.updatedAt = r.now()
+	r.profiles[tenantID] = rec
 	return nil
 }
 
@@ -74,6 +81,31 @@ func (r *MemRepo) GetAgentType(_ context.Context, tenantID int64) (AgentParams, 
 		return AgentParams{}, false, nil
 	}
 	return rec.params, true, nil
+}
+
+// ---- AgentRepo：收款账户（提现闭环补强 #1）----
+
+// SetPayoutAccount upsert 代理收款账户（payout_* 列）；只改写 payout 字段，绝不 touch 同一 profile
+// 记录里已设置的 AgentParams（镜像 gormrepo SetPayoutAccount 的行为）。
+func (r *MemRepo) SetPayoutAccount(_ context.Context, tenantID int64, p PayoutAccount) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec := r.profiles[tenantID] // 不存在则零值（含零值 AgentParams），存在则保留其 params 不被覆盖
+	rec.payout = p
+	rec.updatedAt = r.now()
+	r.profiles[tenantID] = rec
+	return nil
+}
+
+// GetPayoutAccount 读取代理收款账户；found=false 表示尚未设置（含 tenant 尚无 profile 行的情形）。
+func (r *MemRepo) GetPayoutAccount(_ context.Context, tenantID int64) (PayoutAccount, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.profiles[tenantID]
+	if !ok {
+		return PayoutAccount{}, false, nil
+	}
+	return rec.payout, !rec.payout.IsZero(), nil
 }
 
 func (r *MemRepo) GetWallet(_ context.Context, tenantID int64) (*AgentWallet, error) {
@@ -141,6 +173,9 @@ func (r *MemRepo) GetWithdrawal(_ context.Context, id int64) (*Withdrawal, error
 	return &cp, nil
 }
 
+// ResolveWithdrawal 原子迁移 pending→{approved,rejected}（Review 的唯二调用目标）并按新钱流规则
+// 移动资金：approved **不动钱**（钱仍在 frozen，等 MarkWithdrawalPaid 才出账，提现闭环补强 #2 钱流调整）；
+// rejected 解冻退回可提现（金额守恒复原）。
 func (r *MemRepo) ResolveWithdrawal(_ context.Context, id int64, target WithdrawStatus, remark string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -151,23 +186,45 @@ func (r *MemRepo) ResolveWithdrawal(_ context.Context, id int64, target Withdraw
 	if !wd.Status.CanTransitionTo(target) {
 		return ErrWithdrawNotPending
 	}
-	w := r.walletRef(wd.TenantID)
 	switch target {
 	case WithdrawApproved:
-		// 线下打款：扣减冻结，资金离开系统。
-		w.FrozenWithdrawAmount -= wd.Amount
+		// 不动钱：仅记决策，钱仍在 frozen。
 	case WithdrawRejected:
-		// 解冻退回：冻结 → 可提现（金额守恒：withdrawable + frozen 复原）。
+		w := r.walletRef(wd.TenantID)
 		w.FrozenWithdrawAmount -= wd.Amount
 		w.WithdrawableBalance += wd.Amount
+		w.UpdatedAt = r.now()
 	default:
 		return ErrWithdrawNotPending
 	}
 	ts := r.now()
-	w.UpdatedAt = ts
 	wd.Status = target
 	wd.Remark = remark
 	wd.UpdatedAt = ts
 	wd.ReviewedAt = ts
+	return nil
+}
+
+// MarkWithdrawalPaid 原子迁移 approved→paid：扣减冻结资金（线下打款真正出账）+ 记 payout_ref/paid_at
+// （提现闭环补强 #2）。非 approved（含并发已被标记 / 仍是 pending）返回 ErrWithdrawNotApproved；
+// 不存在返回 ErrWithdrawNotFound。
+func (r *MemRepo) MarkWithdrawalPaid(_ context.Context, id int64, payoutRef string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	wd, ok := r.withdrawals[id]
+	if !ok {
+		return ErrWithdrawNotFound
+	}
+	if !wd.Status.CanTransitionTo(WithdrawPaid) {
+		return ErrWithdrawNotApproved
+	}
+	w := r.walletRef(wd.TenantID)
+	w.FrozenWithdrawAmount -= wd.Amount
+	ts := r.now()
+	w.UpdatedAt = ts
+	wd.Status = WithdrawPaid
+	wd.PayoutRef = payoutRef
+	wd.PaidAt = ts
+	wd.UpdatedAt = ts
 	return nil
 }

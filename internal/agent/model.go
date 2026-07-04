@@ -2,6 +2,7 @@ package agent
 
 import (
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -137,7 +138,64 @@ type AgentWallet struct {
 	UpdatedAt time.Time
 }
 
-// ---- 提现状态机（detailed-design §2.3）----
+// ---- 收款账户（detailed-design 提现闭环补强 #1）----
+
+// PayoutMethod 是代理收款方式枚举。
+type PayoutMethod string
+
+const (
+	// PayoutAlipay 支付宝收款。
+	PayoutAlipay PayoutMethod = "alipay"
+	// PayoutBank 银行卡收款。
+	PayoutBank PayoutMethod = "bank"
+)
+
+// Valid 判断是否为已知的合法收款方式。
+func (m PayoutMethod) Valid() bool {
+	switch m {
+	case PayoutAlipay, PayoutBank:
+		return true
+	default:
+		return false
+	}
+}
+
+// PayoutAccount 是代理的收款账户（提现打款目标）。代理在「收款账户」设置里自助填写/修改；
+// 申请提现时整份快照进 Withdrawal（记录不可变，见下方 Withdrawal.Payout* 字段）。
+type PayoutAccount struct {
+	// Method 收款方式：alipay | bank。
+	Method PayoutMethod
+	// Account 收款账号（支付宝账号 / 银行卡号）。
+	Account string
+	// Name 实名（收款人姓名）。
+	Name string
+	// Bank 开户行；仅 Method==PayoutBank 时必填，alipay 下应为空。
+	Bank string
+}
+
+// Validate 校验收款账户合法性：方式∈{alipay,bank}、账号与姓名非空、bank 方式下开户行必填。
+// 非法返回 ErrPayoutAccountInvalid（PAYOUT_ACCOUNT_INVALID）。
+func (p PayoutAccount) Validate() error {
+	switch {
+	case !p.Method.Valid():
+		return ErrPayoutAccountInvalid
+	case strings.TrimSpace(p.Account) == "":
+		return ErrPayoutAccountInvalid
+	case strings.TrimSpace(p.Name) == "":
+		return ErrPayoutAccountInvalid
+	case p.Method == PayoutBank && strings.TrimSpace(p.Bank) == "":
+		return ErrPayoutAccountInvalid
+	default:
+		return nil
+	}
+}
+
+// IsZero 判断收款账户是否为「尚未设置」的零值（GetPayoutAccount 据此报告 found）。
+func (p PayoutAccount) IsZero() bool {
+	return p == PayoutAccount{}
+}
+
+// ---- 提现状态机（detailed-design §2.3；paid + 收款快照见提现闭环补强 #1/#2）----
 
 // WithdrawStatus 是提现单状态。
 type WithdrawStatus string
@@ -145,8 +203,12 @@ type WithdrawStatus string
 const (
 	// WithdrawPending 已提交，可提现余额冻结中。
 	WithdrawPending WithdrawStatus = "pending"
-	// WithdrawApproved 审核通过 → 线下打款（终态）。
+	// WithdrawApproved 审核通过，等待线下打款——**不再是终态**：approve 本身不动钱
+	// （钱仍在 frozen），须再经 mark-paid（→ paid）才真正出账。
 	WithdrawApproved WithdrawStatus = "approved"
+	// WithdrawPaid 已打款（终态）：mark-paid 扣减冻结后的资金真正离开系统状态，
+	// 连带记录 payout_ref（打款单号/凭证）与 paid_at。
+	WithdrawPaid WithdrawStatus = "paid"
 	// WithdrawRejected 审核拒绝 → 解冻退回（终态）。
 	WithdrawRejected WithdrawStatus = "rejected"
 )
@@ -154,22 +216,26 @@ const (
 // Valid 判断是否为已知的合法提现状态。
 func (s WithdrawStatus) Valid() bool {
 	switch s {
-	case WithdrawPending, WithdrawApproved, WithdrawRejected:
+	case WithdrawPending, WithdrawApproved, WithdrawPaid, WithdrawRejected:
 		return true
 	default:
 		return false
 	}
 }
 
-// allowedWithdrawTransitions 编码 detailed-design §2.3 的状态机：
+// allowedWithdrawTransitions 编码提现闭环补强 #2 的状态机：
 //
-//	pending -> approved | rejected
-//	approved / rejected 为终态（不可迁出）。
+//	pending  -> approved | rejected
+//	approved -> paid            （approved 不再是终态）
+//	paid / rejected 为终态（不可迁出）。
 //
-// 不在表内的迁移（含 same->same、任何 from 终态）均为非法 → WITHDRAW_NOT_PENDING。
+// 不在表内的迁移（含 same->same、任何终态迁出）均为非法：
+// pending/approved 分支迁移非法 → WITHDRAW_NOT_PENDING；approved->paid 分支非法 → WITHDRAW_NOT_APPROVED
+// （由调用方 ResolveWithdrawal / MarkWithdrawalPaid 各自的 CAS 语境决定具体错误码）。
 var allowedWithdrawTransitions = map[WithdrawStatus]map[WithdrawStatus]bool{
 	WithdrawPending:  {WithdrawApproved: true, WithdrawRejected: true},
-	WithdrawApproved: {},
+	WithdrawApproved: {WithdrawPaid: true},
+	WithdrawPaid:     {},
 	WithdrawRejected: {},
 }
 
@@ -180,15 +246,28 @@ func (s WithdrawStatus) CanTransitionTo(next WithdrawStatus) bool {
 
 // Withdrawal 是一笔提现单。
 type Withdrawal struct {
-	ID         int64
-	TenantID   int64
-	UserID     int64
-	Amount     float64 // 提现金额（¥）
-	Status     WithdrawStatus
-	Remark     string    // 审核备注
+	ID       int64
+	TenantID int64
+	UserID   int64
+	Amount   float64 // 提现金额（¥）
+	Status   WithdrawStatus
+	Remark   string // 审核备注（驳回理由等）
+
+	// PayoutMethod/PayoutAccount/PayoutName/PayoutBank 是申请提现那一刻从代理收款账户
+	// （PayoutAccount）整份快照下来的打款目标（提现闭环补强 #1）：记录不可变，日后代理修改收款账户
+	// 不影响已提交的历史单——管理员审核/打款时据此转账。
+	PayoutMethod  PayoutMethod
+	PayoutAccount string
+	PayoutName    string
+	PayoutBank    string
+	// PayoutRef 打款单号/凭证（mark-paid 时填，空=尚未打款）。
+	PayoutRef string
+
 	CreatedAt  time.Time // 提交时间
 	UpdatedAt  time.Time // 最近更新时间
 	ReviewedAt time.Time // 审核时间（approved/rejected 时填充）
+	// PaidAt 标记已打款时间（mark-paid 时填充；零值=尚未打款）。
+	PaidAt time.Time
 }
 
 // WithdrawInput 是提现申请入参。

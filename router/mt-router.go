@@ -77,6 +77,9 @@ func SetMtRouter(router *gin.Engine) {
 		{
 			agentSelf.POST("/withdrawals", app.HandleAgentRequestWithdrawal)
 			agentSelf.GET("/withdrawals", app.HandleAgentListWithdrawals)
+			// 收款账户（提现闭环补强 #1）：申请提现前必须先设置，管理员审核/打款据此转账。
+			agentSelf.GET("/payout-account", app.HandleAgentGetPayoutAccount)
+			agentSelf.PUT("/payout-account", app.HandleAgentSetPayoutAccount)
 			agentSelf.GET("/earnings", app.HandleAgentListEarnings)
 			// P1-UI-04 代理自助分销：套餐上架改价 / 推广渠道 / 我的用户 / 兑换码（建/列） / 用户组倍率。
 			agentSelf.GET("/token-plans/listings", app.HandleAgentListPlanListings)
@@ -201,6 +204,8 @@ func SetMtRouter(router *gin.Engine) {
 		adminWithdrawGroup.GET("", app.HandleAdminListWithdrawals)
 		adminWithdrawGroup.POST("/:id/approve", app.HandleAdminApproveWithdrawal)
 		adminWithdrawGroup.POST("/:id/reject", app.HandleAdminRejectWithdrawal)
+		// 标记已打款（提现闭环补强 #2）：approved→paid，CAS + 扣减冻结（真正出账）+ 记打款单号/时间。
+		adminWithdrawGroup.POST("/:id/mark-paid", app.HandleAdminMarkPaidWithdrawal)
 	}
 
 	// 主站模型分组管理（全局，非租户维度，§2.15）：增删改 + 设倍率/绑渠道。复用 new-api AdminAuth。

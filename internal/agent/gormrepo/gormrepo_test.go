@@ -2,6 +2,8 @@ package gormrepo
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -134,8 +136,9 @@ func TestAppendEarning_IdempotentAndAccrues(t *testing.T) {
 	}
 }
 
-// TestWithdrawal_FreezeApproveConservesMoney 验证提现「申请冻结 → 通过打款」金额守恒。
-func TestWithdrawal_FreezeApproveConservesMoney(t *testing.T) {
+// TestWithdrawal_ApproveMovesNoMoney 验证提现闭环补强 #2 的钱流调整：「申请冻结 → 通过」
+// 只翻状态，approve 绝不动钱（钱仍留在 frozen，等 mark-paid 才真正出账）。
+func TestWithdrawal_ApproveMovesNoMoney(t *testing.T) {
 	ctx := context.Background()
 	r := newTestRepo(t)
 	seedBalance(t, r, 1, 5, 100)
@@ -156,14 +159,233 @@ func TestWithdrawal_FreezeApproveConservesMoney(t *testing.T) {
 	if err := r.ResolveWithdrawal(ctx, wd.ID, agent.WithdrawApproved, "paid"); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	// 通过：扣冻结（资金离开），可提现保持 70，冻结回 0。
+	// 通过：不动钱——可提现仍 70，冻结仍 30（等 mark-paid 才真正出账）。
 	w, _ = r.GetWallet(ctx, 1)
-	if w.WithdrawableBalance != 70 || w.FrozenWithdrawAmount != 0 {
-		t.Fatalf("after approve: withdrawable=%v frozen=%v, want 70/0", w.WithdrawableBalance, w.FrozenWithdrawAmount)
+	if w.WithdrawableBalance != 70 || w.FrozenWithdrawAmount != 30 {
+		t.Fatalf("after approve: withdrawable=%v frozen=%v, want 70/30 (approve must not move money)",
+			w.WithdrawableBalance, w.FrozenWithdrawAmount)
 	}
-	// 终态不可再审。
+	// approved 只能迁去 paid，不能再迁去 rejected/pending。
 	if err := r.ResolveWithdrawal(ctx, wd.ID, agent.WithdrawRejected, "x"); err != agent.ErrWithdrawNotPending {
 		t.Fatalf("re-review = %v, want ErrWithdrawNotPending", err)
+	}
+}
+
+// ---- mark-paid（提现闭环补强 #2）----
+
+// TestMarkWithdrawalPaid_DebitsFrozenAndRecordsRef 验证标记已打款：扣减冻结（资金真正出账）+
+// 记录打款单号/时间；金额守恒（withdrawable+frozen 复原到「打款前」状态）。
+func TestMarkWithdrawalPaid_DebitsFrozenAndRecordsRef(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	seedBalance(t, r, 1, 5, 100)
+
+	wd := &agent.Withdrawal{TenantID: 1, UserID: 5, Amount: 30}
+	if err := r.CreateWithdrawal(ctx, wd); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := r.ResolveWithdrawal(ctx, wd.ID, agent.WithdrawApproved, ""); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if err := r.MarkWithdrawalPaid(ctx, wd.ID, "WX20260704001"); err != nil {
+		t.Fatalf("mark paid: %v", err)
+	}
+
+	got, err := r.GetWithdrawal(ctx, wd.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != agent.WithdrawPaid || got.PayoutRef != "WX20260704001" || got.PaidAt.IsZero() {
+		t.Fatalf("withdrawal after mark-paid = %+v", got)
+	}
+	// mark-paid 真正出账：冻结清零，可提现维持 70（早在申请时已冻结，approve 未动过）。
+	w, _ := r.GetWallet(ctx, 1)
+	if w.WithdrawableBalance != 70 || w.FrozenWithdrawAmount != 0 {
+		t.Fatalf("after mark-paid: withdrawable=%v frozen=%v, want 70/0", w.WithdrawableBalance, w.FrozenWithdrawAmount)
+	}
+}
+
+// TestMarkWithdrawalPaid_OnlyFromApproved 验证 CAS：仅 approved→paid；pending 直接标记 / 重复
+// 标记均被拒（ErrWithdrawNotApproved），且被拒的调用绝不重复扣款。
+func TestMarkWithdrawalPaid_OnlyFromApproved(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	seedBalance(t, r, 1, 5, 100)
+
+	wd := &agent.Withdrawal{TenantID: 1, UserID: 5, Amount: 30}
+	if err := r.CreateWithdrawal(ctx, wd); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// 仍是 pending：mark-paid 必须拒绝。
+	if err := r.MarkWithdrawalPaid(ctx, wd.ID, "ref-1"); err != agent.ErrWithdrawNotApproved {
+		t.Fatalf("mark-paid on pending = %v, want ErrWithdrawNotApproved", err)
+	}
+
+	if err := r.ResolveWithdrawal(ctx, wd.ID, agent.WithdrawApproved, ""); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if err := r.MarkWithdrawalPaid(ctx, wd.ID, "ref-1"); err != nil {
+		t.Fatalf("first mark-paid: %v", err)
+	}
+	// 已是 paid（终态）：重复标记必须拒绝。
+	if err := r.MarkWithdrawalPaid(ctx, wd.ID, "ref-2"); err != agent.ErrWithdrawNotApproved {
+		t.Fatalf("second mark-paid = %v, want ErrWithdrawNotApproved", err)
+	}
+
+	w, _ := r.GetWallet(ctx, 1)
+	if w.FrozenWithdrawAmount != 0 || w.WithdrawableBalance != 70 {
+		t.Fatalf("double mark-paid moved money again: withdrawable=%v frozen=%v", w.WithdrawableBalance, w.FrozenWithdrawAmount)
+	}
+	got, _ := r.GetWithdrawal(ctx, wd.ID)
+	if got.PayoutRef != "ref-1" {
+		t.Fatalf("payout_ref = %q, want unchanged %q", got.PayoutRef, "ref-1")
+	}
+}
+
+// TestMarkWithdrawalPaid_NotFound 验证提现单不存在时的错误码。
+func TestMarkWithdrawalPaid_NotFound(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	if err := r.MarkWithdrawalPaid(ctx, 404, "ref"); err != agent.ErrWithdrawNotFound {
+		t.Fatalf("mark-paid missing = %v, want ErrWithdrawNotFound", err)
+	}
+}
+
+// TestMarkWithdrawalPaid_ConcurrentOnlyOneWins 验证 -race 下并发 mark-paid 同一张 approved 单，
+// CAS(WHERE status='approved') 只放行一个赢家，冻结只扣一次（不重复出账）。
+func TestMarkWithdrawalPaid_ConcurrentOnlyOneWins(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	seedBalance(t, r, 1, 5, 100)
+
+	wd := &agent.Withdrawal{TenantID: 1, UserID: 5, Amount: 30}
+	if err := r.CreateWithdrawal(ctx, wd); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := r.ResolveWithdrawal(ctx, wd.ID, agent.WithdrawApproved, ""); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	var wins int64
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := r.MarkWithdrawalPaid(ctx, wd.ID, "ref"); err == nil {
+				atomic.AddInt64(&wins, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if wins != 1 {
+		t.Fatalf("concurrent mark-paid winners = %d, want exactly 1", wins)
+	}
+	w, _ := r.GetWallet(ctx, 1)
+	if w.FrozenWithdrawAmount != 0 || w.WithdrawableBalance != 70 {
+		t.Fatalf("after concurrent mark-paid: withdrawable=%v frozen=%v, want 70/0 (must debit exactly once)",
+			w.WithdrawableBalance, w.FrozenWithdrawAmount)
+	}
+}
+
+// ---- 收款账户（提现闭环补强 #1）----
+
+func TestSetPayoutAccount_RoundTrips(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	want := agent.PayoutAccount{Method: agent.PayoutBank, Account: "6222000000", Name: "Alice", Bank: "ICBC"}
+	if err := r.SetPayoutAccount(ctx, 7, want); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	got, found, err := r.GetPayoutAccount(ctx, 7)
+	if err != nil || !found {
+		t.Fatalf("get: found=%v err=%v", found, err)
+	}
+	if got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestGetPayoutAccount_NotFoundWhenUnset(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	// tenant 7 无 profile 行。
+	if _, found, err := r.GetPayoutAccount(ctx, 7); err != nil || found {
+		t.Fatalf("GetPayoutAccount(no profile): found=%v err=%v, want false/nil", found, err)
+	}
+	// tenant 5 有 profile 行（已设代理），但从未设置收款账户。
+	if err := r.SetAgentType(ctx, 5, agent.AgentParams{Level: 1}); err != nil {
+		t.Fatalf("set agent type: %v", err)
+	}
+	if _, found, err := r.GetPayoutAccount(ctx, 5); err != nil || found {
+		t.Fatalf("GetPayoutAccount(unset payout): found=%v err=%v, want false/nil", found, err)
+	}
+}
+
+// TestSetPayoutAccount_DoesNotClobberAgentParams 确认收款账户与 AgentParams 是同一 profile 行
+// 里互不干扰的两组列：无论先后顺序写入，都不清空对方（镜像 SetAgentType 对 payout_* 的同等保护）。
+func TestSetPayoutAccount_DoesNotClobberAgentParams(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	params := agent.AgentParams{CostPrice: 10, PackageDiscount: 0.9, CommissionRatio: 0.2, Level: 1}
+	if err := r.SetAgentType(ctx, 7, params); err != nil {
+		t.Fatalf("set agent type: %v", err)
+	}
+	payout := agent.PayoutAccount{Method: agent.PayoutAlipay, Account: "a@example.com", Name: "Alice"}
+	if err := r.SetPayoutAccount(ctx, 7, payout); err != nil {
+		t.Fatalf("set payout account: %v", err)
+	}
+
+	gotParams, _, err := r.GetAgentType(ctx, 7)
+	if err != nil || gotParams != params {
+		t.Fatalf("AgentParams clobbered by SetPayoutAccount: got %+v, want %+v (err %v)", gotParams, params, err)
+	}
+	gotPayout, found, err := r.GetPayoutAccount(ctx, 7)
+	if err != nil || !found || gotPayout != payout {
+		t.Fatalf("payout account not persisted: got %+v found=%v err=%v", gotPayout, found, err)
+	}
+
+	// 反向：再次 SetAgentType 不得清空已设置的 payout。
+	params2 := agent.AgentParams{CostPrice: 20, Level: 2}
+	if err := r.SetAgentType(ctx, 7, params2); err != nil {
+		t.Fatalf("set agent type again: %v", err)
+	}
+	gotPayout2, found2, err := r.GetPayoutAccount(ctx, 7)
+	if err != nil || !found2 || gotPayout2 != payout {
+		t.Fatalf("payout account clobbered by second SetAgentType: got %+v found=%v err=%v", gotPayout2, found2, err)
+	}
+}
+
+// TestCreateWithdrawal_PersistsPayoutSnapshot 验证 CreateWithdrawal 把调用方已填好的收款快照
+// 字段（PayoutMethod/PayoutAccount/PayoutName/PayoutBank）如实持久化并原样读回。
+func TestCreateWithdrawal_PersistsPayoutSnapshot(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	seedBalance(t, r, 1, 5, 100)
+
+	wd := &agent.Withdrawal{
+		TenantID: 1, UserID: 5, Amount: 30,
+		PayoutMethod: agent.PayoutAlipay, PayoutAccount: "alice@example.com", PayoutName: "Alice",
+	}
+	if err := r.CreateWithdrawal(ctx, wd); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := r.GetWithdrawal(ctx, wd.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.PayoutMethod != agent.PayoutAlipay || got.PayoutAccount != "alice@example.com" || got.PayoutName != "Alice" || got.PayoutBank != "" {
+		t.Fatalf("withdrawal payout snapshot = %+v, want alipay/alice@example.com/Alice/''", got)
+	}
+	// 列表接口同样带出快照字段（管理员/代理列表页据此显示打款目标）。
+	byTenant, err := r.ListWithdrawalsByTenant(ctx, 1)
+	if err != nil || len(byTenant) != 1 || byTenant[0].PayoutAccount != "alice@example.com" {
+		t.Fatalf("ListWithdrawalsByTenant = %+v (err %v), want 1 row with payout snapshot", byTenant, err)
+	}
+	all, err := r.ListWithdrawals(ctx, "")
+	if err != nil || len(all) != 1 || all[0].PayoutAccount != "alice@example.com" {
+		t.Fatalf("ListWithdrawals = %+v (err %v), want 1 row with payout snapshot", all, err)
 	}
 }
 

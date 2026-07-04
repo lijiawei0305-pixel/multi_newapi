@@ -25,17 +25,24 @@ import (
 // ---- 表 1：agent_profiles —— 代理资料（tenant_id 主键，1:1 独占） ----
 
 type profileRow struct {
-	TenantID         int64     `gorm:"column:tenant_id;primaryKey"`
-	UserID           int64     `gorm:"column:user_id;not null;default:0;index:idx_agent_profiles_user"`
-	Level            int       `gorm:"column:level;not null;default:0"`
-	CanAPI           bool      `gorm:"column:can_api;not null;default:false"`
-	CostPriceCNY     float64   `gorm:"column:cost_price_cny;type:decimal(20,8);not null;default:0"`
-	PackageDiscount  float64   `gorm:"column:package_discount;type:decimal(20,8);not null;default:0"`
-	CommissionRatio  float64   `gorm:"column:commission_ratio;type:decimal(20,8);not null;default:0"`
-	DiscountFloor    float64   `gorm:"column:discount_floor;type:decimal(20,8);not null;default:0"`
-	BottomPriceRatio float64   `gorm:"column:bottom_price_ratio;type:decimal(20,8);not null;default:0"`
-	CreatedAt        time.Time `gorm:"column:created_at"`
-	UpdatedAt        time.Time `gorm:"column:updated_at"`
+	TenantID         int64   `gorm:"column:tenant_id;primaryKey"`
+	UserID           int64   `gorm:"column:user_id;not null;default:0;index:idx_agent_profiles_user"`
+	Level            int     `gorm:"column:level;not null;default:0"`
+	CanAPI           bool    `gorm:"column:can_api;not null;default:false"`
+	CostPriceCNY     float64 `gorm:"column:cost_price_cny;type:decimal(20,8);not null;default:0"`
+	PackageDiscount  float64 `gorm:"column:package_discount;type:decimal(20,8);not null;default:0"`
+	CommissionRatio  float64 `gorm:"column:commission_ratio;type:decimal(20,8);not null;default:0"`
+	DiscountFloor    float64 `gorm:"column:discount_floor;type:decimal(20,8);not null;default:0"`
+	BottomPriceRatio float64 `gorm:"column:bottom_price_ratio;type:decimal(20,8);not null;default:0"`
+	// PayoutMethod/PayoutAccount/PayoutName/PayoutBank：代理收款账户（提现闭环补强 #1）。
+	// 代理自助设置/修改（GetPayoutAccount/SetPayoutAccount，不经 AgentParams/SetAgentType）；
+	// 申请提现时整份快照进 agent_withdrawals（见 withdrawalRow 同名字段）。
+	PayoutMethod  string    `gorm:"column:payout_method;type:varchar(16);not null;default:''"`
+	PayoutAccount string    `gorm:"column:payout_account;type:varchar(128);not null;default:''"`
+	PayoutName    string    `gorm:"column:payout_name;type:varchar(64);not null;default:''"`
+	PayoutBank    string    `gorm:"column:payout_bank;type:varchar(128);not null;default:''"`
+	CreatedAt     time.Time `gorm:"column:created_at"`
+	UpdatedAt     time.Time `gorm:"column:updated_at"`
 }
 
 func (profileRow) TableName() string { return "agent_profiles" }
@@ -73,12 +80,21 @@ func (earningRow) TableName() string { return "agent_earning_logs" }
 // ---- 表 4：agent_withdrawals —— 提现单（状态机 pending→approved/rejected） ----
 
 type withdrawalRow struct {
-	ID         int64      `gorm:"column:id;primaryKey;autoIncrement"`
-	TenantID   int64      `gorm:"column:tenant_id;not null;index:idx_agent_withdrawals_tenant"`
-	UserID     int64      `gorm:"column:user_id;not null;default:0"`
-	Amount     float64    `gorm:"column:amount;type:decimal(20,8);not null"`
-	Status     string     `gorm:"column:status;type:varchar(16);not null;default:pending;index:idx_agent_withdrawals_status"`
-	Remark     string     `gorm:"column:remark;type:varchar(255);not null;default:''"`
+	ID       int64   `gorm:"column:id;primaryKey;autoIncrement"`
+	TenantID int64   `gorm:"column:tenant_id;not null;index:idx_agent_withdrawals_tenant"`
+	UserID   int64   `gorm:"column:user_id;not null;default:0"`
+	Amount   float64 `gorm:"column:amount;type:decimal(20,8);not null"`
+	Status   string  `gorm:"column:status;type:varchar(16);not null;default:pending;index:idx_agent_withdrawals_status"`
+	Remark   string  `gorm:"column:remark;type:varchar(255);not null;default:''"`
+	// PayoutMethod/PayoutAccount/PayoutName/PayoutBank：申请提现那一刻从 agent_profiles 收款账户
+	// 整份快照下来的打款目标（提现闭环补强 #1）；记录不可变，日后代理修改收款账户不影响历史单。
+	PayoutMethod  string `gorm:"column:payout_method;type:varchar(16);not null;default:''"`
+	PayoutAccount string `gorm:"column:payout_account;type:varchar(128);not null;default:''"`
+	PayoutName    string `gorm:"column:payout_name;type:varchar(64);not null;default:''"`
+	PayoutBank    string `gorm:"column:payout_bank;type:varchar(128);not null;default:''"`
+	// PayoutRef 打款单号/凭证；PaidAt 标记已打款时间（mark-paid 时填，提现闭环补强 #2）。
+	PayoutRef  string     `gorm:"column:payout_ref;type:varchar(128);not null;default:''"`
+	PaidAt     *time.Time `gorm:"column:paid_at"`
 	CreatedAt  time.Time  `gorm:"column:created_at"`
 	UpdatedAt  time.Time  `gorm:"column:updated_at"`
 	ReviewedAt *time.Time `gorm:"column:reviewed_at"`
@@ -148,6 +164,49 @@ func (r *Repo) GetAgentType(ctx context.Context, tenantID int64) (agent.AgentPar
 		DiscountFloor:    row.DiscountFloor,
 		BottomPriceRatio: row.BottomPriceRatio,
 	}, true, nil
+}
+
+// ---- AgentRepo：收款账户（提现闭环补强 #1）----
+
+// GetPayoutAccount 读取代理收款账户；found=false 表示尚未设置（含尚无 profile 行的情形）。
+func (r *Repo) GetPayoutAccount(ctx context.Context, tenantID int64) (agent.PayoutAccount, bool, error) {
+	var row profileRow
+	err := r.db.WithContext(ctx).Take(&row, "tenant_id = ?", tenantID).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return agent.PayoutAccount{}, false, nil
+		}
+		return agent.PayoutAccount{}, false, err
+	}
+	p := agent.PayoutAccount{
+		Method:  agent.PayoutMethod(row.PayoutMethod),
+		Account: row.PayoutAccount,
+		Name:    row.PayoutName,
+		Bank:    row.PayoutBank,
+	}
+	return p, !p.IsZero(), nil
+}
+
+// SetPayoutAccount 按 tenant_id 主键 upsert 代理收款账户；DoUpdates 只列 payout_* 四列 + updated_at，
+// 与 SetAgentType 的 DoUpdates 互不重叠列——两者可任意顺序调用，谁都不会清空对方已写入的字段
+// （见 profileRow 注释 / TestSetPayoutAccount_DoesNotClobberAgentParams）。
+func (r *Repo) SetPayoutAccount(ctx context.Context, tenantID int64, p agent.PayoutAccount) error {
+	now := r.now()
+	row := profileRow{
+		TenantID:      tenantID,
+		PayoutMethod:  string(p.Method),
+		PayoutAccount: p.Account,
+		PayoutName:    p.Name,
+		PayoutBank:    p.Bank,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "tenant_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"payout_method", "payout_account", "payout_name", "payout_bank", "updated_at",
+		}),
+	}).Create(&row).Error
 }
 
 // ---- AgentRepo：钱包（只读；写由 AppendEarning / 提现状态机驱动） ----
@@ -244,13 +303,17 @@ func (r *Repo) CreateWithdrawal(ctx context.Context, wd *agent.Withdrawal) error
 			return agent.ErrWithdrawInsufficient
 		}
 		row := withdrawalRow{
-			TenantID:  wd.TenantID,
-			UserID:    wd.UserID,
-			Amount:    wd.Amount,
-			Status:    string(agent.WithdrawPending),
-			Remark:    wd.Remark,
-			CreatedAt: now,
-			UpdatedAt: now,
+			TenantID:      wd.TenantID,
+			UserID:        wd.UserID,
+			Amount:        wd.Amount,
+			Status:        string(agent.WithdrawPending),
+			Remark:        wd.Remark,
+			PayoutMethod:  string(wd.PayoutMethod),
+			PayoutAccount: wd.PayoutAccount,
+			PayoutName:    wd.PayoutName,
+			PayoutBank:    wd.PayoutBank,
+			CreatedAt:     now,
+			UpdatedAt:     now,
 		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
@@ -276,7 +339,9 @@ func (r *Repo) GetWithdrawal(ctx context.Context, id int64) (*agent.Withdrawal, 
 	return toWithdrawal(&row), nil
 }
 
-// ResolveWithdrawal 原子迁移提现单状态并移动资金：approved=扣冻结（线下打款），rejected=解冻退回。
+// ResolveWithdrawal 原子迁移 pending→{approved,rejected}（Review 的唯二调用目标）并按新钱流规则
+// 移动资金（提现闭环补强 #2 钱流调整）：approved **不动钱**（仅记决策，钱仍在 frozen，等
+// MarkWithdrawalPaid 才真正出账）；rejected 解冻退回可提现。
 // 不存在 -> ErrWithdrawNotFound；非 pending（或并发已被审核）-> ErrWithdrawNotPending。
 func (r *Repo) ResolveWithdrawal(ctx context.Context, id int64, target agent.WithdrawStatus, remark string) error {
 	now := r.now()
@@ -306,15 +371,55 @@ func (r *Repo) ResolveWithdrawal(ctx context.Context, id int64, target agent.Wit
 		if res.RowsAffected == 0 {
 			return agent.ErrWithdrawNotPending
 		}
-		// 资金移动：approved 仅扣冻结（资金离开系统）；rejected 解冻退回可提现。
-		updates := map[string]interface{}{
+		if target != agent.WithdrawRejected {
+			return nil // approved：不触碰钱包，钱仍在 frozen
+		}
+		// rejected：解冻退回可提现（frozen → withdrawable，金额守恒复原）。
+		return tx.Model(&walletRow{}).Where("tenant_id = ?", row.TenantID).Updates(map[string]interface{}{
+			"frozen_withdraw_amount": gorm.Expr("frozen_withdraw_amount - ?", row.Amount),
+			"withdrawable_balance":   gorm.Expr("withdrawable_balance + ?", row.Amount),
+			"updated_at":             now,
+		}).Error
+	})
+}
+
+// MarkWithdrawalPaid 原子迁移 approved→paid（CAS，WHERE status='approved'）并扣减冻结资金
+// （线下打款真正出账），记 payout_ref/paid_at（提现闭环补强 #2）。与 ResolveWithdrawal 同一 txn 风格：
+// 先读行校验状态机合法性，再 CAS UPDATE 抢状态，赢家才移动资金；并发败者 RowsAffected==0。
+// 不存在 -> ErrWithdrawNotFound；非 approved（或并发已被标记）-> ErrWithdrawNotApproved。
+func (r *Repo) MarkWithdrawalPaid(ctx context.Context, id int64, payoutRef string) error {
+	now := r.now()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var row withdrawalRow
+		if err := tx.Take(&row, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return agent.ErrWithdrawNotFound
+			}
+			return err
+		}
+		if !agent.WithdrawStatus(row.Status).CanTransitionTo(agent.WithdrawPaid) {
+			return agent.ErrWithdrawNotApproved
+		}
+		// CAS：approved→paid，抢到者负责移动资金；并发败者 RowsAffected==0。
+		res := tx.Model(&withdrawalRow{}).
+			Where("id = ? AND status = ?", id, string(agent.WithdrawApproved)).
+			Updates(map[string]interface{}{
+				"status":     string(agent.WithdrawPaid),
+				"payout_ref": payoutRef,
+				"paid_at":    now,
+				"updated_at": now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return agent.ErrWithdrawNotApproved
+		}
+		// 打款真正出账：扣冻结（资金离开系统）。
+		return tx.Model(&walletRow{}).Where("tenant_id = ?", row.TenantID).Updates(map[string]interface{}{
 			"frozen_withdraw_amount": gorm.Expr("frozen_withdraw_amount - ?", row.Amount),
 			"updated_at":             now,
-		}
-		if target == agent.WithdrawRejected {
-			updates["withdrawable_balance"] = gorm.Expr("withdrawable_balance + ?", row.Amount)
-		}
-		return tx.Model(&walletRow{}).Where("tenant_id = ?", row.TenantID).Updates(updates).Error
+		}).Error
 	})
 }
 
@@ -421,17 +526,25 @@ func toWallet(row *walletRow) *agent.AgentWallet {
 
 func toWithdrawal(row *withdrawalRow) *agent.Withdrawal {
 	w := &agent.Withdrawal{
-		ID:        row.ID,
-		TenantID:  row.TenantID,
-		UserID:    row.UserID,
-		Amount:    row.Amount,
-		Status:    agent.WithdrawStatus(row.Status),
-		Remark:    row.Remark,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
+		ID:            row.ID,
+		TenantID:      row.TenantID,
+		UserID:        row.UserID,
+		Amount:        row.Amount,
+		Status:        agent.WithdrawStatus(row.Status),
+		Remark:        row.Remark,
+		PayoutMethod:  agent.PayoutMethod(row.PayoutMethod),
+		PayoutAccount: row.PayoutAccount,
+		PayoutName:    row.PayoutName,
+		PayoutBank:    row.PayoutBank,
+		PayoutRef:     row.PayoutRef,
+		CreatedAt:     row.CreatedAt,
+		UpdatedAt:     row.UpdatedAt,
 	}
 	if row.ReviewedAt != nil {
 		w.ReviewedAt = *row.ReviewedAt
+	}
+	if row.PaidAt != nil {
+		w.PaidAt = *row.PaidAt
 	}
 	return w
 }

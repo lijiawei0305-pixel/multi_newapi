@@ -44,3 +44,16 @@ func (s *agentService) AgentLevel(ctx context.Context, tenantID int64) (int, err
 	}
 	return p.Level, nil
 }
+
+// SetPayoutAccount 校验收款账户后落库（提现闭环补强 #1）；非法返回 PAYOUT_ACCOUNT_INVALID。
+func (s *agentService) SetPayoutAccount(ctx context.Context, tenantID int64, p PayoutAccount) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	return s.repo.SetPayoutAccount(ctx, tenantID, p)
+}
+
+// GetPayoutAccount 返回租户当前收款账户；found=false 表示尚未设置。
+func (s *agentService) GetPayoutAccount(ctx context.Context, tenantID int64) (PayoutAccount, bool, error) {
+	return s.repo.GetPayoutAccount(ctx, tenantID)
+}

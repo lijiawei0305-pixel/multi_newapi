@@ -16,6 +16,11 @@ type AgentService interface {
 	GetWallet(ctx context.Context, tenantID int64) (*AgentWallet, error)
 	// AgentLevel 返回该租户代理档位（能力 gate 的唯一真相）；非代理租户返回 0（非错误）。
 	AgentLevel(ctx context.Context, tenantID int64) (int, error)
+	// SetPayoutAccount 设置/修改代理收款账户（提现闭环补强 #1；经 PayoutAccount.Validate 校验，
+	// 非法返回 PAYOUT_ACCOUNT_INVALID）。
+	SetPayoutAccount(ctx context.Context, tenantID int64, p PayoutAccount) error
+	// GetPayoutAccount 返回代理当前收款账户；found=false 表示尚未设置。
+	GetPayoutAccount(ctx context.Context, tenantID int64) (PayoutAccount, bool, error)
 }
 
 // EarningSink 是收益入账下沉口，被 Billing/Wallet/TokenPlan 调用。
@@ -25,13 +30,19 @@ type EarningSink interface {
 	AddEarning(ctx context.Context, e EarningEntry) error
 }
 
-// WithdrawalService 是提现申请与审核（状态机 pending→approved/rejected）。
+// WithdrawalService 是提现申请与审核（状态机 pending→approved→paid | pending→rejected）。
 type WithdrawalService interface {
-	// Request 提交提现：冻结可提现余额（→ frozen_withdraw_amount）；超额返回 WITHDRAW_INSUFFICIENT。
+	// Request 提交提现：先校验代理已设置收款账户（未设返回 PAYOUT_ACCOUNT_REQUIRED，不冻结），
+	// 再把当前收款账户快照进提现单，最后冻结可提现余额（→ frozen_withdraw_amount）；
+	// 金额超额返回 WITHDRAW_INSUFFICIENT。
 	Request(ctx context.Context, in WithdrawInput) (*Withdrawal, error)
-	// Review 审核提现：approve=true 标 approved（线下打款）；approve=false 解冻退回；
-	// 非 pending 再审返回 WITHDRAW_NOT_PENDING。
+	// Review 审核提现：approve=true 标 approved（**不动钱**，钱仍在 frozen，等 MarkPaid 才出账）；
+	// approve=false 标 rejected（解冻退回）；非 pending 再审返回 WITHDRAW_NOT_PENDING。
 	Review(ctx context.Context, id int64, approve bool, remark string) error
+	// MarkPaid 标记已打款：approved→paid，扣减冻结资金（线下打款真正出账），记 payout_ref/paid_at。
+	// payoutRef 必填（空白返回 PAYOUT_REF_REQUIRED）；非 approved（含并发已被标记）返回 WITHDRAW_NOT_APPROVED；
+	// 不存在返回 WITHDRAW_NOT_FOUND。
+	MarkPaid(ctx context.Context, id int64, payoutRef string) error
 }
 
 // ---- 消费者定义接口（本模块声明其依赖，运行时由 cmd/main 注入实现）----
@@ -59,11 +70,22 @@ type AgentRepo interface {
 	GetWallet(ctx context.Context, tenantID int64) (*AgentWallet, error)
 	// AppendEarning 幂等入账：同 (SourceType, SourceID) 已存在则 applied=false 且不重复增余额。
 	AppendEarning(ctx context.Context, e EarningEntry) (applied bool, err error)
-	// CreateWithdrawal 原子冻结可提现余额并建 pending 提现单；金额非正或超额返回 ErrWithdrawInsufficient。
+	// CreateWithdrawal 原子冻结可提现余额并建 pending 提现单（含调用方已填好的收款快照字段）；
+	// 金额非正或超额返回 ErrWithdrawInsufficient。
 	CreateWithdrawal(ctx context.Context, w *Withdrawal) error
 	// GetWithdrawal 按 id 读取提现单；不存在返回 ErrWithdrawNotFound。
 	GetWithdrawal(ctx context.Context, id int64) (*Withdrawal, error)
-	// ResolveWithdrawal 原子迁移提现单状态并移动资金：approved=扣冻结（线下打款），rejected=解冻退回；
+	// ResolveWithdrawal 原子迁移 pending→{approved,rejected} 并按新钱流规则移动资金：
+	// approved **不动钱**（钱仍在 frozen，等 MarkWithdrawalPaid 才出账）；rejected 解冻退回可提现。
 	// 非 pending 返回 ErrWithdrawNotPending，不存在返回 ErrWithdrawNotFound。
 	ResolveWithdrawal(ctx context.Context, id int64, target WithdrawStatus, remark string) error
+	// MarkWithdrawalPaid 原子迁移 approved→paid（CAS，WHERE status='approved'）并扣减冻结资金
+	// （线下打款真正出账），记 payout_ref/paid_at。非 approved（含并发已被标记）返回
+	// ErrWithdrawNotApproved；不存在返回 ErrWithdrawNotFound。
+	MarkWithdrawalPaid(ctx context.Context, id int64, payoutRef string) error
+	// GetPayoutAccount 读取代理收款账户；found=false 表示尚未设置。
+	GetPayoutAccount(ctx context.Context, tenantID int64) (PayoutAccount, bool, error)
+	// SetPayoutAccount 写入/更新代理收款账户（按 tenantID upsert；仅影响 payout_* 列，
+	// 不触碰同一 profile 行上的 AgentParams 字段）。
+	SetPayoutAccount(ctx context.Context, tenantID int64, p PayoutAccount) error
 }
