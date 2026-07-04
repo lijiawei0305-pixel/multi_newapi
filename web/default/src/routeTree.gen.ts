@@ -63,7 +63,6 @@ import { Route as AuthenticatedModerationViolationsIndexRouteImport } from './ro
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedModelGroupsIndexRouteImport } from './routes/_authenticated/model-groups/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
-import { Route as AuthenticatedFinanceReportIndexRouteImport } from './routes/_authenticated/finance-report/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedCustomDomainIndexRouteImport } from './routes/_authenticated/custom-domain/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
@@ -391,12 +390,6 @@ const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
   path: '/keys/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const AuthenticatedFinanceReportIndexRoute =
-  AuthenticatedFinanceReportIndexRouteImport.update({
-    id: '/finance-report/',
-    path: '/finance-report/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 const AuthenticatedDashboardIndexRoute =
   AuthenticatedDashboardIndexRouteImport.update({
     id: '/dashboard/',
@@ -637,7 +630,6 @@ export interface FileRoutesByFullPath {
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
-  '/finance-report/': typeof AuthenticatedFinanceReportIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/model-groups/': typeof AuthenticatedModelGroupsIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
@@ -724,7 +716,6 @@ export interface FileRoutesByTo {
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/custom-domain': typeof AuthenticatedCustomDomainIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
-  '/finance-report': typeof AuthenticatedFinanceReportIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/model-groups': typeof AuthenticatedModelGroupsIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
@@ -815,7 +806,6 @@ export interface FileRoutesById {
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
-  '/_authenticated/finance-report/': typeof AuthenticatedFinanceReportIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/model-groups/': typeof AuthenticatedModelGroupsIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
@@ -905,7 +895,6 @@ export interface FileRouteTypes {
     | '/channels/'
     | '/custom-domain/'
     | '/dashboard/'
-    | '/finance-report/'
     | '/keys/'
     | '/model-groups/'
     | '/models/'
@@ -992,7 +981,6 @@ export interface FileRouteTypes {
     | '/channels'
     | '/custom-domain'
     | '/dashboard'
-    | '/finance-report'
     | '/keys'
     | '/model-groups'
     | '/models'
@@ -1082,7 +1070,6 @@ export interface FileRouteTypes {
     | '/_authenticated/channels/'
     | '/_authenticated/custom-domain/'
     | '/_authenticated/dashboard/'
-    | '/_authenticated/finance-report/'
     | '/_authenticated/keys/'
     | '/_authenticated/model-groups/'
     | '/_authenticated/models/'
@@ -1529,13 +1516,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedKeysIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/finance-report/': {
-      id: '/_authenticated/finance-report/'
-      path: '/finance-report'
-      fullPath: '/finance-report/'
-      preLoaderRoute: typeof AuthenticatedFinanceReportIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/dashboard/': {
       id: '/_authenticated/dashboard/'
       path: '/dashboard'
@@ -1873,7 +1853,6 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedCustomDomainIndexRoute: typeof AuthenticatedCustomDomainIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
-  AuthenticatedFinanceReportIndexRoute: typeof AuthenticatedFinanceReportIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedModelGroupsIndexRoute: typeof AuthenticatedModelGroupsIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
@@ -1927,7 +1906,6 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedCustomDomainIndexRoute: AuthenticatedCustomDomainIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
-  AuthenticatedFinanceReportIndexRoute: AuthenticatedFinanceReportIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedModelGroupsIndexRoute: AuthenticatedModelGroupsIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,

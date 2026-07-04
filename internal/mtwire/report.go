@@ -199,6 +199,10 @@ type earningsTrendOut struct {
 	Bucket    string  `json:"bucket"`
 	BucketTS  int64   `json:"bucket_ts"`
 	AmountCNY float64 `json:"amount_cny"`
+	// TokenplanWithdrawableCNY / ConsumptionWithdrawableCNY：按天拆分的 v3 总览两条可提现子序列
+	// （字段名镜像 agentFinanceOverviewOut），供代理「我的收益」3 线趋势图（第三线=两者之和，前端算）。
+	TokenplanWithdrawableCNY   float64 `json:"tokenplan_withdrawable_cny"`
+	ConsumptionWithdrawableCNY float64 `json:"consumption_withdrawable_cny"`
 }
 
 type rechargeTrendOut struct {
@@ -674,7 +678,13 @@ func (a *App) handleFinanceTrend(c *gin.Context, tenantID *int64) {
 		}
 		out := make([]earningsTrendOut, 0, len(pts))
 		for _, p := range pts {
-			out = append(out, earningsTrendOut{Bucket: p.Bucket, BucketTS: p.BucketTS, AmountCNY: round2(p.AmountCNY)})
+			out = append(out, earningsTrendOut{
+				Bucket:                     p.Bucket,
+				BucketTS:                   p.BucketTS,
+				AmountCNY:                  round2(p.AmountCNY),
+				TokenplanWithdrawableCNY:   round2(p.TokenplanWithdrawableCNY),
+				ConsumptionWithdrawableCNY: round2(p.ConsumptionWithdrawableCNY),
+			})
 		}
 		series = out
 	case "recharge":

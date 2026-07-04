@@ -327,7 +327,7 @@ export function OverviewCards(props: OverviewCardsProps) {
       testid: 'kpi-overview-apikey-consumption',
     },
     {
-      label: t('Consumption Withdrawable', { defaultValue: '消耗可提现' }),
+      label: t('Consumption Withdrawable', { defaultValue: 'apikey消费可提现' }),
       value: cny(overview.consumption_withdrawable_cny),
       icon: HandCoins,
       testid: 'kpi-overview-consumption-withdrawable',

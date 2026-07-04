@@ -209,6 +209,10 @@ export interface TrendPointBase {
 
 export interface EarningsTrendPoint extends TrendPointBase {
   amount_cny: number
+  /** 套餐可提现（Σ tokenplan_spread），供代理「我的收益」3 线趋势图使用。 */
+  tokenplan_withdrawable_cny: number
+  /** apikey 消费可提现（Σ ratio_markup + consume_commission），同上。 */
+  consumption_withdrawable_cny: number
 }
 
 export interface RechargeTrendPoint extends TrendPointBase {

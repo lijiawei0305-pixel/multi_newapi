@@ -85,11 +85,17 @@ type ConsumptionTrendPoint struct {
 	UsedCostCNY float64
 }
 
-// EarningsTrendPoint 是收益趋势的一个日历桶（跨来源合计 amount_cny）。
+// EarningsTrendPoint 是收益趋势的一个日历桶（跨来源合计 amount_cny）；另按 v3 总览同款口径
+// （agentFinanceOverviewOut）拆出两条可提现子序列，供代理「我的收益」3 线趋势图使用：
+// TokenplanWithdrawableCNY = Σ source_type=tokenplan_spread；
+// ConsumptionWithdrawableCNY = Σ source_type IN (ratio_markup, consume_commission)。
+// 两者之和 <= AmountCNY（AmountCNY 还含 tokenplan_commission/manual_adjustment 等其余来源）。
 type EarningsTrendPoint struct {
-	Bucket    string
-	BucketTS  int64
-	AmountCNY float64
+	Bucket                     string
+	BucketTS                   int64
+	AmountCNY                  float64
+	TokenplanWithdrawableCNY   float64
+	ConsumptionWithdrawableCNY float64
 }
 
 // RechargeTrendPoint 是充值/订单趋势的一个日历桶。
@@ -531,19 +537,53 @@ func (r *Repo) ConsumptionTrend(ctx context.Context, tenantID *int64, start, end
 // 趋势：收益 / 充值 / 提现（主库 DATETIME 台账）
 // ============================================================================
 
-// TrendEarnings 按日历桶汇总收益（跨来源合计 amount_cny）。
+// TrendEarnings 按日历桶汇总收益（跨来源合计 amount_cny），另拆出 tokenplan_spread / (ratio_markup+
+// consume_commission) 两条按天子序列（字段口径镜像 agentFinanceOverviewOut，供代理「我的收益」3 线
+// 趋势图 —— 套餐可提现/apikey消费可提现/总和，总和由 mtwire 层或前端相加）。三个 bucketedSumDatetime
+// 调用共享同一张表/时间列，只是 extra 过滤不同，与 TrendRecharge 的 tokenplan_spread 子查询同款写法。
 func (r *Repo) TrendEarnings(ctx context.Context, tenantID *int64, start, end int64, granularity string) ([]EarningsTrendPoint, error) {
 	granularity = normGranularity(granularity)
 	sums, err := r.bucketedSumDatetime(ctx, "agent_earning_logs", "amount", "created_at", tenantID, start, end, granularity, nil)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]EarningsTrendPoint, 0, len(sums))
-	for _, label := range sortedStringKeys(sums) {
+	tokenplanWithdrawable, err := r.bucketedSumDatetime(ctx, "agent_earning_logs", "amount", "created_at", tenantID, start, end, granularity, func(q *gorm.DB) *gorm.DB {
+		return q.Where("source_type = ?", "tokenplan_spread")
+	})
+	if err != nil {
+		return nil, err
+	}
+	consumptionWithdrawable, err := r.bucketedSumDatetime(ctx, "agent_earning_logs", "amount", "created_at", tenantID, start, end, granularity, func(q *gorm.DB) *gorm.DB {
+		return q.Where("source_type IN ?", []string{"ratio_markup", "consume_commission"})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	set := map[string]struct{}{}
+	for k := range sums {
+		set[k] = struct{}{}
+	}
+	for k := range tokenplanWithdrawable {
+		set[k] = struct{}{}
+	}
+	for k := range consumptionWithdrawable {
+		set[k] = struct{}{}
+	}
+	labels := make([]string, 0, len(set))
+	for k := range set {
+		labels = append(labels, k)
+	}
+	sort.Strings(labels)
+
+	out := make([]EarningsTrendPoint, 0, len(labels))
+	for _, label := range labels {
 		out = append(out, EarningsTrendPoint{
-			Bucket:    label,
-			BucketTS:  bucketStartTS(granularity, label),
-			AmountCNY: sums[label],
+			Bucket:                     label,
+			BucketTS:                   bucketStartTS(granularity, label),
+			AmountCNY:                  sums[label],
+			TokenplanWithdrawableCNY:   tokenplanWithdrawable[label],
+			ConsumptionWithdrawableCNY: consumptionWithdrawable[label],
 		})
 	}
 	return out, nil

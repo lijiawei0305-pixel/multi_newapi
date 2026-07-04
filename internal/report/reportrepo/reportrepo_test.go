@@ -207,3 +207,67 @@ func TestTrendEarnings_IncludesRatioMarkup(t *testing.T) {
 		t.Fatalf("bucket amount = %v, want 45.5 (40.5 ratio_markup + 5 consume_commission)", pts[0].AmountCNY)
 	}
 }
+
+// TestTrendEarnings_SplitsWithdrawableBuckets 锁定代理「我的收益」3 线趋势图的数据源：TrendEarnings
+// 除跨来源合计 AmountCNY 外，还要把 tokenplan_spread 与 (ratio_markup+consume_commission) 按天拆成
+// 各自独立的子序列（字段口径镜像 agentFinanceOverviewOut），且互不污染、也不从 AmountCNY 里消失。
+// day 1 混合四种来源（含一个两条子序列都不认领的 manual_adjustment），day 2 只有 tokenplan_spread，
+// 覆盖「某天只有一条子序列非零、另一条应为 0 而非用上一天的值」的桶对齐场景。
+func TestTrendEarnings_SplitsWithdrawableBuckets(t *testing.T) {
+	db := newFinanceTestDB(t)
+	repo := New(db)
+	ctx := context.Background()
+	day1 := time.Unix(1_700_000_000, 0).UTC()
+	day2 := day1.Add(24 * time.Hour)
+
+	seedEarning(t, db, 9, "tokenplan_spread", 12.5, day1)
+	seedEarning(t, db, 9, "ratio_markup", 7, day1)
+	seedEarning(t, db, 9, "consume_commission", 3, day1)
+	seedEarning(t, db, 9, "manual_adjustment", 100, day1) // must NOT leak into either withdrawable bucket
+	seedEarning(t, db, 9, "tokenplan_spread", 20, day2)
+
+	start := day1.Add(-time.Hour).Unix()
+	end := day2.Add(time.Hour).Unix()
+	pts, err := repo.TrendEarnings(ctx, nil, start, end, "day")
+	if err != nil {
+		t.Fatalf("TrendEarnings: %v", err)
+	}
+	if len(pts) != 2 {
+		t.Fatalf("buckets = %d, want 2 (pts=%+v)", len(pts), pts)
+	}
+
+	byBucket := map[string]EarningsTrendPoint{}
+	for _, p := range pts {
+		byBucket[p.Bucket] = p
+	}
+	day1Label := day1.Format("2006-01-02")
+	day2Label := day2.Format("2006-01-02")
+	d1, ok := byBucket[day1Label]
+	if !ok {
+		t.Fatalf("day1 bucket %q missing (pts=%+v)", day1Label, pts)
+	}
+	d2, ok := byBucket[day2Label]
+	if !ok {
+		t.Fatalf("day2 bucket %q missing (pts=%+v)", day2Label, pts)
+	}
+
+	if d1.AmountCNY != 122.5 {
+		t.Fatalf("day1 AmountCNY = %v, want 122.5 (12.5+7+3+100)", d1.AmountCNY)
+	}
+	if d1.TokenplanWithdrawableCNY != 12.5 {
+		t.Fatalf("day1 TokenplanWithdrawableCNY = %v, want 12.5", d1.TokenplanWithdrawableCNY)
+	}
+	if d1.ConsumptionWithdrawableCNY != 10 {
+		t.Fatalf("day1 ConsumptionWithdrawableCNY = %v, want 10 (7 ratio_markup + 3 consume_commission)", d1.ConsumptionWithdrawableCNY)
+	}
+
+	if d2.AmountCNY != 20 {
+		t.Fatalf("day2 AmountCNY = %v, want 20", d2.AmountCNY)
+	}
+	if d2.TokenplanWithdrawableCNY != 20 {
+		t.Fatalf("day2 TokenplanWithdrawableCNY = %v, want 20", d2.TokenplanWithdrawableCNY)
+	}
+	if d2.ConsumptionWithdrawableCNY != 0 {
+		t.Fatalf("day2 ConsumptionWithdrawableCNY = %v, want 0 (no ratio_markup/consume_commission that day)", d2.ConsumptionWithdrawableCNY)
+	}
+}

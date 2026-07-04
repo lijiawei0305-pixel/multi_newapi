@@ -137,12 +137,6 @@ export function useSidebarData(): SidebarData {
             agentOwnerOnly: true,
           },
           {
-            title: t('Financial Report'),
-            url: '/finance-report',
-            icon: ChartColumnBig,
-            agentOwnerOnly: true,
-          },
-          {
             title: t('Support Tickets'),
             url: '/tickets',
             icon: LifeBuoy,

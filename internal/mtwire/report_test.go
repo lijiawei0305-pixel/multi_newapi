@@ -453,3 +453,60 @@ func TestHandleTenantFinanceSummary_OverviewV3_AgentFourFields(t *testing.T) {
 		t.Fatalf("apikey_consumption_cny = %v, want %v (not the other tenant's 999)", ov.ApikeyConsumptionCNY, wantCons)
 	}
 }
+
+// TestHandleTenantFinanceTrend_EarningsLens_SplitsWithdrawableBuckets 覆盖 GET
+// /api/tenant/finance/trend?lens=earnings：每个按天桶除跨来源合计 amount_cny 外，还要带
+// tokenplan_withdrawable_cny / consumption_withdrawable_cny 两个子序列——这是代理「我的收益」3 线
+// 趋势图（doc/agent-earnings-simplify.md §三）的数据源，第三条「总和」线由前端把两者相加。
+func TestHandleTenantFinanceTrend_EarningsLens_SplitsWithdrawableBuckets(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app := newFinanceReportTestApp(t)
+	base := time.Unix(1_700_000_000, 0).UTC()
+	seedFinanceEarning(t, app, 9, "tokenplan_spread", 12.5, base)
+	seedFinanceEarning(t, app, 9, "ratio_markup", 7, base)
+	seedFinanceEarning(t, app, 9, "consume_commission", 3, base)
+	seedFinanceEarning(t, app, 9, "manual_adjustment", 100, base) // must not leak into either withdrawable bucket
+
+	start := base.Add(-time.Hour).Unix()
+	end := base.Add(time.Hour).Unix()
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet,
+		fmt.Sprintf("/api/tenant/finance/trend?start_timestamp=%d&end_timestamp=%d&granularity=day&lens=earnings", start, end), nil)
+	c.Set(ginKeyAgentTenant, int64(9))
+	app.HandleTenantFinanceTrend(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var env struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Series []struct {
+				Bucket                     string  `json:"bucket"`
+				AmountCNY                  float64 `json:"amount_cny"`
+				TokenplanWithdrawableCNY   float64 `json:"tokenplan_withdrawable_cny"`
+				ConsumptionWithdrawableCNY float64 `json:"consumption_withdrawable_cny"`
+			} `json:"series"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, w.Body.String())
+	}
+	if !env.Success {
+		t.Fatalf("success=false; body=%s", w.Body.String())
+	}
+	if len(env.Data.Series) != 1 {
+		t.Fatalf("series buckets = %d, want 1; body=%s", len(env.Data.Series), w.Body.String())
+	}
+	pt := env.Data.Series[0]
+	if pt.AmountCNY != 122.5 {
+		t.Fatalf("amount_cny = %v, want 122.5 (12.5+7+3+100)", pt.AmountCNY)
+	}
+	if pt.TokenplanWithdrawableCNY != 12.5 {
+		t.Fatalf("tokenplan_withdrawable_cny = %v, want 12.5", pt.TokenplanWithdrawableCNY)
+	}
+	if pt.ConsumptionWithdrawableCNY != 10 {
+		t.Fatalf("consumption_withdrawable_cny = %v, want 10 (7 ratio_markup + 3 consume_commission)", pt.ConsumptionWithdrawableCNY)
+	}
+}

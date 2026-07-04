@@ -23,14 +23,31 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
+import {
+  getTenantFinanceSummary,
+  getTenantFinanceTrend,
+} from '@/features/financial-report/api'
+import { OverviewCards } from '@/features/financial-report/components/summary-cards'
+import type {
+  EarningsTrendPoint,
+  RangeParams,
+} from '@/features/financial-report/types'
+import { computeTimeRange } from '@/lib/time'
 import { getMyWithdrawals, getPayoutAccount, getTenantEarnings } from './api'
 import { EarningsSummaryCards } from './components/earnings-summary-cards'
-import { EarningsTable } from './components/earnings-table'
+import { EarningsTrendChart } from './components/earnings-trend-chart'
 import { MyWithdrawalsTable } from './components/my-withdrawals-table'
 import { PayoutAccountCard } from './components/payout-account-card'
 import { PayoutAccountDialog } from './components/payout-account-dialog'
 import { WithdrawDialog } from './components/withdraw-dialog'
 import { parseEarnings } from './lib'
+
+// ============================================================================
+// 「我的收益」是代理站唯一的收益/报表入口（doc/agent-earnings-simplify.md）：钱包 3 卡
+// (EarningsSummaryCards) + v3 概览 4 卡 (OverviewCards scope='agent') + 3 线趋势图
+// (EarningsTrendChart) + 收款账户/提现历史/dialog。原「财务报表」代理页已删除，其
+// OverviewCards/getTenantFinanceSummary/getTenantFinanceTrend 在此复用（管理端页面不受影响）。
+// ============================================================================
 
 export function AgentEarnings() {
   const { t } = useTranslation()
@@ -60,10 +77,29 @@ export function AgentEarnings() {
   })
   const payoutAccount = payoutRes?.data
 
-  const { summary, items } = useMemo(
-    () => parseEarnings(earningsRes?.data),
-    [earningsRes]
-  )
+  const { summary } = useMemo(() => parseEarnings(earningsRes?.data), [earningsRes])
+
+  // v3 概览卡 + 3 线趋势图：固定近 30 天（与 financial-report 页一致的默认口径），本页精简后不
+  // 提供交互式区间选择器（doc/agent-earnings-simplify.md §一）。
+  const [range] = useState<RangeParams>(() => computeTimeRange(30))
+
+  const financeSummaryQuery = useQuery({
+    queryKey: ['tenant-finance-summary', range],
+    queryFn: () => getTenantFinanceSummary(range),
+    select: (res) => res.data,
+    placeholderData: (prev) => prev,
+  })
+
+  const trendParams = { ...range, lens: 'earnings' as const, granularity: 'day' as const }
+  const financeTrendQuery = useQuery({
+    queryKey: ['tenant-finance-trend', trendParams],
+    queryFn: () => getTenantFinanceTrend(trendParams),
+    select: (res) => res.data,
+    placeholderData: (prev) => prev,
+  })
+  const trendSeries = (
+    financeTrendQuery.data?.lens === 'earnings' ? financeTrendQuery.data.series : []
+  ) as EarningsTrendPoint[]
 
   const refreshAll = () => {
     queryClient.invalidateQueries({ queryKey: ['tenant-earnings'] })
@@ -110,18 +146,22 @@ export function AgentEarnings() {
         <div className='flex flex-col gap-6' data-testid='agent-earnings-page'>
           <EarningsSummaryCards summary={summary} loading={earningsLoading} />
 
+          <OverviewCards
+            scope='agent'
+            overview={financeSummaryQuery.data?.overview}
+            loading={financeSummaryQuery.isLoading}
+          />
+
+          <EarningsTrendChart
+            series={trendSeries}
+            loading={financeTrendQuery.isLoading}
+          />
+
           <PayoutAccountCard
             account={payoutAccount}
             loading={payoutLoading}
             onEdit={() => setPayoutOpen(true)}
           />
-
-          <section className='flex flex-col gap-2'>
-            <h3 className='text-sm font-semibold'>{t('Earnings Details')}</h3>
-            <div className='overflow-hidden rounded-lg border'>
-              <EarningsTable items={items} loading={earningsLoading} />
-            </div>
-          </section>
 
           <section className='flex flex-col gap-2'>
             <h3 className='text-sm font-semibold'>{t('My Withdrawals')}</h3>
