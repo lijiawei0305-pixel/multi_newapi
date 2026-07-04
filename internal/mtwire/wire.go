@@ -22,6 +22,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agent"
 	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
+	"github.com/QuantumNous/new-api/internal/agentplan"
+	agentplanrepo "github.com/QuantumNous/new-api/internal/agentplan/gormrepo"
 	"github.com/QuantumNous/new-api/internal/modelgroup"
 	"github.com/QuantumNous/new-api/internal/moderation"
 	moderationrepo "github.com/QuantumNous/new-api/internal/moderation/gormrepo"
@@ -70,6 +72,11 @@ type App struct {
 	Catalog       tokenplan.PlanCatalog
 	Retail        tokenplan.PlanRetailService
 	Subscriptions tokenplan.SubscriptionService
+
+	// --- agentplan 模块（购买代理套餐：一次性+有效期，落地页展示+控制台购买）---
+	// AgentPlanRepo 持具体类型（seed 用 EnsurePlan）；AgentCatalog 管理员 CRUD。
+	AgentPlanRepo *agentplanrepo.Repo
+	AgentCatalog  agentplan.PlanCatalog
 
 	// --- agent 模块（代理核心闭环）---
 	// AgentRepo 持有具体类型：列表/seed 用到非接口方法（ListProfiles/ListWithdrawals/EnsureWallet 等）。
@@ -185,6 +192,10 @@ func New(db *gorm.DB) *App {
 	// 收益经 tokenplanEarningAdapter 真实落到 agent 钱包（ActivateFromPayment 激活事务内、按 source_order_id 幂等）。
 	subs := tokenplan.NewSubscriptionService(tp, tp, newSubPayment(newSubOrderStore(db)), allowAllRisk{}, newTokenplanEarningAdapter(agentEarnings), nil)
 
+	// agentplan：GORM 仓储（agent_plans）+ 管理员 CRUD 目录。购买/激活在 P3（AGT 订单 → SetAgentType）。
+	agentPlanRepo := agentplanrepo.New(db)
+	agentCatalog := agentplan.NewCatalog(agentPlanRepo)
+
 	// payment/recharge：GORM 订单仓储（payment_orders，仅存 RCG 充值订单）+ 进程内支付适配（PaySDK）。
 	// 入账 Sink 只挂 recharge→原生 quota；SUB 套餐订单不入 payment_orders，由回调按前缀
 	// 分发到 App.ActivatePaidTokenplanOrder（Track 1 桥接，读 mt_subscription_orders）。
@@ -222,6 +233,8 @@ func New(db *gorm.DB) *App {
 		Catalog:         catalog,
 		Retail:          retail,
 		Subscriptions:   subs,
+		AgentPlanRepo:   agentPlanRepo,
+		AgentCatalog:    agentCatalog,
 		AgentRepo:       ar,
 		AgentService:    agentSvc,
 		Withdrawals:     withdrawals,
@@ -253,6 +266,9 @@ func New(db *gorm.DB) *App {
 //	subscription_usage_logs / pending_subscription_orders（tokenplan 模块）
 func (a *App) Migrate() error {
 	if err := tenantrepo.AutoMigrate(a.DB); err != nil {
+		return err
+	}
+	if err := agentplanrepo.AutoMigrate(a.DB); err != nil { // agent_plans（购买代理套餐定义）
 		return err
 	}
 	if err := tprepo.AutoMigrate(a.DB); err != nil {

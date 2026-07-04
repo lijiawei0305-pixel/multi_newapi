@@ -157,6 +157,18 @@ func SetMtRouter(router *gin.Engine) {
 		adminPlanGroup.PATCH("/:id", app.HandleAdminUpdatePlan)
 	}
 
+	// 主站代理套餐目录管理（购买代理套餐；全局，非租户维度），复用 new-api AdminAuth。
+	adminAgentPlanGroup := router.Group("/api/admin/agent-plans")
+	adminAgentPlanGroup.Use(middleware.AdminAuth())
+	{
+		adminAgentPlanGroup.GET("", app.HandleAdminListAgentPlans)
+		adminAgentPlanGroup.POST("", app.HandleAdminCreateAgentPlan)
+		adminAgentPlanGroup.PATCH("/:id", app.HandleAdminUpdateAgentPlan)
+	}
+
+	// 公开代理套餐价目（无需登录）：供公开落地页（代理加盟）动态展示。全局目录，无 TenantMiddleware。
+	router.GET("/api/agent-plans/public", app.HandleListPublicAgentPlans)
+
 	// 支付渠道配置已移至系统设置（setting.*Enabled + 凭据，DB option）：渠道启用/凭据由设置页管理，
 	// 买家可用渠道经 GET /api/tenant/wallet/recharge/methods 暴露（configured 进程内判断），故此处无独立管理路由。
 

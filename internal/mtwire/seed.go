@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agent"
+	"github.com/QuantumNous/new-api/internal/agentplan"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
 	"github.com/QuantumNous/new-api/model"
@@ -76,6 +77,11 @@ func (a *App) Seed() error {
 		if err := a.TokenPlanRepo.EnsureListing(ctx, t.ID, planID, true, plan.BasePrice); err != nil {
 			return err
 		}
+	}
+
+	// 三档代理套餐默认基准（主站全局、非按租户上架；幂等，已存在不覆盖管理员改动）。
+	if err := agentplan.SeedInto(a.AgentPlanRepo); err != nil {
+		return err
 	}
 
 	// demo 代理：把 tokendream 的 owner 设为 demo 代理用户，并写一条 agent_profile + 钱包（幂等）。
