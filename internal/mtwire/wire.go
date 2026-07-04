@@ -324,6 +324,10 @@ func (a *App) Migrate() error {
 	if err := migrateSubscriptionBridge(a.DB); err != nil {
 		return err
 	}
+	// 购买代理套餐（P3）：mt_agent_plan_orders（AGT 订单状态机）+ mt_agent_memberships（会员台账/到期）。
+	if err := migrateAgentPlanBridge(a.DB); err != nil {
+		return err
+	}
 	// 对账记录 + 心跳（reconcile-history）：历史列表 reconcile_runs + 单行心跳 reconcile_heartbeat。
 	if err := migrateReconcileRuns(a.DB); err != nil {
 		return err

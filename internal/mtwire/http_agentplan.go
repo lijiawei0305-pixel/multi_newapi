@@ -2,10 +2,13 @@ package mtwire
 
 import (
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/QuantumNous/new-api/internal/agentplan"
+	"github.com/QuantumNous/new-api/internal/payment"
 )
 
 // ============================ 代理套餐（agentplan）端点 ============================
@@ -249,4 +252,106 @@ func (a *App) HandleListPublicAgentPlans(c *gin.Context) {
 		out = append(out, toPublicAgentPlanOut(p))
 	}
 	respondOK(c, out)
+}
+
+// ---- 购买（控制台，需登录）----
+
+// purchaseAgentPlanIn 是 POST /api/tenant/agent-plans/:id/purchase 入参。
+type purchaseAgentPlanIn struct {
+	Provider string `json:"provider"` // wxpay|alipay（默认 wxpay）
+	Slug     string `json:"slug"`     // 新代理子域名/标识（已是代理则忽略）
+	Name     string `json:"name"`     // 站点名（已是代理则忽略）
+}
+
+// HandlePurchaseAgentPlan POST /api/tenant/agent-plans/:id/purchase —— 购买代理套餐（下单 + 出支付凭据）。
+// 需 UserAuth。支付成功后平台回调按 AGT 前缀分发到 ActivatePaidAgentPlanOrder：开通/升级代理 + 记到期。
+func (a *App) HandlePurchaseAgentPlan(c *gin.Context) {
+	planID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondErr(c, agentplan.ErrPlanNotFound)
+		return
+	}
+	ctx := reqCtx(c)
+	plan, err := a.AgentCatalog.Get(ctx, planID)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	if !plan.Status.IsEnabled() {
+		respondErr(c, agentplan.ErrPlanDisabled)
+		return
+	}
+	var body purchaseAgentPlanIn
+	_ = c.ShouldBindJSON(&body) // body 可选
+
+	provider := payment.ProviderWxpay
+	if body.Provider != "" {
+		provider = payment.Provider(body.Provider)
+	}
+	if !provider.Valid() {
+		respondErr(c, payment.ErrOrderInvalid)
+		return
+	}
+	if err := a.ensureProviderUsable(ctx, provider); err != nil {
+		respondErr(c, err)
+		return
+	}
+	userID := int64(c.GetInt("id"))
+	if userID <= 0 {
+		respondErr(c, payment.ErrOrderInvalid)
+		return
+	}
+
+	orderNo := AgentPlanOrderPrefix + strings.ToUpper(randToken(12))
+	now := time.Now()
+	if err := newAgentPlanOrderStore(a.DB).create(ctx, &agentPlanOrderRow{
+		OrderNo:            orderNo,
+		OwnerUserID:        userID,
+		PlanID:             plan.ID,
+		AmountCNY:          plan.Price,
+		Provider:           string(provider),
+		Status:             agtOrderPending,
+		GrantLevel:         plan.GrantLevel,
+		GrantCanAPI:        plan.GrantCanAPI,
+		GrantDiscountRatio: plan.GrantDiscountRatio,
+		ValidDays:          plan.ValidDays,
+		Slug:               body.Slug,
+		Name:               body.Name,
+		PlanCode:           plan.Code,
+		CreatedAt:          now,
+		UpdatedAt:          now,
+	}); err != nil {
+		respondErr(c, err)
+		return
+	}
+
+	payURL, err := a.agentPlanPayURL(ctx, orderNo, plan, provider)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	pay := gin.H{}
+	switch provider {
+	case payment.ProviderWxpay:
+		pay["wxpay_qr"] = payURL // 前端渲染二维码
+	case payment.ProviderAlipay:
+		pay["alipay_url"] = payURL // 前端跳转
+	}
+	respondOK(c, gin.H{
+		"order_no":   orderNo,
+		"pay_url":    payURL,
+		"amount_cny": plan.Price,
+		"plan_id":    plan.ID,
+		"pay":        pay,
+	})
+}
+
+// agentPlanPayURL 为一笔 AGT 订单向真实平台进程内下单取回支付凭据（复用 RCG/SUB 同一 providerManager）。
+// providerMgr 未装配时回退占位 URL，保证可跑不 panic。
+func (a *App) agentPlanPayURL(ctx context.Context, orderNo string, plan *agentplan.Plan, provider payment.Provider) (string, error) {
+	if a.providerMgr == nil {
+		return "/console/agent-plan/pay?order=" + orderNo, nil
+	}
+	notifyURL := resolveNotifyBase() + notifyPathFor(provider)
+	return a.providerMgr.CreatePay(ctx, provider, orderNo, "开通代理套餐 "+plan.Name, plan.Price, notifyURL)
 }

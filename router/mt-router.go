@@ -42,6 +42,8 @@ func SetMtRouter(router *gin.Engine) {
 		}
 		// 支付卡单对账兜底定时任务（master-only）：周期扫 RCG/SUB 卡单补入账/补激活。
 		app.StartReconcileLoop()
+		// 代理套餐到期降级定时任务（P4，master-only）：周期扫 mt_agent_memberships 到期会员 → 撤销付费授予。
+		app.StartAgentPlanExpiryLoop()
 	}
 
 	// 租户控制台（Host 维度）。GET /current 公开；其余复用 new-api UserAuth。
@@ -51,6 +53,8 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.GET("/current", app.HandleTenantCurrent)
 		tenantGroup.GET("/token-plans", middleware.UserAuth(), app.HandleListTokenPlans)
 		tenantGroup.POST("/token-plans/:id/purchase", middleware.UserAuth(), app.HandlePurchase)
+		// 购买代理套餐（P3）：登录用户下单 → realpay 出凭据 → 回调激活开通/升级代理。
+		tenantGroup.POST("/agent-plans/:id/purchase", middleware.UserAuth(), app.HandlePurchaseAgentPlan)
 		tenantGroup.GET("/subscriptions", middleware.UserAuth(), app.HandleListSubscriptions)
 		// 支持工单（用户端）：UserAuth + Host 租户；仅按会话 user_id 隔离（不信任客户端 user_id）。
 		// tenant_id 于创建时由服务端从提交用户 users.tenant_id 派生固化，不接受请求体传入。

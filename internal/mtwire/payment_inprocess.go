@@ -341,9 +341,12 @@ func (a *App) handlePayNotify(c *gin.Context, provider payment.Provider) {
 		return
 	}
 	var creditErr error
-	if IsSubscriptionOrderNo(info.OrderNo) {
+	switch {
+	case IsSubscriptionOrderNo(info.OrderNo):
 		creditErr = notifyActivateSub(a, ctx, info.OrderNo, info.PaidAmount)
-	} else {
+	case IsAgentPlanOrderNo(info.OrderNo):
+		creditErr = notifyActivateAgentPlan(a, ctx, info.OrderNo, info.PaidAmount)
+	default:
 		creditErr = notifyCreditRecharge(a, ctx, info.OrderNo, info.TxnID, info.PaidAmount)
 	}
 	if creditErr != nil {
