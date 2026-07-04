@@ -206,6 +206,7 @@ func (a *App) HandleAdminUpdateAgentPlan(c *gin.Context) {
 // publicAgentPlanOut 是公开代理套餐卡片（仅展示字段；不含 grant_discount_ratio 等内部成本口径）。
 // grant_level / grant_can_api 作为「能力标识」保留，供前端展示「独立域名 / 开放 API」等卖点。
 type publicAgentPlanOut struct {
+	ID             int64   `json:"id"`
 	Code           string  `json:"code"`
 	Name           string  `json:"name"`
 	Desc           string  `json:"description"`
@@ -222,6 +223,7 @@ type publicAgentPlanOut struct {
 
 func toPublicAgentPlanOut(p agentplan.Plan) publicAgentPlanOut {
 	return publicAgentPlanOut{
+		ID:             p.ID,
 		Code:           p.Code,
 		Name:           p.Name,
 		Desc:           p.Desc,

@@ -528,7 +528,7 @@ export function AgentJoin() {
             <div className='mt-8 flex flex-wrap items-center gap-3'>
               <Button
                 className='group h-11 rounded-lg px-5 text-sm font-medium'
-                render={<Link to='/register' />}
+                render={<Link to='/become-agent' />}
               >
                 {t('Agent Join CTA Apply', { defaultValue: '立即申请加盟' })}
                 <ArrowRight className='ml-1.5 size-4 transition-transform duration-200 group-hover:translate-x-0.5' />
@@ -771,7 +771,7 @@ export function AgentJoin() {
                     </div>
                     <Button
                       className='w-full'
-                      render={<Link to='/register' />}
+                      render={<Link to='/become-agent' />}
                     >
                       {t('Agent Join Plan CTA', { defaultValue: '立即开通' })}
                     </Button>

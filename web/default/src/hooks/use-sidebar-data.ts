@@ -126,6 +126,11 @@ export function useSidebarData(): SidebarData {
             icon: ShoppingBag,
           },
           {
+            title: t('Become Agent', { defaultValue: '开通代理' }),
+            url: '/become-agent',
+            icon: HandCoins,
+          },
+          {
             title: t('Wallet'),
             url: '/wallet',
             icon: Wallet,
