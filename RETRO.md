@@ -298,3 +298,9 @@
 - **根因**：`/root/newapi-test` 是非 git 的 rsync 副本；某个**外部动作**（协作者从自己过期的 Mac 副本 rsync、或 `deploy/ops/deploy.sh` 用了过期源）把整棵源码树覆盖回了旧版。这**不是**我的部署造成的——上一次 i18n 部署（health 200 带我的改动）之后、本次之前发生的。DB 迁移过的列（discount_ratio 等）仍在（只回退了源码文件，没动库）。
 - **解决/规避（本次）**：`git archive HEAD | ssh 'tar --exclude=<锁定文件> -xf -'` **整仓 HEAD 覆盖服务器源码（排除锁定 WIP 文件）**恢复所有会话提交；再 `rm` 掉「本会话删除但被回退恢复」的孤儿文件（`git diff --diff-filter=D --name-only <会话基线>..HEAD` 得列表，注意 git archive 只加不删、rspack 会顺着被回退恢复的旧路由/旧组件把引用了已删符号的孤儿也拉进构建 → 编译失败）；重建后 health 200。
 - **⚠️ 会复发**：只要那个外部 rsync/deploy 再跑一次，服务器源码会再次被覆盖回退。**需用户排查并停用**：谁/什么在 rsync 到 `/root/newapi-test`？是不是 `deploy/ops/deploy.sh` 的源目录指向了过期副本？多人协作时**约定唯一部署源**（最好是从 git 仓库拉，而非各自 Mac 副本 rsync）。在此之前，每次部署后都要 `grep` 关键符号确认没被回退。参见 [[服务器非 git 副本按显式清单部署漏文件]]。
+
+### [已解决] 验证前端是否进二进制：用 `grep 二进制` 别用 `strings | grep`（strings 丢多字节中文，恒 0 误判）
+- **现象**：部署支付概览后 `docker exec … strings /new-api | grep -c 已收款待入账` = 0，连本来在的「折扣系数」「代理加盟」也全 0，误判为"前端没进二进制/构建层命中缓存"，白跑了一次 `--no-cache` 重建。
+- **根因**：`strings` 默认只抽 ASCII 可打印串（长度≥4），**中文 UTF-8 是非 ASCII 多字节，会被整段丢弃** → `strings | grep 中文` 恒 0（与前端在不在无关）。之前"折扣系数=2"能查到是因为用了**直接 `grep -c 折扣系数 /new-api`**（grep 匹配二进制里的原始 UTF-8 字节，能命中 embed 的 dist）。
+- **解决**：验证 embed 的前端中文串一律 `docker exec <app> sh -c "grep -c <中文> /new-api"`（直接 grep 二进制），不要过 `strings`。直接 grep 后 已收款待入账=1/支付对账=2/待支付=4/折扣系数=3/代理加盟=2，全在。
+- **升级**：**「某中文串在不在编译产物里」的判定，永远用直接 grep 二进制，别用 strings**；否则会对着假 0 瞎折腾（重建/回滚）。顺带：Docker 前端构建层（`COPY ./web/default` → `bun run build`）偶发命中旧缓存，真遇到才 `--no-cache` 重建——但先用直接 grep 确认它是真没进，别被 strings 骗。
