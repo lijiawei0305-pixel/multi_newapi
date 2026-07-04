@@ -220,14 +220,6 @@ function OverviewSkeletonGrid({
 export function OverviewCards(props: OverviewCardsProps) {
   const { t } = useTranslation()
 
-  // Interim caveat (doc/finance-model-report-v3.md; see backend
-  // agentFinanceOverviewOut.ApikeyConsumptionCNY comment): these three
-  // "wallet consumption" fields currently can't exclude tokenplan-bucket
-  // consumption, so they're an upper bound rather than a pure wallet figure.
-  const consumptionCaveat = t('Overview Consumption Caveat', {
-    defaultValue: '*暂含套餐额度消耗,待精确',
-  })
-
   const heading = (
     <h3 className='text-base font-semibold'>
       {t('Finance Report V3 Overview', { defaultValue: 'v3 概览' })}
@@ -273,16 +265,12 @@ export function OverviewCards(props: OverviewCardsProps) {
         }),
         value: cny(overview.mainsite_wallet_consumption_cny),
         icon: Activity,
-        testid: 'kpi-overview-mainsite-wallet-consumption',
-        footnote: consumptionCaveat,
-      },
+        testid: 'kpi-overview-mainsite-wallet-consumption',      },
       {
         label: t('Agent Wallet Consumption', { defaultValue: '代理站钱包消耗' }),
         value: cny(overview.agent_wallet_consumption_cny),
         icon: Building2,
-        testid: 'kpi-overview-agent-wallet-consumption',
-        footnote: consumptionCaveat,
-      },
+        testid: 'kpi-overview-agent-wallet-consumption',      },
       {
         label: t('Agent Api Rebate', {
           defaultValue: '需返现代理的 api 消耗金额',
