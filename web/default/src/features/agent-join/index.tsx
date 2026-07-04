@@ -17,7 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   ArrowRight,
@@ -55,7 +54,6 @@ import {
 import { Input } from '@/components/ui/input'
 import { useStatus } from '@/hooks/use-status'
 
-import { getPublicTokenPlans } from './api'
 import { HeroIllustration } from './hero-illustration'
 
 /**
@@ -78,18 +76,6 @@ import { HeroIllustration } from './hero-illustration'
 const COMMISSION_RATE = 0.1
 /** 成本保护线：代理设置的售价必须高于成本的倍数。 */
 const MIN_MARKUP = 1.11
-
-/** 代理合作方案卡片的统一展示形状（静态兜底与后端动态套餐共用）。 */
-type PlanCard = {
-  tier: string
-  name: string
-  desc: string
-  currency: string
-  anchor: string
-  price: string
-  discount: string
-  recommended: boolean
-}
 
 function EarningsCalculator() {
   const { t } = useTranslation()
@@ -404,9 +390,9 @@ export function AgentJoin() {
     t('Agent Join Rule 4', { defaultValue: '系统抽成 10%。' }),
   ]
 
-  // 代理合作方案静态兜底（4 档）。真实价目来自公开只读端点 /api/tenant/token-plans/public；
-  // 拉取失败或后台未配置套餐时回退到这份兜底文案，保证公开落地页永不空白。
-  const fallbackPlans: PlanCard[] = [
+  // 代理合作方案（四档，对应本项目普通用户 / 普通代理 / OEM 代理 / API 代理）。
+  // 静态营销数据,集中于此便于日后接入后台代理套餐接口。
+  const plans = [
     {
       tier: t('Agent Join Plan Tier User', { defaultValue: '普通用户' }),
       name: t('Agent Join Plan Name One', { defaultValue: '套餐一' }),
@@ -456,40 +442,6 @@ export function AgentJoin() {
       recommended: false,
     },
   ]
-
-  // 拉取主站公开套餐（无需登录，仅 enabled 套餐的展示字段）；失败或空 → 回退 fallbackPlans。
-  const { data: livePlans } = useQuery({
-    queryKey: ['agent-join', 'public-token-plans'],
-    queryFn: getPublicTokenPlans,
-    staleTime: 5 * 60 * 1000,
-  })
-
-  const fmtPrice = (n: number) =>
-    Number.isFinite(n)
-      ? n.toLocaleString('zh-CN', {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })
-      : ''
-
-  const plans: PlanCard[] =
-    livePlans && livePlans.length > 0
-      ? [...livePlans]
-          .sort((a, b) => a.sort - b.sort)
-          .map((p) => ({
-            tier: p.badge,
-            name: p.name,
-            desc: '',
-            currency: '¥',
-            anchor:
-              p.anchor_price_cny > p.base_price_cny
-                ? fmtPrice(p.anchor_price_cny)
-                : '',
-            price: fmtPrice(p.base_price_cny),
-            discount: p.discount_label,
-            recommended: p.is_recommended,
-          }))
-      : fallbackPlans
 
   return (
     <PublicLayout showMainContainer={false}>
@@ -737,33 +689,27 @@ export function AgentJoin() {
                   }
                 >
                   <CardHeader>
-                    {plan.tier || plan.recommended ? (
-                      <div className='flex items-center justify-between gap-2'>
-                        <span className='text-muted-foreground text-xs'>
-                          {plan.tier}
-                        </span>
-                        {plan.recommended ? (
-                          <Badge className='shrink-0'>
-                            {t('Agent Join Plan Recommended', {
-                              defaultValue: '推荐',
-                            })}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    ) : null}
+                    <div className='flex items-center justify-between gap-2'>
+                      <span className='text-muted-foreground text-xs'>
+                        {plan.tier}
+                      </span>
+                      {plan.recommended ? (
+                        <Badge className='shrink-0'>
+                          {t('Agent Join Plan Recommended', {
+                            defaultValue: '推荐',
+                          })}
+                        </Badge>
+                      ) : null}
+                    </div>
                     <CardTitle className='mt-1'>{plan.name}</CardTitle>
-                    {plan.desc ? (
-                      <CardDescription>{plan.desc}</CardDescription>
-                    ) : null}
+                    <CardDescription>{plan.desc}</CardDescription>
                   </CardHeader>
                   <CardContent className='space-y-4'>
                     <div>
-                      {plan.anchor ? (
-                        <p className='text-muted-foreground text-sm line-through'>
-                          {plan.currency}
-                          {plan.anchor}
-                        </p>
-                      ) : null}
+                      <p className='text-muted-foreground text-sm line-through'>
+                        {plan.currency}
+                        {plan.anchor}
+                      </p>
                       <p className='flex items-baseline gap-1'>
                         <span className='text-3xl font-bold tracking-tight'>
                           {plan.currency}
@@ -775,11 +721,9 @@ export function AgentJoin() {
                           })}
                         </span>
                       </p>
-                      {plan.discount ? (
-                        <p className='mt-1 text-xs font-medium text-emerald-600 dark:text-emerald-400'>
-                          {plan.discount}
-                        </p>
-                      ) : null}
+                      <p className='mt-1 text-xs font-medium text-emerald-600 dark:text-emerald-400'>
+                        {plan.discount}
+                      </p>
                     </div>
                     <Button
                       className='w-full'
