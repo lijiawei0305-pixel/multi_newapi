@@ -33,8 +33,9 @@ const (
 )
 
 var (
-	// ErrAgentTypeInvalid 代理类型/参数非法。
-	ErrAgentTypeInvalid = apperr.New(CodeAgentTypeInvalid, "代理类型或参数非法", http.StatusBadRequest)
+	// ErrAgentParamsInvalid 代理参数非法（成本价/分润/折扣/等级等 AgentParams 校验失败）。
+	// 错误码常量保持 CodeAgentTypeInvalid（"AGENT_TYPE_INVALID"）不变，对外契约稳定。
+	ErrAgentParamsInvalid = apperr.New(CodeAgentTypeInvalid, "代理参数非法", http.StatusBadRequest)
 	// ErrWithdrawInsufficient 提现金额超过可提现余额。
 	ErrWithdrawInsufficient = apperr.New(CodeWithdrawInsufficient, "提现金额超过可提现余额", http.StatusBadRequest)
 	// ErrWithdrawNotPending 提现单非 pending，不可再次审核。

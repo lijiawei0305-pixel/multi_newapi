@@ -43,22 +43,22 @@ type AgentParams struct {
 	DiscountRatio float64
 }
 
-// Validate 校验参数合法性；任一非法返回 ErrAgentTypeInvalid（AGENT_TYPE_INVALID）。
+// Validate 校验参数合法性；任一非法返回 ErrAgentParamsInvalid（AGENT_TYPE_INVALID）。
 // 规则：成本价 ≥ 0、分润比例 ∈[0,1]、折扣倍率 ∈[0,1]、等级 ≥ 0。
 func (p AgentParams) Validate() error {
 	switch {
 	case p.CostPrice < 0:
-		return ErrAgentTypeInvalid
+		return ErrAgentParamsInvalid
 	case p.CommissionRatio < 0 || p.CommissionRatio > 1:
-		return ErrAgentTypeInvalid
+		return ErrAgentParamsInvalid
 	case p.PackageDiscount < 0 || p.PackageDiscount > 1:
-		return ErrAgentTypeInvalid
+		return ErrAgentParamsInvalid
 	case p.Level < 0:
-		return ErrAgentTypeInvalid
+		return ErrAgentParamsInvalid
 	case p.BottomPriceRatio < 0:
-		return ErrAgentTypeInvalid
+		return ErrAgentParamsInvalid
 	case p.DiscountRatio < 0:
-		return ErrAgentTypeInvalid
+		return ErrAgentParamsInvalid
 	default:
 		return nil
 	}

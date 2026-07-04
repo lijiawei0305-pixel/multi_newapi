@@ -153,7 +153,7 @@ func TestErrorCodes(t *testing.T) {
 		err  error
 		code string
 	}{
-		{ErrAgentTypeInvalid, "AGENT_TYPE_INVALID"},
+		{ErrAgentParamsInvalid, "AGENT_TYPE_INVALID"},
 		{ErrWithdrawInsufficient, "WITHDRAW_INSUFFICIENT"},
 		{ErrWithdrawNotPending, "WITHDRAW_NOT_PENDING"},
 		{ErrWithdrawNotFound, "WITHDRAW_NOT_FOUND"},
