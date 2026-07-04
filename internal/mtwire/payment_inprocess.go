@@ -82,7 +82,8 @@ func newProviderManager() *providerManager { return &providerManager{} }
 func wxpayCredentialsComplete() bool {
 	return setting.WechatPayAppID != "" && setting.WechatPayMchID != "" &&
 		setting.WechatPayAPIv3Key != "" && setting.WechatPayCertSerial != "" &&
-		setting.WechatPayPrivateKey != ""
+		setting.WechatPayPrivateKey != "" &&
+		setting.WechatPayPublicKeyID != "" && setting.WechatPayPublicKey != ""
 }
 
 // alipayCredentialsComplete 报告支付宝凭据是否齐全（与 realpay.AlipayConfig.complete 同口径）。
@@ -129,6 +130,8 @@ func buildRealpayConfig() realpay.Config {
 			APIv3Key:     setting.WechatPayAPIv3Key,
 			CertSerialNo: setting.WechatPayCertSerial,
 			PrivateKey:   setting.WechatPayPrivateKey, // PEM 内容，realpay 经 utils.LoadPrivateKey 解析
+			PublicKeyID:  setting.WechatPayPublicKeyID,
+			PublicKey:    setting.WechatPayPublicKey, // PEM 内容，realpay 经 utils.LoadPublicKey 解析
 		}
 	}
 	if alipayCredentialsComplete() {
@@ -152,6 +155,7 @@ func credentialFingerprint() string {
 	for _, v := range []string{
 		setting.WechatPayAppID, setting.WechatPayMchID, setting.WechatPayAPIv3Key,
 		setting.WechatPayCertSerial, setting.WechatPayPrivateKey,
+		setting.WechatPayPublicKeyID, setting.WechatPayPublicKey,
 		setting.AlipayAppID, setting.AlipayPrivateKey, setting.AlipayPublicKey,
 		setting.AlipaySellerID, setting.AlipayReturnURL,
 		strconv.FormatBool(setting.AlipaySandbox),

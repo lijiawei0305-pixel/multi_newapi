@@ -19,12 +19,35 @@ package realpay
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"time"
 
 	"github.com/QuantumNous/new-api/internal/payment"
 )
 
-// WxpayConfig 微信支付商户凭据（平台证书自动下载模式：仅需商户私钥 + 证书序列号 + APIv3 密钥）。
+// ipv4OnlyHTTPClient 返回强制走 IPv4 拨号的 HTTP 客户端，供微信/支付宝适配器共用。
+//
+// 背景：本环境出网 IPv6 不可达——宿主机上 connect 会快速失败（no route），但容器内 Go 默认双栈拨号
+// 遇到微信/支付宝域名的 AAAA 记录会挂起直到超时，表现为 "TLS handshake timeout"（而非快速报错），
+// 一次下单请求可能要挂到 10s+ 才失败。强制 tcp4 拨号后直接命中可用的 IPv4 地址，避免这一无谓等待。
+func ipv4OnlyHTTPClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialer.DialContext(ctx, "tcp4", addr)
+			},
+		},
+	}
+}
+
+// WxpayConfig 微信支付商户凭据（微信支付公钥模式：商户私钥 + 证书序列号 + APIv3 密钥 + 微信支付公钥）。
+//
+// 微信 2024 起对新商户强制启用「微信支付公钥模式」，不再签发平台证书（GET /v3/certificates 返回
+// 404 RESOURCE_NOT_EXISTS）；验签改用商户在「商户平台-账户中心-API安全」申请的微信支付公钥
+// （固定值，配合 PublicKeyID 使用），不再需要证书自动下载轮换。
 //
 // 私钥两种注入方式（二选一，PrivateKey 优先）：
 //   - PrivateKey：商户私钥 PEM **内容**（主站进程内模式：从 DB option 读入后直接注入）；
@@ -32,15 +55,18 @@ import (
 type WxpayConfig struct {
 	AppID          string // 公众号/开放平台 appid
 	MchID          string // 商户号
-	APIv3Key       string // APIv3 密钥（AES-256-GCM 回调解密 + 平台证书解密）
-	CertSerialNo   string // 商户证书序列号
+	APIv3Key       string // APIv3 密钥（AES-256-GCM 回调解密）
+	CertSerialNo   string // 商户 API 证书序列号（用于对外请求签名，须与 PrivateKey 为同一证书）
 	PrivateKey     string // 商户私钥（PEM 内容；进程内模式由 setting.WechatPayPrivateKey 注入，优先于 PrivateKeyPath）
 	PrivateKeyPath string // 商户私钥 apiclient_key.pem 路径（PrivateKey 为空时回退；auth-service 兼容）
+	PublicKeyID    string // 微信支付公钥 ID（商户平台-API安全 申请，形如 PUB_KEY_ID_...）
+	PublicKey      string // 微信支付公钥 PEM 内容（验证微信应答/回调签名）
 }
 
 func (c WxpayConfig) complete() bool {
 	return c.AppID != "" && c.MchID != "" && c.APIv3Key != "" && c.CertSerialNo != "" &&
-		(c.PrivateKey != "" || c.PrivateKeyPath != "")
+		(c.PrivateKey != "" || c.PrivateKeyPath != "") &&
+		c.PublicKeyID != "" && c.PublicKey != ""
 }
 
 // AlipayConfig 支付宝应用凭据（普通公钥模式：应用私钥 + 支付宝公钥）。

@@ -18,20 +18,23 @@ func saveSettings(t *testing.T) {
 	o := struct {
 		wxEn                                          bool
 		wxApp, wxMch, wxKey, wxSerial, wxPriv         string
+		wxPubID, wxPubKey                             string
 		aliEn                                         bool
 		aliApp, aliPriv, aliPub, aliSeller, aliReturn string
 		aliSandbox                                    bool
 	}{
 		setting.WechatPayEnabled, setting.WechatPayAppID, setting.WechatPayMchID, setting.WechatPayAPIv3Key, setting.WechatPayCertSerial, setting.WechatPayPrivateKey,
+		setting.WechatPayPublicKeyID, setting.WechatPayPublicKey,
 		setting.AlipayEnabled, setting.AlipayAppID, setting.AlipayPrivateKey, setting.AlipayPublicKey, setting.AlipaySellerID, setting.AlipayReturnURL, setting.AlipaySandbox,
 	}
 	t.Cleanup(func() {
 		setting.WechatPayEnabled, setting.WechatPayAppID, setting.WechatPayMchID, setting.WechatPayAPIv3Key, setting.WechatPayCertSerial, setting.WechatPayPrivateKey = o.wxEn, o.wxApp, o.wxMch, o.wxKey, o.wxSerial, o.wxPriv
+		setting.WechatPayPublicKeyID, setting.WechatPayPublicKey = o.wxPubID, o.wxPubKey
 		setting.AlipayEnabled, setting.AlipayAppID, setting.AlipayPrivateKey, setting.AlipayPublicKey, setting.AlipaySellerID, setting.AlipayReturnURL, setting.AlipaySandbox = o.aliEn, o.aliApp, o.aliPriv, o.aliPub, o.aliSeller, o.aliReturn, o.aliSandbox
 	})
 }
 
-// setWxFull 设一组齐全的微信凭据（启用 + 5 字段全有）。
+// setWxFull 设一组齐全的微信凭据（启用 + 7 字段全有：含微信支付公钥模式的 PublicKeyID/PublicKey）。
 func setWxFull() {
 	setting.WechatPayEnabled = true
 	setting.WechatPayAppID = "wxapp"
@@ -39,6 +42,8 @@ func setWxFull() {
 	setting.WechatPayAPIv3Key = "apiv3key"
 	setting.WechatPayCertSerial = "serial"
 	setting.WechatPayPrivateKey = "-----BEGIN PRIVATE KEY-----\nXX\n-----END PRIVATE KEY-----"
+	setting.WechatPayPublicKeyID = "PUB_KEY_ID_test"
+	setting.WechatPayPublicKey = "-----BEGIN PUBLIC KEY-----\nXX\n-----END PUBLIC KEY-----"
 }
 
 // TestProviderManagerConfigured 启用 + 凭据齐全才 configured；缺一字段 / enabled=false / 未知渠道 → false。
@@ -62,6 +67,18 @@ func TestProviderManagerConfigured(t *testing.T) {
 	setWxFull()
 	if !m.Configured(payment.ProviderWxpay) {
 		t.Fatal("wxpay enabled + full credentials must be configured")
+	}
+	// 微信启用但缺微信支付公钥 ID（公钥模式必需字段）→ 不可用。
+	setWxFull()
+	setting.WechatPayPublicKeyID = ""
+	if m.Configured(payment.ProviderWxpay) {
+		t.Fatal("wxpay missing public key id must be not configured")
+	}
+	// 微信启用但缺微信支付公钥内容 → 不可用。
+	setWxFull()
+	setting.WechatPayPublicKey = ""
+	if m.Configured(payment.ProviderWxpay) {
+		t.Fatal("wxpay missing public key must be not configured")
 	}
 	// 凭据齐全但 enabled=false → 不可用。
 	setting.WechatPayEnabled = false

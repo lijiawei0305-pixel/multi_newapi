@@ -21,7 +21,7 @@ type alipayAdapter struct {
 }
 
 func newAlipayAdapter(cfg AlipayConfig) (*alipayAdapter, error) {
-	client, err := alipay.New(cfg.AppID, cfg.PrivateKey, cfg.IsProduction)
+	client, err := alipay.New(cfg.AppID, cfg.PrivateKey, cfg.IsProduction, alipay.WithHTTPClient(ipv4OnlyHTTPClient()))
 	if err != nil {
 		return nil, fmt.Errorf("alipay: new client: %w", err)
 	}

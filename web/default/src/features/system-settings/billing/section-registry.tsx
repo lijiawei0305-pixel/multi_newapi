@@ -157,6 +157,8 @@ const BILLING_SECTIONS = [
           WechatPayAPIv3Key: settings.WechatPayAPIv3Key ?? '',
           WechatPayCertSerial: settings.WechatPayCertSerial ?? '',
           WechatPayPrivateKey: settings.WechatPayPrivateKey ?? '',
+          WechatPayPublicKeyID: settings.WechatPayPublicKeyID ?? '',
+          WechatPayPublicKey: settings.WechatPayPublicKey ?? '',
           AlipayEnabled: settings.AlipayEnabled ?? false,
           AlipayAppID: settings.AlipayAppID ?? '',
           AlipayPrivateKey: settings.AlipayPrivateKey ?? '',

@@ -96,6 +96,8 @@ func InitOptionMap() {
 	common.OptionMap["WechatPayAPIv3Key"] = setting.WechatPayAPIv3Key
 	common.OptionMap["WechatPayCertSerial"] = setting.WechatPayCertSerial
 	common.OptionMap["WechatPayPrivateKey"] = setting.WechatPayPrivateKey
+	common.OptionMap["WechatPayPublicKeyID"] = setting.WechatPayPublicKeyID
+	common.OptionMap["WechatPayPublicKey"] = setting.WechatPayPublicKey
 	common.OptionMap["AlipayEnabled"] = strconv.FormatBool(setting.AlipayEnabled)
 	common.OptionMap["AlipayAppID"] = setting.AlipayAppID
 	common.OptionMap["AlipayPrivateKey"] = setting.AlipayPrivateKey
@@ -443,6 +445,10 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.WechatPayCertSerial = value
 	case "WechatPayPrivateKey":
 		setting.WechatPayPrivateKey = value
+	case "WechatPayPublicKeyID":
+		setting.WechatPayPublicKeyID = value
+	case "WechatPayPublicKey":
+		setting.WechatPayPublicKey = value
 	case "AlipayEnabled":
 		setting.AlipayEnabled, _ = strconv.ParseBool(value)
 	case "AlipayAppID":

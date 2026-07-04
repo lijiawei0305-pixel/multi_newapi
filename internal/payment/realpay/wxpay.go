@@ -9,7 +9,6 @@ import (
 
 	"github.com/wechatpay-apiv3/wechatpay-go/core"
 	"github.com/wechatpay-apiv3/wechatpay-go/core/auth/verifiers"
-	"github.com/wechatpay-apiv3/wechatpay-go/core/downloader"
 	"github.com/wechatpay-apiv3/wechatpay-go/core/notify"
 	"github.com/wechatpay-apiv3/wechatpay-go/core/option"
 	"github.com/wechatpay-apiv3/wechatpay-go/services/payments"
@@ -20,8 +19,9 @@ import (
 )
 
 // wxpayAdapter 封装微信支付 V3：Native 下单 / 回调验签+AES-256-GCM 解密 / 主动查单。
-// 采用「平台证书自动下载」模式：WithWechatPayAutoAuthCipher 自动拉取并轮换平台证书，
-// 回调验签复用同一证书访问器（无需单独配置微信支付公钥 + key_id）。
+// 采用「微信支付公钥」模式：WithWechatPayPublicKeyAuthCipher 用商户私钥签名出站请求，
+// 用微信支付固定公钥（PublicKeyID + PublicKey）验证应答/回调签名——微信自 2024 起对新商户
+// 强制此模式，不再签发平台证书（GET /v3/certificates 会返回 404 RESOURCE_NOT_EXISTS）。
 type wxpayAdapter struct {
 	appID   string
 	mchID   string
@@ -51,16 +51,17 @@ func newWxpayAdapter(ctx context.Context, cfg WxpayConfig) (*wxpayAdapter, error
 	if err != nil {
 		return nil, err
 	}
-	client, err := core.NewClient(ctx, option.WithWechatPayAutoAuthCipher(cfg.MchID, cfg.CertSerialNo, priv, cfg.APIv3Key))
+	pubKey, err := utils.LoadPublicKey(cfg.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("wxpay: load wechat pay public key: %w", err)
+	}
+	client, err := core.NewClient(ctx, option.WithWechatPayPublicKeyAuthCipher(
+		cfg.MchID, cfg.CertSerialNo, priv, cfg.PublicKeyID, pubKey,
+	), option.WithHTTPClient(ipv4OnlyHTTPClient()))
 	if err != nil {
 		return nil, fmt.Errorf("wxpay: new client: %w", err)
 	}
-	// 注册平台证书下载器（回调验签用）；与 client 同一私钥/序列号/APIv3 密钥。
-	if err := downloader.MgrInstance().RegisterDownloaderWithPrivateKey(ctx, priv, cfg.CertSerialNo, cfg.MchID, cfg.APIv3Key); err != nil {
-		return nil, fmt.Errorf("wxpay: register cert downloader: %w", err)
-	}
-	certVisitor := downloader.MgrInstance().GetCertificateVisitor(cfg.MchID)
-	handler := notify.NewNotifyHandler(cfg.APIv3Key, verifiers.NewSHA256WithRSAVerifier(certVisitor))
+	handler := notify.NewNotifyHandler(cfg.APIv3Key, verifiers.NewSHA256WithRSAPubkeyVerifier(cfg.PublicKeyID, *pubKey))
 	return &wxpayAdapter{
 		appID:   cfg.AppID,
 		mchID:   cfg.MchID,
@@ -105,7 +106,12 @@ func (a *wxpayAdapter) verifyNotify(ctx context.Context, r *http.Request) (*paym
 	tx := new(payments.Transaction)
 	// ParseNotifyRequest 内部：读 Wechatpay-* 头验签 → AES-256-GCM 解密 resource → 反序列化到 tx。
 	if _, err := a.handler.ParseNotifyRequest(ctx, r, tx); err != nil {
-		return nil, payment.ErrSignInvalid // 验签/解密失败
+		// 诊断（临时）：surface ParseNotifyRequest 的真实报错 + 回调头 Wechatpay-Serial，
+		// 定位验签卡在哪一步（时间戳容差 / serial 不对上 PublicKeyID / RSA 签名 / APIv3 解密）。
+		// %w 保留 payment.ErrSignInvalid，下游 handlePayNotify 的 errors.Is 判定与 ack 行为不变。
+		return nil, fmt.Errorf("%w: parseNotify: %v (Wechatpay-Serial=%q Timestamp=%q Nonce=%q)",
+			payment.ErrSignInvalid, err,
+			r.Header.Get("Wechatpay-Serial"), r.Header.Get("Wechatpay-Timestamp"), r.Header.Get("Wechatpay-Nonce"))
 	}
 	return wxTransactionToInfo(tx, a.appID, a.mchID)
 }

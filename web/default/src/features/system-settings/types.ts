@@ -309,6 +309,8 @@ export type BillingSettings = {
   WechatPayAPIv3Key: string
   WechatPayCertSerial: string
   WechatPayPrivateKey: string
+  WechatPayPublicKeyID: string
+  WechatPayPublicKey: string
   // Alipay credentials — DB option keys
   AlipayEnabled: boolean
   AlipayAppID: string

@@ -88,6 +88,8 @@ const defaultBillingSettings: BillingSettings = {
   WechatPayAPIv3Key: '',
   WechatPayCertSerial: '',
   WechatPayPrivateKey: '',
+  WechatPayPublicKeyID: '',
+  WechatPayPublicKey: '',
   AlipayEnabled: false,
   AlipayAppID: '',
   AlipayPrivateKey: '',

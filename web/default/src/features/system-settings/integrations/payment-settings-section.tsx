@@ -164,6 +164,8 @@ const paymentSchema = z.object({
   WechatPayAPIv3Key: z.string(),
   WechatPayCertSerial: z.string(),
   WechatPayPrivateKey: z.string(),
+  WechatPayPublicKeyID: z.string(),
+  WechatPayPublicKey: z.string(),
   AlipayEnabled: z.boolean(),
   AlipayAppID: z.string(),
   AlipayPrivateKey: z.string(),
@@ -455,6 +457,8 @@ export function PaymentSettingsSection({
       WechatPayAPIv3Key: values.WechatPayAPIv3Key.trim(),
       WechatPayCertSerial: values.WechatPayCertSerial.trim(),
       WechatPayPrivateKey: values.WechatPayPrivateKey.trim(),
+      WechatPayPublicKeyID: values.WechatPayPublicKeyID.trim(),
+      WechatPayPublicKey: values.WechatPayPublicKey.trim(),
       AlipayEnabled: values.AlipayEnabled,
       AlipayAppID: values.AlipayAppID.trim(),
       AlipayPrivateKey: values.AlipayPrivateKey.trim(),
@@ -513,6 +517,8 @@ export function PaymentSettingsSection({
       WechatPayAPIv3Key: initialRef.current.WechatPayAPIv3Key.trim(),
       WechatPayCertSerial: initialRef.current.WechatPayCertSerial.trim(),
       WechatPayPrivateKey: initialRef.current.WechatPayPrivateKey.trim(),
+      WechatPayPublicKeyID: initialRef.current.WechatPayPublicKeyID.trim(),
+      WechatPayPublicKey: initialRef.current.WechatPayPublicKey.trim(),
       AlipayEnabled: initialRef.current.AlipayEnabled,
       AlipayAppID: initialRef.current.AlipayAppID.trim(),
       AlipayPrivateKey: initialRef.current.AlipayPrivateKey.trim(),
@@ -709,6 +715,23 @@ export function PaymentSettingsSection({
       updates.push({
         key: 'WechatPayPrivateKey',
         value: sanitized.WechatPayPrivateKey,
+      })
+    }
+
+    if (sanitized.WechatPayPublicKeyID !== initial.WechatPayPublicKeyID) {
+      updates.push({
+        key: 'WechatPayPublicKeyID',
+        value: sanitized.WechatPayPublicKeyID,
+      })
+    }
+
+    if (
+      sanitized.WechatPayPublicKey &&
+      sanitized.WechatPayPublicKey !== initial.WechatPayPublicKey
+    ) {
+      updates.push({
+        key: 'WechatPayPublicKey',
+        value: sanitized.WechatPayPublicKey,
       })
     }
 
@@ -1422,6 +1445,70 @@ export function PaymentSettingsSection({
                           className='font-mono text-xs'
                           placeholder={
                             '-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----'
+                          }
+                          autoComplete='off'
+                          {...field}
+                          onChange={(event) =>
+                            field.onChange(event.target.value)
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t('Paste PEM content; leave blank to keep the current key')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className='rounded-md bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100'>
+                  <p>
+                    {t(
+                      'WeChat Pay requires merchant accounts created since 2024 to use "WeChat Pay Public Key" mode instead of platform certificates. If order creation fails with RESOURCE_NOT_EXISTS / "no available platform certificate", fill in the two fields below (Merchant Platform → Account Center → API Security → WeChat Pay Public Key).'
+                    )}
+                  </p>
+                </div>
+
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='WechatPayPublicKeyID'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('WeChat Pay Public Key ID')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder='PUB_KEY_ID_0123456789...'
+                            autoComplete='off'
+                            {...field}
+                            onChange={(event) =>
+                              field.onChange(event.target.value)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'The publicKeyID shown next to the WeChat Pay public key in the merchant platform'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name='WechatPayPublicKey'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('WeChat Pay public key (PEM)')}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          rows={6}
+                          className='font-mono text-xs'
+                          placeholder={
+                            '-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----'
                           }
                           autoComplete='off'
                           {...field}
