@@ -67,7 +67,7 @@ func TestReconcileStuckCreated(t *testing.T) {
 		return orderNo == "RCG-paid", nil // 仅 RCG-paid 平台已收款
 	}
 	// before 取极大值确保两单都被扫到（seed 的 UpdatedAt 为零值）；maxAge=0 关闭年龄过滤。
-	res, err := g.ReconcileStuckCreated(context.Background(), time.Unix(1<<40, 0), 0, 0, query)
+	res, err := g.ReconcileStuckCreated(context.Background(), time.Unix(1<<40, 0), 0, 0, 0, query)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -88,11 +88,40 @@ func TestReconcileStuckCreated(t *testing.T) {
 	}
 }
 
+// TestReconcileStuckCreatedExpire 未付且已超过 expireAge 的 created 单 → 自动置 failed（未付超时/过期）；
+// 已付的仍正常补入账 credited（过期逻辑不误伤真付款）。
+func TestReconcileStuckCreatedExpire(t *testing.T) {
+	g, repo, _, _ := newGateway()
+	seedCreatedOrder(t, repo, "RCG-paid", OrderTypeRecharge)
+	seedCreatedOrder(t, repo, "RCG-stale", OrderTypeRecharge)
+
+	query := func(_ context.Context, orderNo, _ string) (bool, error) {
+		return orderNo == "RCG-paid", nil // 仅 RCG-paid 平台已收款
+	}
+	// expireAge=1h：seed 的 CreatedAt 为零值（远古），未付者均早于 now-1h → 过期置 failed。before 取极大值扫全部。
+	res, err := g.ReconcileStuckCreated(context.Background(), time.Unix(1<<40, 0), time.Hour, 0, 0, query)
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(res.Reconciled) != 1 || res.Reconciled[0] != "RCG-paid" {
+		t.Fatalf("reconciled=%v, want [RCG-paid]", res.Reconciled)
+	}
+	if len(res.Expired) != 1 || res.Expired[0] != "RCG-stale" {
+		t.Fatalf("expired=%v, want [RCG-stale]", res.Expired)
+	}
+	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-paid"); got.Status != OrderCredited {
+		t.Fatalf("RCG-paid status=%q, want credited", got.Status)
+	}
+	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-stale"); got.Status != OrderFailed {
+		t.Fatalf("RCG-stale status=%q, want failed (expired)", got.Status)
+	}
+}
+
 // TestReconcileStuckCreatedNilQuery query 未注入 → 安全空跑（不扫不入账）。
 func TestReconcileStuckCreatedNilQuery(t *testing.T) {
 	g, repo, _, _ := newGateway()
 	seedCreatedOrder(t, repo, "RCG-x", OrderTypeRecharge)
-	res, err := g.ReconcileStuckCreated(context.Background(), time.Unix(1<<40, 0), 0, 0, nil)
+	res, err := g.ReconcileStuckCreated(context.Background(), time.Unix(1<<40, 0), 0, 0, 0, nil)
 	if err != nil || res.Scanned != 0 {
 		t.Fatalf("nil query should no-op, got scanned=%d err=%v", res.Scanned, err)
 	}

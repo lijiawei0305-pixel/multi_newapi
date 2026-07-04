@@ -24,7 +24,7 @@ var reconcileCreatedFn = func(a *App, ctx context.Context, before time.Time) (pa
 	query := func(ctx context.Context, orderNo, provider string) (bool, error) {
 		return a.providerMgr.QueryOrder(ctx, payment.Provider(provider), orderNo)
 	}
-	return a.RechargeGateway.ReconcileStuckCreated(ctx, before, reconcileCreatedMaxAge, reconcileCreatedLimit, query)
+	return a.RechargeGateway.ReconcileStuckCreated(ctx, before, reconcileCreatedExpireAge, reconcileCreatedMaxAge, reconcileCreatedLimit, query)
 }
 
 var reconcileSubFn = func(a *App, ctx context.Context, before time.Time) (ReconcileSubResult, error) {
@@ -48,9 +48,9 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 	if cerr != nil {
 		logger.LogWarn(ctx, "reconcile RCG(created) failed: "+cerr.Error())
 		created.Failed = map[string]string{"_error": cerr.Error()}
-	} else if len(created.Reconciled) > 0 || len(created.Failed) > 0 {
-		logger.LogInfo(ctx, fmt.Sprintf("reconcile RCG(created): scanned=%d credited=%d failed=%d",
-			created.Scanned, len(created.Reconciled), len(created.Failed)))
+	} else if len(created.Reconciled) > 0 || len(created.Expired) > 0 || len(created.Failed) > 0 {
+		logger.LogInfo(ctx, fmt.Sprintf("reconcile RCG(created): scanned=%d credited=%d expired=%d failed=%d",
+			created.Scanned, len(created.Reconciled), len(created.Expired), len(created.Failed)))
 	}
 
 	sub, serr := reconcileSubFn(a, ctx, before)

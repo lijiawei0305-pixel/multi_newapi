@@ -44,7 +44,12 @@ export interface StuckList {
 
 export interface ReconcileRunResult {
   rcg?: { scanned: number; credited: string[] | null; failed: Record<string, string> }
-  rcg_created?: { scanned: number; credited: string[] | null; failed: Record<string, string> }
+  rcg_created?: {
+    scanned: number
+    credited: string[] | null
+    expired?: string[] | null
+    failed: Record<string, string>
+  }
   sub?: {
     scanned: number
     activated: string[] | null

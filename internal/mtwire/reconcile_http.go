@@ -10,11 +10,11 @@ import (
 
 // stuckOrderOut 是 admin「支付对账」页展示的一条卡单。
 type stuckOrderOut struct {
-	Kind      string  `json:"kind"`       // "RCG"（充值）| "SUB"（套餐）
+	Kind      string  `json:"kind"` // "RCG"（充值）| "SUB"（套餐）
 	OrderNo   string  `json:"order_no"`
 	TenantID  int64   `json:"tenant_id"`
 	UserID    int64   `json:"user_id"`
-	Amount    float64 `json:"amount"`     // 实付（¥）
+	Amount    float64 `json:"amount"` // 实付（¥）
 	Status    string  `json:"status"`
 	StuckSecs int64   `json:"stuck_secs"` // 卡了多久（秒）
 }
@@ -70,7 +70,7 @@ func (a *App) HandleAdminRunReconcile(c *gin.Context) {
 	paid, created, sub := a.runReconcileAll(ctx, before, "manual")
 	respondOK(c, gin.H{
 		"rcg":         gin.H{"scanned": paid.Scanned, "credited": paid.Reconciled, "failed": paid.Failed},
-		"rcg_created": gin.H{"scanned": created.Scanned, "credited": created.Reconciled, "failed": created.Failed},
+		"rcg_created": gin.H{"scanned": created.Scanned, "credited": created.Reconciled, "expired": created.Expired, "failed": created.Failed},
 		"sub":         gin.H{"scanned": sub.Scanned, "activated": sub.Activated, "unpaid": sub.Unpaid, "failed": sub.Failed},
 	})
 }

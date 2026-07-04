@@ -179,7 +179,7 @@ export function PaymentReconcile() {
       const c = res.rcg_created
       setLastResult(
         `RCG 扫${r?.scanned ?? 0}/入账${r?.credited?.length ?? 0}/失败${Object.keys(r?.failed ?? {}).length} · ` +
-          `RCG-created 扫${c?.scanned ?? 0}/入账${c?.credited?.length ?? 0}/失败${Object.keys(c?.failed ?? {}).length} · ` +
+          `RCG-created 扫${c?.scanned ?? 0}/入账${c?.credited?.length ?? 0}/过期${c?.expired?.length ?? 0}/失败${Object.keys(c?.failed ?? {}).length} · ` +
           `SUB 扫${s?.scanned ?? 0}/激活${s?.activated?.length ?? 0}/未付${s?.unpaid?.length ?? 0}/失败${Object.keys(s?.failed ?? {}).length}`
       )
       qc.invalidateQueries({ queryKey: ['admin-reconcile-stuck'] })

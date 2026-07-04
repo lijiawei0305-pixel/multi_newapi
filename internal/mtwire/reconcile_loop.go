@@ -15,8 +15,11 @@ import (
 const (
 	reconcileTickInterval  = 5 * time.Minute // 对账扫描周期
 	reconcileMinAge        = 5 * time.Minute // 只对账「落单/占位超过此时长」的卡单，过滤仍在途的订单
-	reconcileCreatedMaxAge = 26 * time.Hour  // created 卡单主动查单的最大年龄（超此视为过期废弃单，停止查单）
-	reconcileCreatedLimit  = 200             // created 卡单单轮主动查单上限
+	reconcileCreatedMaxAge = 26 * time.Hour  // created 单超此年龄：不再查单、直接置 failed（平台单/二维码早已作废，查也白查）
+	// reconcileCreatedExpireAge：created 未付超过此时长 → 对账查证仍未付即自动置 failed（未付超时/过期），
+	// 清出「待支付」。贴微信 Native 二维码默认有效期 2h（超时二维码作废、无人能再付）。
+	reconcileCreatedExpireAge = 2 * time.Hour
+	reconcileCreatedLimit     = 200 // created 卡单单轮主动查单上限
 )
 
 var (

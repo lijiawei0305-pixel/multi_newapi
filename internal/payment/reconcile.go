@@ -9,6 +9,7 @@ import (
 type ReconcileResult struct {
 	Scanned    int               // 扫到的卡单数
 	Reconciled []string          // 成功补入账的 order_no
+	Expired    []string          // 未付超时/过期 → 自动置 failed 的 order_no（仅 created 路径）
 	Failed     map[string]string // order_no → 错误（本次仍失败、留待下次再扫）
 }
 
@@ -56,17 +57,19 @@ func (g *Gateway) ListStuckPaid(ctx context.Context, before time.Time) ([]*PayOr
 
 // ReconcileStuckCreated 扫卡在 created（早于 before）的订单，逐笔经 query 向支付平台主动查单：
 // 已付 → 走 CreditPaidOrder 补入账（paidAmount=0 跳过金额比对，信己方查单结果）；
-// 真未付 / 查单失败 → 不动状态、计入结果，下次再扫。
+// 查证真未付且已超时 → 自动置 failed（未付超时/过期，清出「待支付」）；查单失败 → 不动、下次再扫。
 //
 // 卡单成因：用户已付，但平台异步回调始终未成功送达主站（极端：平台多次重推全失败），
 // 订单永停 created。本方法是其兜底（与 ReconcileStuckPaid 互补：后者管「已 paid 未 credited」崩溃缺口）。
 //
 //   - query：由调用方注入（主站经 auth-service 向微信/支付宝查单），返回该单平台是否已收款。
-//   - maxAge：早于 now-maxAge 的 created 单视为已过期废弃单，跳过查单（微信≈8h、支付宝≈25h 后必失效）。
+//   - expireAge：created 未付超过 now-expireAge（贴微信二维码有效期，如 2h）→ 查证仍未付即置 failed（自动过期）。0=关闭。
+//   - maxAge：早于 now-maxAge 的 created 单（平台单已作废，查也白查）直接置 failed，不再查单（如 26h）。0=关闭。
 //   - limit：单轮最多处理笔数（>0 生效），防一轮查单过多。
 func (g *Gateway) ReconcileStuckCreated(
 	ctx context.Context,
 	before time.Time,
+	expireAge time.Duration,
 	maxAge time.Duration,
 	limit int,
 	query func(ctx context.Context, orderNo, provider string) (bool, error),
@@ -79,29 +82,51 @@ func (g *Gateway) ReconcileStuckCreated(
 		return ReconcileResult{}, err
 	}
 	res := ReconcileResult{Failed: map[string]string{}}
-	cutoff := g.now().Add(-maxAge)
+	staleCutoff := g.now().Add(-maxAge)     // 早于此：不查、直接置 failed（二维码/平台单早已作废，必未付）
+	expireCutoff := g.now().Add(-expireAge) // 早于此仍未付：查证后置 failed（未付超时，自动过期）
 	for _, ord := range created {
-		if maxAge > 0 && ord.CreatedAt.Before(cutoff) {
-			continue // 早已过期的废弃单，不再查单
-		}
 		if limit > 0 && res.Scanned >= limit {
 			break
 		}
 		res.Scanned++
+		// ① 太老（>maxAge）：跳过查单，直接过期失败（平台已无此单、查也白查）。
+		if maxAge > 0 && ord.CreatedAt.Before(staleCutoff) {
+			if g.markCreatedFailed(ctx, ord.OrderNo) {
+				res.Expired = append(res.Expired, ord.OrderNo)
+			}
+			continue
+		}
 		paid, qErr := query(ctx, ord.OrderNo, string(ord.Provider))
 		if qErr != nil {
 			res.Failed[ord.OrderNo] = "query: " + qErr.Error()
+			continue // 查单出错：本轮不动（不因瞬时错误误判失败），下轮再来
+		}
+		if paid {
+			// 信己方查单结果，金额已由下单时落库；paidAmount=0 跳过比对，复用强幂等入账。
+			if cErr := g.CreditPaidOrder(ctx, ord.OrderNo, "reconcile", 0); cErr != nil {
+				res.Failed[ord.OrderNo] = "credit: " + cErr.Error()
+				continue
+			}
+			res.Reconciled = append(res.Reconciled, ord.OrderNo)
 			continue
 		}
-		if !paid {
-			continue // 真未付：用户没付，不动
+		// ② 查证真未付：超过 expireAge（二维码已失效）→ 自动过期置 failed；否则保留（还能付），下轮再查。
+		if expireAge > 0 && ord.CreatedAt.Before(expireCutoff) {
+			if g.markCreatedFailed(ctx, ord.OrderNo) {
+				res.Expired = append(res.Expired, ord.OrderNo)
+			}
 		}
-		// 信己方查单结果，金额已由下单时落库；paidAmount=0 跳过比对，复用强幂等入账。
-		if cErr := g.CreditPaidOrder(ctx, ord.OrderNo, "reconcile", 0); cErr != nil {
-			res.Failed[ord.OrderNo] = "credit: " + cErr.Error()
-			continue
-		}
-		res.Reconciled = append(res.Reconciled, ord.OrderNo)
 	}
 	return res, nil
+}
+
+// markCreatedFailed 把仍 created 的单原子置 failed（未付超时/过期废弃）；成功返回 true。
+// CAS 失败（已被正常回调/别处推进走）不算过期，避免误统计。
+func (g *Gateway) markCreatedFailed(ctx context.Context, orderNo string) bool {
+	ok, err := g.repo.CompareAndSetStatus(ctx, orderNo, OrderCreated, OrderFailed)
+	if err != nil || !ok {
+		g.logf("payment: reconcile expire %s: created→failed failed (ok=%v err=%v)", orderNo, ok, err)
+		return false
+	}
+	return true
 }
