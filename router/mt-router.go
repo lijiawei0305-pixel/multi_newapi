@@ -49,6 +49,8 @@ func SetMtRouter(router *gin.Engine) {
 	tenantGroup.Use(app.TenantMiddleware())
 	{
 		tenantGroup.GET("/current", app.HandleTenantCurrent)
+		// 公开只读套餐价目（无需登录）：供公开落地页（代理加盟）展示，仅 enabled 套餐的展示字段。
+		tenantGroup.GET("/token-plans/public", app.HandleListPublicTokenPlans)
 		tenantGroup.GET("/token-plans", middleware.UserAuth(), app.HandleListTokenPlans)
 		tenantGroup.POST("/token-plans/:id/purchase", middleware.UserAuth(), app.HandlePurchase)
 		tenantGroup.GET("/subscriptions", middleware.UserAuth(), app.HandleListSubscriptions)

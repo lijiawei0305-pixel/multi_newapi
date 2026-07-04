@@ -186,6 +186,54 @@ func (a *App) HandleListTokenPlans(c *gin.Context) {
 	respondOK(c, out)
 }
 
+// HandleListPublicTokenPlans GET /api/tenant/token-plans/public —— 主站已上架套餐（官方基准价）。
+// 公开只读、无需登录，供公开落地页（代理加盟）展示价目。仅返回 enabled 套餐的展示字段，
+// 不含代理成本价/零售保护线等内部字段。
+func (a *App) HandleListPublicTokenPlans(c *gin.Context) {
+	plans, err := a.Catalog.List(reqCtx(c))
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	out := make([]publicPlanOut, 0, len(plans))
+	for _, p := range plans {
+		if !p.Status.IsEnabled() {
+			continue
+		}
+		out = append(out, toPublicPlanOut(p))
+	}
+	respondOK(c, out)
+}
+
+// publicPlanOut 是公开套餐卡片的展示 DTO（无内部成本价/保护线字段）。
+type publicPlanOut struct {
+	Code           string  `json:"code"`
+	Name           string  `json:"name"`
+	BasePriceCNY   float64 `json:"base_price_cny"`
+	AnchorPriceCNY float64 `json:"anchor_price_cny"`
+	DiscountLabel  string  `json:"discount_label"`
+	Badge          string  `json:"badge"`
+	IsRecommended  bool    `json:"is_recommended"`
+	MonthLimitUSD  float64 `json:"month_limit_usd"`
+	ValidDays      int     `json:"valid_days"`
+	Sort           int     `json:"sort"`
+}
+
+func toPublicPlanOut(p tokenplan.Plan) publicPlanOut {
+	return publicPlanOut{
+		Code:           p.Code,
+		Name:           p.Name,
+		BasePriceCNY:   p.BasePrice,
+		AnchorPriceCNY: p.AnchorPrice,
+		DiscountLabel:  p.DiscountLabel,
+		Badge:          p.Badge,
+		IsRecommended:  p.IsRecommended,
+		MonthLimitUSD:  p.MonthLimitUSD,
+		ValidDays:      p.ValidDays,
+		Sort:           p.Sort,
+	}
+}
+
 // purchaseRequest 是 POST /api/tenant/token-plans/:id/purchase 入参（全部可选）。
 // provider 缺省 wxpay；device_id/real_name_id 为 Trial 限购维度（本阶段风控放行）。
 type purchaseRequest struct {
