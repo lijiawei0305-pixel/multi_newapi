@@ -100,7 +100,7 @@ print(response.choices[0].message.content)
 **字体层级**
 | 元素 | 规格 |
 |---|---|
-| 眉标 | `text-xs tracking-widest text-muted-foreground`（W5：用中文「开发文档」；见 §9 开放项，若要与参考页完全一致改回 `DOCUMENTATION`） |
+| 眉标 | `text-xs tracking-widest text-muted-foreground`，中文「开发文档」（已定，守 W5） |
 | 主标题「使用文档」 | `text-4xl md:text-5xl font-bold text-foreground` |
 | 副标题 | `text-base text-muted-foreground` |
 | 分隔线 | 标题区下方一条 `border-border` 细线 |
@@ -127,7 +127,7 @@ print(response.choices[0].message.content)
 ## 9. 交付前需核对 / 开放项（不影响结构）
 1. 控制台里令牌菜单的**确切名称**（令牌 / API 令牌 / API 密钥），据实写进步骤 02
 2. 示例代码 `model=` 换成本平台**实际在售**的模型名（如模型广场首个可用模型）
-3. 眉标语言：默认中文「开发文档」（合 W5）；若要与参考页**完全一致**改回英文 `DOCUMENTATION`——待你定夺
+3. 眉标语言 **已定**：中文「开发文档」（用户 2026-07-05 拍板，守 W5）
 
 ## 10. 实现约束
 - 两个新 `.tsx` 需加项目**版权头**（有 `copyright:check` 脚本）
