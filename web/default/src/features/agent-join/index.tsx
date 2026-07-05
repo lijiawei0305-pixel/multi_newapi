@@ -724,32 +724,32 @@ export function AgentJoin() {
                 <Card
                   className={
                     plan.recommended
-                      ? 'border-primary/40 h-full shadow-lg'
-                      : 'h-full'
+                      ? 'border-primary/40 flex h-full flex-col shadow-lg'
+                      : 'flex h-full flex-col'
                   }
                 >
                   <CardHeader>
-                    {plan.tier || plan.recommended ? (
-                      <div className='flex items-center justify-between gap-2'>
-                        <span className='text-muted-foreground text-xs'>
-                          {plan.tier}
-                        </span>
-                        {plan.recommended ? (
-                          <Badge className='shrink-0'>
-                            {t('Agent Join Plan Recommended', {
-                              defaultValue: '推荐',
-                            })}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    ) : null}
+                    <div className='flex min-h-6 items-start justify-between gap-2'>
+                      <span className='text-muted-foreground text-xs'>
+                        {plan.tier}
+                      </span>
+                      {plan.recommended ? (
+                        <Badge className='shrink-0'>
+                          {t('Agent Join Plan Recommended', {
+                            defaultValue: '推荐',
+                          })}
+                        </Badge>
+                      ) : null}
+                    </div>
                     <CardTitle className='mt-1'>{plan.name}</CardTitle>
                     {plan.desc ? (
-                      <CardDescription>{plan.desc}</CardDescription>
+                      <CardDescription className='min-h-10'>
+                        {plan.desc}
+                      </CardDescription>
                     ) : null}
                   </CardHeader>
-                  <CardContent className='space-y-4'>
-                    <div>
+                  <CardContent className='flex flex-1 flex-col'>
+                    <div className='mb-4'>
                       {plan.anchor ? (
                         <p className='text-muted-foreground text-sm line-through'>
                           {plan.currency}
@@ -774,7 +774,7 @@ export function AgentJoin() {
                       ) : null}
                     </div>
                     <Button
-                      className='w-full'
+                      className='mt-auto w-full'
                       render={<Link to='/become-agent' />}
                     >
                       {t('Agent Join Plan CTA', { defaultValue: '立即开通' })}
