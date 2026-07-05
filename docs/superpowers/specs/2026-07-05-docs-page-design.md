@@ -38,7 +38,7 @@
 
 ## 5. 页面结构与内容（逐段，最终中文文案）
 
-外层：`<PublicLayout>` 默认容器内，再套 `max-w-4xl mx-auto` 单列。
+外层：`<PublicLayout>`（自带 `container` 居中、`pt-20` 避让浮动页眉）。内容单列**不额外收窄**——实测参考页内容宽度 ≈ `container`（约 1024–1032px，比 `max-w-4xl` 宽），沿用 PublicLayout 默认容器即可对齐；各段之间大间距（`space-y-16`）。
 
 ### 头部
 - 眉标：「开发文档」（**中文**，合 W5；不用英文 `DOCUMENTATION`）
@@ -90,16 +90,44 @@ print(response.choices[0].message.content)
 - 导航键 `Docs` 已有（`zh.json`→「文档」），无需新增
 - 交付前肉眼核对页面**显示**全中文、无英文残留（含眉标）
 
-## 8. 样式 / 适配
-- shadcn `Card`/`CardHeader`/`CardTitle`/`CardContent`/`Button` + Tailwind 令牌（`bg-background`/`text-foreground`/`text-muted-foreground`/`bg-muted`/`border-border`）
-- **深浅色自适应**（参考页仅深色，本项目两色都要正常）
-- 移动端响应式：单列、卡片纵向堆叠、代码块 `overflow-x-auto` 横向滚动不撑破页面
-- 复制按钮：`lucide-react` 图标 + 复制成功 toast
-- 可选：进入视口渐显（`AnimateInView`，与 agent-join 一致），非必需
+## 8. 排版规格（从参考页实测）与样式
 
-## 9. 交付前需核对的 2 处细节（不影响结构）
+**布局与节奏**
+- 内容列 = PublicLayout `container` 居中（≈1024px 宽，**不要** `max-w-4xl` 收窄，否则比参考页窄）
+- 纵向节奏大：每个二级区块间距 ≈ `mt-16`（64px）；区块标题↔卡片 ≈ `mt-4~6`；步骤卡之间 ≈ `gap-3~4`
+- 顶部标题区到首个区块留白充足
+
+**字体层级**
+| 元素 | 规格 |
+|---|---|
+| 眉标 | `text-xs tracking-widest text-muted-foreground`（W5：用中文「开发文档」；见 §9 开放项，若要与参考页完全一致改回 `DOCUMENTATION`） |
+| 主标题「使用文档」 | `text-4xl md:text-5xl font-bold text-foreground` |
+| 副标题 | `text-base text-muted-foreground` |
+| 分隔线 | 标题区下方一条 `border-border` 细线 |
+| 区块标题 | `text-xl md:text-2xl font-semibold` |
+| 步骤序号 01–04 | `text-2xl font-bold text-muted-foreground/40`（大号淡灰） |
+| 步骤标题 / 描述 | 标题 `font-semibold text-foreground`；描述 `text-sm text-muted-foreground` |
+| 正文 / 联系行 | `text-sm~base text-muted-foreground`（标签「邮箱/微信」同色） |
+
+**卡片与代码**
+- 卡片：shadcn `<Card>`（`border-border` + `rounded-xl` + `p-6`），深色下几乎透明、靠边框勾勒（即参考页观感）
+- 快速开始卡：卡内嵌一个更暗的**代码 chip**（`bg-muted rounded-md px-4 py-3 font-mono`）显示 `{origin}/v1`
+- 示例代码：整块 `<Card>` 内 `<pre><code>` 纯等宽（**不做语法高亮**，参考页就是纯灰等宽）、`overflow-x-auto`
+- 复制按钮：卡右上角 `lucide-react` Copy 图标 + 成功 toast
+
+**共享框架（已与本站一致，无需另做）**
+- 页眉：复用浮动、随滚动收缩的 `PublicHeader`（与参考页同款交互）
+- 页脚：复用本站 `<Footer/>`（我们自己的产品/加盟/支持列——即“与本站一致”；参考页页脚是他们的，不照搬）
+
+**适配**
+- 深浅色都要正常（参考页仅深色，本项目两色都要过）
+- 移动端：单列、卡片纵向堆叠、代码块横向滚动不撑破
+- 可选：进入视口渐显 `AnimateInView`（与 agent-join 一致），非必需
+
+## 9. 交付前需核对 / 开放项（不影响结构）
 1. 控制台里令牌菜单的**确切名称**（令牌 / API 令牌 / API 密钥），据实写进步骤 02
 2. 示例代码 `model=` 换成本平台**实际在售**的模型名（如模型广场首个可用模型）
+3. 眉标语言：默认中文「开发文档」（合 W5）；若要与参考页**完全一致**改回英文 `DOCUMENTATION`——待你定夺
 
 ## 10. 实现约束
 - 两个新 `.tsx` 需加项目**版权头**（有 `copyright:check` 脚本）
