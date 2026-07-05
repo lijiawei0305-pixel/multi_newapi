@@ -40,6 +40,12 @@ func SetMtRouter(router *gin.Engine) {
 			// seed 失败不致命：记录后继续启动（路由仍注册）。
 			common.SysError("mt-router: seed failed: " + err.Error())
 		}
+		// 模型分组启动自愈（§2.15，master-only 幂等）：确保 enabled 模型分组进 UserUsableGroups/GroupRatio，
+		// 使「加模型分组即处处可用」不依赖创建路径；顺带修 gemini「no channel under default」根因。须在 Seed 之后
+		// （Seed 首次会把 UserUsableGroups 固化为 default-only，此处再补回模型分组）。
+		if err := app.ReconcileModelGroupsUsable(); err != nil {
+			common.SysError("mt-router: 模型分组启动自愈失败: " + err.Error())
+		}
 		// 支付卡单对账兜底定时任务（master-only）：周期扫 RCG/SUB 卡单补入账/补激活。
 		app.StartReconcileLoop()
 		// 代理套餐到期降级定时任务（P4，master-only）：周期扫 mt_agent_memberships 到期会员 → 撤销付费授予。

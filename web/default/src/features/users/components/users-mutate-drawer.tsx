@@ -34,6 +34,7 @@ import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
+import { getModelGroups } from '@/features/model-groups/api'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -117,6 +118,18 @@ export function UsersMutateDrawer({
   })
 
   const groups = groupsData?.data || []
+
+  // 模型分组（gemini/qwen…）属「模型路由维度」，非用户档位；从档位下拉排除，只留 default/vip/svip。
+  // 判定读 model_groups 登记表（getModelGroups）——加新模型分组会自动隐藏，不必改此处（一劳永逸）。
+  const { data: modelGroupsData } = useQuery({
+    queryKey: ['admin-model-groups'],
+    queryFn: getModelGroups,
+    staleTime: 5 * 60 * 1000,
+  })
+  const modelGroupNames = new Set(
+    (modelGroupsData?.data ?? []).map((g) => g.name)
+  )
+  const tierGroups = groups.filter((g) => !modelGroupNames.has(g))
 
   // Permission catalog is owned by the backend; fetched once and reused.
   const { data: permissionCatalog = EMPTY_PERMISSION_CATALOG } = useQuery({
@@ -359,7 +372,7 @@ export function UsersMutateDrawer({
                         <FormLabel>{t('Group')}</FormLabel>
                         <Select
                           items={[
-                            ...groups.map((group) => ({
+                            ...tierGroups.map((group) => ({
                               value: group,
                               label: group,
                             })),
@@ -374,7 +387,7 @@ export function UsersMutateDrawer({
                           </FormControl>
                           <SelectContent alignItemWithTrigger={false}>
                             <SelectGroup>
-                              {groups.map((group) => (
+                              {tierGroups.map((group) => (
                                 <SelectItem key={group} value={group}>
                                   {group}
                                 </SelectItem>

@@ -314,6 +314,58 @@ func (a *App) removeUserUsableGroup(name string) error {
 	return model.UpdateOption("UserUsableGroups", string(uugJSON))
 }
 
+// ReconcileModelGroupsUsable 启动自愈（master 幂等）：确保每个 enabled 模型分组都在 UserUsableGroups
+// （缺则补，label 取 description|name）与 GroupRatio（缺则补占位 1.0、不覆盖已有）里——使「加模型分组即处处
+// 可用」不依赖创建路径（管理页/手工插库/seed 皆自愈）。档位（default/vip/svip 等**非** model_groups 组）不在
+// 此表 → 永不会被加进 UserUsableGroups → 用户不可自选档位（防越权，见 seed.go）仍成立。仅在有缺失时写库。
+//
+// 修复背景：早先手工/旁路建入的模型分组只进了 GroupRatio+model_groups、漏了 UserUsableGroups，导致用户建 Key
+// 只能选 default → 够不到该模型分组（gemini「no available channel under group default」根因）。本自愈一并补齐。
+func (a *App) ReconcileModelGroupsUsable() error {
+	if a.ModelGroupRepo == nil {
+		return nil
+	}
+	rows, err := a.ModelGroupRepo.List(context.Background())
+	if err != nil {
+		return err
+	}
+	gr := ratio_setting.GetGroupRatioCopy()
+	uug := setting.GetUserUsableGroupsCopy()
+	changed := false
+	for _, m := range rows {
+		if !m.Enabled {
+			continue
+		}
+		if _, ok := gr[m.Name]; !ok {
+			gr[m.Name] = 1 // 占位倍率（无折扣）；实际倍率由模型分组管理页设定，此处只补缺不覆盖
+			changed = true
+		}
+		if _, ok := uug[m.Name]; !ok {
+			label := strings.TrimSpace(m.Description)
+			if label == "" {
+				label = m.Name
+			}
+			uug[m.Name] = label
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	grJSON, err := json.Marshal(gr)
+	if err != nil {
+		return err
+	}
+	uugJSON, err := json.Marshal(uug)
+	if err != nil {
+		return err
+	}
+	return model.UpdateOptionsBulk(map[string]string{
+		"GroupRatio":       string(grJSON),
+		"UserUsableGroups": string(uugJSON),
+	})
+}
+
 // ============================================================================
 // 辅助
 // ============================================================================
