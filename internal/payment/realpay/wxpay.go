@@ -81,7 +81,7 @@ func (a *wxpayAdapter) createPay(ctx context.Context, orderNo, subject string, a
 	if totalFen <= 0 {
 		return "", fmt.Errorf("wxpay: invalid amount %.2f", amountCNY)
 	}
-	resp, _, err := a.svc.Prepay(ctx, native.PrepayRequest{
+	req := native.PrepayRequest{
 		Appid:       core.String(a.appID),
 		Mchid:       core.String(a.mchID),
 		Description: core.String(subject),
@@ -91,7 +91,19 @@ func (a *wxpayAdapter) createPay(ctx context.Context, orderNo, subject string, a
 			Total:    core.Int64(totalFen),
 			Currency: core.String("CNY"),
 		},
-	})
+	}
+	// 跨境到微信 API 间歇性慢 → 对幂等的 Native 下单做短超时重试（同 out_trade_no 返回同 code_url，
+	// 重试不会重复下单/扣款）。把「偶发单次 30s 卡死」变成「快速重试后成功」。见 retry.go。
+	var resp *native.PrepayResponse
+	err := retryTransientPay(ctx, payCreateAttempts, payCreatePerTry, payCreateRetryDelay,
+		func(tryCtx context.Context) error {
+			r, _, e := a.svc.Prepay(tryCtx, req)
+			if e != nil {
+				return e
+			}
+			resp = r
+			return nil
+		})
 	if err != nil {
 		return "", fmt.Errorf("wxpay prepay: %w", err)
 	}

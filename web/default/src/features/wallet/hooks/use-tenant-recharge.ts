@@ -165,8 +165,14 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
         }
         window.location.href = url
         return true
-      } catch (_error) {
-        toast.error(i18next.t('Payment request failed'))
+      } catch {
+        // 仅传输层失败 / 后端 5xx（含跨境微信下单超时、后端重试耗尽）会到这里；业务错误走上面
+        // !isApiSuccess 分支。给出可操作的友好提示，按钮随 finally 恢复可点，用户可直接重试。
+        toast.error(
+          i18next.t('Payment service busy, please retry', {
+            defaultValue: '支付服务网络繁忙，请稍后重试',
+          })
+        )
         return false
       } finally {
         setSubmitting(null)

@@ -266,6 +266,8 @@ export async function createTenantRecharge(
 ): Promise<TenantRechargeResponse> {
   const res = await api.post('/api/tenant/wallet/recharge', request, {
     skipBusinessError: true,
+    // 后端对跨境微信下单已做短超时重试(最多 ~25s)；前端给 30s 上限，避免网络卡顿时无限等待。
+    timeout: 30000,
   } as Record<string, unknown>)
   return res.data
 }
