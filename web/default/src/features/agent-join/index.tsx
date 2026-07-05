@@ -70,14 +70,11 @@ import { HeroIllustration } from './hero-illustration'
  * - The original "成功案例" testimonials were fabricated income claims; per
  *   product decision they are replaced by a factual "三重收益" band describing
  *   the real revenue streams (充值差价 / 消耗分润 / 成本保护).
- * - The commission rules (系统抽成 10%、售价须 ≥ 成本 1.11 倍) are kept and drive
- *   the interactive earnings calculator.
+ * - Commission model（doc/finance-model-report-v3.md）：套餐分成 = 售价 − 底价（购买即得、平台抽成 0）
+ *   + API 消耗分成 = 基准消耗额 ×（用户倍率 − 底价倍率）（消耗即得），两条合计为代理总利润、均立即可提现。
  */
 
-/** 系统抽成比例（占位默认值，与对标页一致；后端固化后可下沉为配置）。 */
-const COMMISSION_RATE = 0.1
-/** 成本保护线：代理设置的售价必须高于成本的倍数。 */
-const MIN_MARKUP = 1.11
+/** 平台抽成比例：现阶段为 0，并将长期为 0（套餐分成 = 售价 − 成本，全额归代理）。 */
 
 /** 代理合作方案卡片的统一展示形状（静态兜底与后端动态代理套餐共用）。 */
 type PlanCard = {
@@ -94,51 +91,63 @@ type PlanCard = {
 
 function EarningsCalculator() {
   const { t } = useTranslation()
-  const [price, setPrice] = useState('100')
-  const [cost, setCost] = useState('70')
-  const [orders, setOrders] = useState('50')
+  // 金流 A · 套餐分成（购买即得差价，见 doc/finance-model-report-v3.md）
+  const [pkgPrice, setPkgPrice] = useState('100')
+  const [pkgCost, setPkgCost] = useState('70')
+  const [pkgCount, setPkgCount] = useState('50')
+  // 金流 B · API 消耗分成（消耗即得倍率差 = ratio_markup）
+  const [baseCost, setBaseCost] = useState('1000')
+  const [userRate, setUserRate] = useState('1.5')
+  const [bottomRate, setBottomRate] = useState('1')
 
-  const priceNum = Number.parseFloat(price) || 0
-  const costNum = Number.parseFloat(cost) || 0
-  const ordersNum = Number.parseFloat(orders) || 0
+  const num = (s: string) => Number.parseFloat(s) || 0
 
-  const { perOrder, monthly, belowFloor, ready } = useMemo(() => {
-    const hasInput = priceNum > 0 && costNum > 0
-    const below = hasInput && priceNum < costNum * MIN_MARKUP
-    const profit = Math.max(0, priceNum - costNum) * (1 - COMMISSION_RATE)
-    return {
-      perOrder: profit,
-      monthly: profit * ordersNum,
-      belowFloor: below,
-      ready: hasInput && !below,
-    }
-  }, [priceNum, costNum, ordersNum])
+  const { pkgProfit, apiProfit, total } = useMemo(() => {
+    // 套餐分成 =（售价 − 底价）× 套餐数（购买时一次性，平台抽成 0）。
+    const pkg = Math.max(0, num(pkgPrice) - num(pkgCost)) * num(pkgCount)
+    // API 消耗分成 = 基准消耗额 ×（你给用户的倍率 − 平台给你的底价倍率）。
+    // 对齐 consume_markup.go：markup = rawUnits ×（chargedGroupRatio − bottomRatio），倍率倒挂时为 0。
+    const api = Math.max(0, num(baseCost) * (num(userRate) - num(bottomRate)))
+    return { pkgProfit: pkg, apiProfit: api, total: pkg + api }
+  }, [pkgPrice, pkgCost, pkgCount, baseCost, userRate, bottomRate])
 
   const fmt = (n: number) =>
     n.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
 
-  const fields = [
-    {
-      id: 'price',
-      label: t('Agent Join Calc Price', { defaultValue: '用户充值售价（元）' }),
-      value: price,
-      onChange: setPrice,
-    },
-    {
-      id: 'cost',
-      label: t('Agent Join Calc Cost', { defaultValue: '您的进货成本（元）' }),
-      value: cost,
-      onChange: setCost,
-    },
-    {
-      id: 'orders',
-      label: t('Agent Join Calc Orders', {
-        defaultValue: '预计月销售笔数',
-      }),
-      value: orders,
-      onChange: setOrders,
-    },
+  const pkgFields = [
+    { id: 'pkgPrice', label: t('Agent Join Calc Pkg Price', { defaultValue: '套餐售价（元）' }), value: pkgPrice, onChange: setPkgPrice },
+    { id: 'pkgCost', label: t('Agent Join Calc Pkg Cost', { defaultValue: '你的底价 / 进货成本（元）' }), value: pkgCost, onChange: setPkgCost },
+    { id: 'pkgCount', label: t('Agent Join Calc Pkg Count', { defaultValue: '月售套餐数' }), value: pkgCount, onChange: setPkgCount },
   ]
+  const apiFields = [
+    { id: 'baseCost', label: t('Agent Join Calc Api Base', { defaultValue: '月基准消耗额（元 · 按上游成本计）' }), value: baseCost, onChange: setBaseCost },
+    { id: 'userRate', label: t('Agent Join Calc Api User Rate', { defaultValue: '你给用户的倍率' }), value: userRate, onChange: setUserRate },
+    { id: 'bottomRate', label: t('Agent Join Calc Api Bottom Rate', { defaultValue: '平台给你的底价倍率' }), value: bottomRate, onChange: setBottomRate },
+  ]
+  const renderField = (field: {
+    id: string
+    label: string
+    value: string
+    onChange: (v: string) => void
+  }) => (
+    <div key={field.id} className='space-y-1.5'>
+      <label
+        htmlFor={field.id}
+        className='text-muted-foreground text-xs font-medium'
+      >
+        {field.label}
+      </label>
+      <Input
+        id={field.id}
+        type='number'
+        inputMode='decimal'
+        min={0}
+        className='h-10'
+        value={field.value}
+        onChange={(e) => field.onChange(e.target.value)}
+      />
+    </div>
+  )
 
   return (
     <Card className='border-primary/20 h-full'>
@@ -151,63 +160,54 @@ function EarningsCalculator() {
         </CardTitle>
         <CardDescription>
           {t('Agent Join Calc Desc', {
-            defaultValue: '输入售价与成本，实时估算您的分成收益。',
+            defaultValue: '估算套餐分成 + API 消耗分成，实时预览总收益。',
           })}
         </CardDescription>
       </CardHeader>
       <CardContent className='space-y-4'>
-        <div className='space-y-3'>
-          {fields.map((field) => (
-            <div key={field.id} className='space-y-1.5'>
-              <label
-                htmlFor={field.id}
-                className='text-muted-foreground text-xs font-medium'
-              >
-                {field.label}
-              </label>
-              <Input
-                id={field.id}
-                type='number'
-                inputMode='decimal'
-                min={0}
-                className='h-10'
-                value={field.value}
-                onChange={(e) => field.onChange(e.target.value)}
-              />
-            </div>
-          ))}
+        <div className='space-y-2'>
+          <p className='text-primary text-xs font-semibold'>
+            {t('Agent Join Calc Pkg Group', { defaultValue: '套餐分成' })}
+          </p>
+          <div className='space-y-3'>{pkgFields.map(renderField)}</div>
+        </div>
+        <div className='space-y-2'>
+          <p className='text-primary text-xs font-semibold'>
+            {t('Agent Join Calc Api Group', { defaultValue: 'API 消耗分成' })}
+          </p>
+          <div className='space-y-3'>{apiFields.map(renderField)}</div>
         </div>
 
-        {belowFloor ? (
-          <p className='text-destructive bg-destructive/10 rounded-lg px-3 py-2 text-xs'>
-            {t('Agent Join Calc Floor Warning', {
-              defaultValue: '售价需高于成本的 1.11 倍，请调高售价。',
-            })}
-          </p>
-        ) : null}
-
-        <div className='border-border/60 grid grid-cols-2 gap-3 border-t pt-4'>
+        <div className='border-border/60 grid grid-cols-3 gap-3 border-t pt-4'>
           <div>
             <p className='text-muted-foreground text-xs'>
-              {t('Agent Join Calc Per Order', { defaultValue: '单笔分成' })}
+              {t('Agent Join Calc Pkg Profit', { defaultValue: '套餐分成' })}
             </p>
-            <p className='text-foreground mt-1 text-lg font-semibold'>
-              {ready ? `¥${fmt(perOrder)}` : '—'}
+            <p className='text-foreground mt-1 text-base font-semibold'>
+              ¥{fmt(pkgProfit)}
             </p>
           </div>
           <div>
             <p className='text-muted-foreground text-xs'>
-              {t('Agent Join Calc Monthly', { defaultValue: '预计月收益' })}
+              {t('Agent Join Calc Api Profit', { defaultValue: 'API 消耗分成' })}
             </p>
-            <p className='mt-1 bg-gradient-to-r from-blue-500 via-violet-500 to-purple-500 bg-clip-text text-lg font-semibold text-transparent'>
-              {ready ? `¥${fmt(monthly)}` : '—'}
+            <p className='text-foreground mt-1 text-base font-semibold'>
+              ¥{fmt(apiProfit)}
+            </p>
+          </div>
+          <div>
+            <p className='text-muted-foreground text-xs'>
+              {t('Agent Join Calc Total', { defaultValue: '月总利润' })}
+            </p>
+            <p className='mt-1 bg-gradient-to-r from-blue-500 via-violet-500 to-purple-500 bg-clip-text text-base font-semibold text-transparent'>
+              ¥{fmt(total)}
             </p>
           </div>
         </div>
         <p className='text-muted-foreground/70 text-[11px] leading-relaxed'>
           {t('Agent Join Calc Formula', {
             defaultValue:
-              '公式：（售价 − 成本价）×（1 − 抽成比例），系统抽成 10%。结果仅供估算。',
+              '套餐分成 =（售价 − 底价）× 套餐数；API 消耗分成 = 基准消耗额 ×（你的倍率 − 底价倍率）。平台抽成 0，结果仅供估算。',
           })}
         </p>
       </CardContent>
@@ -313,31 +313,31 @@ export function AgentJoin() {
     {
       icon: Coins,
       title: t('Agent Join Revenue Markup Title', {
-        defaultValue: '充值差价',
+        defaultValue: '套餐分成',
       }),
       desc: t('Agent Join Revenue Markup Desc', {
         defaultValue:
-          '自定义下级售价，用户充值时的售价与成本之差即时转入您的分成。',
+          '自定义下级套餐售价，用户购买套餐时，售价减去你的底价即时转入你的分成（购买即得、平台抽成 0）。',
       }),
     },
     {
       icon: TrendingUp,
       title: t('Agent Join Revenue Usage Title', {
-        defaultValue: '消耗分润',
+        defaultValue: 'API 消耗分成',
       }),
       desc: t('Agent Join Revenue Usage Desc', {
         defaultValue:
-          '下级用户每次调用模型产生用量分润，用得越多，您的持续收益越高。',
+          '下级用户消耗钱包余额调用模型时，按「你给用户的倍率 − 平台给你的底价倍率」实时分润，消耗越多收益越高。',
       }),
     },
     {
       icon: ShieldCheck,
       title: t('Agent Join Revenue Scale Title', {
-        defaultValue: '成本保护 · 规模效应',
+        defaultValue: '规模效应',
       }),
       desc: t('Agent Join Revenue Scale Desc', {
         defaultValue:
-          '内置成本保护线，杜绝亏本定价；一套上游渠道分发多模型，规模越大成本越低。',
+          '一套上游渠道分发多模型，下级用户越多、用量越大，你的单位成本越低、总收益越高。',
       }),
     },
   ]
@@ -394,15 +394,19 @@ export function AgentJoin() {
   // 代理规则
   const rules = [
     t('Agent Join Rule 1', {
-      defaultValue: '用户访问您的代理域名进行注册，即与您建立代理关系。',
+      defaultValue: '用户访问你的代理域名注册，即与你建立代理关系。',
     }),
     t('Agent Join Rule 2', {
-      defaultValue: '用户充值按照您设置的价格进行购买。',
+      defaultValue:
+        '套餐分成：用户购买套餐时，你的利润 = 售价 − 你的底价（进货成本），购买当时一次性入账、立即可提现。平台抽成 0%（现阶段并将长期为 0）。',
     }),
     t('Agent Join Rule 3', {
-      defaultValue: '系统自动扣除成本与抽成，其余转入您的分成金额。',
+      defaultValue:
+        'API 消耗分成：用户消耗钱包余额调用 API 时，你的利润 = 基准消耗额 ×（你给用户的倍率 − 平台给你的底价倍率），消耗时逐笔实时入账、立即可提现。',
     }),
-    t('Agent Join Rule 4', { defaultValue: '系统抽成 10%。' }),
+    t('Agent Join Rule 4', {
+      defaultValue: '你的总利润 = 套餐分成 + API 消耗分成，实时结算、可提现。',
+    }),
   ]
 
   // 代理合作方案 = 代理套餐（一次性 + 有效期）。真实数据来自公开只读端点
@@ -840,13 +844,13 @@ export function AgentJoin() {
                 <CardHeader>
                   <CardTitle>
                     {t('Agent Join Rules Card Title', {
-                      defaultValue: '分成方式 · 直接充值',
+                      defaultValue: '分成方式 · 套餐分成 + API 消耗分成',
                     })}
                   </CardTitle>
                   <CardDescription>
                     {t('Agent Join Rules Card Desc', {
                       defaultValue:
-                        '代理可以没有余额；代理设置的价格必须高于成本的 1.11 倍。',
+                        '代理可以没有余额；套餐与 API 消耗两条分成合并结算，平台抽成 0。',
                     })}
                   </CardDescription>
                 </CardHeader>
@@ -868,9 +872,10 @@ export function AgentJoin() {
                         defaultValue: '分成计算公式',
                       })}
                     </p>
-                    <p className='mt-1 font-mono text-sm'>
+                    <p className='mt-1 font-mono text-xs leading-relaxed break-words'>
                       {t('Agent Join Rules Formula', {
-                        defaultValue: '（售价 − 成本价）×（1 − 抽成比例）',
+                        defaultValue:
+                          '套餐分成 =（售价 − 底价）；API 消耗分成 = 基准消耗额 ×（你给用户的倍率 − 平台给你的底价倍率）；总利润 = 两者之和',
                       })}
                     </p>
                   </div>
