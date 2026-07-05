@@ -122,7 +122,7 @@ export function TenantRechargeCard({
   return (
     <div className='space-y-3 border-b pb-4 sm:pb-6'>
       <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
-        {t('Recharge (WeChat / Alipay)')}
+        {t('Recharge (WeChat / Alipay)', { defaultValue: '充值（微信 / 支付宝）' })}
       </Label>
 
       <div className='space-y-2'>
@@ -130,7 +130,10 @@ export function TenantRechargeCard({
           htmlFor='tenant-recharge-amount'
           className='text-muted-foreground text-xs'
         >
-          {t('Amount (USD), minimum ${{amount}}', { amount: MIN_RECHARGE_USD })}
+          {t('Amount (USD), minimum ${{amount}}', {
+            amount: MIN_RECHARGE_USD,
+            defaultValue: '金额（美元），最低 ${{amount}}',
+          })}
         </Label>
         <Input
           id='tenant-recharge-amount'
@@ -164,8 +167,12 @@ export function TenantRechargeCard({
         {belowMin
           ? t('Minimum recharge amount is ${{amount}}', {
               amount: MIN_RECHARGE_USD,
+              defaultValue: '最低充值金额为 ${{amount}}',
             })
-          : t('Recharge ${{amount}}', { amount: amountNum })}
+          : t('Recharge ${{amount}}', {
+              amount: amountNum,
+              defaultValue: '充值 ${{amount}}',
+            })}
       </Button>
 
       <RechargeQrDialog

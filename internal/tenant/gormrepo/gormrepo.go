@@ -307,7 +307,12 @@ func (r *Repo) TenantByOwner(ctx context.Context, ownerUserID int64) (*tenant.Te
 		return nil, tenant.ErrTenantNotFound
 	}
 	var row tenantRow
-	err := r.db.WithContext(ctx).Take(&row, "owner_user_id = ?", ownerUserID).Error
+	// 仅解析「非删除且非停用」租户：停用/删除的代理不得再凭 owner 反查通过代理鉴权（撤权即时生效）。
+	// 与购买链路 agentTenantByOwner 口径一致；owner 1:1 独占租户，ORDER BY id ASC 兜底歧义（安全审计 M2）。
+	err := r.db.WithContext(ctx).
+		Where("owner_user_id = ? AND status <> ? AND status <> ?",
+			ownerUserID, string(tenant.StatusDeleted), string(tenant.StatusSuspended)).
+		Order("id ASC").Limit(1).Take(&row).Error
 	return mapTenantResult(&row, err) // ErrRecordNotFound → tenant.ErrTenantNotFound
 }
 

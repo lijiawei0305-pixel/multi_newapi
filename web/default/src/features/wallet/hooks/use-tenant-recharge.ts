@@ -127,6 +127,7 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
         toast.error(
           i18next.t('Minimum recharge amount is ${{amount}}', {
             amount: MIN_RECHARGE_USD,
+            defaultValue: '最低充值金额为 ${{amount}}',
           })
         )
         return false

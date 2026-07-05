@@ -188,8 +188,9 @@ func TestActivateIdempotentSequential(t *testing.T) {
 	if s1.ID != s2.ID || s2.ID != s3.ID {
 		t.Fatalf("idempotent activation must return same instance: %d %d %d", s1.ID, s2.ID, s3.ID)
 	}
-	if earn.callCount() != 1 {
-		t.Fatalf("earning must be emitted exactly once across re-activations, got %d", earn.callCount())
+	// 多次重激活会多次调用 AddEarning（幂等、无 created 门控），但只落 1 条收益（idem_key 去重，安全审计 M1）。
+	if earn.count() != 1 {
+		t.Fatalf("re-activation must persist exactly 1 earning, got %d (calls=%d)", earn.count(), earn.callCount())
 	}
 }
 
@@ -261,12 +262,43 @@ func TestActivateIdempotentConcurrent(t *testing.T) {
 			t.Fatalf("instance divergence: ids[%d]=%d != ids[0]=%d", i, ids[i], ids[0])
 		}
 	}
-	if earn.callCount() != 1 {
-		t.Fatalf("exactly 1 earning across concurrent activations, got %d", earn.callCount())
+	// 并发多次调用 AddEarning（幂等），最终只落 1 条收益（idem_key 去重，安全审计 M1）。
+	if earn.count() != 1 {
+		t.Fatalf("exactly 1 earning across concurrent activations, got %d (calls=%d)", earn.count(), earn.callCount())
 	}
 	// 该用户只有 1 个 active 实例。
 	if a, _ := repo.GetActiveByUser(ctx, 11, epoch); a == nil || a.ID != ids[0] {
 		t.Fatalf("active sub mismatch: %+v", a)
+	}
+}
+
+// TestActivateEarningRetryAfterFailure 锁定安全审计 M1：ActivateFromOrder 成功、但首次 AddEarning
+// 失败后，二次激活（对账重驱动）必须仍能补记 tokenplan_spread 收益——不因 created=false 永久漏记。
+// 旧实现把 AddEarning 门控在 if created 内：重试时 created=false → 永久跳过 → 分润丢失（本用例复现并锁定修复）。
+func TestActivateEarningRetryAfterFailure(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _, _, earn := newSubService(newFakeClock(epoch))
+	order := purchaseAndActivate(t, ctx, svc, repo, 279) // 仅下单：retail 279 > cost 200 → spread>0
+
+	// 首次激活：注入 AddEarning 失败（订阅行已建 created=true，但收益事务失败）。
+	earn.setErr(errEarningInjected)
+	if _, err := svc.ActivateFromPayment(ctx, order); err == nil {
+		t.Fatal("expected earning failure to surface on first activation")
+	}
+	if earn.count() != 0 {
+		t.Fatalf("no earning must persist after failed activation, got %d", earn.count())
+	}
+
+	// 二次激活（对账重驱动）：AddEarning 恢复。旧代码 created=false → 永久跳过；修复后必须补记，恰好 1 条。
+	earn.setErr(nil)
+	if _, err := svc.ActivateFromPayment(ctx, order); err != nil {
+		t.Fatalf("retry activation must succeed: %v", err)
+	}
+	if earn.count() != 1 {
+		t.Fatalf("earning must be recovered on retry (M1), got %d", earn.count())
+	}
+	if e, ok := earn.last(); !ok || e.SourceID != order || e.SourceType != EarningTokenplanSpread {
+		t.Fatalf("recovered earning wrong: %+v", e)
 	}
 }
 

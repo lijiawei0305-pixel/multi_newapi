@@ -80,9 +80,22 @@ export function ResetPasswordConfirm({
         } else {
           toast.success(t('Password reset: {{password}}', { password }))
         }
+      } else {
+        // skipBusinessError 关闭了全局失败 toast：此处显式提示，避免 token 失效时静默无反馈（安全审计 M4）。
+        toast.error(
+          res?.data?.message ||
+            t('Password reset failed, the link may be invalid or expired', {
+              defaultValue: '重置失败，链接可能已失效或过期',
+            })
+        )
       }
     } catch {
-      // Errors handled by global interceptor
+      // 网络/HTTP 异常：skipBusinessError 下全局拦截器不弹提示，这里兜底。
+      toast.error(
+        t('Password reset failed, the link may be invalid or expired', {
+          defaultValue: '重置失败，链接可能已失效或过期',
+        })
+      )
     } finally {
       setLoading(false)
     }

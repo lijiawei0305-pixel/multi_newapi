@@ -2,6 +2,7 @@ package tokenplan
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -112,6 +113,9 @@ type fakeEarnings struct {
 
 func newFakeEarnings() *fakeEarnings { return &fakeEarnings{} }
 
+// errEarningInjected 供用例注入 AddEarning 失败（模拟瞬时 DB 错误），验证重试补记（安全审计 M1）。
+var errEarningInjected = errors.New("fakeEarnings: injected failure")
+
 func (e *fakeEarnings) AddEarning(_ context.Context, en EarningEntry) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -119,8 +123,22 @@ func (e *fakeEarnings) AddEarning(_ context.Context, en EarningEntry) error {
 	if e.err != nil {
 		return e.err
 	}
+	// 模型化真实 EarningSink 的幂等（agent_earning_logs.idem_key UNIQUE(tenant,source_type,source_id)
+	// + ON CONFLICT DO NOTHING）：同 (SourceType, SourceID) 只落一条，多次调用不重复记账。
+	for _, x := range e.entries {
+		if x.SourceType == en.SourceType && x.SourceID == en.SourceID {
+			return nil
+		}
+	}
 	e.entries = append(e.entries, en)
 	return nil
+}
+
+// setErr 注入/清除后续 AddEarning 的失败（并发安全）。
+func (e *fakeEarnings) setErr(err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.err = err
 }
 
 func (e *fakeEarnings) count() int {

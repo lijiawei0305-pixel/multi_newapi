@@ -136,18 +136,20 @@ func (s *subscriptionService) ActivateFromPayment(ctx context.Context, orderID s
 	if err != nil {
 		return nil, err
 	}
-	if created {
-		if spread := tokenplanSpread(pp.RetailPrice, pp.AgentCostPrice); spread > 0 {
-			if err := s.earnings.AddEarning(ctx, EarningEntry{
-				TenantID:   pp.TenantID,
-				UserID:     pp.UserID,
-				SourceType: EarningTokenplanSpread,
-				SourceID:   orderID,
-				Amount:     spread,
-				Reference:  orderID,
-			}); err != nil {
-				return nil, err
-			}
+	// 分润不再以 created 门控：AddEarning 幂等（idem_key UNIQUE(tenant,source_type,source_id)），
+	// 每次重试都调用安全、最终会补记 —— 修复「首次 AddEarning 事务失败后，对账重驱动因 created=false
+	// 永久跳过、订单随后被置 settled 关闭 → 代理差价永久漏记」的缺陷（安全审计 M1）。
+	_ = created
+	if spread := tokenplanSpread(pp.RetailPrice, pp.AgentCostPrice); spread > 0 {
+		if err := s.earnings.AddEarning(ctx, EarningEntry{
+			TenantID:   pp.TenantID,
+			UserID:     pp.UserID,
+			SourceType: EarningTokenplanSpread,
+			SourceID:   orderID,
+			Amount:     spread,
+			Reference:  orderID,
+		}); err != nil {
+			return nil, err
 		}
 	}
 	return sub, nil

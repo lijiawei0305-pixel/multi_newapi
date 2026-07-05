@@ -55,14 +55,19 @@ export function RechargeQrDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className='sm:max-w-sm'>
         <DialogHeader>
-          <DialogTitle>{t('Scan to pay with WeChat')}</DialogTitle>
+          <DialogTitle>
+            {t('Scan to pay with WeChat', { defaultValue: '请扫码支付' })}
+          </DialogTitle>
           <DialogDescription>
             {amountUsd != null
               ? t('Recharge ${{usd}} (pay ¥{{cny}})', {
                   usd: amountUsd,
                   cny: amountCny,
+                  defaultValue: '充值 ${{usd}}（支付 ¥{{cny}}）',
                 })
-              : t('Scan the QR code with WeChat to complete payment.')}
+              : t('Scan the QR code with WeChat to complete payment.', {
+                  defaultValue: '请扫描二维码完成支付。',
+                })}
           </DialogDescription>
         </DialogHeader>
 
@@ -80,7 +85,7 @@ export function RechargeQrDialog({
 
           {orderNo ? (
             <p className='text-muted-foreground text-center text-xs'>
-              {t('Order')}: <code>{orderNo}</code>
+              {t('Order', { defaultValue: '订单号' })}: <code>{orderNo}</code>
             </p>
           ) : null}
 
@@ -93,7 +98,9 @@ export function RechargeQrDialog({
               data-testid='pay-qr-link'
               className='text-xs underline underline-offset-4'
             >
-              {t('Trouble scanning? Open the payment page')}
+              {t('Trouble scanning? Open the payment page', {
+                defaultValue: '扫码有问题？打开支付页面',
+              })}
             </a>
           ) : null}
         </div>

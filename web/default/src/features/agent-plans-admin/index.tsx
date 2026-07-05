@@ -246,7 +246,7 @@ export function AgentPlansAdmin() {
               </CardHeader>
               <CardContent className='space-y-4'>
                 <div className='grid gap-3 sm:grid-cols-2'>
-                  <Field label='Code'>
+                  <Field label={t('Code', { defaultValue: '套餐标识' })}>
                     <Input
                       value={form.code}
                       onChange={(e) => set('code', e.target.value)}

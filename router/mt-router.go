@@ -247,8 +247,9 @@ func SetMtRouter(router *gin.Engine) {
 		adminCustomDomainGroup.DELETE("/:id", app.HandleAdminUnbindCustomDomain)
 	}
 
-	// 主站违禁词审核（6e · §2.14）：全站基础库（tenant_id=0）词库 CRUD + 违规日志（当前 Host 租户）。
-	// 前置 TenantMiddleware（违规日志按 Host 租户隔离）+ new-api AdminAuth。
+	// 主站违禁词审核（6e · §2.14）：全站基础库（tenant_id=0）词库 CRUD + 违规日志（主站统一管控，跨全租户）。
+	// 前置 TenantMiddleware（供词库 tenant 上下文）+ new-api AdminAuth。违规日志由 super-admin 跨租户查看
+	// （HandleAdminListViolations 恒传 -1=全租户），与财报/工单的跨租户 admin 视图一致，仅全局管理员可达。
 	adminModerationGroup := router.Group("/api/admin/moderation")
 	adminModerationGroup.Use(app.TenantMiddleware(), middleware.AdminAuth())
 	{

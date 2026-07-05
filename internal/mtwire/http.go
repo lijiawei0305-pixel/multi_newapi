@@ -572,15 +572,13 @@ func (a *App) HandleAdminListSubscriptions(c *gin.Context) {
 		subs []tokenplan.Subscription
 		err  error
 	)
-	if tenant.IsMainSiteHost(c.Request.Host) {
-		subs, err = a.TokenPlanRepo.ListAllSubscriptions(ctx, time.Now())
-	} else {
-		t := tenantFrom(c)
-		if t == nil {
-			respondErr(c, tenant.ErrTenantNotFound)
-			return
-		}
+	// 按「已解析出的租户」判隔离，而非 Host 串：IsMainSiteHost 对自定义域名恒为 true，会把代理 OEM
+	// 域名误判成主站 → 返回全租户订阅（泄漏，安全审计 L3）。TenantMiddleware 命中租户（子域名/自定义
+	// 域名）→ 隔离到本租户；未命中（主站 apex/www）→ tenantFrom 为 nil → 管理员看全平台（与既有一致）。
+	if t := tenantFrom(c); t != nil {
 		subs, err = a.TokenPlanRepo.ListSubscriptionsByTenant(ctx, t.ID, time.Now())
+	} else {
+		subs, err = a.TokenPlanRepo.ListAllSubscriptions(ctx, time.Now())
 	}
 	if err != nil {
 		respondErr(c, err)
