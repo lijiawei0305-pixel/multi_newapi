@@ -2394,6 +2394,7 @@ window.__bulb3d = {
 try {
   initBulb3D();
 } catch (err) {
+  document.body.classList.remove('webgl3d');   /* 若在加类后才失败，摘除以恢复 PNG 回退 */
   console.warn('bulb3d 回退为 PNG 灯泡：', err && err.message);
   /* 不加 body.webgl3d → 原 #halo + #bulb 照常呈现，两段式交互不受影响 */
 }

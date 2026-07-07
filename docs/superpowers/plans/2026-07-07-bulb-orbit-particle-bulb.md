@@ -622,6 +622,7 @@ cd /Users/cc/newapi628/bulb-orbit
 - 对照 scratchpad `yun/hero-logo-satellite-final.png`：粒子灯泡形象（点阵质感、青蓝配色、发光底座、泛光柔度）还原到位；
 - 对照 git 里旧版阶段 2 图（`git show HEAD~3:bulb-orbit/... > /tmp` 不可用——旧图未入库，用 Task 2 留存的对读结论即可）：布局/文字/芯片无回归。
 - 核对设计 §9 验收表逐条通过（断网双击项：成品无任何网络引用，`grep -c "https://" bulb-orbit/index.html` 期望 0——SVG 命名空间 `http://www.w3.org/2000/svg` 不算，检查仅 `https://`）。
+（修正 2026-07-07：实测该计数为 5，全为 vendored three.js 注释内的文档链接——惰性字符串、非运行时引用；有效检查应匹配可执行引用：`grep -cE '<script[^>]+src=|<link[^>]+href="http|@import|url\(http' bulb-orbit/index.html` 期望 0，实测 0。发现者：Task 4 实现者 + 终审。）
 
 - [ ] **Step 3: 更新 `bulb-orbit/交互修改文档.md`**
 
