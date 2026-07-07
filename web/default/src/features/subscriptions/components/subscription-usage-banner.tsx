@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useReducer } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
@@ -12,7 +12,7 @@ import { computeUsageAlert } from '../lib/usage-alert'
 export function SubscriptionUsageBanner() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [dismissed, setDismissed] = useState(false) // 关闭后立即隐藏（本次会话内）
+  const [, forceUpdate] = useReducer((n: number) => n + 1, 0) // 关闭后强制重渲染，重读 localStorage 判据
   const { data } = useQuery({
     queryKey: ['self-subscription-full'],
     queryFn: getSelfSubscriptionFull,
@@ -23,7 +23,6 @@ export function SubscriptionUsageBanner() {
   // 满额提醒只看当前生效中的订阅列表（subscriptions），过期/已取消的不计入。
   const alert = computeUsageAlert(data?.data?.subscriptions)
   if (alert.level === 'none') return null
-  if (dismissed) return null
 
   const dismissKey = `subUsageDismiss:${alert.subscriptionId}:${alert.level}`
   if (typeof localStorage !== 'undefined' && localStorage.getItem(dismissKey)) {
@@ -39,7 +38,7 @@ export function SubscriptionUsageBanner() {
     } catch {
       /* localStorage 不可用则仅本次隐藏 */
     }
-    setDismissed(true)
+    forceUpdate()
   }
 
   return (
