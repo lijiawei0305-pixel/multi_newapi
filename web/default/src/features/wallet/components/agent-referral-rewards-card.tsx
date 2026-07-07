@@ -101,8 +101,10 @@ export function AgentReferralRewardsCard() {
     0
   )
 
-  // 被邀请消费/套餐 + 返现(finance summary 概览)；累计口径取很宽的区间。
-  const [range] = useState<RangeParams>(() => computeTimeRange(3650))
+  // 被邀请消费/套餐 + 返现(finance summary 概览)。区间取近 365 天——后端
+  // parseTimeRange 对区间跨度有 366 天上限(超出→STATS_RANGE_INVALID「统计范围非法」,
+  // 2026-07-07 首个真实 L0 踩雷),不能用"很宽的区间"表达累计。
+  const [range] = useState<RangeParams>(() => computeTimeRange(365))
   const financeQuery = useQuery({
     queryKey: ['tenant-finance-summary', range],
     queryFn: () => getTenantFinanceSummary(range),
@@ -212,9 +214,12 @@ export function AgentReferralRewardsCard() {
           <Stat label='邀请总人数' value={String(invitedCount)} />
           <Stat label='被邀请 API 消费' value={cny(apiConsumption)} />
           <Stat label='被邀请套餐购买' value={cny(planPurchase)} />
-          <Stat label='累计返现' value={cny(totalRebate)} />
+          <Stat label='返现' value={cny(totalRebate)} />
           <Stat label='可提现' value={cny(withdrawable)} emphasis />
         </div>
+        <p className='text-muted-foreground mt-2 text-xs'>
+          消费、购买与返现为近 365 天统计;邀请人数与可提现为累计值。
+        </p>
 
         {/* 收款账户 + 提现 */}
         <div className='mt-4 flex flex-col gap-3'>

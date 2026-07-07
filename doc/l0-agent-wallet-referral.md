@@ -33,6 +33,7 @@
 - 邀请总人数 = 经邀请渠道注册数之和(L0 通常即下级用户数)。
 - 被邀请消费 = `apikey_consumption_cny`(纯钱包 API 消费,不含套餐);被邀请套餐 = `tokenplan_revenue_cny`(下级为套餐支付总额)。
 - 总返现 = 消耗返现(`consumption_withdrawable_cny`)+ 套餐返现(`tokenplan_withdrawable_cny`);可提现 = 代理钱包总可提现 `withdrawable_cny`。
+- **统计窗口(2026-07-07 修正)**:消费/购买/返现三项取**近 365 天**——后端 `parseTimeRange` 区间上限 366 天,超出报 `STATS_RANGE_INVALID`「统计范围非法」(首个真实 L0 jia 踩雷,原实现传了 3650 天)。邀请人数(channels 累加)与可提现(钱包状态)为累计值,面板已加口径注脚。
 
 ## 五、落地
 
