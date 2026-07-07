@@ -429,10 +429,11 @@ function initBulb3D() {
   composer.addPass(new OutputPass());
   composer.addPass(new ShaderPass(AlphaFromLumaShader));
 
+  document.body.classList.add('webgl3d');            /* 先加类使 #bulb3d display:block，clientWidth 才可量（修正 2026-07-07） */
   onResize3D();
   addEventListener('resize', onResize3D);
-  document.body.classList.add('webgl3d');
   window.__bulb3dActive = true;
+  /* （修正 2026-07-07：原稿先 onResize3D 后加 webgl3d 类，canvas display:none 时 clientWidth=0 → 渲染缓冲区 0×0 且 PNG 已被隐藏；实施时已改为先加类再量尺。发现者：Task 2 实现者。） */
 
   if (PRM) renderTick(FROZEN_T, 0.016);              /* 静态一帧，不进循环 */
   else requestAnimationFrame(loop3d);

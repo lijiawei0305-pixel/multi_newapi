@@ -2315,9 +2315,9 @@ function initBulb3D() {
   composer.addPass(new OutputPass());
   composer.addPass(new ShaderPass(AlphaFromLumaShader));
 
+  document.body.classList.add('webgl3d');            /* 先加类使 #bulb3d display:block，clientWidth 才可量（修正 2026-07-07） */
   onResize3D();
   addEventListener('resize', onResize3D);
-  document.body.classList.add('webgl3d');
   window.__bulb3dActive = true;
 
   if (PRM) renderTick(FROZEN_T, 0.016);              /* 静态一帧，不进循环 */
