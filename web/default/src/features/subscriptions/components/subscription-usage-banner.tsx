@@ -6,27 +6,29 @@ import { AlertTriangle, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { getSelfSubscriptions } from '../api'
+import { getSelfSubscriptionFull } from '../api'
 import { computeUsageAlert } from '../lib/usage-alert'
 
 export function SubscriptionUsageBanner() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [dismissedTick, setDismissedTick] = useState(0) // 触发重渲染
+  const [dismissed, setDismissed] = useState(false) // 关闭后立即隐藏（本次会话内）
   const { data } = useQuery({
-    queryKey: ['self-subscriptions'],
-    queryFn: getSelfSubscriptions,
+    queryKey: ['self-subscription-full'],
+    queryFn: getSelfSubscriptionFull,
     staleTime: 60_000, // 每页挂载共享缓存，避免频繁重拉
   })
 
-  const alert = computeUsageAlert(data?.data)
+  // /api/subscription/self 返回的是对象 { subscriptions, all_subscriptions, ... }，
+  // 满额提醒只看当前生效中的订阅列表（subscriptions），过期/已取消的不计入。
+  const alert = computeUsageAlert(data?.data?.subscriptions)
   if (alert.level === 'none') return null
+  if (dismissed) return null
 
   const dismissKey = `subUsageDismiss:${alert.subscriptionId}:${alert.level}`
   if (typeof localStorage !== 'undefined' && localStorage.getItem(dismissKey)) {
     return null
   }
-  void dismissedTick // 关闭后 state 变化触发重渲染 → 上面 localStorage 命中 → 隐藏
 
   const pct = Math.round(alert.ratio * 100)
   const exhausted = alert.level === 'exhausted'
@@ -37,7 +39,7 @@ export function SubscriptionUsageBanner() {
     } catch {
       /* localStorage 不可用则仅本次隐藏 */
     }
-    setDismissedTick((n) => n + 1)
+    setDismissed(true)
   }
 
   return (
@@ -46,7 +48,7 @@ export function SubscriptionUsageBanner() {
       className={cn(
         'flex items-center gap-3 rounded-none border-x-0 border-t-0',
         !exhausted &&
-          'border-yellow-500/50 text-yellow-800 dark:text-yellow-300 [&>svg]:text-yellow-600'
+          'border-yellow-500/50 text-yellow-800 dark:text-yellow-300 [&>svg]:text-yellow-600 *:data-[slot=alert-description]:text-yellow-800 dark:*:data-[slot=alert-description]:text-yellow-300'
       )}
     >
       <AlertTriangle className='h-4 w-4 shrink-0' />
