@@ -2359,6 +2359,34 @@ function renderTick(t, dt) {
   composer.render();
 }
 
+/* ---------- 交互：排斥场坐标 + 核心喷发触发（捕获段先于主脚本 ignite 读取 pre 状态） ---------- */
+addEventListener('mousemove', e => {
+  const r = canvas3d.getBoundingClientRect();
+  mouseNDC.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+  mouseNDC.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+  /* 稍溢出画布仍算在场内，排斥的高斯衰减自然收尾；远离后 renderTick 缓释回流 */
+  pointerInCanvas = Math.abs(mouseNDC.x) < 1.15 && Math.abs(mouseNDC.y) < 1.15;
+});
+document.addEventListener('mouseleave', () => { pointerInCanvas = false; });
+
+function surge() {
+  if (!PRM && window.__bulb3dActive) surgeT0 = performance.now() / 1000;
+}
+addEventListener('pointerdown', e => {
+  if (!window.__bulb3dActive) return;
+  if (document.body.classList.contains('pre')) { surge(); return; }   /* 点亮瞬间：3D 版迸发 */
+  const r = canvas3d.getBoundingClientRect();
+  const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
+  const ny = -((e.clientY - r.top) / r.height) * 2 + 1;
+  if (nx * nx + ny * ny < 0.55 * 0.55) surge();                        /* lit：点灯泡区域重放 */
+}, true);
+
+window.__bulb3d = {
+  surge,
+  get surgeT0() { return surgeT0; },
+  get repel() { return particleMaterial ? particleMaterial.uniforms.uRepelStrength.value : -1; }
+};
+
 try {
   initBulb3D();
 } catch (err) {
