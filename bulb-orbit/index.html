@@ -89,9 +89,17 @@
     user-select:none; -webkit-user-drag:none;
     filter:drop-shadow(0 0 24px rgba(70,170,255,.35));
   }
+  #bulb3d {   /* 3D 粒子灯泡画布：占原 #halo/#bulb 层位，方形、居中于 --cy，事件全穿透 */
+    position:absolute; left:50%; top:var(--cy); z-index:6; pointer-events:none;
+    width:var(--b3d); height:var(--b3d);
+    margin:calc(var(--b3d) / -2) 0 0 calc(var(--b3d) / -2);
+    display:none;
+  }
+  body.webgl3d #bulb3d { display:block; }
+  body.webgl3d #halo, body.webgl3d #bulb { display:none; }   /* WebGL 就绪后 PNG 灯泡退场（仍作回退保留） */
 
   /* ---------- glass logo badges ---------- */
-  :root { --chip:56px; --cy:57%; }   /* --cy must match CY in the JS layout */
+  :root { --chip:56px; --cy:57%; --b3d:min(73.1vh, 98.6vw); }   /* --cy must match CY in the JS layout; --b3d = 1.7×灯泡高 */
   .chip {
     position:absolute; left:50%; top:var(--cy);
     width:var(--chip); height:var(--chip);
@@ -239,6 +247,7 @@
 
   <div id="halo"></div>
   <img id="bulb" src="bulb.png" alt="" draggable="false">
+  <canvas id="bulb3d"></canvas>
   <div id="vignette"></div>
   <div id="hint" aria-hidden="true">点 击 点 亮</div>
 
@@ -2109,7 +2118,253 @@ const DENGPAO_B64_CHUNKS=[
 window.__bulbDataB64Len=1280000;
 
 /* ===== BULB3D-DATA-END ===== */
-/* ===== BULB3D-CODE：3D 灯泡装配（手写区，Task 2/3 实现） ===== */
+/* ===== BULB3D-CODE：3D 灯泡装配（手写区；源自 wei500L/yun src/main.js，参数原样） ===== */
+const PRM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const FROZEN_T = 12.0;                               /* reduced-motion 的静态时刻（秒） */
+const canvas3d = document.getElementById('bulb3d');
+
+const bulbVertexShader = `
+  uniform float uTime;
+  uniform float uSize;
+  uniform vec3 uMouseOrigin;
+  uniform vec3 uMouseDir;
+  uniform float uRepelStrength;
+  uniform float uRepelRadius;
+  uniform float uRepelPower;
+  attribute vec3 aNormal;
+  attribute float aRandom;
+  varying vec3 vColor;
+  void main() {
+    float breathingOffset = sin(uTime * 1.1 + aRandom * 6.28318) * 0.006;
+    vec3 noiseOffset = vec3(
+      sin(uTime * 0.5 + aRandom * 25.0),
+      cos(uTime * 0.7 + aRandom * 30.0),
+      sin(uTime * 0.9 + aRandom * 35.0)
+    ) * 0.002;
+    vec3 finalPos = position + aNormal * breathingOffset + noiseOffset;
+    float breath = 1.0 + sin(uTime * 0.7) * 0.012;
+    finalPos *= breath;
+    vec3 worldPos = (modelMatrix * vec4(finalPos, 1.0)).xyz;
+    vec3 toParticle = worldPos - uMouseOrigin;
+    vec3 closest = uMouseOrigin + uMouseDir * dot(toParticle, uMouseDir);
+    vec3 away = worldPos - closest;
+    float rayDist = length(away);
+    float force = uRepelStrength * exp(-(rayDist * rayDist) / (uRepelRadius * uRepelRadius));
+    vec3 pushDir = rayDist > 0.0001 ? away / rayDist : aNormal;
+    worldPos += pushDir * force * uRepelPower * (0.75 + 0.5 * aRandom);
+    float radialDist = length(position.xz);
+    vec3 coreColor = vec3(0.85, 0.94, 1.0);
+    vec3 edgeColor = vec3(0.0, 0.65, 1.0);
+    vColor = mix(coreColor, edgeColor, smoothstep(0.06, 0.35, radialDist));
+    vColor = mix(vColor, vec3(0.75, 0.95, 1.0), force * 0.6);
+    vec4 mvPosition = viewMatrix * vec4(worldPos, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+    float twinkle = 0.7 + 0.3 * sin(uTime * (1.6 + aRandom * 2.2) + aRandom * 6.28318);
+    gl_PointSize = uSize * (300.0 / -mvPosition.z) * twinkle;
+  }
+`;
+const bulbFragmentShader = `
+  varying vec3 vColor;
+  void main() {
+    float dist = length(gl_PointCoord - vec2(0.5));
+    if (dist > 0.5) discard;
+    float alpha = smoothstep(0.5, 0.06, dist);
+    float core = smoothstep(0.12, 0.0, dist) * 0.6;
+    vec3 finalColor = mix(vColor, vec3(1.0), core * 0.4);
+    gl_FragColor = vec4(finalColor, (alpha * 0.45 + core * 0.15) * 0.75);
+  }
+`;
+/* 透明画布 × Bloom 的合成：末端把 alpha 置为 max(r,g,b)。深色页面底下与加法发光等效，
+   且保证 rgb ≤ alpha（预乘合成合法），泛光延伸区不再因 alpha=0 而丢失。 */
+const AlphaFromLumaShader = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: `varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      gl_FragColor = vec4(c.rgb, clamp(max(c.r, max(c.g, c.b)), 0.0, 1.0));
+    }`
+};
+
+function decodeDengpao() {
+  const b64 = DENGPAO_B64_CHUNKS.join('');
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const f = new Float32Array(bytes.buffer);
+  if (f.length !== 240000) throw new Error('dengpao 数据长度异常: ' + f.length);
+  return f;                                          /* 40000 × (pos.xyz + normal.xyz) */
+}
+
+function createGlowTexture(colorHex) {               /* yun createGlowSpriteTexture 原样 */
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, colorHex);
+  grad.addColorStop(0.2, colorHex);
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+  return new CanvasTexture(c);
+}
+
+let renderer, scene, camera, composer, root, particleMaterial, glowSprite, filament, pointLight;
+let surgeT0 = -1e9;                                  /* 核心喷发起点（秒）；Task 3 写入 */
+const mouseNDC = new Vector2(0, 0);                  /* 画布局部 NDC；Task 3 写入 */
+let pointerInCanvas = false;                         /* Task 3 写入 */
+const cursorRayDir = new Vector3(0, 0, -1);
+
+function initBulb3D() {
+  if (/nowebgl/i.test(location.search)) throw new Error('forced no-webgl (test hook)');
+  const f = decodeDengpao();
+
+  renderer = new WebGLRenderer({ canvas: canvas3d, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.toneMapping = ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.setClearColor(0x000000, 0);
+
+  scene = new Scene();                               /* 无雾无背景：透明画布 */
+  camera = new PerspectiveCamera(45, 1, 0.1, 100);   /* 方形画布，aspect 恒 1 */
+  camera.position.set(0, 0, 4.6);
+
+  scene.add(new AmbientLight('#040d20', 1.5));
+  pointLight = new PointLight('#00f0ff', 1.5, 8);
+  pointLight.position.set(0, 0.14, 1.2);
+  scene.add(pointLight);
+
+  root = new Group();                                /* 点云+装配同组：整体自旋/重定中心 */
+  scene.add(root);
+
+  const positions = new Float32Array(40000 * 3);
+  const normals = new Float32Array(40000 * 3);
+  const randoms = new Float32Array(40000);
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < 40000; i++) {
+    const y = f[i * 6 + 1];
+    positions[i * 3] = f[i * 6];  positions[i * 3 + 1] = y;  positions[i * 3 + 2] = f[i * 6 + 2];
+    normals[i * 3] = f[i * 6 + 3]; normals[i * 3 + 1] = f[i * 6 + 4]; normals[i * 3 + 2] = f[i * 6 + 5];
+    randoms[i] = Math.random();
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute('position', new BufferAttribute(positions, 3));
+  geo.setAttribute('aNormal', new BufferAttribute(normals, 3));
+  geo.setAttribute('aRandom', new BufferAttribute(randoms, 1));
+  particleMaterial = new ShaderMaterial({
+    vertexShader: bulbVertexShader,
+    fragmentShader: bulbFragmentShader,
+    uniforms: {
+      uTime: { value: 0.0 },
+      uSize: { value: 0.045 },
+      uMouseOrigin: { value: new Vector3(0, 0, 99) },
+      uMouseDir: { value: new Vector3(0, 0, -1) },
+      uRepelStrength: { value: 0.0 },
+      uRepelRadius: { value: 0.26 },
+      uRepelPower: { value: 0.16 }
+    },
+    transparent: true,
+    depthWrite: false,
+    blending: AdditiveBlending
+  });
+  root.add(new Points(geo, particleMaterial));
+
+  /* 玻璃罩/灯座/灯丝/辉光：yun setupGlassCore 原参数 */
+  const glassMat = new MeshPhongMaterial({
+    color: 0x8be5ff, transparent: true, opacity: 0.05, shininess: 120,
+    specular: 0xffffff, side: DoubleSide, depthWrite: false
+  });
+  const dome = new Mesh(new SphereGeometry(0.36, 40, 40), glassMat);
+  dome.position.y = 0.14;
+  root.add(dome);
+  const neck = new Mesh(new CylinderGeometry(0.36, 0.20, 0.32, 32, 1, true), glassMat);
+  neck.position.y = -0.16;
+  root.add(neck);
+  const cap = new Mesh(
+    new CylinderGeometry(0.18, 0.18, 0.18, 32),
+    new MeshStandardMaterial({ color: 0x1a2b42, metalness: 0.9, roughness: 0.2, transparent: true, opacity: 0.65 })
+  );
+  cap.position.y = -0.41;
+  root.add(cap);
+  glowSprite = new Sprite(new SpriteMaterial({
+    map: createGlowTexture('#00f0ff'), transparent: true, opacity: 0.28, blending: AdditiveBlending
+  }));
+  glowSprite.scale.set(0.65, 0.65, 1.0);
+  glowSprite.position.y = 0.14;
+  root.add(glowSprite);
+  filament = new Mesh(
+    new CylinderGeometry(0.008, 0.008, 0.12, 16),
+    new MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.65 })
+  );
+  filament.position.y = 0.14;
+  root.add(filament);
+
+  /* 取景：装配包围盒（点云 ∪ 玻璃罩 ±0.5）高 ×1.7 = 可视高，与 CSS --b3d 的 1.7 一致，
+     灯泡恒占画布 1/1.7 → 屏幕身量精确等于原 PNG 的 min(43vh,58vw) */
+  const top = Math.max(maxY, 0.5), bottom = Math.min(minY, -0.5);
+  root.position.y = -(top + bottom) / 2;
+  camera.fov = 2 * Math.atan((top - bottom) * 1.7 / 2 / 4.6) * 180 / Math.PI;
+  camera.updateProjectionMatrix();
+
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  composer.addPass(new UnrealBloomPass(new Vector2(canvas3d.clientWidth, canvas3d.clientHeight), 0.6, 0.45, 0.85));
+  composer.addPass(new OutputPass());
+  composer.addPass(new ShaderPass(AlphaFromLumaShader));
+
+  onResize3D();
+  addEventListener('resize', onResize3D);
+  document.body.classList.add('webgl3d');
+  window.__bulb3dActive = true;
+
+  if (PRM) renderTick(FROZEN_T, 0.016);              /* 静态一帧，不进循环 */
+  else requestAnimationFrame(loop3d);
+}
+
+function onResize3D() {
+  const s = canvas3d.clientWidth;                    /* 方形：clientWidth == clientHeight */
+  renderer.setSize(s, s, false);
+  composer.setSize(s, s);
+  if (PRM) renderTick(FROZEN_T, 0.016);
+}
+
+let last3d = 0;
+function loop3d(nowMs) {
+  requestAnimationFrame(loop3d);
+  const t = nowMs / 1000;
+  renderTick(t, Math.min(Math.max(t - last3d, 0.001), 0.05));
+  last3d = t;
+}
+
+function renderTick(t, dt) {
+  const u = particleMaterial.uniforms;
+  u.uTime.value = t;
+  if (!PRM) {                                        /* 排斥场：yun animate() 原逻辑 */
+    if (pointerInCanvas) cursorRayDir.set(mouseNDC.x, mouseNDC.y, 0.5).unproject(camera).sub(camera.position).normalize();
+    u.uMouseOrigin.value.copy(camera.position);
+    u.uMouseDir.value.lerp(cursorRayDir, 1 - Math.exp(-9 * dt)).normalize();
+    const target = pointerInCanvas ? 1 : 0;
+    const ease = target > u.uRepelStrength.value ? 5 : 2.2;
+    u.uRepelStrength.value += (target - u.uRepelStrength.value) * (1 - Math.exp(-ease * dt));
+  }
+  root.rotation.y = t * 0.02;                        /* 缓慢自旋 */
+  const k = (t - surgeT0) / 0.7;                     /* 核心喷发：0.7s 正弦包络（yun surge 的无 GSAP 版） */
+  const env = (k >= 0 && k <= 1) ? Math.sin(Math.PI * k) : 0;
+  filament.scale.setScalar(1 + 0.8 * env);
+  glowSprite.material.opacity = 0.28 + 0.27 * env;
+  pointLight.intensity = 1.5 + 1.3 * env;
+  composer.render();
+}
+
+try {
+  initBulb3D();
+} catch (err) {
+  console.warn('bulb3d 回退为 PNG 灯泡：', err && err.message);
+  /* 不加 body.webgl3d → 原 #halo + #bulb 照常呈现，两段式交互不受影响 */
+}
 </script>
 </body>
 </html>
