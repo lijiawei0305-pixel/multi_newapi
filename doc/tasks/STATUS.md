@@ -58,7 +58,7 @@
 
 ## 三、真正剩余 / 可选（很少）
 
-- **7c-2 满额"主动推送"** —— NoteUsage → AlertSink 计量时推送。**未做，可选**（显示侧已有订阅监控页分级）。需选投递渠道（站内表 / 邮件 / webhook）。
+- ~~7c-2 满额提醒(用户侧)~~ → **✅ 已落地（2026-07-07）**：`SubscriptionUsageBanner` 全局横幅——套餐用量 ≥80% 黄条 /≥100% 红条，可关闭（按 订阅×档位×计费周期 记忆，跨周期/升档自动重弹），CTA 跳 `/plans`；纯前端读原生订阅快照（spec `doc/specs/2026-07-07-subscription-usage-banner.md`，提交 e85afe5..447bed9，SDD 终审 Ready-to-merge）。**服务端主动推送（NoteUsage→AlertSink 邮件/webhook）仍未做、可选**。
 - **8c 运维零头** —— 迁移版本化、监控告警渠道接线。
 - **8a CF「Full (strict)」模式** —— 源站已具 Origin CA 证书；仅差在**你的 CF 面板**切模式。
 - **Trial 设备/实名维** —— 需前端购买请求上送 `device_id`/`real_name_id`（用户维已挡住主要滥用）。
