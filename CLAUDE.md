@@ -37,7 +37,8 @@
 | 计费 · 倍率 · 收益 · 支付 | 改扣费 / 用户组倍率 / 充值差价 / 消耗分润 / 成本保护 / 提现 / 支付回调 | [`doc/billing.md`](doc/billing.md) | proposal §7 |
 | tokenplan 套餐 | 改套餐定义 / 月度计量 / 购买 / 到期 / 代理上架改价 / 限购防刷 | [`doc/proposal.md`](doc/proposal.md) §8 | proposal §8 §2.4 |
 | 详细设计（跨模块） | 写代码前看模块边界 / Go 接口契约 / 数据流时序 / 单测策略 | [`doc/detailed-design.md`](doc/detailed-design.md) | 全模块 |
-| 任务与进度（开发跟踪） | 认领任务 / 看构建顺序 / 勾选进度 / 查模块 MET 与验收标准 | [`doc/tasks/progress.md`](doc/tasks/progress.md) | 14 模块 |
+| **现状（唯一权威 · 先看这个）** | 查"什么已建成 / 已上线 / 真正剩余" | [`doc/tasks/STATUS.md`](doc/tasks/STATUS.md) | 全部 |
+| 任务与进度（历史存档） | 早期里程碑 / Slice 笔记（**勿据以判断现状**，看 STATUS） | [`doc/tasks/progress.md`](doc/tasks/progress.md)、[`phase2.md`](doc/tasks/phase2.md) | — |
 | 验收标准（三期 · 质量门） | 验收某期/某项 / 查 12 道通用技术门与阈值 / 定义完成(DoD) / 写演示判据 | [`doc/acceptance.md`](doc/acceptance.md) | proposal §17 §18 |
 | 自动化开发起始 Prompt | 启动 Master-Worker 全自动开发 / 查质量门与部署规范 | [`doc/prompt.md`](doc/prompt.md) | 全流程 |
 | API 契约（前后端对齐） | 前端对接 / 加改端点 / 查错误码注册表 / 对象字段 | [`doc/api-contract.md`](doc/api-contract.md) | proposal §10 §13 |
@@ -99,7 +100,8 @@
 - **W3 — 棘轮升级。** `RETRO.md` 中已固化为规则的经验，升级为本文件「部署硬约束」或本节纪律，并在 `RETRO.md` 标注"已升级为规则"及位置。
 - **W4 — Mac 只调试、部署在服务器。** 本项目唯一环境是服务器 `64.90.4.114`（见上「服务器与部署」）；Mac 仅代码编辑/调试，构建/迁移/集成/部署/E2E 一律在服务器执行；私钥不入库。
 - **W5 — 前端页面文字一律用中文。** 任何面向用户的界面文案（标签 / 按钮 / 提示 / 表头 / 菜单 / toast / 错误码展示文案等）必须是中文，不留英文。i18n 以 `zh.json` 为准；当 `zh.json` 被并行工作区占用不可改时，用 `t('English Key', { defaultValue: '中文' })` 兜底（即时渲染中文、不动锁定文件，日后补 locale 条目会透明覆盖）。新增/改动任何前端前，务必核对最终**显示**出来的是中文。
-- **W6 —** TODO（按需补充）。
+- **W6 — 浏览器/本地服务进程用完即关（用户警告 2026-07-06）。** Playwright 浏览器（`playwright-cli close` / `kill-all`）、无头 Chrome（`--headless` 截图/调试进程）、本地调试 HTTP 服务（如 `python3 -m http.server`）等，验证一结束**立即关闭**，并用 `ps` 复核零残留；严禁留后台常驻——闲置进程持续消耗 Mac 性能且毫无用处。
+- **W7 —** TODO（按需补充）。
 
 ---
 
@@ -111,5 +113,5 @@
 - 🔴 **[需你提供] 微信/支付宝商户凭据** —— 接真实支付的**唯一外部阻塞**（真实 SDK 已落地：主站进程内 `internal/payment/realpay` + `internal/mtwire/payment_inprocess.go`，凭据存 DB；充值/购买闭环已 E2E 通过）。需：微信 `mch_id`/`app_id`/`api_v3_key`/商户私钥 `apiclient_key.pem`/微信支付公钥+`pub_key_id`；支付宝 `app_id`/应用私钥/应用公钥证书/支付宝公钥证书/根证书。拿到后→后台「系统设置 → 支付 → 微信/支付宝 选项卡」填表单并启用（**单门**：配好即在用户充值页与套餐购买页对买家显示，无需改配置文件/环境变量）→沙箱小额验收（入账侧零改）。
 - 🔴 **[需你后续 · 我以后改] gemini 换上游** —— gemini 渠道（测试栈 channel **id4**，type=24 Google Gemini，分组 `gemini`）上游不出请求 → new-api 跨组回退、报 `no available channel … under group default`。**已逐层验证：token 组=gemini、可用组校验含 gemini、渠道启用、路由 enabled、已配价——分组/调用都没错，纯上游渠道问题。** 换法：控制台「渠道管理」→ gemini 渠道 → 编辑 → 改 **base_url + key**（换成能分发 gemini 的上游）→ 保存（分组/路由/倍率/可选全不动）。换好后若仍回退 default，叫我加调试日志精确定位。
 - ✅ **①+② 买家页端到端闭环（完成）** —— 购买 snake_case + 走 auth-service mock：购买→mock 支付页→确认→激活原生订阅→代理分润(¥23.8)→**/v1 走订阅桶**，全链路 E2E 过。
-- 🆕 **[明日 · Phase 2 新功能] 违禁词屏蔽** —— 识别用户发送的违禁消息→提醒用户→管理员可见。规格已补 `doc/detailed-design.md` §2.14（含开放问题，实现前先与用户确认细节）。
-- 候选下一步：7c 风控（Redis RPM/并发 + Trial 三维限购）｜ 6b 代理管理 UI ｜ 真实支付（待凭据）。
+- ✅ **[已建成 · 非待办] 违禁词屏蔽** —— relay 转发前扫描用户输入（`agenthook.ScanUserInput`）+ 违规日志 + 管理员/代理词库 CRUD + 全站基础库 + 违规审阅 + 4 前端页，均已落地（表 `moderation_banned_words`/`moderation_content_violations`）。规格 `doc/detailed-design.md` §2.14。~~"明日新功能"~~ 系旧文档误记（2026-07-07 核实纠正）。
+- 真正剩余（少）：7c-2 满额主动推送（可选，需渠道）｜ 8c 运维零头 ｜ 8a CF Full-strict（你的 CF 面板）｜ 真实支付（待你给商户凭据）｜ gemini 换上游。（7c 风控、6b 代理管理 UI 均已完成。）**完整现状见 [STATUS.md](doc/tasks/STATUS.md)。**
