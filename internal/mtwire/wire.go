@@ -188,9 +188,10 @@ func New(db *gorm.DB) *App {
 	catalog := tokenplan.NewCatalog(tp)
 	retail := tokenplan.NewRetailService(tp, guard)
 	// Purchase 经 subPayment 落一条真实 pending 订单（前缀 SUB），可被支付回调用
-	// App.ActivatePaidTokenplanOrder 激活（见 subscription_bridge.go）。risk 仍占位；agent 套餐差价
-	// 收益经 tokenplanEarningAdapter 真实落到 agent 钱包（ActivateFromPayment 激活事务内、按 source_order_id 幂等）。
-	subs := tokenplan.NewSubscriptionService(tp, tp, newSubPayment(newSubOrderStore(db)), allowAllRisk{}, newTokenplanEarningAdapter(agentEarnings), nil)
+	// App.ActivatePaidTokenplanOrder 激活（见 subscription_bridge.go）。限购经 tokenplanRiskAdapter 桥接
+	// 真实 risk 引擎（Trial 用户∪实名∪设备三维去重；riskEngine 为 nil 即 Redis 关时放行不回归）；
+	// agent 套餐差价收益经 tokenplanEarningAdapter 真实落到 agent 钱包（ActivateFromPayment 激活事务内、按 source_order_id 幂等）。
+	subs := tokenplan.NewSubscriptionService(tp, tp, newSubPayment(newSubOrderStore(db)), tokenplanRiskAdapter{eng: riskEngine}, newTokenplanEarningAdapter(agentEarnings), nil)
 
 	// agentplan：GORM 仓储（agent_plans）+ 管理员 CRUD 目录。购买/激活在 P3（AGT 订单 → SetAgentType）。
 	agentPlanRepo := agentplanrepo.New(db)
