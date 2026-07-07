@@ -2259,7 +2259,7 @@ function initBulb3D() {
     fragmentShader: bulbFragmentShader,
     uniforms: {
       uTime: { value: 0.0 },
-      uSize: { value: 0.045 },
+      uSize: { value: 0.055 },   /* yun 原值 0.045；2026-07-07 调大补饱满（删灯丝后中心发光量下降，用户定夺） */
       uMouseOrigin: { value: new Vector3(0, 0, 99) },
       uMouseDir: { value: new Vector3(0, 0, -1) },
       uRepelStrength: { value: 0.0 },
@@ -2287,7 +2287,7 @@ function initBulb3D() {
   neck.position.y = -0.16;
   root.add(neck);
   glowSprite = new Sprite(new SpriteMaterial({
-    map: createGlowTexture('#00f0ff'), transparent: true, opacity: 0.28, blending: AdditiveBlending, depthWrite: false
+    map: createGlowTexture('#00f0ff'), transparent: true, opacity: 0.36, blending: AdditiveBlending, depthWrite: false   /* yun 原值 0.28；同上调大 */
   }));
   glowSprite.scale.set(0.65, 0.65, 1.0);
   glowSprite.position.y = 0.14;
@@ -2344,7 +2344,7 @@ function renderTick(t, dt) {
   root.rotation.y = t * 0.02;                        /* 缓慢自旋 */
   const k = (t - surgeT0) / 0.7;                     /* 核心喷发：0.7s 正弦包络，辉光+点光承担（灯丝已移除） */
   const env = (k >= 0 && k <= 1) ? Math.sin(Math.PI * k) : 0;
-  glowSprite.material.opacity = 0.28 + 0.27 * env;
+  glowSprite.material.opacity = 0.36 + 0.27 * env;
   pointLight.intensity = 1.5 + 1.3 * env;
   composer.render();
 }
