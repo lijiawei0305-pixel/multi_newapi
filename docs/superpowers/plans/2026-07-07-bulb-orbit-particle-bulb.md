@@ -556,12 +556,18 @@ addEventListener('pointerdown', e => {
   if (nx * nx + ny * ny < 0.55 * 0.55) surge();                        /* lit：点灯泡区域重放 */
 }, true);
 
+addEventListener('keydown', e => {   /* 键盘点亮（Enter/空格）与鼠标等效：捕获段先于主脚本读 pre */
+  if ((e.key === 'Enter' || e.key === ' ') && document.body.classList.contains('pre')) surge();
+}, true);
+
 window.__bulb3d = {
   surge,
   get surgeT0() { return surgeT0; },
   get repel() { return particleMaterial ? particleMaterial.uniforms.uRepelStrength.value : -1; }
 };
 ```
+
+（修正 2026-07-07：原稿仅挂 pointerdown 捕获段，键盘 Enter/空格点亮不触发 3D 迸发，违背『键盘与鼠标等效』既定规格；补对称的 keydown 捕获监听。发现者：Task 3 审查者。）
 
 - [ ] **Step 2: 验证——排斥与喷发的确定性探针（playwright-cli）**
 
