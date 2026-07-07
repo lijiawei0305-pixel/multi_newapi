@@ -2210,7 +2210,7 @@ function createGlowTexture(colorHex) {               /* yun createGlowSpriteText
   return new CanvasTexture(c);
 }
 
-let renderer, scene, camera, composer, root, particleMaterial, glowSprite, pointLight;
+let renderer, scene, camera, composer, root, particleMaterial, glowSprite, pointLight, bulbPoints;
 let surgeT0 = -1e9;                                  /* 核心喷发起点（秒）；Task 3 写入 */
 const mouseNDC = new Vector2(0, 0);                  /* 画布局部 NDC；Task 3 写入 */
 let pointerInCanvas = false;                         /* Task 3 写入 */
@@ -2270,7 +2270,8 @@ function initBulb3D() {
     depthWrite: false,
     blending: AdditiveBlending
   });
-  root.add(new Points(geo, particleMaterial));
+  bulbPoints = new Points(geo, particleMaterial);
+  root.add(bulbPoints);
 
   /* 玻璃罩/辉光：yun setupGlassCore 原参数。程序化灯丝与金属灯座已移除（2026-07-07 用户反馈）：
      灯丝在本构图呈生硬白色光条；暗色灯座默认写深度 + 亮度转alpha 合成，会在点云底座上冲出黑色方框洞。
@@ -2377,7 +2378,8 @@ addEventListener('keydown', e => {   /* 键盘点亮（Enter/空格）与鼠标�
 window.__bulb3d = {
   surge,
   get surgeT0() { return surgeT0; },
-  get repel() { return particleMaterial ? particleMaterial.uniforms.uRepelStrength.value : -1; }
+  get repel() { return particleMaterial ? particleMaterial.uniforms.uRepelStrength.value : -1; },
+  get points() { return bulbPoints ? bulbPoints.geometry.attributes.position.count : 0; }
 };
 
 try {
