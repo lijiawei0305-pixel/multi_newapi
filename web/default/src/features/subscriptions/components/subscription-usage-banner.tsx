@@ -1,3 +1,21 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import { useReducer } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
@@ -16,7 +34,9 @@ export function SubscriptionUsageBanner() {
   const { data } = useQuery({
     queryKey: ['self-subscription-full'],
     queryFn: getSelfSubscriptionFull,
-    staleTime: 60_000, // 每页挂载共享缓存，避免频繁重拉
+    // 数据为载入时快照（全局 refetchOnWindowFocus=false、无失效方），会话中不主动
+    // 刷新——对促续费提示已足够；如需实时可后续接购买后失效。
+    staleTime: 60_000,
   })
 
   // /api/subscription/self 返回的是对象 { subscriptions, all_subscriptions, ... }，
@@ -24,7 +44,9 @@ export function SubscriptionUsageBanner() {
   const alert = computeUsageAlert(data?.data?.subscriptions)
   if (alert.level === 'none') return null
 
-  const dismissKey = `subUsageDismiss:${alert.subscriptionId}:${alert.level}`
+  // key 带上 resetMarker（next_reset_time）：后端月度重置是原地清零 amount_used
+  // （同一条订阅记录、同一个 id），不带周期标记的话关闭一次就永久不再弹。
+  const dismissKey = `subUsageDismiss:${alert.subscriptionId}:${alert.level}:${alert.resetMarker}`
   if (typeof localStorage !== 'undefined' && localStorage.getItem(dismissKey)) {
     return null
   }
@@ -53,10 +75,10 @@ export function SubscriptionUsageBanner() {
       <AlertTriangle className='h-4 w-4 shrink-0' />
       <AlertDescription className='flex-1'>
         {exhausted
-          ? t('subUsage.exhausted', {
+          ? t('Your plan quota is exhausted. Renew or switch plans to continue.', {
               defaultValue: '你的套餐额度已用尽，续费或换套餐以继续使用。',
             })
-          : t('subUsage.warn', {
+          : t('Your plan has used {{pct}}%, running low — renew soon.', {
               defaultValue: '你的套餐已用 {{pct}}%，快用完了，建议尽快续费。',
               pct,
             })}
@@ -66,13 +88,13 @@ export function SubscriptionUsageBanner() {
         variant={exhausted ? 'secondary' : 'default'}
         onClick={() => navigate({ to: '/plans' })}
       >
-        {t('subUsage.cta', { defaultValue: '去续费' })}
+        {t('Renew now', { defaultValue: '去续费' })}
       </Button>
       <Button
         size='icon'
         variant='ghost'
         className='h-6 w-6 shrink-0'
-        aria-label={t('subUsage.dismiss', { defaultValue: '关闭' })}
+        aria-label={t('Dismiss', { defaultValue: '关闭' })}
         onClick={dismiss}
       >
         <X className='h-4 w-4' />
