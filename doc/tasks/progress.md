@@ -1,3 +1,5 @@
+> ⚠️ **历史存档（冻结于 ~2026-07-03）。现状唯一权威见 [STATUS.md](STATUS.md)。** 本文顶部"集成层 ⏳（fork/迁移/handler/部署/E2E 待办）"等描述**已过时**——这些早已完成并上线（下方 Slice 1–4 笔记即为佐证）。勿据本文判断现状。
+
 # 📋 总体进度看板 — New API 多租户代理分销平台
 
 > **依据**：[proposal.md](../proposal.md) v2.0 ｜ [detailed-design.md](../detailed-design.md) ｜ 任务文件见本目录 `NN-<module>.md`

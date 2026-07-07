@@ -1,3 +1,5 @@
+> ⚠️ **历史存档。现状唯一权威见 [STATUS.md](STATUS.md)。** 本文是早期"4 目标计划（5a–8c）"框架，真实开发已**远超此结构**（代理分级/定价/域名/财务/工单/违禁词等 phase2.md 几乎没写的维度均已建成）；且 `phase2` 分支已删、活并入 `main`。文中带 2026-07-07 复核标注的条目为准，其余可能滞后——一律以 STATUS.md 为准。
+
 # 📋 Phase 2 计划 — 产品化（用户确认的 4 大目标）
 
 > **承接**：Phase 1 已完成 14 模块逻辑层 + 4 个集成纵切（tenant/identity/wallet/tokenplan/relay 在测试栈 `tokendream.wedreamhub.com` 真实跑通）。
