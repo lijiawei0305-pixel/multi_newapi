@@ -59,11 +59,11 @@
 - [x] **7d 支付基建(mock)**：auth-service 微信/支付宝下单+回调 + 充值→原生quota + tokenplan购买→激活原生订阅，**强幂等全通**
 - 🟡 **7d′ 真实凭据（代码已就绪，待凭据+沙箱）**：真实 V3 SDK（`wechatpay-go`/`smartwalle/alipay`）已落地于主站**进程内** `internal/payment/realpay`（+ `internal/mtwire/payment_inprocess.go`，凭据存 DB、后台「系统设置 → 支付」选项卡表单填写并启用）；待补=沙箱→小额真单验收。**唯一阻塞=你提供微信/支付宝商户凭据**。（注：早期独立 auth-service 版实现在 `500L` 分支 提交 `493b830`，已被进程内版取代。）
 - [ ] **7b 真实分模型定价**：原生 model_ratio 本就生效；待校准我们套餐桶与分组倍率/成本保护线口径
-- [ ] 🟡 **7c 多档风控（核心已上线）**：✅ 真实 Redis RPM 限流接 relay（`RISK_DEFAULT_RPM`、超限 429、压测原子无超发，提交 cd1cf95）+ 租户状态校验；**待补**：并发/IP allowlist 完整接线、Trial 三维限购、满额分级告警
+- [x] **7c 多档风控（核心收口，2026-07-07 复核）**：✅ 真实 Redis RPM 限流接 relay（`RISK_DEFAULT_RPM`、429、提交 cd1cf95）+ 租户状态校验；✅ **Trial 限购接线**——`tokenplanRiskAdapter`（`internal/mtwire/risk_purchase.go`）换掉 wire.go 的 `allowAllRisk{}` 占位（切原生订阅桥时曾回归成永远放行），桥接真 risk 引擎，部署 + **逐笔 E2E 实证**（首购 200 放行 / 再购 409 `PURCHASE_LIMIT_EXCEEDED`）；用户维 live，设备/实名维后端就绪但前端购买未上送 `device_id/real_name_id`（休眠，属前端跟进项）。**核实定论：RPM / IP allowlist / 并发 new-api 原生已覆盖**（`middleware.ModelRequestRateLimit` 已挂 relayV1+gemini、`model/token.go AllowIps` 经 `middleware/auth.go:378` 强制 + keys 页有 UI），`internal/risk` 的 RPM/IP/并发是 fork 前 **superseded 死代码**，勿再在其上重造接线；**原生速率限制已启用 live**（`ModelRequestRateLimitEnabled=true`、周期 1min、`Count=0`、`SuccessCount=1000`＝每用户 1000 成功/分，经 `/api/option` 改、内存即时生效）。满额"可见"已由订阅监控页(6a+)满足；主动推送（`risk.NoteUsage/AlertSink`）为**可选增强、未做**（待定投递渠道：站内表/邮件/webhook）。
 - [x] **遗留接线 ①②③④ 完成**：①购买响应 snake_case ✅ ②tokenplan 购买走 auth-service mock(全链路 E2E) ✅ ③代理差价/分润落账(`tokenplan_spread`+`consume_commission` 真实 /v1 E2E) ✅ ④ **RCG/SUB 'paid'卡单对账兜底** ✅：`ReconcileStuckPaid`(扫 RCG paid→重跑 OnPaid 幂等→credited)+`ReconcileStuckSubscriptions`(扫 SUB pending→查 auth-service `/auth/order/status`→已付补激活)；`StartReconcileLoop` 5min 定时扫(master-only)，线上日志确认在跑；TDD 全测，提交 35c5098/c6f8e39/bd25efa/69d2136
 
 ## 4. 目标④：正式上线（**最后**，灰度）
-- [ ] **8a 域名/证书**：`*.wedreamhub.com` 通配 vhost + CF Origin CA 证书（Full strict）；主站 `www/admin/api` + 代理泛子域
+- 🟡 **8a 域名/证书（2026-07-07 复核：证书侧已完成）**：✅ `*.wedreamhub.com` 通配 vhost 已配；✅ **源站证书已是 CF Origin CA**（三域名 443 live、到 2041），**非自签**；api/www/tokendream 均走 fork(3100)（`api-443-to-origin.conf` 的 `proxy_pass` 已是 3100，仅注释还写 3000）。**待补**：CF「Full (strict)」模式需在 **CF 面板**确认/切换（服务器侧看不到；源站已具备 Origin CA 前提）；3 份 vhost 注释过期（"自签"/`newapi_YFNf`/3000 字样，**无功能影响**，可选清理）。
 - [ ] **8b 灰度切流**：测试栈验证 → 正式栈（独立于现网 `newapi_YFNf` 或择机替换）→ 小流量灰度
 - [ ] **8c 运维**：备份/回滚脚本、迁移版本化、监控/告警、`docker compose` 一键启停
 

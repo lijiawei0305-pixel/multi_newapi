@@ -36,7 +36,7 @@
 | 🟡 | 🎨 SiteConfig 装修 | [10-siteconfig](10-siteconfig.md) | tenant | 校验+装修+上传安全+单测 ✓ 99%；迁移·Blob·handler·前端 ⏳ |
 | 🟡 | 🚦 RelayGateway 中继 | [11-relay](11-relay.md) | identity, billing, risk | 接口+编排+全mock单测 ✓ 100%；handler·UpstreamPool·E2E ⏳ |
 | 🟡 | 📊 Stats 统计看板 | [12-stats](12-stats.md) | billing, tokenplan | 聚合+满额预警+隔离+单测 ✓ 100%；迁移·GORM·handler ⏳ |
-| 🟡 | 🛡️ RiskControl 风控 | [13-risk](13-risk.md) | infra | 限流+Trial三维限购+告警+单测 ✓ 97.3%；真实Redis·接入·E2E ⏳ |
+| 🟡 | 🛡️ RiskControl 风控 | [13-risk](13-risk.md) | infra | 逻辑+单测 ✓ 97.3%；接入(07-07)：Trial限购 E2E✓、RPM/IP/并发**原生覆盖**、满额告警可选（详见 [phase2 §3 7c](phase2.md)） |
 
 进度：🟢 **14/14 模块逻辑层完成**（Wave 0–4 全绿）—— 全部 `go test -race -cover` 通过，平均覆盖率 **~98.7%**（apperr/appctx/pricing/identity/billing/promotion/relay/stats 100%，payment 99.2，agent 99.2，siteconfig 98.9，tenant/wallet 98，risk 97.3，tokenplan 95.5）。
 > ⏳ **集成层待办（统一收尾）**：① fork `QuantumNous/new-api` 合并基座；② 迁移 + GORM 真实 Repo + Redis；③ Gin handler + `cmd/main` 装配（含组装层适配器）；④ 部署独立测试栈 + E2E；⑤ 前端对接 `doc/api-contract.md`。完成后 🟡 → ✅。
