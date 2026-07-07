@@ -20,6 +20,7 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/agent"
 	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
+	"github.com/QuantumNous/new-api/internal/tenant"
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
 )
 
@@ -55,12 +56,22 @@ func agentContextCtx(userID int64) (*gin.Context, *httptest.ResponseRecorder) {
 	return c, w
 }
 
+// agentContextCtxOnTenant 造一个「已登录(id=userID)、Host 已被 TenantMiddleware 解析到 hostTenant」
+// 的 gin 上下文——模拟请求打在某个代理站（子域名/自定义域名）上。与 agentContextCtx（主站、无租户）
+// 互补，用于 on_own_site 的 Host 维度用例。
+func agentContextCtxOnTenant(userID int64, hostTenant *tenant.Tenant) (*gin.Context, *httptest.ResponseRecorder) {
+	c, w := agentContextCtx(userID)
+	c.Set(ginKeyTenant, hostTenant)
+	return c, w
+}
+
 type agentContextEnvelope struct {
 	Success bool `json:"success"`
 	Data    struct {
 		IsAgentOwner bool `json:"is_agent_owner"`
 		Level        int  `json:"level"`
 		CanAPI       bool `json:"can_api"`
+		OnOwnSite    bool `json:"on_own_site"`
 	} `json:"data"`
 }
 
@@ -187,5 +198,82 @@ func TestHandleAgentContext_PlatformTenantOwnerNotFlaggedAsAgent(t *testing.T) {
 	}
 	if env.Data.Level != 0 || env.Data.CanAPI {
 		t.Fatalf("got %+v, want zero-value level/can_api for platform-tenant owner", env.Data)
+	}
+}
+
+// ---- on_own_site（代理自助 UI 的 Host 维度门控，2026-07-07 用户报 bug 的回归测试组）----
+//
+// 现象：L1 代理在主站控制台也看到「代理自助」侧栏。根因：Fix 1（8ddfe19）为救 L0 把 is_agent_owner
+// 改成 owner-based、Host 无关，但没有给前端提供"当前 Host 是否= 自己的代理站"的信号，侧栏/路由守卫
+// 只凭 is_agent_owner 显隐 → 代理菜单泄漏到主站与别家代理站。
+// 修复：agent-context 新增 on_own_site（Host 解析到的租户 == 自己拥有的租户），is_agent_owner 语义
+// 不变（主站钱包页 L0「邀请返现」面板仍依赖它，见 doc/l0-agent-wallet-referral.md）。
+
+// L1 owner 在自己的代理站（Host 解析到自己拥有的租户）→ on_own_site=true：代理自助 UI 只在这里亮。
+func TestHandleAgentContext_OwnerOnOwnSite_OnOwnSiteTrue(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app := newAgentContextTestApp(t)
+	ctx := context.Background()
+	tid := seedOwnedTenant(t, app, "ownshop", 300)
+	if err := app.AgentRepo.SetAgentType(ctx, tid, agent.AgentParams{Level: 1, CanAPI: false}); err != nil {
+		t.Fatalf("seed agent profile: %v", err)
+	}
+
+	c, w := agentContextCtxOnTenant(300, &tenant.Tenant{ID: tid, Slug: "ownshop"})
+	app.HandleAgentContext(c)
+
+	env := decodeAgentContext(t, w)
+	if !env.Data.IsAgentOwner {
+		t.Fatalf("is_agent_owner = false on own site, want true")
+	}
+	if !env.Data.OnOwnSite {
+		t.Fatalf("on_own_site = false on own site, want true — 代理自助 UI 在自己站必须可见")
+	}
+}
+
+// L1 owner 在主站（Host 解析不到租户）→ is_agent_owner 仍 true（钱包 L0 卡等身份消费方不受影响），
+// 但 on_own_site=false：主站控制台不得出现「代理自助」——这正是用户报的 bug。
+func TestHandleAgentContext_OwnerOnMainSite_OnOwnSiteFalse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app := newAgentContextTestApp(t)
+	ctx := context.Background()
+	tid := seedOwnedTenant(t, app, "l1onmain", 301)
+	if err := app.AgentRepo.SetAgentType(ctx, tid, agent.AgentParams{Level: 1, CanAPI: true}); err != nil {
+		t.Fatalf("seed agent profile: %v", err)
+	}
+
+	c, w := agentContextCtx(301) // 主站 Host：不设 ginKeyTenant
+	app.HandleAgentContext(c)
+
+	env := decodeAgentContext(t, w)
+	if !env.Data.IsAgentOwner {
+		t.Fatalf("is_agent_owner = false for owner on main site, want true (owner-based 语义不变)")
+	}
+	if env.Data.OnOwnSite {
+		t.Fatalf("on_own_site = true on main-site Host, want false — 代理自助菜单不得泄漏到主站（bug 回归）")
+	}
+}
+
+// owner 在别家代理站（Host 解析到的租户 ≠ 自己拥有的租户）→ on_own_site=false：
+// 代理菜单也不得泄漏到别人的站。
+func TestHandleAgentContext_OwnerOnOtherTenantSite_OnOwnSiteFalse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app := newAgentContextTestApp(t)
+	ctx := context.Background()
+	tid := seedOwnedTenant(t, app, "myshop", 302)
+	otherID := seedOwnedTenant(t, app, "othershop", 999)
+	if err := app.AgentRepo.SetAgentType(ctx, tid, agent.AgentParams{Level: 1, CanAPI: false}); err != nil {
+		t.Fatalf("seed agent profile: %v", err)
+	}
+
+	c, w := agentContextCtxOnTenant(302, &tenant.Tenant{ID: otherID, Slug: "othershop"})
+	app.HandleAgentContext(c)
+
+	env := decodeAgentContext(t, w)
+	if !env.Data.IsAgentOwner {
+		t.Fatalf("is_agent_owner = false, want true (owner-based)")
+	}
+	if env.Data.OnOwnSite {
+		t.Fatalf("on_own_site = true on another tenant's site, want false — 不得在别家代理站亮自己的代理菜单")
 	}
 }

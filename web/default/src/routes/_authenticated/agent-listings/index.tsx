@@ -26,7 +26,7 @@ import { AgentListings } from '@/features/agent-listings'
 export const Route = createFileRoute('/_authenticated/agent-listings/')({
   beforeLoad: async ({ context }) => {
     const ctx = await context.queryClient.fetchQuery(agentContextQueryOptions)
-    if (!ctx.is_agent_owner) {
+    if (!ctx.is_agent_owner || !ctx.on_own_site) {
       throw redirect({ to: '/403' })
     }
   },

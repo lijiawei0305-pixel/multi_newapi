@@ -492,16 +492,28 @@ func (a *App) isAgentOwner(c *gin.Context) bool {
 }
 
 // HandleAgentContext GET /api/tenant/agent-context —— 代理身份门控信号。**仅 UserAuth**（不挂
-// AgentOwnerAuth/AgentOwnerAuthByUser），任何登录用户可调；返回当前用户是否拥有某个代理租户
-// ——owner-based 解析（TenantByOwner），与 Host 无关：L0 无子域名、请求打在主站 Host 上也必须能
-// 命中，前端代理自助 UI（侧栏 + 10 处路由守卫）才对 L0 可达（Fix 1：此前用 Host 租户判定，L0 因无
-// 子域名而永远 false，UI 不可达）。前端据此隐藏代理自助菜单 + 在路由 beforeLoad 拦截直敲 URL，避免
-// 普通用户/别站代理触发 AGENT_FORBIDDEN。永远 200：未登录/非 owner/查询失败 → is_agent_owner=false
-// （不 abort）。
+// AgentOwnerAuth/AgentOwnerAuthByUser），任何登录用户可调。两个正交信号：
+//
+//   - is_agent_owner / level / can_api：owner-based 解析（TenantByOwner），与 Host 无关——身份事实。
+//     主站钱包页 L0「邀请返现」面板（is_agent_owner && level==0，doc/l0-agent-wallet-referral.md）
+//     依赖它在主站 Host 下也为 true，语义不可回退成 Host 判定（Fix 1 教训：L0 无子域名，Host 判定
+//     使其 UI 永远不可达）。
+//   - on_own_site：当前 Host 解析到的租户（TenantMiddleware → tenantFrom）是否 == 自己拥有的租户
+//     ——位置事实。前端「代理自助」侧栏 + 代理路由守卫改门 is_agent_owner && on_own_site：
+//     代理控制台只在自己的代理站（子域名/自定义域名）出现，不泄漏到主站或别家代理站
+//     （2026-07-07 用户报 bug：L1 在主站控制台看到代理自助）。L0 没有自己的站 → on_own_site
+//     永远 false → 侧栏对 L0 永不显示，L0 的界面只有主站钱包返现面板（与文档一致）。
+//
+// 后端 agent-self 真实鉴权（AgentOwnerAuthByUser）保持 owner-based 不动：Host 可伪造，
+// 不是安全边界；on_own_site 只是产品/UI 边界。永远 200：未登录/非 owner/查询失败 →
+// is_agent_owner=false（不 abort）。
 func (a *App) HandleAgentContext(c *gin.Context) {
 	out := agentContextOut{}
 	if t := a.callerOwnedTenant(c); t != nil {
 		out.IsAgentOwner = true
+		if hostT := tenantFrom(c); hostT != nil && hostT.ID == t.ID {
+			out.OnOwnSite = true
+		}
 		if p, found, err := a.AgentRepo.GetAgentType(c.Request.Context(), t.ID); err == nil && found {
 			out.Level = p.Level
 			out.CanAPI = p.CanAPI
@@ -515,10 +527,12 @@ func (a *App) HandleAgentContext(c *gin.Context) {
 // ============================================================================
 
 // agentContextOut 是 GET /api/tenant/agent-context 响应：前端据此隐藏菜单 + 路由守卫 gate。
+// IsAgentOwner=身份（Host 无关，钱包 L0 卡消费）；OnOwnSite=位置（Host==自己的站，侧栏/守卫消费）。
 type agentContextOut struct {
 	IsAgentOwner bool `json:"is_agent_owner"`
 	Level        int  `json:"level"`
 	CanAPI       bool `json:"can_api"`
+	OnOwnSite    bool `json:"on_own_site"`
 }
 
 type agentOut struct {

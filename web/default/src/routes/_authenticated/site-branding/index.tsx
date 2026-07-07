@@ -28,7 +28,7 @@ import { SiteBranding } from '@/features/site-branding'
 export const Route = createFileRoute('/_authenticated/site-branding/')({
   beforeLoad: async ({ context }) => {
     const ctx = await context.queryClient.fetchQuery(agentContextQueryOptions)
-    if (!ctx.is_agent_owner || ctx.level < 1) {
+    if (!ctx.is_agent_owner || !ctx.on_own_site || ctx.level < 1) {
       throw redirect({ to: '/403' })
     }
   },

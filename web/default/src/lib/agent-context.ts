@@ -23,12 +23,24 @@ import { api } from '@/lib/api'
  * Agent self-service identity + capability gate.
  *
  * `GET /api/tenant/agent-context` is UserAuth-only (any logged-in user may
- * call it) and returns whether the *current* user owns the *current Host's*
- * tenant — the authoritative `tenant.owner_user_id === session user id` check
- * — plus that tenant's `level` (0=普通/basic, 1=独立/independent) and `can_api`,
- * read straight from the DB on the backend. It always responds 200; no
- * tenant / not the owner / not logged in all yield the fail-closed defaults
- * (`is_agent_owner: false, level: 0, can_api: false`).
+ * call it) and returns two orthogonal signals:
+ *
+ * - `is_agent_owner` / `level` / `can_api` — **identity** (owner-based,
+ *   Host-independent): the caller owns a tenant (`tenant.owner_user_id ===
+ *   session user id`), plus that tenant's `level` (0=普通/basic, 1=独立/
+ *   independent) and `can_api`. The main-site wallet L0 referral card gates
+ *   on this (`is_agent_owner && level===0`) and relies on it staying true on
+ *   the main site.
+ * - `on_own_site` — **location**: the current Host resolves to the very
+ *   tenant the caller owns. The Agent Self-Service sidebar group and agent
+ *   route guards gate on `is_agent_owner && on_own_site`, so the agent
+ *   console appears only on the agent's own site (subdomain / custom
+ *   domain) — never on the main site or another agent's site. L0 has no
+ *   site of its own → console never shows for L0 (wallet card is their UI).
+ *
+ * It always responds 200; no tenant / not the owner / not logged in all
+ * yield the fail-closed defaults (`is_agent_owner: false, level: 0,
+ * can_api: false, on_own_site: false`).
  *
  * Shared by the sidebar (React `useQuery`) and the route guards (`beforeLoad`
  * via `queryClient.fetchQuery`) so both honour one source of truth.
@@ -37,6 +49,7 @@ export type AgentContext = {
   is_agent_owner: boolean
   level: number
   can_api: boolean
+  on_own_site: boolean
 }
 
 type AgentContextEnvelope = {
@@ -44,7 +57,12 @@ type AgentContextEnvelope = {
   data?: Partial<AgentContext> | null
 }
 
-const CLOSED: AgentContext = { is_agent_owner: false, level: 0, can_api: false }
+const CLOSED: AgentContext = {
+  is_agent_owner: false,
+  level: 0,
+  can_api: false,
+  on_own_site: false,
+}
 
 /**
  * Fetch the agent context for the current Host + session. Any failure
@@ -62,6 +80,7 @@ async function fetchAgentContext(): Promise<AgentContext> {
       is_agent_owner: Boolean(d?.is_agent_owner),
       level: Number(d?.level ?? 0),
       can_api: Boolean(d?.can_api),
+      on_own_site: Boolean(d?.on_own_site),
     }
   } catch {
     return CLOSED

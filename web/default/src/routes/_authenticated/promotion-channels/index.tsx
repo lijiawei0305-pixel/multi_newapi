@@ -26,7 +26,7 @@ import { PromotionChannels } from '@/features/promotion-channels'
 export const Route = createFileRoute('/_authenticated/promotion-channels/')({
   beforeLoad: async ({ context }) => {
     const ctx = await context.queryClient.fetchQuery(agentContextQueryOptions)
-    if (!ctx.is_agent_owner) {
+    if (!ctx.is_agent_owner || !ctx.on_own_site) {
       throw redirect({ to: '/403' })
     }
   },
