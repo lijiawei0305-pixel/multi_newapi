@@ -251,9 +251,14 @@ export function AgentPlansPurchase() {
                       {plan.grant_level >= 1 ? (
                         <li className='flex items-center gap-1.5'>
                           <Globe className='text-primary h-3.5 w-3.5' />
-                          {t('Become Agent Cap Oem', {
-                            defaultValue: '独立域名 + 站点装修(OEM)',
-                          })}
+                          {/* API 档(can_api)明示「含 OEM 全部能力」——API=OEM 超集(2026-07-08 用户定档);OEM 档保持原文案 */}
+                          {plan.grant_can_api
+                            ? t('Become Agent Cap Oem Superset', {
+                                defaultValue: '含 OEM 全部能力(独立域名 + 站点装修)',
+                              })
+                            : t('Become Agent Cap Oem', {
+                                defaultValue: '独立域名 + 站点装修(OEM)',
+                              })}
                         </li>
                       ) : null}
                       {plan.grant_can_api ? (
