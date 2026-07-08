@@ -103,6 +103,12 @@
 - **解决/规避**：`scripts/issue-cert.sh` 为每个域名写 `custom_<域名>.conf` 到宝塔 vhost 目录（被主配 `include *.conf` 自动加载），**不声明 default_server**；HTTP-01 走共享 webroot `/www/wwwroot/acme-challenge`，签发前先写「仅 80」vhost+reload 让 challenge 可达，装证后再写「80→443」完整 vhost。`Host $host` 透传供后端按 Host 解析租户。**红线**：只反代 127.0.0.1:3100，绝不碰现网 3000。已 E2E（绑定→TXT→active→解析→品牌→解绑）全绿；真实 LE 签发需代理提供可控域名（A 直连、勿套 CF 代理，否则 HTTP-01 取不到）。
 - **升级**：宝塔下加自定义反代一律走「手写精确 server_name vhost + 不碰 default + 勿在面板编辑这些站点」。已写入 `doc/domains-ssl.md` §6.5 / `scripts/README.md`。
 
+### [已解决] 服务器磁盘被 Docker build cache 撑满（每次 `--build` 累积，81% → prune 后 25%）
+- **现象**：`df -h /` 用到 81%（76G/99G，仅剩 19G）；`docker system df` 显示 **Build Cache 56.5GB，其中 55.7GB reclaimable**（占满半块盘），Images 另有 4.7GB reclaimable（旧 `prev-*` 回滚 tag + dangling）。磁盘逼近满，后续 `--build` 有失败风险。
+- **根因**：每次 `docker compose … up -d --build` 都往 BuildKit build cache 累积层；多轮部署后无人清理 → cache 无上限膨胀。与运行镜像/容器/DB **无关**，纯构建副产物堆积。
+- **解决/规避**：`docker builder prune -f`（只删构建缓存，下次构建自动重生、仅慢一次；**不碰**镜像/容器/volume/DB）→ 一次回收 55.7GB；`docker image prune -f` 只删 dangling（保留 `prev-*` 回滚 tag）再回收 0.35GB。**81% → 25%（71G free）**。go mod/build 的**命名 volume**（newapi_gomodcache 等）是提速用的、`builder prune` 不动它们，放心。
+- **升级**：**每隔若干次部署、或见 `df` 逼近 80% 就 `docker builder prune -f`**——安全的例行维护，别等构建因 no space 失败才处理；判断看 `docker system df` 的 Build Cache RECLAIMABLE 列。（`/root/newapi-test-old-*`、`/root/newapi-compile` 等 /root 旧源码副本另占 ~5.7G，属人工备份，删前问用户。）
+
 ---
 
 ## 二、构建与依赖
@@ -235,6 +241,24 @@
 - **子坑 2（单测踩过一次的 nil-panic）**：`httptest.NewRequest` 不显式设 `req.Host` 时默认给 `"example.com"`；而 `tenant.IsMainSiteHost` 对"不在 `*.wedreamhub.com` 下的外部域名"有意兜底 `true`（本地直连/开发场景）。二者一叠加，一个零值 `&App{}`（`TenantRepo==nil`）的既有测试走到新加的主站回退分支时对 `nil` 的 `*gormrepo.Repo` 调用方法，直接 panic。修法：`resolveBuyerTenant` 对 `a.TenantRepo==nil` 短路直接判 `TENANT_NOT_FOUND`（沿用 `grouphook.go` 里已有的同款防御惯例），不是改测试凑合过。
 - **升级**：①任何新增/复用"Host 未解析出租户"分支的 handler，都要过一遍 `tenant.IsMainSiteHost` 三态，不能自己再造一版主站判定。②新代码只要调用 `TenantByOwner` 反查"用户拥有的租户"，必须过 `isPlatformTenant` 排除——已有 `callerOwnedTenant`/`AgentOwnerAuthByUser` 两个封装可直接复用，不要绕开它们直连 `TenantRepo.TenantByOwner`。③给这类"主站兜底"逻辑写单测，零值 `&App{}` 一定要么补齐依赖、要么显式设 `req.Host` 避开 `example.com` 默认值。
 
+### [已解决] `webgl3d` 类晚于首次量尺 → `display:none` 下 `clientWidth=0` → 渲染缓冲 0×0（灯泡对真实用户全空）
+- **现象**：`bulb-orbit/index.html` 的 `initBulb3D()` 原始顺序先调 `onResize3D()` 再 `document.body.classList.add('webgl3d')`；此时 `#bulb3d` 仍 `display:none`，`canvas.clientWidth===0`，`renderer.setSize(0,0,false)`/`composer.setSize(0,0)` 把 WebGL 绘图缓冲区永久锁定 0×0——PNG 回退灯泡又已被 `body.webgl3d` 规则隐藏，真实用户打开页面（不手动缩放窗口）看到的中央区域完全空白，比替换前（总能看到 PNG 灯泡）更差。
+- **根因**：`display:none` 元素的 `clientWidth`/`clientHeight` 恒为 0，量尺必须发生在切换为可见之后；无头 Chrome 截图工具的 `--window-size` 在渲染开始后才应用到真实窗口，会顺带触发一次"意外" `resize` 事件，掩盖了这个问题，使当时的 CLI 截图看起来正常（掩盖了 bug 的副作用，不是 bug 不存在）。
+- **解决**：把 `document.body.classList.add('webgl3d')` 挪到 `onResize3D()` 之前，四个数值参数不变，仅调整语句顺序（commit `7627945`）。
+- **升级**：`display:none` 元素的尺寸量测恒为 0，必须先切换显示再量尺；验证此类时序 bug 须用固定视口、全程零 resize 的会话（如 playwright 显式设视口后不触发原生 resize 事件）——无头截图工具的隐式 resize 会掩盖真实用户场景下才会暴露的 bug。
+
+### [已解决] 键盘点亮（Enter/空格）未同步触发 3D 核心喷发——新交互只挂了 pointerdown 捕获
+- **现象**：鼠标/触屏点击点亮灯泡时会触发 3D 核心喷发（灯丝脉冲+辉光+点光闪烁），但键盘 Enter/空格点亮时喷发不播，与「键盘可触发，与鼠标/触屏等效」的既定规格（`bulb-orbit/交互修改文档.md` §八、设计稿 §6）不符。
+- **根因**：新增的核心喷发触发只接了 `pointerdown` 捕获段监听，主脚本原有的键盘点亮路径（`keydown` → `ignite()`）不产生 `pointerdown` 事件，两条触发路径互不相通。
+- **解决**：对称地追加一个 `keydown` 捕获段监听（`(e.key==='Enter'||e.key===' ') && body.classList.contains('pre')` 时调用同一个 `surge()`），与 pointerdown 分支并列、互不干扰（commit `ad315f6`）。
+- **升级**：给既有交互补充新效果时，必须先枚举该交互的**全部**触发入口（鼠标/键盘/触屏），逐一确认新效果都挂上了，不能只对齐看得见的主入口。
+
+### [已解决] 实体网格在「加法粒子 + 亮度转 alpha」构图里两类穿帮：暗色网格冲出黑框洞、白色小网格成生硬光条
+- **现象**：粒子灯泡上线后用户放大截图反馈两处瑕疵——①灯泡中心一根生硬的白色竖条；②「点 击 点 亮」上方的点云底座里有多个硬边黑色方框（bulb-orbit，2026-07-07 下午）。
+- **根因**：两个从 yun 原样移植的程序化配件在我们的透明画布构图里穿帮。①白条=程序化**灯丝**（白色小圆柱 + Bloom 增亮），yun 里被密集点云与较小屏占掩住，我们的构图里裸露成光条；②黑框=**金属灯座**（暗色 `MeshStandardMaterial`，`transparent:true` 但 `depthWrite` 默认 `true`）：透明排序中它先绘制并写深度，把身后的加法粒子按 z 剔除，叠加「亮度转 alpha」合成（暗像素→低 alpha→透明）后，在发光底座上冲出圆柱侧影形状的硬边黑洞。yun 是不透明深底+屏占小，同一配件不显眼。
+- **解决**：删除灯丝与金属灯座两个网格（点云自带灯泡+底座形状，核心喷发改由辉光+点光承担）；顺带给辉光 Sprite 补 `depthWrite:false`，防自旋时透明排序翻转打出同类方洞。
+- **升级**：在「加法混合粒子 + 透明画布 + 亮度转 alpha」的场景里：装配用的辅助网格一律显式 `depthWrite:false`；暗色实体网格慎用（暗色=透明，只会以"剔除别人"的方式留下负空间）；从别的项目移植视觉装配时，逐件在**目标构图与目标屏占**下过目，不能只信来源项目的观感。
+
 ---
 
 ## 四、工具链与协作
@@ -304,3 +328,14 @@
 - **根因**：`strings` 默认只抽 ASCII 可打印串（长度≥4），**中文 UTF-8 是非 ASCII 多字节，会被整段丢弃** → `strings | grep 中文` 恒 0（与前端在不在无关）。之前"折扣系数=2"能查到是因为用了**直接 `grep -c 折扣系数 /new-api`**（grep 匹配二进制里的原始 UTF-8 字节，能命中 embed 的 dist）。
 - **解决**：验证 embed 的前端中文串一律 `docker exec <app> sh -c "grep -c <中文> /new-api"`（直接 grep 二进制），不要过 `strings`。直接 grep 后 已收款待入账=1/支付对账=2/待支付=4/折扣系数=3/代理加盟=2，全在。
 - **升级**：**「某中文串在不在编译产物里」的判定，永远用直接 grep 二进制，别用 strings**；否则会对着假 0 瞎折腾（重建/回滚）。顺带：Docker 前端构建层（`COPY ./web/default` → `bun run build`）偶发命中旧缓存，真遇到才 `--no-cache` 重建——但先用直接 grep 确认它是真没进，别被 strings 骗。
+
+### [未解决·需用户介入] macOS TCC 隐私保护挡住 CLI 读取 ~/Documents / ~/Desktop（交接素材读不到）
+- **现象**：用户交接素材路径 `/Users/cc/Documents/Codex/…/ai-logo-pack/logo-only`（20 个国产模型 logo），CLI 侧 `ls` 报 `Operation not permitted`；连 `ls ~/Documents`、`ls ~/Desktop` 顶层都被拒。非沙箱模式同样被拒。
+- **根因**：macOS TCC（隐私与安全性 → 文件与文件夹）按「宿主 App」授权；承载 Claude Code 的终端 App 没有「文稿/桌面」访问权，其全部子进程（含 `!` 前缀命令）一律 `EPERM`。与文件是否存在无关。
+- **解决/规避**：二选一——① 系统设置 → 隐私与安全性 → 文件与文件夹（或完全磁盘访问权限）→ 给承载终端授权「文稿」，必要时重启终端 App 后重试；② 用 Finder 把素材拖进仓库或 `/tmp`（TCC 不管这些路径）。**以后交接素材尽量放仓库内或 /tmp，别放 Documents/Desktop。**
+
+### [已解决·规避] 无头 Chrome `--virtual-time-budget` 对含 WebGL rAF 循环的页面截图恒于 ~1s，预算参数不生效
+- **现象**：给 bulb-orbit 页面的 `#final`（lit 全景）截图，`--virtual-time-budget` 从 2000 加到 60000 甚至加 `--timeout=300000`，产物像素级不变（画面质心跨档误差 <1px），真实耗时恒约 1s——此时 `.rise` 文字上升动画（延迟 0.3–0.62s + 0.9s 时长，约 1.6s 完成）与 24 芯片扫光（约 2.1s 完成）都还没播完，被提前定格成半成品画面。
+- **根因**：页面用 `requestAnimationFrame` 驱动常驻 WebGL 渲染循环（`loop3d`/`renderTick`），无头 Chrome 的虚拟时间预算机制与这类常驻 rAF 循环叠加时不按预算推进，捕获时刻实际由启动到就绪的真实时间决定，与 `--virtual-time-budget` 参数值无关。
+- **解决/规避**：需要「动画播完之后」状态的截图改用 playwright：固定视口（本例 1920×990）→ 导航 → 等待 ≥3s 真实墙钟时间 → 截图；`#final` 场景因同文档 fragment 导航不会重新执行脚本，须先导航到 `about:blank` 再导航到带 `#final` 的完整 URL，确保是真实整页加载后再等待截图。
+- **升级**：含 WebGL/rAF 常驻循环的页面，今后截「动画播完之后」的状态一律用 playwright + 真实等待，不再用无头 CLI 的 `--virtual-time-budget` 作为时间控制手段。

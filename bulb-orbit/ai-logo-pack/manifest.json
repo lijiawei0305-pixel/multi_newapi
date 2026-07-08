@@ -1,0 +1,202 @@
+[
+  {
+    "key": "glm_chatglm",
+    "name": "GLM / ChatGLM",
+    "cn": "智谱 GLM",
+    "slug": "chatglm",
+    "source_file": "dark/chatglm-color.png",
+    "logo_only": "logo-only/glm_chatglm.png",
+    "orbit_badge": "orbit-badges/glm_chatglm_badge.png",
+    "accent": "#6F7BFF"
+  },
+  {
+    "key": "zhipu_ai",
+    "name": "Zhipu AI",
+    "cn": "智谱 AI",
+    "slug": "zhipu",
+    "source_file": "dark/zhipu-color.png",
+    "logo_only": "logo-only/zhipu_ai.png",
+    "orbit_badge": "orbit-badges/zhipu_ai_badge.png",
+    "accent": "#43D9FF"
+  },
+  {
+    "key": "kimi",
+    "name": "Kimi",
+    "cn": "Kimi（月之暗面）",
+    "slug": "kimi",
+    "source_file": "dark/kimi-color.png",
+    "logo_only": "logo-only/kimi.png",
+    "orbit_badge": "orbit-badges/kimi_badge.png",
+    "accent": "#6C7CFF"
+  },
+  {
+    "key": "moonshot_ai",
+    "name": "Moonshot AI",
+    "cn": "月之暗面",
+    "slug": "moonshot",
+    "source_file": "dark/moonshot.png",
+    "logo_only": "logo-only/moonshot_ai.png",
+    "orbit_badge": "orbit-badges/moonshot_ai_badge.png",
+    "accent": "#B8C7FF"
+  },
+  {
+    "key": "xiaomi_mimo",
+    "name": "Xiaomi MiMo",
+    "cn": "小米 MiMo",
+    "slug": "xiaomimimo",
+    "source_file": "dark/xiaomimimo.png",
+    "logo_only": "logo-only/xiaomi_mimo.png",
+    "orbit_badge": "orbit-badges/xiaomi_mimo_badge.png",
+    "accent": "#FF6900"
+  },
+  {
+    "key": "qwen",
+    "name": "Qwen",
+    "cn": "通义千问",
+    "slug": "qwen",
+    "source_file": "dark/qwen-color.png",
+    "logo_only": "logo-only/qwen.png",
+    "orbit_badge": "orbit-badges/qwen_badge.png",
+    "accent": "#6B6DFF"
+  },
+  {
+    "key": "deepseek",
+    "name": "DeepSeek",
+    "cn": "DeepSeek",
+    "slug": "deepseek",
+    "source_file": "dark/deepseek-color.png",
+    "logo_only": "logo-only/deepseek.png",
+    "orbit_badge": "orbit-badges/deepseek_badge.png",
+    "accent": "#4FA3FF"
+  },
+  {
+    "key": "doubao",
+    "name": "Doubao",
+    "cn": "豆包",
+    "slug": "doubao",
+    "source_file": "dark/doubao-color.png",
+    "logo_only": "logo-only/doubao.png",
+    "orbit_badge": "orbit-badges/doubao_badge.png",
+    "accent": "#39C5FF"
+  },
+  {
+    "key": "tencent_hunyuan",
+    "name": "Tencent Hunyuan",
+    "cn": "腾讯混元",
+    "slug": "hunyuan",
+    "source_file": "dark/hunyuan-color.png",
+    "logo_only": "logo-only/tencent_hunyuan.png",
+    "orbit_badge": "orbit-badges/tencent_hunyuan_badge.png",
+    "accent": "#25D6FF"
+  },
+  {
+    "key": "tencent_yuanbao",
+    "name": "Tencent Yuanbao",
+    "cn": "腾讯元宝",
+    "slug": "yuanbao",
+    "source_file": "dark/yuanbao-color.png",
+    "logo_only": "logo-only/tencent_yuanbao.png",
+    "orbit_badge": "orbit-badges/tencent_yuanbao_badge.png",
+    "accent": "#5EC4FF"
+  },
+  {
+    "key": "baidu_wenxin",
+    "name": "ERNIE / Wenxin",
+    "cn": "百度文心",
+    "slug": "wenxin",
+    "source_file": "dark/wenxin-color.png",
+    "logo_only": "logo-only/baidu_wenxin.png",
+    "orbit_badge": "orbit-badges/baidu_wenxin_badge.png",
+    "accent": "#2D78FF"
+  },
+  {
+    "key": "iflytek_spark",
+    "name": "iFLYTEK Spark",
+    "cn": "讯飞星火",
+    "slug": "spark",
+    "source_file": "dark/spark-color.png",
+    "logo_only": "logo-only/iflytek_spark.png",
+    "orbit_badge": "orbit-badges/iflytek_spark_badge.png",
+    "accent": "#FF395D"
+  },
+  {
+    "key": "minimax",
+    "name": "MiniMax",
+    "cn": "MiniMax",
+    "slug": "minimax",
+    "source_file": "dark/minimax-color.png",
+    "logo_only": "logo-only/minimax.png",
+    "orbit_badge": "orbit-badges/minimax_badge.png",
+    "accent": "#B987FF"
+  },
+  {
+    "key": "baichuan_ai",
+    "name": "Baichuan AI",
+    "cn": "百川智能",
+    "slug": "baichuan",
+    "source_file": "dark/baichuan-color.png",
+    "logo_only": "logo-only/baichuan_ai.png",
+    "orbit_badge": "orbit-badges/baichuan_ai_badge.png",
+    "accent": "#2DE2A0"
+  },
+  {
+    "key": "zeroone_ai",
+    "name": "01.AI",
+    "cn": "零一万物",
+    "slug": "zeroone",
+    "source_file": "dark/zeroone-color.png",
+    "logo_only": "logo-only/zeroone_ai.png",
+    "orbit_badge": "orbit-badges/zeroone_ai_badge.png",
+    "accent": "#61D3FF"
+  },
+  {
+    "key": "stepfun",
+    "name": "StepFun",
+    "cn": "阶跃星辰",
+    "slug": "stepfun",
+    "source_file": "dark/stepfun-color.png",
+    "logo_only": "logo-only/stepfun.png",
+    "orbit_badge": "orbit-badges/stepfun_badge.png",
+    "accent": "#92A2FF"
+  },
+  {
+    "key": "sensenova",
+    "name": "SenseNova",
+    "cn": "商汤日日新",
+    "slug": "sensenova",
+    "source_file": "dark/sensenova-color.png",
+    "logo_only": "logo-only/sensenova.png",
+    "orbit_badge": "orbit-badges/sensenova_badge.png",
+    "accent": "#5DF0FF"
+  },
+  {
+    "key": "huawei_pangu",
+    "name": "Huawei / Pangu",
+    "cn": "华为盘古",
+    "slug": "huawei",
+    "source_file": "dark/huawei-color.png",
+    "logo_only": "logo-only/huawei_pangu.png",
+    "orbit_badge": "orbit-badges/huawei_pangu_badge.png",
+    "accent": "#EF3340"
+  },
+  {
+    "key": "volcengine",
+    "name": "Volcengine",
+    "cn": "火山引擎",
+    "slug": "volcengine",
+    "source_file": "dark/volcengine-color.png",
+    "logo_only": "logo-only/volcengine.png",
+    "orbit_badge": "orbit-badges/volcengine_badge.png",
+    "accent": "#2E8BFF"
+  },
+  {
+    "key": "alibaba_ai",
+    "name": "Alibaba AI",
+    "cn": "阿里 AI",
+    "slug": "alibaba",
+    "source_file": "dark/alibaba-color.png",
+    "logo_only": "logo-only/alibaba_ai.png",
+    "orbit_badge": "orbit-badges/alibaba_ai_badge.png",
+    "accent": "#FF6A00"
+  }
+]
