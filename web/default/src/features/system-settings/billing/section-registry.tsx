@@ -20,6 +20,7 @@ import { parseCurrencyDisplayType } from '@/lib/currency'
 import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { PricingSection } from '../general/pricing-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
+import { AlertSettingsSection } from '../integrations/alert-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
 import type { BillingSettings } from '../types'
@@ -197,6 +198,21 @@ const BILLING_SECTIONS = [
             settings['payment_setting.compliance_terms_version'] ?? '',
           confirmedAt: settings['payment_setting.compliance_confirmed_at'] ?? 0,
           confirmedBy: settings['payment_setting.compliance_confirmed_by'] ?? 0,
+        }}
+      />
+    ),
+  },
+  {
+    id: 'alert',
+    titleKey: 'Breakage Alerts',
+    build: (settings: BillingSettings) => (
+      <AlertSettingsSection
+        defaultValues={{
+          breakage_alert_enabled: settings.breakage_alert_enabled ?? false,
+          breakage_alert_email: settings.breakage_alert_email ?? '',
+          breakage_alert_webhook_url: settings.breakage_alert_webhook_url ?? '',
+          breakage_alert_threshold_pct:
+            settings.breakage_alert_threshold_pct ?? '',
         }}
       />
     ),

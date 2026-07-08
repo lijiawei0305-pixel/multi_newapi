@@ -60,7 +60,8 @@
 
 **三期(P3 · 品牌营销+国际化续订,2026-07-08 对账,详见 [acceptance.md](../acceptance.md) Part 3)**：≈ **完成一半**——P3-DOM-01 域名/SSL ✅ 超规格(自助绑定+自动签发+**到期提醒已补**[徽标+回刷])；P3-FE-01 营销化 ✅(营销字段全渲染+10 套主题预设)；P3-I18N-01 多语言 ✅(硬编码清零+六语条目全补齐[zh5660/en5581/其余5625],fallback 回归已修;上游拼接键 ~39 记边界)；P3-RNW-01 续订 🟡 **降级版达成**(到期提醒[≤7天黄/过期宽限红]+一键手动续费深链自动下单;全自动免密代扣仍 ⬜ 待代扣资质)；**P3-CUR-01 多币种 ⬜ 未启动**。**#13 四份交付手册 ✅(2026-07-08)**:落于站内 `/docs`「平台手册」节(营销页与模板/OEM 域名与证书/续订/多语言与多币种),六语。合同 13 条仅剩:套餐对比、主站模板入口、多币种(用户暂缓)、全自动代扣(外部资质)。
 
-- ~~7c-2 满额提醒(用户侧)~~ → **✅ 已落地（2026-07-07）**：`SubscriptionUsageBanner` 全局横幅——套餐用量 ≥80% 黄条 /≥100% 红条，可关闭（按 订阅×档位×计费周期 记忆，跨周期/升档自动重弹），CTA 跳 `/plans`；纯前端读原生订阅快照（spec `doc/specs/2026-07-07-subscription-usage-banner.md`，提交 e85afe5..447bed9，SDD 终审 Ready-to-merge）。**服务端主动推送（NoteUsage→AlertSink 邮件/webhook）仍未做、可选**。
+- ~~7c-2 满额提醒(用户侧)~~ → **✅ 已落地（2026-07-07）**：`SubscriptionUsageBanner` 全局横幅——套餐用量 ≥80% 黄条 /≥100% 红条，可关闭（按 订阅×档位×计费周期 记忆，跨周期/升档自动重弹），CTA 跳 `/plans`；纯前端读原生订阅快照（spec `doc/specs/2026-07-07-subscription-usage-banner.md`，提交 e85afe5..447bed9，SDD 终审 Ready-to-merge）。**服务端主动推送（AlertSink 邮件/webhook）代码已随 breakage 监控一并落地（共用 `internal/alert` sink），待服务器验收**。
+- **[代码就绪 · 待服务器验收] breakage 监控（P2-BRK-01）** —— 独立新页「额度沉淀监控」：4 指标卡（活跃套餐剩余/到期未使用/钱包未消耗/系统异常）+ 明细筛选表 + CSV 导出 + 快照趋势图；后端 `internal/breakage`（新表 `breakage_snapshots` + 4 指标聚合 + master-only 每日快照 job + 幂等回填）+ `internal/alert`（邮件/webhook AlertSink，阈值后台可配，收编 7c-2 服务端推送）+ `/api/admin/breakage/**`（租户隔离，门#4 审查通过）。多 agent 并行实施 + 4 透镜对抗审查（critical=0，2 warning 已修）。**本机无 Go 工具链，未编译**；待服务器 `go build`+`go test -race`+迁移(AutoMigrate+回填)+E2E 后转 ✅（分支 `feat/breakage-monitor`）。
 - **8c 运维零头** —— 迁移版本化、监控告警渠道接线。
 - **8a CF「Full (strict)」模式** —— 源站已具 Origin CA 证书；仅差在**你的 CF 面板**切模式。
 - **Trial 设备/实名维** —— 需前端购买请求上送 `device_id`/`real_name_id`（用户维已挡住主要滥用）。
