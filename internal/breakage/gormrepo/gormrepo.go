@@ -49,6 +49,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/breakage"
 )
 
@@ -110,14 +111,29 @@ func AutoMigrate(db *gorm.DB) error {
 	// 趋势查询组合索引 (tenant_id, period_end)：uniqueIndex 已含这两列但顺序为 (tenant,user,sub,period)，
 	// 无法服务「按 tenant 作用域 + period_end 区间」的前缀扫描，故补一条 (tenant_id, period_end)。
 	// AutoMigrate 对 struct tag 的 index 幂等，这里再显式 ensure 一次组合次序（对齐 reportrepo.ensureIndex 习语）。
-	return ensureIndex(db, "breakage_snapshots", "idx_breakage_snap_tenant_period", "tenant_id, period_end")
+	return ensureIndex(db, common.MainDatabaseType(), "breakage_snapshots", "idx_breakage_snap_tenant_period", "tenant_id, period_end")
 }
 
-// ensureIndex 幂等补建组合索引（best-effort）。sqlite/pg/MySQL 8.0.13+ 均支持 CREATE INDEX
-// IF NOT EXISTS（原生幂等）；早于该版本或已存在同名索引时 Exec 会报错，但组合索引仅为查询加速、
-// 唯一键（AutoMigrate 已建）才是正确性所依赖，故此处刻意吞错返回 nil，不阻断启动迁移。
-func ensureIndex(db *gorm.DB, table, idx, cols string) error {
+// ensureIndex 幂等补建组合索引（best-effort）。MySQL 不支持 CREATE INDEX IF NOT EXISTS，故先查
+// information_schema.statistics 判存在、缺失才 CREATE（无 IF NOT EXISTS）；sqlite/pg 用原生
+// IF NOT EXISTS 幂等。组合索引仅为查询加速、唯一键（AutoMigrate 已建）才是正确性所依赖，故一律
+// 吞错返回 nil，不阻断启动迁移。对齐 internal/report/reportrepo/migrate.go ensureIndex 习语。
+func ensureIndex(db *gorm.DB, dbType common.DatabaseType, table, idx, cols string) error {
 	if db == nil {
+		return nil
+	}
+	if dbType == common.DatabaseTypeMySQL {
+		var count int64
+		if err := db.Raw(
+			`SELECT COUNT(*) FROM information_schema.statistics
+			 WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`,
+			table, idx,
+		).Scan(&count).Error; err != nil {
+			return nil // best-effort：探测失败不阻断迁移
+		}
+		if count == 0 {
+			_ = db.Exec("CREATE INDEX " + idx + " ON " + table + " (" + cols + ")").Error
+		}
 		return nil
 	}
 	_ = db.Exec("CREATE INDEX IF NOT EXISTS " + idx + " ON " + table + " (" + cols + ")").Error
