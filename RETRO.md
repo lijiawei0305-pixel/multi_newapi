@@ -109,6 +109,12 @@
 - **解决/规避**：`docker builder prune -f`（只删构建缓存，下次构建自动重生、仅慢一次；**不碰**镜像/容器/volume/DB）→ 一次回收 55.7GB；`docker image prune -f` 只删 dangling（保留 `prev-*` 回滚 tag）再回收 0.35GB。**81% → 25%（71G free）**。go mod/build 的**命名 volume**（newapi_gomodcache 等）是提速用的、`builder prune` 不动它们，放心。
 - **升级**：**每隔若干次部署、或见 `df` 逼近 80% 就 `docker builder prune -f`**——安全的例行维护，别等构建因 no space 失败才处理；判断看 `docker system df` 的 Build Cache RECLAIMABLE 列。（`/root/newapi-test-old-*`、`/root/newapi-compile` 等 /root 旧源码副本另占 ~5.7G，属人工备份，删前问用户。）
 
+### [已解决] MySQL 不支持 `CREATE INDEX IF NOT EXISTS`——sqlite 单测过、MySQL 迁移报 Error 1064
+- **现象**：breakage 监控部署到测试栈后，迁移日志 `Error 1064 (42000): You have an error in your SQL syntax ... near 'IF NOT EXISTS idx_breakage_snap_tenant_period ON breakage_snapshots ...'`（`gormrepo.go` ensureIndex）。本机全部单测（`glebarez/sqlite` :memory:）却是全绿。
+- **根因**：**MySQL（含 8.x）不支持 `CREATE INDEX IF NOT EXISTS`**（仅 MariaDB 10.1.4+/pg/sqlite 支持；agent 写的注释「MySQL 8.0.13+ 支持」是错的，把 MySQL 当 MariaDB）。sqlite 支持该语法 → 单测测不到；生产 MySQL 才炸。**这是 sqlite测试→MySQL生产的系统性方言盲区**：凡「只在 MySQL 跑的原生 SQL」单测都覆盖不到。代码已 best-effort 吞错、不阻断迁移，故功能没坏，但 perf 索引没建上 + 每次迁移刷错误日志。
+- **解决/规避**：照 `internal/report/reportrepo/migrate.go` 已在生产 MySQL 验证的方言分支：MySQL 先查 `information_schema.statistics` 判索引存在、缺失才 `CREATE INDEX`（**无** IF NOT EXISTS）；sqlite/pg 用原生 IF NOT EXISTS。`dbType` 取 `common.MainDatabaseType()`（sqlite 单测未设 → "" → 走 IF NOT EXISTS 分支，不受影响）。修后重新部署，两索引（唯一键 + tenant_period）均建成、日志无 1064。
+- **升级**：补 `AutoMigrate` 不自动建的组合/perf 索引，一律用方言分支 `ensureIndex(db, common.MainDatabaseType(), ...)`；**别用 `CREATE INDEX IF NOT EXISTS`（MySQL 会炸）**。凡涉及只跑 MySQL 的原生 SQL，sqlite 单测过不代表生产过——必上服务器容器验证。已存记忆 [[mysql-create-index-if-not-exists]]。
+
 ---
 
 ## 二、构建与依赖
