@@ -206,8 +206,7 @@ function EarningsCalculator() {
         </div>
         <p className='text-muted-foreground/70 text-[11px] leading-relaxed'>
           {t('Agent Join Calc Formula', {
-            defaultValue:
-              '套餐分成 =（售价 − 底价）× 套餐数；API 消耗分成 = 基准消耗额 ×（你的倍率 − 底价倍率）。平台抽成 0，结果仅供估算。',
+            defaultValue: '套餐分成 =（售价 − 底价）× 套餐数；API 消耗分成 = 基准消耗额 ×（你的倍率 − 底价倍率）。平台抽成 0，结果仅供估算。',
           })}
         </p>
       </CardContent>
@@ -242,8 +241,7 @@ export function AgentJoin() {
       icon: GraduationCap,
       title: t('Agent Join Audience Student Title', { defaultValue: '大学生' }),
       desc: t('Agent Join Audience Student Desc', {
-        defaultValue:
-          '时间充裕，希望通过推广轻松增加收入，负担部分生活费与娱乐支出。',
+        defaultValue: '时间充裕，希望通过推广轻松增加收入，负担部分生活费与娱乐支出。',
       }),
     },
     {
@@ -252,8 +250,7 @@ export function AgentJoin() {
         defaultValue: '自媒体从业者',
       }),
       desc: t('Agent Join Audience Creator Desc', {
-        defaultValue:
-          '拥有一定粉丝基础，只需在文章或帖子末尾附上链接，即可实现额外盈利。',
+        defaultValue: '拥有一定粉丝基础，只需在文章或帖子末尾附上链接，即可实现额外盈利。',
       }),
     },
     {
@@ -316,8 +313,7 @@ export function AgentJoin() {
         defaultValue: '套餐分成',
       }),
       desc: t('Agent Join Revenue Markup Desc', {
-        defaultValue:
-          '自定义下级套餐售价，用户购买套餐时，售价减去你的底价即时转入你的分成（购买即得、平台抽成 0）。',
+        defaultValue: '自定义下级套餐售价，用户购买套餐时，售价减去你的底价即时转入你的分成（购买即得、平台抽成 0）。',
       }),
     },
     {
@@ -326,8 +322,7 @@ export function AgentJoin() {
         defaultValue: 'API 消耗分成',
       }),
       desc: t('Agent Join Revenue Usage Desc', {
-        defaultValue:
-          '下级用户消耗钱包余额调用模型时，按「你给用户的倍率 − 平台给你的底价倍率」实时分润，消耗越多收益越高。',
+        defaultValue: '下级用户消耗钱包余额调用模型时，按「你给用户的倍率 − 平台给你的底价倍率」实时分润，消耗越多收益越高。',
       }),
     },
     {
@@ -336,8 +331,7 @@ export function AgentJoin() {
         defaultValue: '规模效应',
       }),
       desc: t('Agent Join Revenue Scale Desc', {
-        defaultValue:
-          '一套上游渠道分发多模型，下级用户越多、用量越大，你的单位成本越低、总收益越高。',
+        defaultValue: '一套上游渠道分发多模型，下级用户越多、用量越大，你的单位成本越低、总收益越高。',
       }),
     },
   ]
@@ -348,8 +342,7 @@ export function AgentJoin() {
       icon: Zap,
       title: t('Agent Join Reason Easy Title', { defaultValue: '简易设置' }),
       desc: t('Agent Join Reason Easy Desc', {
-        defaultValue:
-          '只需提供一个域名，无需部署 API、无需寻找支付渠道，免备货、免提现手续费。',
+        defaultValue: '只需提供一个域名，无需部署 API、无需寻找支付渠道，免备货、免提现手续费。',
       }),
     },
     {
@@ -358,8 +351,7 @@ export function AgentJoin() {
         defaultValue: '完全定制化',
       }),
       desc: t('Agent Join Reason Custom Desc', {
-        defaultValue:
-          '可定制价格、首页、教程、Logo、公告等，预设首页随价格与站名变动，也可替换为自己的。',
+        defaultValue: '可定制价格、首页、教程、Logo、公告等，预设首页随价格与站名变动，也可替换为自己的。',
       }),
     },
     {
@@ -386,8 +378,7 @@ export function AgentJoin() {
       defaultValue: '提供域名给管理员以配置 SSL 证书。',
     }),
     t('Agent Join Step 5', {
-      defaultValue:
-        '配置完成后，访问域名即可看到代理站点，域名下注册的用户将成为您的下级用户。',
+      defaultValue: '配置完成后，访问域名即可看到代理站点，域名下注册的用户将成为您的下级用户。',
     }),
   ]
 
@@ -397,12 +388,10 @@ export function AgentJoin() {
       defaultValue: '用户访问你的代理域名注册，即与你建立代理关系。',
     }),
     t('Agent Join Rule 2', {
-      defaultValue:
-        '套餐分成：用户购买套餐时，你的利润 = 售价 − 你的底价（进货成本），购买当时一次性入账、立即可提现。平台抽成 0%（现阶段并将长期为 0）。',
+      defaultValue: '套餐分成：用户购买套餐时，你的利润 = 售价 − 你的底价（进货成本），购买当时一次性入账、立即可提现。平台抽成 0%（现阶段并将长期为 0）。',
     }),
     t('Agent Join Rule 3', {
-      defaultValue:
-        'API 消耗分成：用户消耗钱包余额调用 API 时，你的利润 = 基准消耗额 ×（你给用户的倍率 − 平台给你的底价倍率），消耗时逐笔实时入账、立即可提现。',
+      defaultValue: 'API 消耗分成：用户消耗钱包余额调用 API 时，你的利润 = 基准消耗额 ×（你给用户的倍率 − 平台给你的底价倍率），消耗时逐笔实时入账、立即可提现。',
     }),
     t('Agent Join Rule 4', {
       defaultValue: '你的总利润 = 套餐分成 + API 消耗分成，实时结算、可提现。',
@@ -477,7 +466,12 @@ export function AgentJoin() {
               p.anchor_price_cny > p.price_cny ? fmtPrice(p.anchor_price_cny) : '',
             price: fmtPrice(p.price_cny),
             period:
-              p.valid_days > 0 ? `有效期 ${p.valid_days} 天` : '',
+              p.valid_days > 0
+                ? t('Agent Join Plan Validity Days', {
+                    defaultValue: '有效期 {{days}} 天',
+                    days: p.valid_days,
+                  })
+                : '',
             discount: p.discount_label,
             recommended: p.is_recommended,
           }))
@@ -524,8 +518,7 @@ export function AgentJoin() {
             </h1>
             <p className='text-muted-foreground/80 mt-5 max-w-xl text-base leading-relaxed'>
               {t('Agent Join Hero Subtitle', {
-                defaultValue:
-                  '轻松开启您的商业旅程：只需提供域名、按教程配置，即可定制价格、首页与教程，获得用户充值分成。',
+                defaultValue: '轻松开启您的商业旅程：只需提供域名、按教程配置，即可定制价格、首页与教程，获得用户充值分成。',
               })}
             </p>
 
@@ -554,7 +547,9 @@ export function AgentJoin() {
         </div>
       </section>
 
-      {/* ===== 适合人群 ===== */}
+      {
+        /* ===== 适合人群 ===== */
+      }
       <section className='border-border/40 relative z-10 border-t px-6 py-20 md:py-28'>
         <div className='mx-auto max-w-6xl'>
           <SectionHeading
@@ -593,7 +588,9 @@ export function AgentJoin() {
         </div>
       </section>
 
-      {/* ===== 加入特点 ===== */}
+      {
+        /* ===== 加入特点 ===== */
+      }
       <section className='border-border/40 relative z-10 border-t px-6 py-20 md:py-28'>
         <div className='mx-auto max-w-6xl'>
           <SectionHeading
@@ -628,7 +625,9 @@ export function AgentJoin() {
         </div>
       </section>
 
-      {/* ===== 三重收益（替代虚构成功案例）===== */}
+      {
+        /* ===== 三重收益（替代虚构成功案例）===== */
+      }
       <section className='border-border/40 relative z-10 border-t px-6 py-20 md:py-28'>
         <div className='mx-auto max-w-6xl'>
           <SectionHeading
@@ -665,7 +664,9 @@ export function AgentJoin() {
         </div>
       </section>
 
-      {/* ===== 为什么选择我们 ===== */}
+      {
+        /* ===== 为什么选择我们 ===== */
+      }
       <section className='border-border/40 relative z-10 border-t px-6 py-20 md:py-28'>
         <div className='mx-auto max-w-6xl'>
           <SectionHeading
@@ -702,7 +703,9 @@ export function AgentJoin() {
         </div>
       </section>
 
-      {/* ===== 代理合作方案 ===== */}
+      {
+        /* ===== 代理合作方案 ===== */
+      }
       <section className='border-border/40 relative z-10 border-t px-6 py-20 md:py-28'>
         <div className='mx-auto max-w-6xl'>
           <SectionHeading
@@ -792,7 +795,9 @@ export function AgentJoin() {
         </div>
       </section>
 
-      {/* ===== 如何成为代理 ===== */}
+      {
+        /* ===== 如何成为代理 ===== */
+      }
       <section
         id='how-to-join'
         className='border-border/40 relative z-10 scroll-mt-20 border-t px-6 py-20 md:py-28'
@@ -827,7 +832,9 @@ export function AgentJoin() {
         </div>
       </section>
 
-      {/* ===== 代理规则 + 收益计算器 ===== */}
+      {
+        /* ===== 代理规则 + 收益计算器 ===== */
+      }
       <section className='border-border/40 relative z-10 border-t px-6 py-20 md:py-28'>
         <div className='mx-auto max-w-6xl'>
           <SectionHeading
@@ -849,8 +856,7 @@ export function AgentJoin() {
                   </CardTitle>
                   <CardDescription>
                     {t('Agent Join Rules Card Desc', {
-                      defaultValue:
-                        '代理可以没有余额；套餐与 API 消耗两条分成合并结算，平台抽成 0。',
+                      defaultValue: '代理可以没有余额；套餐与 API 消耗两条分成合并结算，平台抽成 0。',
                     })}
                   </CardDescription>
                 </CardHeader>
@@ -874,8 +880,7 @@ export function AgentJoin() {
                     </p>
                     <p className='mt-1 font-mono text-xs leading-relaxed break-words'>
                       {t('Agent Join Rules Formula', {
-                        defaultValue:
-                          '套餐分成 =（售价 − 底价）；API 消耗分成 = 基准消耗额 ×（你给用户的倍率 − 平台给你的底价倍率）；总利润 = 两者之和',
+                        defaultValue: '套餐分成 =（售价 − 底价）；API 消耗分成 = 基准消耗额 ×（你给用户的倍率 − 平台给你的底价倍率）；总利润 = 两者之和',
                       })}
                     </p>
                   </div>
@@ -890,7 +895,9 @@ export function AgentJoin() {
         </div>
       </section>
 
-      {/* ===== 终版 CTA ===== */}
+      {
+        /* ===== 终版 CTA ===== */
+      }
       <section className='relative z-10 overflow-hidden px-6 py-24 md:py-32'>
         <div
           aria-hidden

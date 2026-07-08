@@ -141,8 +141,7 @@ export function AgentPlansPurchase() {
         <div className='flex flex-col gap-6 pb-4'>
           <p className='text-muted-foreground text-sm'>
             {t('Become Agent Intro', {
-              defaultValue:
-                '选择一档代理套餐,支付开通后即成为对应档位代理(一次性付费,含有效期)。首次开通请填写你的专属子域名与站点名;已是代理则为升级,可留空。',
+              defaultValue: '选择一档代理套餐,支付开通后即成为对应档位代理(一次性付费,含有效期)。首次开通请填写你的专属子域名与站点名;已是代理则为升级,可留空。',
             })}
           </p>
 
@@ -156,13 +155,14 @@ export function AgentPlansPurchase() {
             </Alert>
           ) : null}
 
-          {/* 首次开通信息(已是代理 → 升级/续期,后端忽略 slug/name → 隐藏输入,免得填了没反应) */}
+          {
+            /* 首次开通信息(已是代理 → 升级/续期,后端忽略 slug/name → 隐藏输入,免得填了没反应) */
+          }
           {isExistingAgent ? (
             <Alert>
               <AlertDescription>
                 {t('Become Agent Upgrade Hint', {
-                  defaultValue:
-                    '你已是代理:购买将升级/续期你现有的代理站(档位、批发折扣与有效期),不更改站点标识与子域名;升级到 OEM/API 档会自动开通你的独立站点。',
+                  defaultValue: '你已是代理:购买将升级/续期你现有的代理站(档位、批发折扣与有效期),不更改站点标识与子域名;升级到 OEM/API 档会自动开通你的独立站点。',
                 })}
               </AlertDescription>
             </Alert>
@@ -200,7 +200,9 @@ export function AgentPlansPurchase() {
             </div>
           )}
 
-          {/* 支付方式 */}
+          {
+            /* 支付方式 */
+          }
           {officialProviders.length > 0 ? (
             <div className='flex flex-wrap items-center gap-2'>
               <span className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
@@ -213,7 +215,9 @@ export function AgentPlansPurchase() {
             </div>
           ) : null}
 
-          {/* 套餐卡 */}
+          {
+            /* 套餐卡 */
+          }
           {isLoading ? (
             <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
               {[0, 1, 2].map((i) => (
@@ -268,7 +272,9 @@ export function AgentPlansPurchase() {
                       {plan.grant_level >= 1 ? (
                         <li className='flex items-center gap-1.5'>
                           <Globe className='text-primary h-3.5 w-3.5' />
-                          {/* API 档(can_api)明示「含 OEM 全部能力」——API=OEM 超集(2026-07-08 用户定档);OEM 档保持原文案 */}
+                          {
+                            /* API 档(can_api)明示「含 OEM 全部能力」——API=OEM 超集(2026-07-08 用户定档);OEM 档保持原文案 */
+                          }
                           {plan.grant_can_api
                             ? t('Become Agent Cap Oem Superset', {
                                 defaultValue: '含 OEM 全部能力(独立域名 + 站点装修)',
@@ -300,7 +306,9 @@ export function AgentPlansPurchase() {
             </div>
           )}
 
-          {/* 微信支付二维码 */}
+          {
+            /* 微信支付二维码 */
+          }
           {qrState ? (
             <Card className='border-primary/30 mx-auto max-w-sm'>
               <CardHeader>

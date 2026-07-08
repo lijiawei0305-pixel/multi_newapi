@@ -159,8 +159,7 @@ export function AgentPlansAdmin() {
           <div className='flex items-center justify-between'>
             <p className='text-muted-foreground text-sm'>
               {t('Agent Plans Admin Intro', {
-                defaultValue:
-                  '配置「购买代理套餐」的档位:价格、授予能力(代理等级/开放 API/批发折扣系数)、有效期与上下架。',
+                defaultValue: '配置「购买代理套餐」的档位:价格、授予能力(代理等级/开放 API/批发折扣系数)、有效期与上下架。',
               })}
             </p>
             <Button size='sm' onClick={() => setForm({ ...emptyForm })}>
@@ -234,7 +233,9 @@ export function AgentPlansAdmin() {
             </div>
           )}
 
-          {/* 内联创建/编辑表单 */}
+          {
+            /* 内联创建/编辑表单 */
+          }
           {form ? (
             <Card>
               <CardHeader>
@@ -280,7 +281,7 @@ export function AgentPlansAdmin() {
                     <Input
                       value={form.discount_label}
                       onChange={(e) => set('discount_label', e.target.value)}
-                      placeholder='5折'
+                      placeholder={t('Discount Label Placeholder', { defaultValue: '5折' })}
                     />
                   </Field>
                   <Field label={t('Valid Days', { defaultValue: '有效期(天)' })}>
