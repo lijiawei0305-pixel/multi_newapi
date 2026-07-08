@@ -241,6 +241,27 @@ export function CustomDomain() {
                     status={status ?? 'pending_dns'}
                     lastError={data?.last_error}
                   />
+                  {/* SSL 到期提醒(P3 #9):active 且 ≤30 天时提示;系统 acme 自动续期,仅供知会。 */}
+                  {status === 'active' &&
+                    data?.cert_expires_at &&
+                    (() => {
+                      const d = Math.ceil(
+                        (Date.parse(data.cert_expires_at) - Date.now()) / 86400000
+                      )
+                      if (d > 30) return null
+                      return (
+                        <p className='text-muted-foreground -mt-3 text-center text-xs'>
+                          {t(
+                            'Certificate expires in {{days}} day(s); it renews automatically — contact the admin if this persists.',
+                            {
+                              defaultValue:
+                                '证书将于 {{days}} 天后到期,系统会自动续期;若持续临期请联系管理员。',
+                              days: Math.max(d, 0),
+                            }
+                          )}
+                        </p>
+                      )
+                    })()}
                   <div className='flex flex-wrap justify-center gap-2'>
                     {status !== 'active' && (
                       <Button onClick={handleVerify} disabled={verifying}>

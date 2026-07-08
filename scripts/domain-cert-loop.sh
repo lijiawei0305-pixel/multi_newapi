@@ -35,6 +35,25 @@ backoff_minutes() {
   echo "$m"
 }
 
+# ── 阶段 0(≤1 次/20h):回刷 active 域名的磁盘证书到期时间进 DB ──────────────────
+# acme.sh --cron 自动续期只更新磁盘证书、不写 DB;不回刷则 cert_expires_at 停在首签时刻,
+# 前端「SSL 到期提醒」续期后会变假警报(P3 #9)。复用 cert-issued 回写(幂等,重置 active 无副作用)。
+REFRESH_STAMP="$STATE_DIR/.expiry-refresh"
+if [[ ! -f "$REFRESH_STAMP" || -n "$(find "$REFRESH_STAMP" -mmin +1200 2>/dev/null)" ]]; then
+  act="$(curl -fsS "${API_BASE}/active-cert" -H "X-Internal-Secret: ${SECRET}" 2>>"$LOG_FILE")" || act=""
+  if [[ -n "$act" ]]; then
+    mapfile -t actives < <(parse_domains "$act")
+    n=0
+    for d in "${actives[@]}"; do
+      [[ -z "$d" ]] && continue
+      exp="$(cert_expiry_iso "$d")"
+      callback_cert_issued "$d" "$exp" && n=$((n+1))
+    done
+    (( n > 0 )) && log "expiry refresh: ${n} active domain(s) synced"
+    touch "$REFRESH_STAMP"
+  fi
+fi
+
 now=$(date +%s)
 mapfile -t raw < <(parse_domains "$resp")
 # 过滤空行(python3 兜底对空数组会输出一个空行,曾被误计为 1 个域名)。

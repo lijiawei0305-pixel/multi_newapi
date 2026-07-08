@@ -148,6 +148,7 @@ func SetMtRouter(router *gin.Engine) {
 	{
 		internalDomainGroup.GET("/pending-cert", app.HandleInternalListPendingCert) // 列待发证（dns_verified）域名
 		internalDomainGroup.POST("/cert-issued", app.HandleInternalCertIssued)      // 证书就绪 → active + 失效缓存
+		internalDomainGroup.GET("/active-cert", app.HandleInternalListActiveCert)   // 列 active 域名(cert-loop 回刷到期时间用)
 	}
 
 	// 支付平台异步回调（目标③，支付重构后）：微信/支付宝 POST 到此，handler 内验签（无 UserAuth/TenantMiddleware）。

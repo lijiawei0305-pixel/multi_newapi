@@ -150,6 +150,33 @@ export function AdminCustomDomains() {
                               {t('Expires')}: {fmtDateTime(row.cert_expires_at)}
                             </span>
                           )}
+                          {/* SSL 到期提醒(P3 #9):≤30 天琥珀、已过期红。acme 每日自动续期,
+                              cert-loop 每 ~20h 回刷 DB 到期时间,正常不会真过期。 */}
+                          {row.cert_expires_at &&
+                            (() => {
+                              const d = Math.ceil(
+                                (Date.parse(row.cert_expires_at) - Date.now()) /
+                                  86400000
+                              )
+                              if (d > 30) return null
+                              return d <= 0 ? (
+                                <Badge variant='destructive' className='mt-0.5 w-fit'>
+                                  {t('Cert expired, awaiting auto-renew check', {
+                                    defaultValue: '证书已过期(待自动续期核查)',
+                                  })}
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant='secondary'
+                                  className='mt-0.5 w-fit bg-amber-500/15 text-amber-700 dark:text-amber-400'
+                                >
+                                  {t('Cert expires in {{days}} day(s)', {
+                                    defaultValue: '证书 {{days}} 天后到期',
+                                    days: d,
+                                  })}
+                                </Badge>
+                              )
+                            })()}
                         </div>
                       ) : (
                         <span className='text-muted-foreground'>-</span>

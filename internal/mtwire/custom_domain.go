@@ -288,3 +288,21 @@ func (a *App) tenantsByIDs(ctx context.Context, ids []int64) map[int64]tenantBri
 	}
 	return out
 }
+
+// HandleInternalListActiveCert GET /api/internal/domain/active-cert —— 列全部 active 自定义域名。
+// 供 cert-loop 周期回刷磁盘证书到期时间进 DB(SSL 到期提醒 P3 #9 的数据真实性):acme.sh --cron
+// 自动续期只更新磁盘证书、不写 DB,不回刷则 cert_expires_at 停在首签时刻,续期后提醒变假警报。
+func (a *App) HandleInternalListActiveCert(c *gin.Context) {
+	list, err := a.CustomDomains.ListAll(c.Request.Context())
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	domains := make([]string, 0, len(list))
+	for _, d := range list {
+		if d.Status == tenant.CustomDomainActive {
+			domains = append(domains, d.Domain)
+		}
+	}
+	respondOK(c, gin.H{"domains": domains})
+}
