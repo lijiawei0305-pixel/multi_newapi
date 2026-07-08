@@ -61,9 +61,9 @@ type agentPlanOrderRow struct {
 	GrantCanAPI        bool      `gorm:"column:grant_can_api;not null;default:false"`
 	GrantDiscountRatio float64   `gorm:"column:grant_discount_ratio;type:decimal(10,4);not null;default:0"`
 	ValidDays          int       `gorm:"column:valid_days;not null;default:365"`
-	Slug               string    `gorm:"column:slug;type:varchar(64)"`      // 新建代理租户用（子域名/标识）
-	Name               string    `gorm:"column:name;type:varchar(64)"`      // 站点名
-	PlanCode           string    `gorm:"column:plan_code;type:varchar(32)"` // 会员台账用
+	Slug               string    `gorm:"column:slug;type:varchar(64)"`              // 新建代理租户用（子域名/标识）
+	Name               string    `gorm:"column:name;type:varchar(64)"`              // 站点名
+	PlanCode           string    `gorm:"column:plan_code;type:varchar(32)"`         // 会员台账用
 	AgentTenantID      int64     `gorm:"column:agent_tenant_id;not null;default:0"` // 激活回填：开通/升级的代理租户
 	CreatedAt          time.Time `gorm:"column:created_at"`
 	UpdatedAt          time.Time `gorm:"column:updated_at"`
@@ -181,6 +181,26 @@ func (a *App) provisionAgentFromOrder(ctx context.Context, ord *agentPlanOrderRo
 		}
 		if !found {
 			params = agent.AgentParams{UserID: ord.OwnerUserID, PackageDiscount: 1.0}
+		}
+		prevLevel := params.Level
+		// 升独立档基建（镜像 HandleAdminUpdateAgent 促升序列，原子性教训见 agent.go Fix 3 注释）：
+		// GrantLevel≥1 先幂等派生子域名——用租户**既有 slug**（ord.Slug 对升级维持「已是代理则忽略」
+		// 契约），失败则整体失败、level 绝不落库（不得留下「付费升独立却没有站」，2026-07-08 用户报
+		// gap）。仅「真促升」（此前 level<1）才作废推广渠道；**年度续费（已是 L1 再购）不得再作废**
+		// ——否则每年续费都打断代理正在用的邀请链接（购买路径与 admin PATCH 语义的关键差异）。
+		if ord.GrantLevel >= 1 {
+			tn, terr := a.TenantService.Get(ctx, tenantID)
+			if terr != nil {
+				return 0, terr
+			}
+			if err := a.TenantService.EnsureSubdomain(ctx, tenantID, tn.Slug); err != nil {
+				return 0, err
+			}
+			if prevLevel < 1 {
+				if err := a.Promotion.VoidChannelsByTenant(ctx, tenantID); err != nil {
+					return 0, err
+				}
+			}
 		}
 		params.UserID = ord.OwnerUserID
 		params.Level = ord.GrantLevel

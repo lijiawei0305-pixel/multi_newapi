@@ -36,6 +36,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { agentContextQueryOptions } from '@/lib/agent-context'
 import { getPaymentIcon } from '@/features/wallet/lib'
 import { useRechargeMethods } from '@/features/wallet/hooks/use-recharge-methods'
 import type { RechargeProvider } from '@/features/wallet/hooks/use-tenant-recharge'
@@ -75,6 +76,11 @@ export function AgentPlansPurchase() {
     queryFn: getPublicAgentPlans,
     placeholderData: (prev) => prev,
   })
+
+  // 已是代理 → 购买走「升级/续期」分支,后端忽略 slug/name(见 agent_plan_bridge.go 升级契约),
+  // 故隐藏首开输入、换成升级说明——否则买家填了没反应会误以为坏了(2026-07-08 用户反馈)。
+  const { data: agentCtx } = useQuery(agentContextQueryOptions)
+  const isExistingAgent = !!agentCtx?.is_agent_owner
 
   const purchase = useMutation({
     mutationFn: (plan: AgentPlan) =>
@@ -150,38 +156,49 @@ export function AgentPlansPurchase() {
             </Alert>
           ) : null}
 
-          {/* 首次开通信息 */}
-          <div className='grid gap-3 sm:grid-cols-2'>
-            <div className='space-y-1.5'>
-              <label htmlFor='agent-slug' className='text-xs font-medium'>
-                {t('Become Agent Slug', { defaultValue: '子域名(首次开通)' })}
-              </label>
-              <Input
-                id='agent-slug'
-                placeholder='myshop'
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                className='h-9'
-              />
-              <p className='text-muted-foreground/70 text-[11px]'>
-                {t('Become Agent Slug Hint', {
-                  defaultValue: '将生成 <子域名>.wedreamhub.com(仅 OEM/API 档启用站点)',
+          {/* 首次开通信息(已是代理 → 升级/续期,后端忽略 slug/name → 隐藏输入,免得填了没反应) */}
+          {isExistingAgent ? (
+            <Alert>
+              <AlertDescription>
+                {t('Become Agent Upgrade Hint', {
+                  defaultValue:
+                    '你已是代理:购买将升级/续期你现有的代理站(档位、批发折扣与有效期),不更改站点标识与子域名;升级到 OEM/API 档会自动开通你的独立站点。',
                 })}
-              </p>
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <div className='grid gap-3 sm:grid-cols-2'>
+              <div className='space-y-1.5'>
+                <label htmlFor='agent-slug' className='text-xs font-medium'>
+                  {t('Become Agent Slug', { defaultValue: '子域名(首次开通)' })}
+                </label>
+                <Input
+                  id='agent-slug'
+                  placeholder='myshop'
+                  value={slug}
+                  onChange={(e) => setSlug(e.target.value)}
+                  className='h-9'
+                />
+                <p className='text-muted-foreground/70 text-[11px]'>
+                  {t('Become Agent Slug Hint', {
+                    defaultValue: '将生成 <子域名>.wedreamhub.com(仅 OEM/API 档启用站点)',
+                  })}
+                </p>
+              </div>
+              <div className='space-y-1.5'>
+                <label htmlFor='agent-name' className='text-xs font-medium'>
+                  {t('Become Agent Name', { defaultValue: '站点名(首次开通)' })}
+                </label>
+                <Input
+                  id='agent-name'
+                  placeholder={t('Become Agent Name Ph', { defaultValue: '我的 AI 站' })}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className='h-9'
+                />
+              </div>
             </div>
-            <div className='space-y-1.5'>
-              <label htmlFor='agent-name' className='text-xs font-medium'>
-                {t('Become Agent Name', { defaultValue: '站点名(首次开通)' })}
-              </label>
-              <Input
-                id='agent-name'
-                placeholder={t('Become Agent Name Ph', { defaultValue: '我的 AI 站' })}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className='h-9'
-              />
-            </div>
-          </div>
+          )}
 
           {/* 支付方式 */}
           {officialProviders.length > 0 ? (
