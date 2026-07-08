@@ -50,6 +50,9 @@ func SetMtRouter(router *gin.Engine) {
 		app.StartReconcileLoop()
 		// 代理套餐到期降级定时任务（P4，master-only）：周期扫 mt_agent_memberships 到期会员 → 撤销付费授予。
 		app.StartAgentPlanExpiryLoop()
+		// breakage 快照定时任务（P2-BRK-01，master-only）：每日采集全平台额度沉淀落 breakage_snapshots +
+		// 扫满额/异常订阅经 AlertSink 告警（收编 7c-2 满额推送）。
+		app.StartBreakageSnapshotLoop()
 	}
 
 	// 租户控制台（Host 维度）。GET /current 公开；其余复用 new-api UserAuth。
@@ -197,6 +200,17 @@ func SetMtRouter(router *gin.Engine) {
 	adminSubGroup.Use(app.TenantMiddleware(), middleware.AdminAuth())
 	{
 		adminSubGroup.GET("", app.HandleAdminListSubscriptions)
+	}
+
+	// 管理端 breakage 监控（额度沉淀，P2-BRK-01）：当前租户维度，租户来自 Host。前置 TenantMiddleware +
+	// new-api AdminAuth（与 adminSubGroup 同语义：主站 Host 看全平台跨租户，代理子域/自定义域名隔离本租户）。
+	// overview（4 卡）/ detail（明细，筛选+分页+?format=csv 导出）/ snapshots（历史快照趋势，按期）。
+	adminBreakageGroup := router.Group("/api/admin/breakage")
+	adminBreakageGroup.Use(app.TenantMiddleware(), middleware.AdminAuth())
+	{
+		adminBreakageGroup.GET("/overview", app.HandleAdminBreakageOverview)
+		adminBreakageGroup.GET("/detail", app.HandleAdminBreakageDetail)
+		adminBreakageGroup.GET("/snapshots", app.HandleAdminBreakageSnapshots)
 	}
 
 	// 主站代理管理（全局，非租户维度）：设代理 / 列表 / 改代理。复用 new-api AdminAuth。

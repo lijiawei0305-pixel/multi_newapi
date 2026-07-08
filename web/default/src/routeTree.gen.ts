@@ -47,6 +47,7 @@ import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedSubscriptionMonitorIndexRouteImport } from './routes/_authenticated/subscription-monitor/index'
+import { Route as AuthenticatedBreakageMonitorIndexRouteImport } from './routes/_authenticated/breakage-monitor/index'
 import { Route as AuthenticatedSiteBrandingIndexRouteImport } from './routes/_authenticated/site-branding/index'
 import { Route as AuthenticatedRedemptionsIndexRouteImport } from './routes/_authenticated/redemptions/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
@@ -296,6 +297,12 @@ const AuthenticatedSubscriptionMonitorIndexRoute =
   AuthenticatedSubscriptionMonitorIndexRouteImport.update({
     id: '/subscription-monitor/',
     path: '/subscription-monitor/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedBreakageMonitorIndexRoute =
+  AuthenticatedBreakageMonitorIndexRouteImport.update({
+    id: '/breakage-monitor/',
+    path: '/breakage-monitor/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedSiteBrandingIndexRoute =
@@ -671,6 +678,7 @@ export interface FileRoutesByFullPath {
   '/redemptions/': typeof AuthenticatedRedemptionsIndexRoute
   '/site-branding/': typeof AuthenticatedSiteBrandingIndexRoute
   '/subscription-monitor/': typeof AuthenticatedSubscriptionMonitorIndexRoute
+  '/breakage-monitor/': typeof AuthenticatedBreakageMonitorIndexRoute
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
@@ -760,6 +768,7 @@ export interface FileRoutesByTo {
   '/redemptions': typeof AuthenticatedRedemptionsIndexRoute
   '/site-branding': typeof AuthenticatedSiteBrandingIndexRoute
   '/subscription-monitor': typeof AuthenticatedSubscriptionMonitorIndexRoute
+  '/breakage-monitor': typeof AuthenticatedBreakageMonitorIndexRoute
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
@@ -853,6 +862,7 @@ export interface FileRoutesById {
   '/_authenticated/redemptions/': typeof AuthenticatedRedemptionsIndexRoute
   '/_authenticated/site-branding/': typeof AuthenticatedSiteBrandingIndexRoute
   '/_authenticated/subscription-monitor/': typeof AuthenticatedSubscriptionMonitorIndexRoute
+  '/_authenticated/breakage-monitor/': typeof AuthenticatedBreakageMonitorIndexRoute
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
@@ -945,6 +955,7 @@ export interface FileRouteTypes {
     | '/redemptions/'
     | '/site-branding/'
     | '/subscription-monitor/'
+    | '/breakage-monitor/'
     | '/subscriptions/'
     | '/system-info/'
     | '/system-settings/'
@@ -1034,6 +1045,7 @@ export interface FileRouteTypes {
     | '/redemptions'
     | '/site-branding'
     | '/subscription-monitor'
+    | '/breakage-monitor'
     | '/subscriptions'
     | '/system-info'
     | '/system-settings'
@@ -1126,6 +1138,7 @@ export interface FileRouteTypes {
     | '/_authenticated/redemptions/'
     | '/_authenticated/site-branding/'
     | '/_authenticated/subscription-monitor/'
+    | '/_authenticated/breakage-monitor/'
     | '/_authenticated/subscriptions/'
     | '/_authenticated/system-info/'
     | '/_authenticated/system-settings/'
@@ -1441,6 +1454,13 @@ declare module '@tanstack/react-router' {
       path: '/subscription-monitor'
       fullPath: '/subscription-monitor/'
       preLoaderRoute: typeof AuthenticatedSubscriptionMonitorIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/breakage-monitor/': {
+      id: '/_authenticated/breakage-monitor/'
+      path: '/breakage-monitor'
+      fullPath: '/breakage-monitor/'
+      preLoaderRoute: typeof AuthenticatedBreakageMonitorIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/site-branding/': {
@@ -1933,6 +1953,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedRedemptionsIndexRoute: typeof AuthenticatedRedemptionsIndexRoute
   AuthenticatedSiteBrandingIndexRoute: typeof AuthenticatedSiteBrandingIndexRoute
   AuthenticatedSubscriptionMonitorIndexRoute: typeof AuthenticatedSubscriptionMonitorIndexRoute
+  AuthenticatedBreakageMonitorIndexRoute: typeof AuthenticatedBreakageMonitorIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
   AuthenticatedTicketsIndexRoute: typeof AuthenticatedTicketsIndexRoute
@@ -1994,6 +2015,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSiteBrandingIndexRoute: AuthenticatedSiteBrandingIndexRoute,
   AuthenticatedSubscriptionMonitorIndexRoute:
     AuthenticatedSubscriptionMonitorIndexRoute,
+  AuthenticatedBreakageMonitorIndexRoute: AuthenticatedBreakageMonitorIndexRoute,
   AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
   AuthenticatedTicketsIndexRoute: AuthenticatedTicketsIndexRoute,

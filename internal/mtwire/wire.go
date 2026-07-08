@@ -24,6 +24,9 @@ import (
 	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
 	"github.com/QuantumNous/new-api/internal/agentplan"
 	agentplanrepo "github.com/QuantumNous/new-api/internal/agentplan/gormrepo"
+	"github.com/QuantumNous/new-api/internal/alert"
+	"github.com/QuantumNous/new-api/internal/breakage"
+	breakagerepo "github.com/QuantumNous/new-api/internal/breakage/gormrepo"
 	"github.com/QuantumNous/new-api/internal/modelgroup"
 	"github.com/QuantumNous/new-api/internal/moderation"
 	moderationrepo "github.com/QuantumNous/new-api/internal/moderation/gormrepo"
@@ -116,6 +119,14 @@ type App struct {
 	// ReportRepo 持具体 *Repo：财务报表 handlers（report.go）经 raw Table()/Joins() 跨表 SUM/GROUP BY，
 	// 四透镜（收益/充值/消耗/提现）只读聚合，不 import 兄弟模块 model 结构。
 	ReportRepo *reportrepo.Repo
+
+	// --- breakage 监控模块（额度沉淀监控，P2-BRK-01）---
+	// Breakage 是 breakage 监控门面（overview/detail/snapshots + RunSnapshot）：handler（breakage.go）
+	// 经此调用，快照 job（StartBreakageSnapshotLoop）经其 RunSnapshot 落 breakage_snapshots + 触发告警。
+	Breakage breakage.Service
+	// AlertSink 告警分发口（breakage 满额/异常 + 收编 7c-2 满额推送共用）：多通道 best-effort + 去重，
+	// 总开关/收件人/webhook/阈值由「系统设置 → 告警」DB option 配（每次分发重读，见 optionGetterAdapter）。
+	AlertSink alert.AlertSink
 
 	// --- payment/recharge 模块（目标③，支付重构后）---
 	// RechargeGateway 下单（落库 RCG 订单 + 经 inProcessPaySDK 进程内向平台下单）与入账（强幂等状态机）。
@@ -218,6 +229,15 @@ func New(db *gorm.DB) *App {
 	// report（财务报表）：聚合仓储（raw Table()/Joins() 跨表只读聚合），构于同一主库。
 	reportRepo := reportrepo.New(db)
 
+	// breakage 监控（P2-BRK-01）：GORM 聚合仓储（raw Table 聚合 + breakage_snapshots 读写）+ 告警分发器 +
+	// 门面服务。告警配置从 DB option（common.OptionMap）每次分发重读（optionGetterAdapter），管理员在
+	// 「系统设置 → 告警」的改动即时生效、无需重启。sink 默认装配邮件（复用仓库 SMTP）+ webhook 生产通道。
+	brkRepo := breakagerepo.New(db)
+	alertSink := alert.NewSink(func() alert.Config { return alert.LoadConfig(optionGetterAdapter) })
+	// Service 落库后按阈值 best-effort 触发「到期未使用沉淀」告警，故构造时把 sink + 当前 cfg 注入；
+	// cfg 只用于 Service 侧的阈值/开关判定（sink 分发时另有 provider 重读，两者一致——同 LoadConfig 口径）。
+	brkSvc := breakage.NewService(brkRepo, alertSink, alert.LoadConfig(optionGetterAdapter))
+
 	app := &App{
 		DB:              db,
 		TenantRepo:      tr,
@@ -250,6 +270,8 @@ func New(db *gorm.DB) *App {
 		TicketService:   ticketSvc,
 		RiskEngine:      riskEngine,
 		ReportRepo:      reportRepo,
+		Breakage:        brkSvc,
+		AlertSink:       alertSink,
 		RechargeGateway: rechargeGateway,
 		rechargeCfg:     rechargeCfg,
 		providerMgr:     providerMgr, // 复用同一进程内适配器供 tokenplan 购买（SUB）下单 + 回调验签 + 对账查单
@@ -316,6 +338,11 @@ func (a *App) Migrate() error {
 	if err := reportrepo.AutoMigrate(a.DB); err != nil {
 		return err
 	}
+	// breakage 快照表 breakage_snapshots（P2-BRK-01）：唯一键 (tenant_id,user_id,sub_id,period_end)
+	// 保证快照 job 与回填 Upsert 幂等 + 趋势组合索引 (tenant_id,period_end)。
+	if err := breakagerepo.AutoMigrate(a.DB); err != nil {
+		return err
+	}
 	// 充值入账幂等台账：mt_recharge_credit_ledger（order_no 唯一，防额度双扣，审计 C1）。
 	if err := migrateRechargeLedger(a.DB); err != nil {
 		return err
@@ -341,8 +368,25 @@ func (a *App) Migrate() error {
 	if err := migrateWalletConsumeLog(a.DB); err != nil {
 		return err
 	}
+	// breakage 历史快照一次性回填（幂等）：把「当下应落库」的全平台快照 Upsert 进 breakage_snapshots，
+	// 使趋势端点启动即有数据、不必干等首个快照周期。best-effort——回填失败仅记日志、绝不阻断启动
+	// （Upsert 幂等，可由 master 快照 job 后续补齐；唯一键去重保证重跑不重复）。
+	if err := a.backfillBreakageSnapshots(); err != nil {
+		common.SysLog("breakage snapshot backfill failed (non-fatal): " + err.Error())
+	}
 	// 代理分层：现有代理回填 level=1 + 删废弃 type 列（一次性、information_schema 守卫，见 agent.go）。
 	return migrateAgentProfilesDropType(a.DB)
+}
+
+// backfillBreakageSnapshots 一次性把当下全平台 breakage 快照幂等 Upsert 进 breakage_snapshots。
+// tenantID=nil 跨租户全量；now=当前时间。经 Service.RunSnapshot（采集 + Upsert + 告警旁路）落库；
+// Upsert 幂等（唯一键去重），master 每次 Migrate 重跑安全。Breakage 未装配（防御性）时直接跳过。
+func (a *App) backfillBreakageSnapshots() error {
+	if a.Breakage == nil {
+		return nil
+	}
+	_, err := a.Breakage.RunSnapshot(context.Background(), nil, time.Now().Unix())
+	return err
 }
 
 // ----------------------------------------------------------------------------
@@ -352,6 +396,19 @@ func (a *App) Migrate() error {
 // 套餐差价分润占位 noopEarnings 已被 tokenplanEarningAdapter 取代（真实落到 internal/agent 钱包，见 agent.go）；
 // 支付占位 stubPayment 已被 subPayment 取代（落真实 SUB 订单，见 subscription_bridge.go）。
 // ----------------------------------------------------------------------------
+
+// optionGetterAdapter 满足 alert.OptionGetter：按 option 键从 new-api 的 DB option 内存镜像
+// （common.OptionMap，读写受 OptionMapRWMutex 保护）返回字符串值，缺失返回空串。alert 包不 import
+// setting/DB，故由本装配层注入此读函数——「系统设置 → 告警」表单写入的 breakage_alert_* 键经
+// model.UpdateOption 落库并同步进 OptionMap，此处 RLock 读到的即最新值（分发时重读，改动即时生效）。
+func optionGetterAdapter(key string) string {
+	common.OptionMapRWMutex.RLock()
+	defer common.OptionMapRWMutex.RUnlock()
+	if common.OptionMap == nil {
+		return ""
+	}
+	return common.OptionMap[key]
+}
 
 // allowAllRisk 是占位风控引擎。
 type allowAllRisk struct{}

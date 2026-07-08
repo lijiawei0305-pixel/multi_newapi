@@ -344,6 +344,11 @@ export type BillingSettings = {
   'checkin_setting.enabled': boolean
   'checkin_setting.min_quota': number
   'checkin_setting.max_quota': number
+  // breakage 额度沉淀告警 — DB option 键（与 internal/alert/alert.go 常量一致）
+  breakage_alert_enabled: boolean
+  breakage_alert_email: string
+  breakage_alert_webhook_url: string
+  breakage_alert_threshold_pct: string
 }
 
 export type OperationsSettings = {

@@ -120,6 +120,10 @@ const defaultBillingSettings: BillingSettings = {
   'checkin_setting.enabled': false,
   'checkin_setting.min_quota': 1000,
   'checkin_setting.max_quota': 10000,
+  breakage_alert_enabled: false,
+  breakage_alert_email: '',
+  breakage_alert_webhook_url: '',
+  breakage_alert_threshold_pct: '',
 }
 
 export function BillingSettings() {

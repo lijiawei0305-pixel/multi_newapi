@@ -47,6 +47,7 @@ import {
   ShoppingBag,
   Tags,
   Ticket,
+  TrendingDown,
   User,
   Users,
   UsersRound,
@@ -261,6 +262,11 @@ export function useSidebarData(): SidebarData {
             title: t('Subscription Monitor'),
             url: '/subscription-monitor',
             icon: Gauge,
+          },
+          {
+            title: t('Breakage Monitor', { defaultValue: '额度沉淀监控' }),
+            url: '/breakage-monitor',
+            icon: TrendingDown,
           },
           {
             title: t('Sub-Agent Management'),
