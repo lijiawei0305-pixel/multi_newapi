@@ -62,8 +62,7 @@ export function WithdrawalActionDialog() {
         {
           amount: cny(currentRow.amount_cny),
           agent: currentRow.agent_name,
-          defaultValue:
-            '确认已向 {{agent}} 线下打款 {{amount}}，并登记打款单号/凭证。',
+          defaultValue: '确认已向 {{agent}} 线下打款 {{amount}}，并登记打款单号/凭证。',
         }
       )
     : isReject
@@ -119,8 +118,7 @@ export function WithdrawalActionDialog() {
             t(
               'This withdrawal is no longer in approved status and cannot be marked as paid',
               {
-                defaultValue:
-                  '该提现单状态已发生变化（非「已通过」），无法标记已打款',
+                defaultValue: '该提现单状态已发生变化（非「已通过」），无法标记已打款',
               }
             )
           )

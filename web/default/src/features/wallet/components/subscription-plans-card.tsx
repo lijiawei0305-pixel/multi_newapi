@@ -310,8 +310,7 @@ export function SubscriptionPlansCard() {
                 billingPreference === 'subscription_only'
                   ? t('Subscription Only', { defaultValue: '仅用订阅余额' })
                   : t('Subscription First', { defaultValue: '订阅余额优先' }),
-              defaultValue:
-                '偏好已设为 {{pref}}，但当前无生效订阅，系统将自动改用钱包余额扣费。',
+              defaultValue: '偏好已设为 {{pref}}，但当前无生效订阅，系统将自动改用钱包余额扣费。',
             }
           )}
         </p>

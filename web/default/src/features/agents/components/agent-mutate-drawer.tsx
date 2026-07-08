@@ -329,8 +329,7 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                         {t(
                           'Independent unlocks subdomain, custom domain and site branding. Promote manually when the agent performs well.',
                           {
-                            defaultValue:
-                              '独立代理解锁子域名、自定义域名与站点品牌装修；代理表现良好时再手动升级。',
+                            defaultValue: '独立代理解锁子域名、自定义域名与站点品牌装修；代理表现良好时再手动升级。',
                           }
                         )}
                       </FormDescription>
@@ -381,8 +380,7 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   </div>
                   <p className='text-muted-foreground text-xs'>
                     {t('Subdomain hint', {
-                      defaultValue:
-                        '输入 label 开通 <label>.wedreamhub.com 代理站；更新会替换旧子域名。',
+                      defaultValue: '输入 label 开通 <label>.wedreamhub.com 代理站；更新会替换旧子域名。',
                     })}
                   </p>
                 </div>
@@ -427,8 +425,7 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   {t(
                     'Lifetime totals to help you decide whether to promote this agent to independent (level 1).',
                     {
-                      defaultValue:
-                        '累计数据，帮助你判断是否将该代理升级为独立档（等级 1）。',
+                      defaultValue: '累计数据，帮助你判断是否将该代理升级为独立档（等级 1）。',
                     }
                   )}
                 </FormDescription>
@@ -462,8 +459,7 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                       </FormControl>
                       <FormDescription>
                         {t('Agent Discount Ratio Hint', {
-                          defaultValue:
-                            '全线批发折扣 = 主站价 × 系数（如 0.8 即八折）。消耗按分组基准倍率、套餐按主站价缩放；留空或 0 = 不打折。',
+                          defaultValue: '全线批发折扣 = 主站价 × 系数（如 0.8 即八折）。消耗按分组基准倍率、套餐按主站价缩放；留空或 0 = 不打折。',
                         })}
                       </FormDescription>
                       <FormMessage />

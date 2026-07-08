@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Gift } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { agentContextQueryOptions } from '@/lib/agent-context'
 import { computeTimeRange } from '@/lib/time'
@@ -77,6 +78,7 @@ function Stat({
 }
 
 export function AgentReferralRewardsCard() {
+  const { t } = useTranslation()
   const qc = useQueryClient()
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [payoutOpen, setPayoutOpen] = useState(false)
@@ -148,23 +150,33 @@ export function AgentReferralRewardsCard() {
   })
 
   const createMut = useMutation({
-    mutationFn: () => createPromotionChannel('默认邀请'),
+    mutationFn: () =>
+      createPromotionChannel(
+        t('Default invite channel name', { defaultValue: '默认邀请' })
+      ),
     onSuccess: () => {
-      toast.success('邀请链接已生成')
+      toast.success(
+        t('Invite link generated', { defaultValue: '邀请链接已生成' })
+      )
       qc.invalidateQueries({ queryKey: ['tenant-promotion-channels'] })
     },
-    onError: () => toast.error('生成失败'),
+    onError: () =>
+      toast.error(t('Generation failed', { defaultValue: '生成失败' })),
   })
 
   const copyLink = () => {
     if (!inviteLink) return
     navigator.clipboard?.writeText(inviteLink)
-    toast.success('已复制邀请链接')
+    toast.success(t('Invite link copied', { defaultValue: '已复制邀请链接' }))
   }
 
   const handleOpenWithdraw = () => {
     if (payoutAccount && !payoutAccount.configured) {
-      toast.error('请先设置收款账户，再申请提现')
+      toast.error(
+        t('Set up payout account before withdrawal', {
+          defaultValue: '请先设置收款账户，再申请提现',
+        })
+      )
       setPayoutOpen(true)
       return
     }
@@ -178,13 +190,19 @@ export function AgentReferralRewardsCard() {
       <div className='rounded-lg border p-4 sm:p-5' data-testid='agent-referral-card'>
         <div className='mb-3 flex flex-wrap items-center gap-2'>
           <Gift className='text-primary size-4' />
-          <h3 className='text-sm font-semibold'>代理邀请返现</h3>
+          <h3 className='text-sm font-semibold'>
+            {t('Agent referral rewards', { defaultValue: '代理邀请返现' })}
+          </h3>
           <span className='text-muted-foreground text-xs'>
-            分享邀请链接，按下级的 API 消费和套餐购买给你返现
+            {t('Agent referral rewards description', {
+              defaultValue: '分享邀请链接，按下级的 API 消费和套餐购买给你返现',
+            })}
           </span>
         </div>
 
-        {/* 邀请链接 */}
+        {
+          /* 邀请链接 */
+        }
         <div className='mb-4'>
           {inviteLink ? (
             <div className='flex items-center gap-2'>
@@ -195,7 +213,7 @@ export function AgentReferralRewardsCard() {
                 onFocus={(e) => e.currentTarget.select()}
               />
               <Button size='sm' variant='outline' onClick={copyLink}>
-                <Copy className='size-4' /> 复制
+                <Copy className='size-4' /> {t('Copy', { defaultValue: '复制' })}
               </Button>
             </div>
           ) : (
@@ -204,34 +222,64 @@ export function AgentReferralRewardsCard() {
               onClick={() => createMut.mutate()}
               disabled={createMut.isPending || channelsQuery.isLoading}
             >
-              {createMut.isPending ? '生成中…' : '生成邀请链接'}
+              {createMut.isPending
+                ? t('Generating invite link...', { defaultValue: '生成中…' })
+                : t('Generate invite link', { defaultValue: '生成邀请链接' })}
             </Button>
           )}
         </div>
 
-        {/* 统计 */}
+        {
+          /* 统计 */
+        }
         <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5'>
-          <Stat label='邀请总人数' value={String(invitedCount)} />
-          <Stat label='被邀请 API 消费' value={cny(apiConsumption)} />
-          <Stat label='被邀请套餐购买' value={cny(planPurchase)} />
-          <Stat label='返现' value={cny(totalRebate)} />
-          <Stat label='可提现' value={cny(withdrawable)} emphasis />
+          <Stat
+            label={t('Total invited users', { defaultValue: '邀请总人数' })}
+            value={String(invitedCount)}
+          />
+          <Stat
+            label={t('Invited API consumption', {
+              defaultValue: '被邀请 API 消费',
+            })}
+            value={cny(apiConsumption)}
+          />
+          <Stat
+            label={t('Invited plan purchases', {
+              defaultValue: '被邀请套餐购买',
+            })}
+            value={cny(planPurchase)}
+          />
+          <Stat
+            label={t('Rebate', { defaultValue: '返现' })}
+            value={cny(totalRebate)}
+          />
+          <Stat
+            label={t('Withdrawable', { defaultValue: '可提现' })}
+            value={cny(withdrawable)}
+            emphasis
+          />
         </div>
         <p className='text-muted-foreground mt-2 text-xs'>
-          消费、购买与返现为近 365 天统计;邀请人数与可提现为累计值。
+          {t('Referral stats footnote', {
+            defaultValue: '消费、购买与返现为近 365 天统计;邀请人数与可提现为累计值。',
+          })}
         </p>
 
-        {/* 收款账户 + 提现 */}
+        {
+          /* 收款账户 + 提现 */
+        }
         <div className='mt-4 flex flex-col gap-3'>
           <div className='flex items-center justify-between gap-2'>
-            <span className='text-sm font-medium'>收款与提现</span>
+            <span className='text-sm font-medium'>
+              {t('Payout and withdrawal', { defaultValue: '收款与提现' })}
+            </span>
             <Button
               size='sm'
               onClick={handleOpenWithdraw}
               disabled={!(withdrawable > 0)}
               data-testid='referral-withdraw-btn'
             >
-              申请提现
+              {t('Request withdrawal', { defaultValue: '申请提现' })}
             </Button>
           </div>
           <PayoutAccountCard

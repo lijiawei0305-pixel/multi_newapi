@@ -30,7 +30,8 @@ import { computeUsageAlert } from '../lib/usage-alert'
 export function SubscriptionUsageBanner() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [, forceUpdate] = useReducer((n: number) => n + 1, 0) // 关闭后强制重渲染，重读 localStorage 判据
+  // 关闭后强制重渲染，重读 localStorage 判据
+  const [, forceUpdate] = useReducer((n: number) => n + 1, 0)
   const { data } = useQuery({
     queryKey: ['self-subscription-full'],
     queryFn: getSelfSubscriptionFull,

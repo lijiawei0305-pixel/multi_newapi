@@ -19,7 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { t } from 'i18next'
 
 export const ROLE = {
-  GUEST: 0, // 后续如果需要用到这个角色那就再加，同语先留一下
+  // 后续如果需要用到这个角色那就再加，同语先留一下
+  GUEST: 0,
   USER: 1,
   ADMIN: 10,
   SUPER_ADMIN: 100,

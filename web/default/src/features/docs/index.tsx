@@ -53,8 +53,7 @@ export function Docs() {
       no: '03',
       title: t('Docs Step3 Title', { defaultValue: '替换地址' }),
       desc: t('Docs Step3 Desc', {
-        defaultValue:
-          '将 base_url 换成本站地址，请求头 Authorization: Bearer 你的令牌',
+        defaultValue: '将 base_url 换成本站地址，请求头 Authorization: Bearer 你的令牌',
       }),
     },
     {
@@ -75,7 +74,7 @@ client = OpenAI(
 
 response = client.chat.completions.create(
     model="gpt-4o",
-    messages=[{"role": "user", "content": "你好"}],
+    messages=[{"role": "user", "content": "${t('Docs Sample Message', { defaultValue: '你好' })}"}],
 )
 print(response.choices[0].message.content)`
 
@@ -105,8 +104,7 @@ print(response.choices[0].message.content)`
             <CardContent className='p-6'>
               <p className='text-muted-foreground'>
                 {t('Docs QuickStart Desc', {
-                  defaultValue:
-                    '将您的 OpenAI SDK base_url 替换为以下地址即可接入：',
+                  defaultValue: '将您的 OpenAI SDK base_url 替换为以下地址即可接入：',
                 })}
               </p>
               <div className='bg-muted mt-4 flex items-center justify-between gap-3 rounded-md px-4 py-3'>

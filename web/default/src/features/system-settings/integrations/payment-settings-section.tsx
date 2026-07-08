@@ -1132,9 +1132,9 @@ export function PaymentSettingsSection({
                         ) : (
                           <Textarea
                             rows={4}
-                            placeholder={t(
-                              '[{"name":"支付宝","type":"alipay","icon":"SiAlipay"}]'
-                            )}
+                            placeholder={t('Payment methods JSON example', {
+                              defaultValue: '[{"name":"支付宝","type":"alipay","icon":"SiAlipay"}]',
+                            })}
                             {...field}
                             onChange={(event) =>
                               field.onChange(event.target.value)
