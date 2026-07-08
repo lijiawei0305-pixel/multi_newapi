@@ -123,46 +123,74 @@ export const LOG_TYPE_FILTERS = [
  * Must match backend constants in constant/midjourney.go
  */
 export const MJ_TASK_TYPES = {
-  IMAGINE: 'IMAGINE', // 绘图
-  UPSCALE: 'UPSCALE', // 放大
-  VIDEO: 'VIDEO', // 视频
-  EDITS: 'EDITS', // 编辑
-  VARIATION: 'VARIATION', // 变换
-  HIGH_VARIATION: 'HIGH_VARIATION', // 强变换
-  LOW_VARIATION: 'LOW_VARIATION', // 弱变换
-  PAN: 'PAN', // 平移
-  DESCRIBE: 'DESCRIBE', // 图生文
-  BLEND: 'BLEND', // 图混合
-  UPLOAD: 'UPLOAD', // 上传文件
-  SHORTEN: 'SHORTEN', // 缩词
-  REROLL: 'REROLL', // 重绘
-  INPAINT: 'INPAINT', // 局部重绘
-  SWAP_FACE: 'SWAP_FACE', // 换脸
-  ZOOM: 'ZOOM', // 缩放
-  CUSTOM_ZOOM: 'CUSTOM_ZOOM', // 自定义缩放
-  MODAL: 'MODAL', // 窗口
+  // 绘图
+  IMAGINE: 'IMAGINE',
+  // 放大
+  UPSCALE: 'UPSCALE',
+  // 视频
+  VIDEO: 'VIDEO',
+  // 编辑
+  EDITS: 'EDITS',
+  // 变换
+  VARIATION: 'VARIATION',
+  // 强变换
+  HIGH_VARIATION: 'HIGH_VARIATION',
+  // 弱变换
+  LOW_VARIATION: 'LOW_VARIATION',
+  // 平移
+  PAN: 'PAN',
+  // 图生文
+  DESCRIBE: 'DESCRIBE',
+  // 图混合
+  BLEND: 'BLEND',
+  // 上传文件
+  UPLOAD: 'UPLOAD',
+  // 缩词
+  SHORTEN: 'SHORTEN',
+  // 重绘
+  REROLL: 'REROLL',
+  // 局部重绘
+  INPAINT: 'INPAINT',
+  // 换脸
+  SWAP_FACE: 'SWAP_FACE',
+  // 缩放
+  ZOOM: 'ZOOM',
+  // 自定义缩放
+  CUSTOM_ZOOM: 'CUSTOM_ZOOM',
+  // 窗口
+  MODAL: 'MODAL',
 } as const
 
 /**
  * MjProxy task status
  */
 export const MJ_TASK_STATUS = {
-  NOT_START: 'NOT_START', // 未启动
-  SUBMITTED: 'SUBMITTED', // 队列中
-  IN_PROGRESS: 'IN_PROGRESS', // 执行中
-  SUCCESS: 'SUCCESS', // 成功
-  FAILURE: 'FAILURE', // 失败
-  MODAL: 'MODAL', // 窗口等待
+  // 未启动
+  NOT_START: 'NOT_START',
+  // 队列中
+  SUBMITTED: 'SUBMITTED',
+  // 执行中
+  IN_PROGRESS: 'IN_PROGRESS',
+  // 成功
+  SUCCESS: 'SUCCESS',
+  // 失败
+  FAILURE: 'FAILURE',
+  // 窗口等待
+  MODAL: 'MODAL',
 } as const
 
 /**
  * MjProxy submit result codes
  */
 export const MJ_SUBMIT_RESULT_CODES = {
-  NOT_SUBMITTED: 0, // 未提交
-  SUBMITTED: 1, // 已提交
-  WAITING: 21, // 等待中
-  DUPLICATE: 22, // 重复任务
+  // 未提交
+  NOT_SUBMITTED: 0,
+  // 已提交
+  SUBMITTED: 1,
+  // 等待中
+  WAITING: 21,
+  // 重复任务
+  DUPLICATE: 22,
 } as const
 
 // ============================================================================
@@ -175,28 +203,42 @@ export const MJ_SUBMIT_RESULT_CODES = {
  */
 export const TASK_ACTIONS = {
   // Suno (uppercase)
-  MUSIC: 'MUSIC', // 生成音乐
-  LYRICS: 'LYRICS', // 生成歌词
+  // 生成音乐
+  MUSIC: 'MUSIC',
+  // 生成歌词
+  LYRICS: 'LYRICS',
 
   // Video generation (camelCase)
-  GENERATE: 'generate', // 图生视频
-  TEXT_GENERATE: 'textGenerate', // 文生视频
-  FIRST_TAIL_GENERATE: 'firstTailGenerate', // 首尾生视频
-  REFERENCE_GENERATE: 'referenceGenerate', // 参照生视频
-  REMIX_GENERATE: 'remixGenerate', // 视频 Remix
+  // 图生视频
+  GENERATE: 'generate',
+  // 文生视频
+  TEXT_GENERATE: 'textGenerate',
+  // 首尾生视频
+  FIRST_TAIL_GENERATE: 'firstTailGenerate',
+  // 参照生视频
+  REFERENCE_GENERATE: 'referenceGenerate',
+  // 视频 Remix
+  REMIX_GENERATE: 'remixGenerate',
 } as const
 
 /**
  * Task status
  */
 export const TASK_STATUS = {
-  NOT_START: 'NOT_START', // 未启动
-  SUBMITTED: 'SUBMITTED', // 队列中
-  IN_PROGRESS: 'IN_PROGRESS', // 执行中
-  SUCCESS: 'SUCCESS', // 成功
-  FAILURE: 'FAILURE', // 失败
-  QUEUED: 'QUEUED', // 排队中
-  UNKNOWN: 'UNKNOWN', // 未知
+  // 未启动
+  NOT_START: 'NOT_START',
+  // 队列中
+  SUBMITTED: 'SUBMITTED',
+  // 执行中
+  IN_PROGRESS: 'IN_PROGRESS',
+  // 成功
+  SUCCESS: 'SUCCESS',
+  // 失败
+  FAILURE: 'FAILURE',
+  // 排队中
+  QUEUED: 'QUEUED',
+  // 未知
+  UNKNOWN: 'UNKNOWN',
 } as const
 
 /**
