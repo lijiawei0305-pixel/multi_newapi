@@ -321,12 +321,12 @@
 #### [P3-FE-01] tokenplan 营销化前端 + 模板 A/B/C
 - **功能判据**:购买页接 `anchor_price` 划线 / `discount_label` 角标 / `is_recommended` 热门 / 对比 / 推荐样式;主站/代理站模板 A/B/C 可选。
 - **技术判据**:全部读 `token_plans` 营销字段(一期已预留,无需改表)`#8`。
-- **关联门**:#8 #12 ｜ **状态**:🟡(**2026-07-08 复核:大半达成**——`anchor_price_cny` 划线/`discount_label` 角标/`is_recommended` 推荐 已在买家购买页全量渲染并 E2E(Slice3/6a:Trial -99% 角标、Pro 推荐描边),管理 CRUD 抽屉含营销字段;**模板可选**由 `theme_preset` 达成(代理为站点选预设视觉风格,ocean-breeze/rose-garden 等,受控校验 `THEME_PRESET_INVALID`)。**剩**:主站模板切换口径与"A/B/C"命名对齐核验)
+- **关联门**:#8 #12 ｜ **状态**:✅(**2026-07-08 收口**——营销字段(`anchor_price_cny` 划线/`discount_label` 角标/`is_recommended` 推荐)买家页全量渲染并 E2E;模板可选由 `theme_preset` 达成且共 **10 套预设**(default/anthropic/simple-large/underground/rose-garden/lake-view/sunset-glow/forest-whisper/ocean-breeze/lavender-dream),远超"A/B/C"口径;主站走 default 基线),管理 CRUD 抽屉含营销字段;**模板可选**由 `theme_preset` 达成(代理为站点选预设视觉风格,ocean-breeze/rose-garden 等,受控校验 `THEME_PRESET_INVALID`)。**剩**:主站模板切换口径与"A/B/C"命名对齐核验)
 
 #### [P3-DOM-01] OEM 自定义域名 + SSL
 - **功能判据**:代理填域名 → DNS A 记录指向 `64.90.4.114` → 管理员配 SSL → `tenant_domains.ssl_status=configured`;未配 SSL 不对外展示;SSL 到期提醒。
 - **技术判据**:Host 解析覆盖自定义域名 `#4 #8`;证书到期监控 `#11`。
-- **关联门**:#4 #8 #11 ｜ **状态**:✅(**2026-07-08 复核:超规格达成**——代理**自助**绑定自定义域名 + DNS TXT 验证 + **证书自动签发**(超出规格的"管理员手动配 SSL";CertificateSeal 动效展示状态)+ 主站 admin 跨租户域名管理(查看/强制解绑);Host 解析覆盖自定义域名(TenantResolver);表 `tenant_custom_domains`。**剩**:证书**到期监控/提醒**(#11)未核实,单列待办)
+- **关联门**:#4 #8 #11 ｜ **状态**:✅(**2026-07-08 复核:超规格达成**——代理**自助**绑定自定义域名 + DNS TXT 验证 + **证书自动签发**(超出规格的"管理员手动配 SSL";CertificateSeal 动效展示状态)+ 主站 admin 跨租户域名管理(查看/强制解绑);Host 解析覆盖自定义域名(TenantResolver);表 `tenant_custom_domains`。**到期/续期(2026-07-08 核)**:签发经 acme.sh,`acme.sh --cron` 每日自动续期已在 crontab;DB 记 `cert_expires_at` 且 admin 页展示。⚠️ 07-08 发现签发循环 `newapi-cert.service` 因 07-04 整树回退事故丢脚本而 failed(队列为空、无实际影响),已补回三脚本并修空队列误计,服务恢复)
 
 #### [P3-RNW-01] 续订自动化(合同第九条 10 / 第十条 7)
 - **功能判据**:套餐到期提醒、续订任务、续订记录、续订失败提示、人工补处理入口。
@@ -336,7 +336,7 @@
 #### [P3-I18N-01] 多语言(合同第九条 11 / 第十条 8)
 - **功能判据**:至少中文 / 英文两套前端展示文案;核心 购买 / 登录 / 套餐 / 代理站 页面文案可配置;预留后续语言扩展结构。
 - **技术判据**:i18n 文案配置驱动 + 语言切换;扩展结构预留 `#8`。
-- **关联门**:#8 #12 ｜ **状态**:✅(**2026-07-08 完善收口**——框架 + 6 语言文件 + 切换 UI(header/`language-switcher.tsx` + profile 偏好卡)此前已在;本次**中英覆盖审计+修复**:①我们页面 **178 处硬编码中文**清零(真包裹 ~26 处 + prettier 折行/注释误报归位;3 处后端线上值字面匹配**故意保留**并注记)——英文界面不再露中文;②**补 248 条 en.json 条目**(5272→5520,键→中文 defaultValue 语义交叉核对后译出)——切英文不再露 `Become Agent Cap Oem` 类 key 原文。5 提交(7383913/d37b991/00068c7/4f5f777/137924d)+审计脚本复跑归零+服务器构建部署。**已知边界**:上游 new-api 自带页面的字符串拼接键(~39,如 `Are you sure you want to delete channel `)未动——属上游 i18n 范式,单列;"文案可配置"由 siteconfig 站点文案覆盖,独立文案后台按需另立)
+- **关联门**:#8 #12 ｜ **状态**:✅(**2026-07-08 完善收口**——框架 + 6 语言文件 + 切换 UI(header/`language-switcher.tsx` + profile 偏好卡)此前已在;本次**中英覆盖审计+修复**:①我们页面 **178 处硬编码中文**清零(真包裹 ~26 处 + prettier 折行/注释误报归位;3 处后端线上值字面匹配**故意保留**并注记)——英文界面不再露中文;②**补 248 条 en.json 条目**(5272→5520,键→中文 defaultValue 语义交叉核对后译出)——切英文不再露 `Become Agent Cap Oem` 类 key 原文。5 提交+审计归零+部署;**07-08 追加**:③修「en fallback 抢先 defaultValue」回归(zh.json 成对补 272 条);④ **fr/ja/ru/vi 四语两轮共各 +596 条**(381 defaultValue 键 + 281 无 defaultValue 键如侧栏 Buy Plans),终验:在用键∩zh 条目,五语缺口全 0——六语真正可切换。**已知边界**:上游 new-api 自带页面的字符串拼接键(~39,如 `Are you sure you want to delete channel `)未动——属上游 i18n 范式,单列;"文案可配置"由 siteconfig 站点文案覆盖,独立文案后台按需另立)
 
 #### [P3-CUR-01] 多币种(合同第九条 12 / 第十条 9)
 - **功能判据**:币种配置;套餐价格币种展示;订单币种记录;基础汇率配置 + 后台查看。
