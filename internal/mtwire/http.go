@@ -180,8 +180,23 @@ func (a *App) HandleListTokenPlans(c *gin.Context) {
 		return
 	}
 	out := make([]buyerPlanOut, 0, len(views))
+	ids := make([]int64, 0, len(views))
 	for _, v := range views {
 		out = append(out, toBuyerPlanOut(v))
+		ids = append(ids, v.Plan.ID)
+	}
+	// 批量回填 native_plan_id(一键续费深链反查用;查询失败不阻断列表,字段保持 0)。
+	if len(ids) > 0 {
+		var rows []nativePlanMapRow
+		if err := a.DB.WithContext(reqCtx(c)).Where("token_plan_id IN ?", ids).Find(&rows).Error; err == nil {
+			m := make(map[int64]int64, len(rows))
+			for _, r := range rows {
+				m[r.TokenPlanID] = r.NativePlanID
+			}
+			for i := range out {
+				out[i].NativePlanID = m[out[i].ID]
+			}
+		}
 	}
 	respondOK(c, out)
 }
@@ -508,6 +523,10 @@ type buyerPlanOut struct {
 	Badge          string  `json:"badge"`
 	IsRecommended  bool    `json:"is_recommended"`
 	Sort           int     `json:"sort"`
+	// NativePlanID 该套餐对应的原生 subscription_plans.id(mt_native_subscription_plans 映射;
+	// 0=尚未售出过、无映射)。满额/到期横幅只知道原生订阅的 plan_id,靠它反查我们的套餐 id
+	// 拼一键续费深链 /plans?renew=<id>(P3-RNW 降级版)。
+	NativePlanID int64 `json:"native_plan_id"`
 }
 
 // toBuyerPlanOut 把代理视角套餐视图映射为买家卡片（零售价取视图 RetailPrice）。

@@ -45,6 +45,8 @@ export interface TenantPlan {
   month_limit_usd: number
   /** Subscription validity window in days (e.g. 30). */
   valid_days: number
+  /** 对应原生 subscription_plans.id（0=无映射）——满额/到期横幅一键续费深链反查用。 */
+  native_plan_id?: number
   /** 折扣文案 — e.g. "-91%". */
   discount_label?: string
   /** Marketing badge text (e.g. "热销"). */

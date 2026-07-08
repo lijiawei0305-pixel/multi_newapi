@@ -5624,6 +5624,9 @@
     "e.g. Mini": "например, Mini",
     "e.g. WeChat group": "например: группа WeChat",
     "https://your-site.com/pay/return": "https://your-site.com/pay/return",
-    "jpg / png / webp, up to 2MB": "jpg / png / webp, до 2 МБ"
+    "jpg / png / webp, up to 2MB": "jpg / png / webp, до 2 МБ",
+    "Your plan has expired. Renew now to continue using it.": "Срок действия вашего тарифа истёк. Продлите его сейчас, чтобы продолжить пользование.",
+    "Your plan expires in {{days}} day(s) — renew soon to avoid interruption.": "Срок действия тарифа истекает через {{days}} дн. — продлите его заранее, чтобы избежать перерыва.",
+    "Renew Now (one click)": "Продлить сейчас"
   }
 }

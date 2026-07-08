@@ -353,3 +353,47 @@ func TestHandleListSubscriptions_UnregisteredSubdomainStillTenantNotFound(t *tes
 		t.Fatalf("unregistered subdomain must still be TENANT_NOT_FOUND, got %+v", r)
 	}
 }
+
+// TestHandleListTokenPlans_NativePlanIDMapped 一键续费(P3-RNW 降级版)回归:买家套餐卡须携带
+// native_plan_id(mt_native_subscription_plans 映射)——满额/到期横幅只知道原生订阅的 plan_id,
+// 靠它反查"我们的"套餐 id 拼 /plans?renew=<id> 深链;无映射(尚未售出过)时为 0。
+func TestHandleListTokenPlans_NativePlanIDMapped(t *testing.T) {
+	app := newBuyerTestApp(t)
+	ctx := context.Background()
+	acme, err := app.TenantService.Create(ctx, tenant.CreateTenantInput{Slug: "acme2", Name: "Acme2", TokenplanEnabled: true})
+	if err != nil {
+		t.Fatalf("create tenant: %v", err)
+	}
+	planID, err := app.TokenPlanRepo.EnsurePlan(ctx, &tokenplan.Plan{
+		Code: "solo", Name: "Solo", BasePrice: 10, AnchorPrice: 20, Multiplier: 1,
+		MonthLimitUSD: 5, ValidDays: 30, AgentCostPrice: 3, MinPrice: 4, Status: tokenplan.PlanEnabled,
+	})
+	if err != nil {
+		t.Fatalf("EnsurePlan: %v", err)
+	}
+	if err := app.TokenPlanRepo.EnsureListing(ctx, acme.ID, planID, true, 12); err != nil {
+		t.Fatalf("EnsureListing: %v", err)
+	}
+	// 造映射:该 tokenplan 已对应原生 plan 777。
+	if err := app.DB.Create(&nativePlanMapRow{TokenPlanID: planID, NativePlanID: 777}).Error; err != nil {
+		t.Fatalf("seed native map: %v", err)
+	}
+
+	c, rec := newBuyerCtx("acme2.wedreamhub.com", acme, 1, "GET", "", nil)
+	app.HandleListTokenPlans(c)
+
+	r := decodeResp(t, rec)
+	if !r.Success {
+		t.Fatalf("listing should succeed, got %+v", r)
+	}
+	var plans []buyerPlanOut
+	if err := json.Unmarshal(r.Data, &plans); err != nil {
+		t.Fatalf("decode plans: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %d, want 1", len(plans))
+	}
+	if plans[0].NativePlanID != 777 {
+		t.Fatalf("native_plan_id = %d, want 777(横幅原生 plan_id→我们套餐 id 的反查依据)", plans[0].NativePlanID)
+	}
+}

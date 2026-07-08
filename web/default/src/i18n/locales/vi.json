@@ -5624,6 +5624,9 @@
     "e.g. Mini": "ví dụ: Mini",
     "e.g. WeChat group": "ví dụ: nhóm WeChat",
     "https://your-site.com/pay/return": "https://your-site.com/pay/return",
-    "jpg / png / webp, up to 2MB": "jpg / png / webp, tối đa 2MB"
+    "jpg / png / webp, up to 2MB": "jpg / png / webp, tối đa 2MB",
+    "Your plan has expired. Renew now to continue using it.": "Gói của bạn đã hết hạn. Gia hạn ngay để tiếp tục sử dụng.",
+    "Your plan expires in {{days}} day(s) — renew soon to avoid interruption.": "Gói của bạn sẽ hết hạn sau {{days}} ngày — hãy gia hạn sớm để tránh gián đoạn dịch vụ.",
+    "Renew Now (one click)": "Gia hạn ngay"
   }
 }

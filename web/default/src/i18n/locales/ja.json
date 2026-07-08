@@ -5624,6 +5624,9 @@
     "e.g. Mini": "例：Mini",
     "e.g. WeChat group": "例：WeChatグループ",
     "https://your-site.com/pay/return": "https://your-site.com/pay/return",
-    "jpg / png / webp, up to 2MB": "jpg / png / webp、最大2MBまで"
+    "jpg / png / webp, up to 2MB": "jpg / png / webp、最大2MBまで",
+    "Your plan has expired. Renew now to continue using it.": "プランの有効期限が切れました。今すぐ更新してご利用を継続してください。",
+    "Your plan expires in {{days}} day(s) — renew soon to avoid interruption.": "プランはあと {{days}} 日で期限切れになります。サービス中断を避けるため、お早めに更新してください。",
+    "Renew Now (one click)": "今すぐ更新"
   }
 }

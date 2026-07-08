@@ -5659,6 +5659,9 @@
     "e.g. bank transfer serial number": "如银行转账流水号",
     "{{count}} orders": "{{count}} 笔",
     "{{time}} ago": "{{time}} 前",
-    "{{total}} orders total · page {{page}}/{{totalPages}}": "共 {{total}} 笔 · 第 {{page}}/{{totalPages}} 页"
+    "{{total}} orders total · page {{page}}/{{totalPages}}": "共 {{total}} 笔 · 第 {{page}}/{{totalPages}} 页",
+    "Your plan has expired. Renew now to continue using it.": "你的套餐已到期，立即续费以继续使用。",
+    "Your plan expires in {{days}} day(s) — renew soon to avoid interruption.": "你的套餐将于 {{days}} 天后到期，及时续费以免服务中断。",
+    "Renew Now (one click)": "立即续费"
   }
 }

@@ -5580,6 +5580,9 @@
     "WeChat template name": "WeChat template name",
     "{{count}} orders": "{{count}} orders",
     "{{time}} ago": "{{time}} ago",
-    "{{total}} orders total · page {{page}}/{{totalPages}}": "{{total}} orders total · page {{page}}/{{totalPages}}"
+    "{{total}} orders total · page {{page}}/{{totalPages}}": "{{total}} orders total · page {{page}}/{{totalPages}}",
+    "Your plan has expired. Renew now to continue using it.": "Your plan has expired. Renew now to continue using it.",
+    "Your plan expires in {{days}} day(s) — renew soon to avoid interruption.": "Your plan expires in {{days}} day(s) — renew soon to avoid interruption.",
+    "Renew Now (one click)": "Renew Now"
   }
 }

@@ -22,5 +22,10 @@ import { TenantPlans } from '@/features/tenant-plans'
 // Buyer-facing purchase page. Login is already enforced by the
 // `/_authenticated` parent guard, so no extra role gate is needed.
 export const Route = createFileRoute('/_authenticated/plans/')({
+  // ?renew=<套餐id>：满额/到期横幅「立即续费」深链——页面挂载后自动对该套餐发起购买（P3-RNW 降级版）。
+  validateSearch: (search: Record<string, unknown>) => {
+    const n = Number(search.renew)
+    return Number.isFinite(n) && n > 0 ? { renew: n } : {}
+  },
   component: TenantPlans,
 })

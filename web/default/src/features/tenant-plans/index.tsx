@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearch } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { SectionPageLayout } from '@/components/layout'
@@ -136,6 +137,27 @@ function TenantPlansContent() {
     const list = plansData || []
     return [...list].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
   }, [plansData])
+
+  // 一键续费深链（/plans?renew=<套餐id>，来自满额/到期横幅）：套餐与支付渠道就绪后
+  // 自动对该套餐发起一次购买（直接弹二维码/跳转支付），仅触发一次（P3-RNW 降级版）。
+  const search = useSearch({ strict: false }) as { renew?: number }
+  const renewFired = useRef(false)
+  useEffect(() => {
+    if (renewFired.current) return
+    if (!search?.renew || plansLoading || methodsLoading) return
+    if (officialProviders.length === 0) return // 未配支付渠道：页面已有提示，不自动下单
+    const target = (plansData || []).find((p) => p.id === search.renew)
+    if (!target) return // 套餐已下架/不在本租户：静默降级为普通购买页
+    renewFired.current = true
+    purchaseMutation.mutate(target)
+  }, [
+    search?.renew,
+    plansLoading,
+    methodsLoading,
+    officialProviders,
+    plansData,
+    purchaseMutation,
+  ])
 
   const subscriptions = useMemo(() => subsData || [], [subsData])
 
