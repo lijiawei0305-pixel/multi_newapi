@@ -36,7 +36,10 @@ backoff_minutes() {
 }
 
 now=$(date +%s)
-mapfile -t domains < <(parse_domains "$resp")
+mapfile -t raw < <(parse_domains "$resp")
+# 过滤空行(python3 兜底对空数组会输出一个空行,曾被误计为 1 个域名)。
+domains=()
+for d in "${raw[@]}"; do [[ -n "$d" ]] && domains+=("$d"); done
 if [[ ${#domains[@]} -eq 0 ]]; then exit 0; fi
 log "pending-cert: ${#domains[@]} domain(s)"
 
