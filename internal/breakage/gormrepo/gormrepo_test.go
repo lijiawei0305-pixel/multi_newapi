@@ -27,7 +27,6 @@ package gormrepo
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"

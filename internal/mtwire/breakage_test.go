@@ -63,7 +63,7 @@ func newBreakageTestApp(t *testing.T) *App {
 		`CREATE TABLE tokenplan_subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0, plan_id INTEGER NOT NULL DEFAULT 0, month_limit_usd REAL NOT NULL DEFAULT 0, used_usd REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', start_at DATETIME, expire_at DATETIME)`,
 		`CREATE TABLE token_plans (id INTEGER PRIMARY KEY, code TEXT)`,
 		`CREATE TABLE user_balances (user_id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0, balance_usd REAL NOT NULL DEFAULT 0)`,
-		`CREATE TABLE payment_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 0, status TEXT, created_at DATETIME)`,
+		`CREATE TABLE payment_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 0, status TEXT, created_at DATETIME, updated_at DATETIME)`,
 		`CREATE TABLE tenants (id INTEGER PRIMARY KEY, name TEXT)`,
 		`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)`,
 	}
@@ -192,7 +192,8 @@ func TestHandleAdminBreakageOverview_TenantIsolation(t *testing.T) {
 
 func brk_seedPaymentOrder(t *testing.T, app *App, tenantID int64, status string, createdAt time.Time) {
 	t.Helper()
-	if err := app.DB.Exec(`INSERT INTO payment_orders (tenant_id, status, created_at) VALUES (?,?,?)`, tenantID, status, createdAt).Error; err != nil {
+	// created_at 与 updated_at 同置：AnomalyCount 按 updated_at 判「超 minAge 未变动即卡单」（对齐对账口径）。
+	if err := app.DB.Exec(`INSERT INTO payment_orders (tenant_id, status, created_at, updated_at) VALUES (?,?,?,?)`, tenantID, status, createdAt, createdAt).Error; err != nil {
 		t.Fatalf("seed payment order: %v", err)
 	}
 }
@@ -272,13 +273,13 @@ func TestHandleAdminBreakageDetail_CSVExport(t *testing.T) {
 	// ---- 主站作用域 CSV：头含 tenant_id/tenant_name ----
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/breakage/detail?format=csv&start_timestamp=1&end_timestamp=2", nil)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/breakage/detail?format=csv", nil)
 	app.HandleAdminBreakageDetail(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("csv code = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
-	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "breakage-detail-1-2.csv") {
-		t.Fatalf("Content-Disposition = %q, want filename breakage-detail-1-2.csv", cd)
+	if cd := w.Header().Get("Content-Disposition"); !strings.Contains(cd, "breakage-detail-0-0.csv") {
+		t.Fatalf("Content-Disposition = %q, want filename breakage-detail-0-0.csv", cd)
 	}
 	csv := w.Body.String()
 	if !strings.Contains(csv, "tenant_id") || !strings.Contains(csv, "tenant_name") {
@@ -291,7 +292,7 @@ func TestHandleAdminBreakageDetail_CSVExport(t *testing.T) {
 	// ---- 代理作用域 CSV：头省略 tenant_id/tenant_name ----
 	w2 := httptest.NewRecorder()
 	c2, _ := gin.CreateTestContext(w2)
-	c2.Request = httptest.NewRequest(http.MethodGet, "/api/admin/breakage/detail?format=csv&start_timestamp=1&end_timestamp=2", nil)
+	c2.Request = httptest.NewRequest(http.MethodGet, "/api/admin/breakage/detail?format=csv", nil)
 	setAgentScope(c2, 4)
 	app.HandleAdminBreakageDetail(c2)
 	if w2.Code != http.StatusOK {
@@ -299,7 +300,7 @@ func TestHandleAdminBreakageDetail_CSVExport(t *testing.T) {
 	}
 	csv2 := w2.Body.String()
 	// 表头行是第一行（BOM 之后）：断言表头不含 tenant_id 列（值行里恰好没有该子串即可，用表头行判定）。
-	headerLine := strings.SplitN(strings.TrimPrefix(csv2, "﻿"), "\r\n", 2)[0]
+	headerLine := strings.SplitN(strings.TrimPrefix(csv2, "\uFEFF"), "\r\n", 2)[0]
 	if strings.Contains(headerLine, "tenant_id") || strings.Contains(headerLine, "tenant_name") {
 		t.Fatalf("agent CSV header must omit tenant_id/tenant_name; header=%q", headerLine)
 	}
