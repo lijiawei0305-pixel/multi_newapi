@@ -326,7 +326,7 @@
 #### [P3-DOM-01] OEM 自定义域名 + SSL
 - **功能判据**:代理填域名 → DNS A 记录指向 `64.90.4.114` → 管理员配 SSL → `tenant_domains.ssl_status=configured`;未配 SSL 不对外展示;SSL 到期提醒。
 - **技术判据**:Host 解析覆盖自定义域名 `#4 #8`;证书到期监控 `#11`。
-- **关联门**:#4 #8 #11 ｜ **状态**:✅(**2026-07-08 复核:超规格达成**——代理**自助**绑定自定义域名 + DNS TXT 验证 + **证书自动签发**(超出规格的"管理员手动配 SSL";CertificateSeal 动效展示状态)+ 主站 admin 跨租户域名管理(查看/强制解绑);Host 解析覆盖自定义域名(TenantResolver);表 `tenant_custom_domains`。**到期/续期(2026-07-08 核)**:签发经 acme.sh,`acme.sh --cron` 每日自动续期已在 crontab;DB 记 `cert_expires_at` 且 admin 页展示。⚠️ 07-08 发现签发循环 `newapi-cert.service` 因 07-04 整树回退事故丢脚本而 failed(队列为空、无实际影响),已补回三脚本并修空队列误计,服务恢复)
+- **关联门**:#4 #8 #11 ｜ **状态**:✅(**2026-07-08 复核:超规格达成**——代理**自助**绑定自定义域名 + DNS TXT 验证 + **证书自动签发**(超出规格的"管理员手动配 SSL";CertificateSeal 动效展示状态)+ 主站 admin 跨租户域名管理(查看/强制解绑);Host 解析覆盖自定义域名(TenantResolver);表 `tenant_custom_domains`。**到期/续期(2026-07-08 核)**:签发经 acme.sh,`acme.sh --cron` 每日自动续期已在 crontab;DB 记 `cert_expires_at` 且 admin 页展示。⚠️ 07-08 发现签发循环 `newapi-cert.service` 因 07-04 整树回退事故丢脚本而 failed(队列为空、无实际影响),已补回三脚本并修空队列误计,服务恢复;**到期提醒(P3 #9,2026-07-08 达成)**:admin 域名表 ≤30 天琥珀徽标/过期红徽标 + 代理页自动续期知会行;cert-loop 每 ~20h 经内部端点 `/domain/active-cert` 回刷磁盘证书到期时间进 DB,防 acme 续期后假警报(端点 TDD+live 200))
 
 #### [P3-RNW-01] 续订自动化(合同第九条 10 / 第十条 7)
 - **功能判据**:套餐到期提醒、续订任务、续订记录、续订失败提示、人工补处理入口。
