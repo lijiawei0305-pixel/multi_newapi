@@ -150,6 +150,13 @@ func main() {
 		model.InitBatchUpdater()
 	}
 
+	// 自研计费 hook 异步批量落库开关（mt_wallet_consume_log + agent_earning_logs/agent_wallets）：仅置位标志，
+	// writer goroutine 在 router.SetMtRouter → App.StartBillingWriter 处按此标志启动（App 在那里装配）。
+	if os.Getenv("AGENT_HOOK_ASYNC_ENABLED") == "true" {
+		common.AgentHookAsyncEnabled = true
+		common.SysLog("agent hook async billing writer enabled with interval " + strconv.Itoa(common.AgentHookAsyncInterval) + "s")
+	}
+
 	if os.Getenv("ENABLE_PPROF") == "true" {
 		gopool.Go(func() {
 			log.Println(http.ListenAndServe("0.0.0.0:8005", nil))

@@ -25,6 +25,15 @@ services:
       #   激活方式：docker compose -p newapi_test -f deploy/docker-compose.test.yml up -d app（仅重启 app，~5-15s）。
       BATCH_UPDATE_ENABLED: "true"
       BATCH_UPDATE_INTERVAL: "5"
+      # —— 自研计费 hook 写放大优化（2026-07-09，发现 #9）：BATCH_UPDATE 只批量 5 类原生计数，覆盖不到
+      #   本 fork 追加的两类自研每请求写——mt_wallet_consume_log INSERT + agent_earning_logs/agent_wallets
+      #   收益事务（agent_wallets 是每租户热行，同租户并发全串行在其行锁上，是吞吐天花板主嫌）。开启后二者
+      #   改进程内缓冲 + 定时批量落库（单事务多行 INSERT + 按租户合并 UPSERT，消除热行争用）；均以 requestID
+      #   幂等，SIGTERM 优雅 flush 兜底计划重启，缓冲打满退回同步写。方向安全（只会少计代理收益、绝不多付）。
+      #   **默认关闭**（触钱、新上）：服务器构建 + 单测通过 + 小流量灰度核对账目一致后，低峰期改 "true" 再
+      #   `docker compose -p newapi_test -f deploy/docker-compose.test.yml up -d app` 激活。INTERVAL=硬崩溃最坏丢账窗口(秒)。
+      AGENT_HOOK_ASYNC_ENABLED: "false"
+      AGENT_HOOK_ASYNC_INTERVAL: "2"
       # —— 上游渠道凭据：仅引用服务器 .env 的同名变量，值不入库（compose 自动插值），供后续 relay 自测（5b）用 ——
       UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL}"
       UPSTREAM_API_KEY: "${UPSTREAM_API_KEY}"

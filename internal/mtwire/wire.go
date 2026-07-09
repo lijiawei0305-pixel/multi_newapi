@@ -87,6 +87,9 @@ type App struct {
 	AgentService  agent.AgentService
 	Withdrawals   agent.WithdrawalService
 	AgentEarnings agent.EarningSink // 真实收益入账口（写 agent_earning_logs，幂等），注入 tokenplan + consume hook
+	// billing 是自研计费 hook 的异步批量落库 writer（消耗台账 + 消耗分润；AGENT_HOOK_ASYNC_ENABLED 开启才启动）。
+	// 关闭时 hook 维持逐请求同步写，此字段不参与。见 billing_writer.go。
+	billing *billingWriter
 
 	// --- 代理自助分销（P1-UI-04）---
 	// PromotionRepo 持有具体类型（列表用非接口方法 ListChannelsByTenant）；Promotion 复用其领域服务（建渠道码）。
@@ -279,7 +282,20 @@ func New(db *gorm.DB) *App {
 	if app.activateNativeSub == nil {
 		app.activateNativeSub = app.defaultActivateNativeSub // 目标③桥接默认实现（subscription_bridge.go）
 	}
+	// 自研计费 hook 异步批量落库 writer（构造但不启动；启动见 StartBillingWriter，仅 flag 开启时）。
+	// 复用同一共享 DB + 具体 AgentRepo（AppendEarningsBatch 走真源钱包/台账）。
+	app.billing = newBillingWriter(app.DB, app.AgentRepo)
 	return app
+}
+
+// StartBillingWriter 启动自研计费 hook 的异步批量落库 writer（**所有节点**，各自缓冲各自 flush——hook 在每个
+// 收 /v1 流量的节点都会触发）。仅当 AGENT_HOOK_ASYNC_ENABLED=true 时启动；否则 hook 维持逐请求同步写。
+// 由 router.SetMtRouter 在 InstallHooks 之后调用。
+func (a *App) StartBillingWriter() {
+	if !common.AgentHookAsyncEnabled || a.billing == nil {
+		return
+	}
+	a.billing.start()
 }
 
 // Migrate 在 new-api InitDB 之后 AutoMigrate 我们的增量表（共享库）：
