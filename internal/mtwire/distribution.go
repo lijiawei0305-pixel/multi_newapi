@@ -29,9 +29,9 @@ import (
 // maxRedemptionBatch 单次建码张数上限（防刷 / 限制批量插入规模）。
 const maxRedemptionBatch = 1000
 
-// usdToQuotaUnits 把美元额折算为 new-api 内部 quota 单位（$1 = common.QuotaPerUnit）。
-// 建码预扣与兑换入账共用同一换算，保证额度严格守恒。
-func usdToQuotaUnits(usd float64) int64 { return int64(usd * common.QuotaPerUnit) }
+// usdToQuotaUnits 把美元额折算为 new-api 内部 quota 单位（$1 = common.QuotaPerUnit；截断）。
+// 建码预扣与兑换入账共用同一换算，保证额度严格守恒。换算走统一核心 usdToQuotaRound（见 money.go）。
+func usdToQuotaUnits(usd float64) int64 { return usdToQuotaRound(usd, roundDown) }
 
 // ============================================================================
 // 1) 套餐上架 / 改价（复用 App.Retail，经成本保护线）

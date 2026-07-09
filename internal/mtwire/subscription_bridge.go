@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -153,16 +152,10 @@ func (p *subPayment) CreateOrder(ctx context.Context, in tokenplan.OrderInput) (
 
 // ---- 原生订阅激活（核心桥接） ----
 
-// usdToQuota 把 USD 额度换算成原生 quota（$1 = common.QuotaPerUnit；向上取整，对齐原生
-// calcSubscriptionBalanceQuota 的 decimal.Ceil）。非正额度返回 0。
+// usdToQuota 把订阅 USD 额度换算成原生 quota（$1 = common.QuotaPerUnit）。向上取整，对齐原生
+// calcSubscriptionBalanceQuota 的 decimal.Ceil。换算走统一核心 usdToQuotaRound（见 money.go）。
 func usdToQuota(usd float64) int64 {
-	if usd <= 0 {
-		return 0
-	}
-	return decimal.NewFromFloat(usd).
-		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
-		Ceil().
-		IntPart()
+	return usdToQuotaRound(usd, roundUp)
 }
 
 // buildNativeBridgePlan 构造创建原生订阅用的「内存态」SubscriptionPlan（不落库，仅供
