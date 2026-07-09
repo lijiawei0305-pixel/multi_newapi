@@ -309,6 +309,50 @@ func (a *App) subscriptionPayURL(ctx context.Context, ticket *tokenplan.Purchase
 	return payURL, nil
 }
 
+// fillNativeUsedUSD 用生产真源覆盖一批 tokenplan.Subscription 的 UsedUSD（只读展示用，不改库）。
+//
+// 背景（P2-BRK-02）：tokenplan_subscriptions.used_usd 是永为 0 的死列——写它的 tokenplan 计费桶 Meter
+// 在 wire.go 未装配；生产 /v1 用量记在原生 user_subscriptions.amount_used(quota)。故按 source_order_id
+// → mt_subscription_orders.native_sub_id → user_subscriptions 批量取真实 amount_used，换算 USD 覆盖；
+// 缺链行（历史/非桥接订阅、或原生表缺失的测试库）保持原值。best-effort：查询失败仅记日志、绝不阻断列表。
+// mtwire 是桥接（subscription_bridge.go）归属层，故在此做跨桶投影，保持 tokenplan 仓储不感知原生桶。
+func (a *App) fillNativeUsedUSD(ctx context.Context, subs []tokenplan.Subscription) {
+	if a.DB == nil || len(subs) == 0 || common.QuotaPerUnit <= 0 {
+		return
+	}
+	orderNos := make([]string, 0, len(subs))
+	for i := range subs {
+		if subs[i].SourceOrderID != "" {
+			orderNos = append(orderNos, subs[i].SourceOrderID)
+		}
+	}
+	if len(orderNos) == 0 {
+		return
+	}
+	var rows []struct {
+		OrderNo    string
+		AmountUsed int64
+	}
+	if err := a.DB.WithContext(ctx).
+		Table("mt_subscription_orders AS o").
+		Joins("JOIN user_subscriptions AS us ON us.id = o.native_sub_id").
+		Where("o.native_sub_id > 0 AND o.order_no IN ?", orderNos).
+		Select("o.order_no AS order_no, us.amount_used AS amount_used").
+		Scan(&rows).Error; err != nil {
+		common.SysLog("breakage: fill native used_usd failed: " + err.Error())
+		return
+	}
+	usedByOrder := make(map[string]float64, len(rows))
+	for _, r := range rows {
+		usedByOrder[r.OrderNo] = float64(r.AmountUsed) / common.QuotaPerUnit
+	}
+	for i := range subs {
+		if v, ok := usedByOrder[subs[i].SourceOrderID]; ok {
+			subs[i].UsedUSD = v
+		}
+	}
+}
+
 // HandleListSubscriptions GET /api/tenant/subscriptions —— 当前用户在本租户的订阅（含历史）。需 UserAuth。
 // 主站 Host（无租户但命中 tenant.IsMainSiteHost）回退平台租户，见 resolveBuyerTenant。
 func (a *App) HandleListSubscriptions(c *gin.Context) {
@@ -323,6 +367,7 @@ func (a *App) HandleListSubscriptions(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
+	a.fillNativeUsedUSD(ctx, subs) // used_usd 死列 → 覆盖为原生桶真实用量
 	plans, err := a.planByID(ctx)
 	if err != nil {
 		respondErr(c, err)
@@ -603,6 +648,7 @@ func (a *App) HandleAdminListSubscriptions(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
+	a.fillNativeUsedUSD(ctx, subs) // used_usd 死列 → 覆盖为原生桶真实用量
 
 	plans, err := a.planByID(ctx)
 	if err != nil {

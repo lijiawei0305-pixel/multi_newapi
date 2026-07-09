@@ -31,6 +31,7 @@ package mtwire
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -131,21 +132,29 @@ func (a *App) dispatchBreakageAlerts(ctx context.Context, now int64) {
 
 // countExhaustedActiveSubs 统计仍在有效期内、用量占比 >= 阈值的活跃订阅数（跨租户，排除 tenant_id=0）。
 // 走 raw db.Table() 的 COUNT，绝不 import 兄弟 model 结构（升级安全，门 #3）：
-// used_usd >= month_limit_usd * 阈值/100 且 month_limit_usd > 0 且 status='active' 且 expire_at > now。
+// 真实已用 >= month_limit_usd * 阈值/100 且 month_limit_usd > 0 且 status='active' 且 expire_at > now。
+//
+// 用量口径：tokenplan_subscriptions.used_usd 是死列（恒 0，tokenplan 计费桶未装配）；生产用量记在
+// 原生 user_subscriptions.amount_used(quota)，经 s.source_order_id → mt_subscription_orders.native_sub_id
+// 关联，amount_used/QuotaPerUnit 还原为 USD（与 breakage/gormrepo nativeUsedUSD 同口径）。除数用浮点
+// 字面量强制实数除法（sqlite 整除会归零）。改此口径前本函数恒返 0 → 满额告警永不触发（P2-BRK-02）。
 func (a *App) countExhaustedActiveSubs(ctx context.Context, now int64) int64 {
 	if a.DB == nil {
 		return 0
 	}
 	nowT := time.Unix(now, 0).UTC()
 	ratio := breakageExhaustedThresholdPct / 100.0
+	nativeUsed := "COALESCE(us.amount_used / " + strconv.FormatFloat(common.QuotaPerUnit, 'f', 1, 64) + ", 0)"
 	var count int64
 	err := a.DB.WithContext(ctx).
-		Table("tokenplan_subscriptions").
-		Where("status = ?", "active").
-		Where("expire_at > ?", nowT).
-		Where("month_limit_usd > 0").
-		Where("used_usd >= month_limit_usd * ?", ratio).
-		Where("tenant_id <> 0").
+		Table("tokenplan_subscriptions AS s").
+		Joins("LEFT JOIN mt_subscription_orders AS o ON o.order_no = s.source_order_id AND o.native_sub_id > 0").
+		Joins("LEFT JOIN user_subscriptions AS us ON us.id = o.native_sub_id").
+		Where("s.status = ?", "active").
+		Where("s.expire_at > ?", nowT).
+		Where("s.month_limit_usd > 0").
+		Where(nativeUsed+" >= s.month_limit_usd * ?", ratio).
+		Where("s.tenant_id <> 0").
 		Count(&count).Error
 	if err != nil {
 		common.SysLog("breakage snapshot: count exhausted subs failed: " + err.Error())

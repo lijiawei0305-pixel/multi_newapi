@@ -28,6 +28,7 @@ package mtwire
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -39,6 +40,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/alert"
 	"github.com/QuantumNous/new-api/internal/breakage"
 	breakagerepo "github.com/QuantumNous/new-api/internal/breakage/gormrepo"
@@ -60,7 +62,10 @@ func newBreakageTestApp(t *testing.T) *App {
 	sqlDB.SetMaxOpenConns(1)
 
 	stmts := []string{
-		`CREATE TABLE tokenplan_subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0, plan_id INTEGER NOT NULL DEFAULT 0, month_limit_usd REAL NOT NULL DEFAULT 0, used_usd REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', start_at DATETIME, expire_at DATETIME)`,
+		`CREATE TABLE tokenplan_subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0, plan_id INTEGER NOT NULL DEFAULT 0, month_limit_usd REAL NOT NULL DEFAULT 0, used_usd REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT '', start_at DATETIME, expire_at DATETIME, source_order_id TEXT)`,
+		// 原生桶真源 + 桥接（used_usd 死列 → 读侧投影 amount_used/QuotaPerUnit，见 breakage/gormrepo nativeUsedUSD）。
+		`CREATE TABLE mt_subscription_orders (order_no TEXT PRIMARY KEY, native_sub_id INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE user_subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, amount_used INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE token_plans (id INTEGER PRIMARY KEY, code TEXT)`,
 		`CREATE TABLE user_balances (user_id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0, balance_usd REAL NOT NULL DEFAULT 0)`,
 		`CREATE TABLE payment_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 0, status TEXT, created_at DATETIME, updated_at DATETIME)`,
@@ -85,11 +90,26 @@ func newBreakageTestApp(t *testing.T) *App {
 }
 
 // brk_seedSub 造一条订阅（DATETIME 列用 time.Time；聚合按 expire_at 与 now 比较判惰性过期）。
+// 用量走生产真源：原生 user_subscriptions.amount_used(quota)，经 mt_subscription_orders.native_sub_id
+// 关联；tokenplan_subscriptions.used_usd 是死列，恒置 0（坐实读侧只投影原生桶、不读死列，P2-BRK-02）。
 func brk_seedSub(t *testing.T, app *App, tenantID, userID, planID int64, limit, used float64, status string, expireAt time.Time) {
 	t.Helper()
+	if err := app.DB.Exec(`INSERT INTO user_subscriptions (amount_used) VALUES (?)`,
+		int64(used*common.QuotaPerUnit)).Error; err != nil {
+		t.Fatalf("seed native sub: %v", err)
+	}
+	var nativeSubID int64
+	if err := app.DB.Raw(`SELECT last_insert_rowid()`).Scan(&nativeSubID).Error; err != nil {
+		t.Fatalf("native sub id: %v", err)
+	}
+	orderNo := fmt.Sprintf("ord-%d", nativeSubID)
+	if err := app.DB.Exec(`INSERT INTO mt_subscription_orders (order_no, native_sub_id) VALUES (?,?)`,
+		orderNo, nativeSubID).Error; err != nil {
+		t.Fatalf("seed bridge order: %v", err)
+	}
 	if err := app.DB.Exec(
-		`INSERT INTO tokenplan_subscriptions (tenant_id, user_id, plan_id, month_limit_usd, used_usd, status, start_at, expire_at) VALUES (?,?,?,?,?,?,?,?)`,
-		tenantID, userID, planID, limit, used, status, expireAt.Add(-30*24*time.Hour), expireAt,
+		`INSERT INTO tokenplan_subscriptions (tenant_id, user_id, plan_id, month_limit_usd, used_usd, status, start_at, expire_at, source_order_id) VALUES (?,?,?,?,?,?,?,?,?)`,
+		tenantID, userID, planID, limit, 0, status, expireAt.Add(-30*24*time.Hour), expireAt, orderNo,
 	).Error; err != nil {
 		t.Fatalf("seed sub (tenant=%d user=%d): %v", tenantID, userID, err)
 	}
