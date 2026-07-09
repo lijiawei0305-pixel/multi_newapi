@@ -125,7 +125,7 @@
 - **现象**：Mac 本机无 `golangci-lint`，prompt.md 约定的 Go 静态检查门无法原样执行。
 - **根因**：本机未安装，且为保持 Worker 离线、零外部依赖（纯标准库单测），不临时安装。
 - **解决/规避**：质量门降级为 `go build` + `go vet` + `gofmt -l` + `go test -race -cover`（均内置、离线可用）；集成阶段在服务器/CI 安装 `golangci-lint` 补强。
-- **升级**：暂不升级；待集成阶段加 CI 后再固化为门禁。
+- **升级**：CI 已于 2026-07-09 落地（`.github/workflows/ci.yml`，跑 go build/vet/test -race + 前端 bun test/build，见本节末「CI 只剩反灌水 bot」条）；但 **golangci-lint 仍未纳入 CI**，本条的静态检查门禁仍待后续补 `golangci-lint-action`。
 
 ### [已解决] Phase 2 · A 全量 fork：合并 new-api 基座的要点
 - **现象/任务**：把仓库变成 `QuantumNous/new-api` fork，并入我们的 `internal/`。
@@ -144,6 +144,18 @@
 - **根因**：① 本项目唯一环境是服务器（W4），Mac/本机只编辑调试。② mock 链路从不真正经过 `notify_url`，故路径笔误一直未被发现。
 - **解决/规避**：① 把验签/解密（依赖 SDK）与「解析+商户校验+金额换算」（纯函数 `wxTransactionToInfo`/`aliNotificationToInfo`）拆开，对纯函数写可离线编译的单测；真实 crypto 留服务器沙箱 E2E。`go.mod` 加 require，服务器 `go mod tidy && go build ./... && go test` 验证。② auth-service mux 增注册 `POST /pay/wxpay/notify`，nginx `tokendream` vhost 增 `^~ /pay/` 反代到 auth-service（与 `^~ /auth/` 同）。③ `smartwalle/alipay/v3` 的 `TradePagePay`/`TradeQuery` 随版本演进，代码内以 `NOTE(W4)` 标注，服务器构建时核对签名。
 - **升级**：暂不升级为硬约束；"真实支付接入需服务器构建验证 + 核对 alipay v3 签名" 已写入 `docs/vendor/payments/deploy-real-payments.md`（上线指南）。
+
+### [已解决] CI 只剩反灌水 bot、不跑任何测试 + preflight 前端步用错包管理器（audit #10）
+- **现象**：仓库有 176 个 `*_test.go`（1167 个 `func Test`）+ 5 个前端测试，但 7 个 GitHub workflow 里唯一的 PR 门是 `peakoss/anti-slop`（反 AI 灌水 bot，且只在 opened/reopened 触发、连 synchronize 都不含）；docker/release/nightly 等全是上游继承的构建推镜像，`grep 'go test|vitest|go vet' .github/workflows/` **零命中**。质量门只剩本地 deploy 时的 `scripts/preflight.sh`，还留了 `SKIP_PREFLIGHT=1` 逃生口（`deploy/ops/deploy.sh:51`）。且 preflight 前端步 `pnpm install && pnpm build` **用错包管理器**——项目真源是 `web/bun.lock`（无 pnpm-lock），且 `pnpm build` 在 workspace 根跑（根 `package.json` 无 build 脚本），前端预检形同虚设、还从不跑前端测试。
+- **根因**：7 个 workflow 全是上游 new-api 继承来的（构建/发布向），从没人加"跑测试"的 PR 门；本地 preflight 是唯一门却能被 `SKIP_PREFLIGHT=1` 绕过，且它的前端步本身就是坏的（pnpm≠bun、build 目录错、无 test）。
+- **解决/规避**：① 新增 `.github/workflows/ci.yml`（`push[main]` + `pull_request`）——backend job 跑 `gofmt(internal)→go build→go vet→go test ./... -race`（即 preflight 的 Go 序列），frontend job 跑 `bun install --frozen-lockfile → bun test → bun run build`；`setup-go` 用 `go-version-file: go.mod` 单一真源，`concurrency` 取消旧 run。② 修 `preflight.sh`：前端步 pnpm→bun、补 `bun test`、gofmt 目标 `cmd internal`→`internal`（cmd/ 已随 fork 基线合并移除），使本地 preflight 与云端 CI **完全对齐**。本地实测全绿：`bun install`(1611 包)/`bun test`(79 pass 0 fail)/`bun run build`(产出 dist)；Go 侧确认无需 MySQL/Redis（`glebarez/sqlite` 内存库，外部库测试被 `TEST_MYSQL_DSN`+`t.Skip` 挡住；`clickhouse_log_test.go` 的 `tcp(localhost:3306)` 只是 DSN 解析测试字符串），go.mod 无 `replace`/无 `vendor/`。
+- **升级**：**建议升级为硬约束（待用户确认填入 CLAUDE.md C 表）**——"测试必须在 CI 跑，`SKIP_PREFLIGHT=1` 只是本地便利、非唯一门"。注意：CI 文件需 commit + push 到 GitHub 才生效；首次 clean-room 全量 `go test ./... -race` 验证会在推 origin 后由 GitHub runner 跑出。
+
+### [已解决] 前端 5 个测试混用 node:test 与 vitest 两种写法——仅 `bun test` 能统跑
+- **现象**：要给前端测试加 CI，但 `web/default` 无 `test` npm 脚本、无 vitest 配置、`vitest` 根本没装（`bun.lock` 0 命中）；5 个测试文件却分两派——3 个 `import from 'node:test'`+`node:assert/strict`，2 个 `import { describe, it, expect } from 'vitest'`。没有任何单一常规命令能同时跑通两者（`vitest run` 缺依赖/配置；`node --test` 不认 vitest 写法）。
+- **根因**：测试文件历史上分批加入、用了两种框架写法，但因从没进过 CI（见上条），没人配统一 runner；`vitest` 未安装 → `import from 'vitest'` 只能靠运行器的别名解析才能跑。
+- **解决/规避**：**`bun test`** 是唯一能同时跑通的命令——bun 内建实现 `node:test`，又会自动把 `vitest` import 别名到 `bun:test`，且原生按目录发现 `*.test.ts(x)`、原生转译 TS/TSX，无需任何配置。实测 `cd web/default && bun test` → **79 pass / 0 fail across 5 files**（含那个 `.tsx`——它是纯逻辑断言、不 render DOM，故无需 happy-dom/jsdom 环境）。已定为 CI 与 preflight 的前端测试命令。
+- **升级**：新增前端测试统一用 `bun test` 跑；写法用 `node:test` 或 `vitest` 皆可（bun 都兼容），但**别引入 `vitest` 依赖/配置**制造"看起来该用 vitest 却没装"的迷惑。
 
 ---
 
