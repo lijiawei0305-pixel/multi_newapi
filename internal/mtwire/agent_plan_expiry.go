@@ -30,9 +30,10 @@ func (a *App) StartAgentPlanExpiryLoop() {
 			logger.LogInfo(context.Background(), "agent-plan expiry loop started: tick="+agentPlanExpiryTickInterval.String())
 			ticker := time.NewTicker(agentPlanExpiryTickInterval)
 			defer ticker.Stop()
-			a.runAgentPlanExpiryOnce() // 启动即先跑一轮
+			// 每轮经 safeLoopRun 隔离 panic：单轮 panic 不再终结整个循环任务。见 loop_safe.go。
+			safeLoopRun("agent-plan-expiry", a.runAgentPlanExpiryOnce) // 启动即先跑一轮
 			for range ticker.C {
-				a.runAgentPlanExpiryOnce()
+				safeLoopRun("agent-plan-expiry", a.runAgentPlanExpiryOnce)
 			}
 		})
 	})

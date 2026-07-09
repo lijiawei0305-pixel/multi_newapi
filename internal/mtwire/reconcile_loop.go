@@ -40,9 +40,11 @@ func (a *App) StartReconcileLoop() {
 			logger.LogInfo(context.Background(), "payment reconcile loop started: tick="+reconcileTickInterval.String())
 			ticker := time.NewTicker(reconcileTickInterval)
 			defer ticker.Stop()
-			a.runReconcileOnce() // 启动即先跑一轮，不必干等一个周期
+			// 每轮经 safeLoopRun 隔离 panic：单轮 runReconcileOnce panic 不再展开、终结整个
+			// 循环任务（否则支付卡单对账永久静默停摆）。见 loop_safe.go。
+			safeLoopRun("reconcile", a.runReconcileOnce) // 启动即先跑一轮，不必干等一个周期
 			for range ticker.C {
-				a.runReconcileOnce()
+				safeLoopRun("reconcile", a.runReconcileOnce)
 			}
 		})
 	})

@@ -68,9 +68,10 @@ func (a *App) StartBreakageSnapshotLoop() {
 			logger.LogInfo(context.Background(), "breakage snapshot loop started: tick="+breakageSnapshotTickInterval.String())
 			ticker := time.NewTicker(breakageSnapshotTickInterval)
 			defer ticker.Stop()
-			a.runBreakageSnapshotOnce() // 启动即先跑一轮
+			// 每轮经 safeLoopRun 隔离 panic：单轮 panic 不再终结整个循环任务。见 loop_safe.go。
+			safeLoopRun("breakage-snapshot", a.runBreakageSnapshotOnce) // 启动即先跑一轮
 			for range ticker.C {
-				a.runBreakageSnapshotOnce()
+				safeLoopRun("breakage-snapshot", a.runBreakageSnapshotOnce)
 			}
 		})
 	})
