@@ -115,6 +115,13 @@
 - **解决/规避**：照 `internal/report/reportrepo/migrate.go` 已在生产 MySQL 验证的方言分支：MySQL 先查 `information_schema.statistics` 判索引存在、缺失才 `CREATE INDEX`（**无** IF NOT EXISTS）；sqlite/pg 用原生 IF NOT EXISTS。`dbType` 取 `common.MainDatabaseType()`（sqlite 单测未设 → "" → 走 IF NOT EXISTS 分支，不受影响）。修后重新部署，两索引（唯一键 + tenant_period）均建成、日志无 1064。
 - **升级**：补 `AutoMigrate` 不自动建的组合/perf 索引，一律用方言分支 `ensureIndex(db, common.MainDatabaseType(), ...)`；**别用 `CREATE INDEX IF NOT EXISTS`（MySQL 会炸）**。凡涉及只跑 MySQL 的原生 SQL，sqlite 单测过不代表生产过——必上服务器容器验证。已存记忆 [[mysql-create-index-if-not-exists]]。
 
+### [已解决] 计费吞吐卡 ~95rps / CPU 75% 空闲——根因是 MySQL per-commit fsync 天花板，非 app 逻辑
+- **现象**：文本请求吞吐卡 ~95rps（单用户 ~31rps）、~30ms 计费尾延迟，但 CPU 仅 75% 占用（≈25% 空闲）→ 非硬件瓶颈。初判为「计费未批量：每请求同步写 users/tokens/channels + logs INSERT，各独立事务各触发 fsync」。
+- **根因**：MySQL 默认 `innodb_flush_log_at_trx_commit=1` + `sync_binlog=1`（本栈 `log_bin=ON`）→ **每次 commit 都要 fsync（redo，且开了 binlog 再来一次）**，单盘 fsync 延迟把提交吞吐钉死。实测：scratch 表单连接串行单行提交仅 **523 commits/s**、~1.19 fsync/commit。聚合 ~95rps × 每请求约 5 次 commit（钱包 4 UPDATE+1 log，或订阅桶 1 FOR UPDATE 事务+1 log）≈ 475 commits/s，**正好顶到 523 天花板**——CPU 在等磁盘 fsync 返回，故空闲。
+- **解决/规避**：**先量后改（optimize-measure）**。DB 杠杆（零代码/零停机/可秒回退，覆盖钱包/订阅桶/日志三条同步路径）：`SET GLOBAL` 即时生效 + `SET PERSIST innodb_flush_log_at_trx_commit=2; sync_binlog=0`（写入数据卷 `mysqld-auto.cnf`，重启/recreate 保留）+ `deploy/docker-compose.test.yml` mysql `command:` 兜底（全新卷）。同基准复测 **523→5763 commits/s（11×）**，fsync/commit 1.19→0.076。durability：进程崩溃不丢已提交扣费，仅宿主机断电丢 ≤1s（用户拍板可接受）。第二杠杆 app 层 batch-update（`BATCH_UPDATE_ENABLED`，机制早在 `model/utils.go` 只是默认关）已 staged 待低峰重启激活，用于消除 `channels.used_quota` 热行锁竞争（非 fsync）；安全前提=Redis 为额度权威（`cacheDecr*` 同步扣 Redis）故 DB 列滞后不超扣。
+- **坑点**：① 症状「CPU 空闲 + 吞吐卡 + 尾延迟」= 典型 **fsync-bound**（等盘），别往 app 算法上找。② 诊断用 **scratch 表 `SET PERSIST`+存储过程 loop 提交** 隔离 fsync 天花板，零上游成本/零真实数据变更/可精确复测，胜过在生产压测（费真实 token + 扰动用户）。③ MySQL 8 用 `SET PERSIST` 持久化动态变量（写 `mysqld-auto.cnf`，落在挂载卷）——比改 compose `command` 免 recreate mysql。
+- **升级**：暂不升级为硬约束（属调优而非红线）。记忆 [[billing-fsync-tuning-and-batch]]；相关 [[used-usd-dead-column-real-usage-native-bucket]]。
+
 ---
 
 ## 二、构建与依赖
