@@ -35,6 +35,7 @@ import {
   type AppRanking,
 } from '../lib/mock-stats'
 import type { PricingModel } from '../types'
+import { SampleDataBadge } from './sample-data-badge'
 
 const COMPACT_NUMBER = new Intl.NumberFormat(undefined, {
   notation: 'compact',
@@ -121,6 +122,7 @@ export function ModelDetailsApps(props: { model: PricingModel }) {
   const top = apps[0]
   return (
     <div className='flex flex-col gap-4'>
+      <SampleDataBadge className='self-start' />
       <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
         <div className='bg-muted/20 rounded-lg border p-3'>
           <div className='text-muted-foreground text-[10px] font-medium tracking-wider uppercase'>
