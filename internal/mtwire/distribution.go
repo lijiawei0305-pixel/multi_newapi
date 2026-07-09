@@ -340,18 +340,19 @@ func (a *App) HandleRedeem(c *gin.Context) {
 		return
 	}
 	code := strings.TrimSpace(body.Code)
-	amountUSD, err := a.RedemptionRepo.RedeemCode(reqCtx(c), t.ID, code, userID, time.Now())
+	// 单事务原子：CAS 翻 used + 原生 quota 入账要么全成、要么全回滚——消除旧「两步跨事务」下
+	// 「CAS 已翻 used 但 IncreaseUserQuota 另起事务失败 → 码永久作废、额度不到账、无对账兜底」的窗口
+	// （对齐充值 OnPaid / CreateCodesWithDeduction 同事务标准）。quotaPerUnit 传入以保仓储解耦；
+	// 换算 int64(usd×QuotaPerUnit) 与旧 usdToQuotaUnits 逐位一致，入账数额不变。
+	amountUSD, credit, err := a.RedemptionRepo.RedeemCodeAndCredit(reqCtx(c), t.ID, code, userID, time.Now(), common.QuotaPerUnit)
 	if err != nil {
-		respondErr(c, err) // REDEEM_CODE_INVALID / REDEEM_CODE_USED
+		respondErr(c, err) // REDEEM_CODE_INVALID / REDEEM_CODE_USED / DB 错误（已整体回滚，码未消费可再兑）
 		return
 	}
-	credit := usdToQuotaUnits(amountUSD)
-	if err := model.IncreaseUserQuota(int(userID), int(credit), true); err != nil {
-		// 罕见：CAS 已翻 used 但入账失败（DB 错误）。loudly 记日志，码已消费但额度未到账，需人工核对。
-		common.SysError("mtwire: redeem credited CAS but IncreaseUserQuota failed for user " +
-			strconv.FormatInt(userID, 10) + " code " + code + ": " + err.Error())
-		respondErr(c, err)
-		return
+	// DB 已提交。使额度缓存失效（下次读从 DB 重载，缓存永不与 DB 发散），与充值入账收尾一致。
+	if cErr := model.InvalidateUserCache(int(userID)); cErr != nil {
+		common.SysLog("mtwire: redeem invalidate user cache failed for user " +
+			strconv.FormatInt(userID, 10) + ": " + cErr.Error())
 	}
 	respondOK(c, gin.H{"amount_usd": amountUSD, "credited_quota": credit})
 }

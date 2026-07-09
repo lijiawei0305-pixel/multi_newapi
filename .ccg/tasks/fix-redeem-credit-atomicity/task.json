@@ -1,0 +1,17 @@
+{
+  "id": "fix-redeem-credit-atomicity",
+  "title": "兑换码翻 used 与入账额度跨事务非原子：折叠为单事务原子化（对齐充值/建码同事务标准）",
+  "status": "in_progress",
+  "strategy": "direct-fix",
+  "currentPhase": "4-verify",
+  "nextAction": "服务器编译+跑单测验证（本机无 Go 工具链）：rsync→/root/newapi-test→deploy.sh 或 go test ./internal/wallet/gormrepo/ ./internal/mtwire/。生产行为：入账数额逐位不变，仅入账缓存收尾从 cacheIncr 改为 InvalidateUserCache（同充值 OnPaid），并消除跨事务作废窗口。",
+  "gate": "await-user: 服务器编译+部署时机",
+  "branch": "500L",
+  "scope": "fix-redeem-credit-atomicity",
+  "createdAt": "2026-07-09T12:04:58Z",
+  "changedFiles": [
+    "internal/wallet/gormrepo/gormrepo.go",
+    "internal/mtwire/distribution.go",
+    "internal/wallet/gormrepo/gormrepo_redemption_test.go"
+  ]
+}
