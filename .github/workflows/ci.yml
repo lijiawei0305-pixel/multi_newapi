@@ -46,6 +46,15 @@ jobs:
             echo "$fmt"
           fi
 
+      # main.go 有 //go:embed web/*/dist（前端产物）。dist 被 gitignore、不在 checkout 里，
+      # 本 job 又只编译/测试后端不真服务前端 —— 造占位 index.html 满足 embed，令 go build/vet/test
+      # 能跑（真前端产物由 frontend job 的 bun run build 独立校验）。
+      - name: stub frontend dist (satisfy go:embed)
+        run: |
+          mkdir -p web/default/dist web/classic/dist
+          printf '<!doctype html>\n' > web/default/dist/index.html
+          printf '<!doctype html>\n' > web/classic/dist/index.html
+
       - name: go build
         run: go build ./...
 
