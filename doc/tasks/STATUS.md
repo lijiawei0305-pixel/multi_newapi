@@ -66,6 +66,7 @@
 - **8a CF「Full (strict)」模式** —— 源站已具 Origin CA 证书；仅差在**你的 CF 面板**切模式。
 - **Trial 设备/实名维** —— 需前端购买请求上送 `device_id`/`real_name_id`（用户维已挡住主要滥用）。
 - **vhost 注释清理** —— 3 份配置注释过期（"自签"/`newapi_YFNf`/3000），无功能影响。
+- **[已修 ✅ · 已部署验证] 审计 #12 USD→quota 换算 DRY（2026-07-09）** —— 三处 `$→quota`（充值 `rechargeQuota` / 订阅 `usdToQuota` / 分销 `usdToQuotaUnits`）收敛为单一核心 `internal/mtwire/money.go: usdToQuotaRound(usd, rounding)`（decimal 精确乘法 + 显式取整：充值/分销截断、订阅进位对齐原生 Ceil），各调用点签名/行为不变；顺带把两处 float 截断改 decimal，消除 `int(0.29×QuotaPerUnit)=144999` 少算 1 quota 的浮点误差。**已提交 `main`（`ba22be2`，仅这 5 文件，与并行 WIP 解耦）**；服务器**已部署**——`git apply` 定向打补丁到 `/root/newapi-test`（保留他人 WIP 不动）→ `up -d --build`，`go build` 实跑 87.6s 重编译，容器重建健康、内网 3100 + 三域名 200；新增表驱动 `TestUsdToQuotaRound`（服务器 `golang:1.26.1-alpine`/`CGO_ENABLED=0` build+vet+test 全绿）。详见 `audit-report-newapi628-2026-07-09.html` #12。
 
 ## 四、外部阻塞 —— 2026-07-07 均已由用户解除 ✅
 

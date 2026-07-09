@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>newapi628 审计报告</title>
+<style>
+  :root {
+    --sidebar-bg: #1a1f2e;
+    --sidebar-hover: #242a3d;
+    --sidebar-active: #2d3555;
+    --bg: #f0f3f7;
+    --card-bg: #ffffff;
+    --border: #e6eaef;
+    --text: #1e2233;
+    --text-secondary: #6b7394;
+    --accent: #3370ff;
+    --accent-light: #e8f0ff;
+    --success: #34c759;
+    --warning: #ff9500;
+    --danger: #ff3b30;
+    --info: #5ac8fa;
+    --badge-critical: #ff3b30;
+    --badge-high: #ff9500;
+    --badge-medium: #3370ff;
+    --badge-low: #8e8e93;
+    --badge-info: #5ac8fa;
+    --bar-bg: #e8eaed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    display: flex;
+    min-height: 100vh;
+    font-size: 15px;
+  }
+  .sidebar { width: 240px; background: var(--sidebar-bg); color: #fff; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  .sidebar-header .sub { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 4px; }
+  .sidebar-nav { padding: 8px 0; flex: 1; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 12px 20px; color: rgba(255,255,255,.6); text-decoration: none; font-size: 14px; transition: all .15s; border-left: 3px solid transparent; }
+  .sidebar-nav a:hover { background: var(--sidebar-hover); color: #fff; }
+  .sidebar-nav a.active { background: var(--sidebar-active); color: #fff; border-left-color: var(--accent); }
+  .sidebar-nav a .icon { width: 18px; text-align: center; font-size: 14px; }
+  .sidebar-footer { padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.3); }
+  .main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+  .page-header { margin-bottom: 32px; }
+  .page-header h2 { font-size: 26px; font-weight: 700; }
+  .page-header .meta { font-size: 14px; color: var(--text-secondary); margin-top: 6px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .page-header .meta span { display: flex; align-items: center; gap: 4px; }
+  .card { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .card-body { padding: 24px; }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .score-item { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); }
+  .score-item .label { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .4px; }
+  .score-item .bar-row { display: flex; align-items: center; gap: 12px; }
+  .score-item .bar-track { flex: 1; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .score-item .bar-fill { height: 100%; border-radius: 5px; transition: width .6s ease; }
+  .score-item .value { font-size: 22px; font-weight: 700; min-width: 52px; text-align: right; }
+  .score-item .grade { font-size: 15px; font-weight: 700; min-width: 22px; text-align: center; }
+  .bar-fill.s { background: linear-gradient(90deg, #34c759, #30d158); }
+  .bar-fill.a { background: linear-gradient(90deg, #3370ff, #5e8cff); }
+  .bar-fill.b { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .bar-fill.c { background: linear-gradient(90deg, #ff3b30, #ff6b61); }
+  .bar-fill.d { background: linear-gradient(90deg, #ff6b61, #ff9f91); }
+  .bar-fill.f { background: linear-gradient(90deg, #9b1d1a, #d63031); }
+  .grade-s { color: #34c759; } .grade-a { color: #3370ff; }
+  .grade-b { color: #ff9500; } .grade-c { color: #ff3b30; }
+  .grade-d { color: #ff6b61; } .grade-f { color: #9b1d1a; }
+  .overall-row { grid-column: 1 / -1; background: linear-gradient(135deg, #1a1f2e, #2d3555); border-color: transparent; }
+  .overall-row .label { color: rgba(255,255,255,.6); }
+  .overall-row .value { color: #fff; }
+  .overall-row .grade { color: #ff9500; }
+  .overall-row .bar-fill { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat-card { flex: 1; min-width: 120px; padding: 20px 24px; background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); text-align: center; }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1.3; }
+  .stat-card .desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .finding { border-left: 4px solid var(--border); margin-bottom: 20px; padding: 20px 24px; border-radius: 0 10px 10px 0; background: #fafbfc; border: 1px solid var(--border); border-left-width: 4px; }
+  .finding.severity-critical { border-left-color: var(--badge-critical); }
+  .finding.severity-high { border-left-color: var(--badge-high); }
+  .finding.severity-medium { border-left-color: var(--badge-medium); }
+  .finding.severity-low { border-left-color: var(--badge-low); }
+  .finding.severity-info { border-left-color: var(--badge-info); }
+  .finding-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .finding-header h4 { font-size: 16px; font-weight: 600; flex: 1; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; line-height: 1.6; }
+  .badge-critical { background: #ffeae9; color: var(--badge-critical); }
+  .badge-high { background: #fff3e0; color: var(--badge-high); }
+  .badge-medium { background: var(--accent-light); color: var(--badge-medium); }
+  .badge-low { background: #f2f2f5; color: var(--badge-low); }
+  .badge-info { background: #e4f5ff; color: #007aff; }
+  .badge-confirmed { background: #e8ffe8; color: #248a3d; }
+  .badge-suspected { background: #fff8e1; color: #b8860b; }
+  .badge-fixed { background: #248a3d; color: #fff; }
+  .finding.fixed { border-left-color: #248a3d !important; background: #fafffa; }
+  .badge-s { background: #e8ffe8; color: #248a3d; }
+  .badge-a { background: var(--accent-light); color: var(--accent); }
+  .badge-b { background: #fff3e0; color: var(--warning); }
+  .badge-c { background: #ffeae9; color: var(--danger); }
+  .finding-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+  .finding-meta span { display: flex; align-items: center; gap: 4px; }
+  .finding .evidence { margin: 12px 0; padding: 14px 18px; background: #f0f2f5; border-radius: 8px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .finding .problem { font-size: 14px; margin: 12px 0; color: var(--text); line-height: 1.8; }
+  .finding .fix-box { margin-top: 12px; padding: 14px 18px; background: #f0f7ff; border-radius: 8px; border: 1px solid #d6e4ff; font-size: 13px; }
+  .finding .fix-box code { display: block; margin-top: 6px; padding: 12px 16px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .fix-label { font-weight: 600; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
+  .section-title { font-size: 20px; font-weight: 700; margin: 36px 0 20px; padding-bottom: 10px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 12px 16px; font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); background: #f8fafc; }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; }
+  .check-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.6; }
+  .check-item .check { color: var(--success); font-weight: 700; }
+  .check-item .cross { color: var(--danger); font-weight: 700; }
+  .win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .win-card { padding: 16px; background: linear-gradient(135deg, #f0f7ff, #e8f0ff); border-radius: 8px; border: 1px solid #d6e4ff; }
+  .win-card .win-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .win-card .win-meta { font-size: 11px; color: var(--text-secondary); }
+  .small { font-size: 13px; color: var(--text-secondary); }
+  @media (max-width: 768px) { .sidebar { display: none; } .main { padding: 16px; } .score-grid { grid-template-columns: 1fr; } .stats-row { flex-direction: column; } .check-list { grid-template-columns: 1fr; } .win-grid { grid-template-columns: 1fr; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c1c7d0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a8adb8; }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>newapi628</h1>
+    <div class="sub">全量审计 · 2026-07-09</div>
+  </div>
+  <div class="sidebar-nav">
+    <a href="#summary"><span class="icon">📊</span> 概览</a>
+    <a href="#executive-summary"><span class="icon">📝</span> 总体评估</a>
+    <a href="#coverage"><span class="icon">🧭</span> 覆盖矩阵</a>
+    <a href="#findings"><span class="icon">🔍</span> 详细发现</a>
+    <a href="#architecture"><span class="icon">🏗</span> 架构</a>
+    <a href="#security"><span class="icon">🔒</span> 安全</a>
+    <a href="#stability"><span class="icon">⚡</span> 稳定性</a>
+    <a href="#performance"><span class="icon">🚀</span> 性能</a>
+    <a href="#testing"><span class="icon">🧪</span> 测试</a>
+    <a href="#maintainability"><span class="icon">📐</span> 可维护性</a>
+    <a href="#design"><span class="icon">📋</span> 设计原则</a>
+    <a href="#release"><span class="icon">🚢</span> 发布</a>
+    <a href="#documentation"><span class="icon">📚</span> 文档</a>
+    <a href="#configuration"><span class="icon">⚙️</span> 配置</a>
+    <a href="#observability"><span class="icon">🩺</span> 可观测</a>
+    <a href="#data-integrity"><span class="icon">🧱</span> 数据完整</a>
+    <a href="#privacy"><span class="icon">🛡</span> 隐私</a>
+    <a href="#accessibility"><span class="icon">⌨️</span> 可访问性</a>
+    <a href="#supply-chain"><span class="icon">🔗</span> 供应链</a>
+    <a href="#cost"><span class="icon">💸</span> 成本</a>
+    <a href="#ai-safety"><span class="icon">🤖</span> AI 安全</a>
+    <a href="#fallback"><span class="icon">🕳</span> 兜底代码</a>
+    <a href="#testing-authenticity"><span class="icon">✅</span> 测试真实性</a>
+    <a href="#type-safety"><span class="icon">🔤</span> 类型安全</a>
+    <a href="#frontend-state"><span class="icon">🎛</span> 前端状态</a>
+    <a href="#backend-api"><span class="icon">🔌</span> 后端 API</a>
+    <a href="#dependency-weight"><span class="icon">📦</span> 依赖重量</a>
+    <a href="#code-consistency"><span class="icon">🧩</span> 代码一致性</a>
+    <a href="#comment-coverage"><span class="icon">💬</span> 注释覆盖</a>
+    <a href="#principles"><span class="icon">📏</span> 原则符合度</a>
+    <a href="#fix-order"><span class="icon">🎯</span> 修复顺序</a>
+  </div>
+  <div class="sidebar-footer">Fuck My Shit Mountain v1.0</div>
+</nav>
+
+<div class="main">
+
+  <!-- PAGE HEADER -->
+  <div class="page-header" id="summary">
+    <h2>newapi628 全量代码审计报告</h2>
+    <div class="meta">
+      <span>📅 2026-07-09</span>
+      <span>🔍 全量审计（full · 25 维度）</span>
+      <span>🛠 Fuck My Shit Mountain</span>
+      <span>🌿 分支 main @ 577fb31</span>
+    </div>
+  </div>
+
+  <!-- SCORE DASHBOARD -->
+  <div class="card">
+    <div class="card-header">📊 评分面板 <span class="small" style="font-weight:400">高分 = 更好 · 满分 10.0</span></div>
+    <div class="card-body">
+      <div class="score-grid">
+
+        <div class="score-item">
+          <div class="label">Security 安全</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill a" style="width:80%"></div></div>
+            <span class="value grade-a">8.0</span>
+            <span class="grade grade-a">A</span>
+          </div>
+          <div class="small">租户隔离与支付完整性经核实扎实，仅余降级/纵深防御缺口（租户停用依赖 Redis）</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Stability 稳定性</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:60%"></div></div>
+            <span class="value grade-b">6.0</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">同步资金路径事务化且幂等，但后台任务 panic 即永久停摆、沉淀监控读空列</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Performance 性能</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:55%"></div></div>
+            <span class="value grade-b">5.5</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">每请求同步写库封顶吞吐（实测 ~95rps/75%CPU 空闲）+ 多处无界查询，成体系</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Testing 测试</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:60%"></div></div>
+            <span class="value grade-b">6.0</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">后端测试真实可信（真库+httptest+领域不变量），但前端近乎为零且 CI 不跑测试</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Maintainability 可维护</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:65%"></div></div>
+            <span class="value grade-b">6.5</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">领域包整洁、约定统一，但缝合层与最大 UI 组件聚成千行级 god-file</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Design 设计</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:65%"></div></div>
+            <span class="value grade-b">6.5</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">资金路径 fail-closed/幂等纪律强，但 USD→quota 三处取整不一致、作用域 fail-open-by-约定</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Release 发布</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:60%"></div></div>
+            <span class="value grade-b">6.0</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">deploy.sh 有预检+备份+自动回滚，但 GitHub CI 零测试门、版本占位 v0.0.0</div>
+        </div>
+
+        <div class="score-item overall-row">
+          <div class="label">Overall 总评</div>
+          <div class="bar-row">
+            <div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:64%;background:linear-gradient(90deg,#ff9500,#ffb340)"></div></div>
+            <span class="value" style="color:#fff">6.4</span>
+            <span class="grade" style="color:#ff9500">B</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- EXECUTIVE SUMMARY -->
+  <h3 class="section-title" id="executive-summary">📝 总体评估</h3>
+  <div class="card">
+    <div class="card-header">📋 总体评估</div>
+    <div class="card-body">
+      <p><strong>项目概况：</strong> newapi628 是基于 <em>New API</em>（One API 衍生）二次开发的多租户 API 代理分销平台——单套后端 + 多租户隔离 + 统一网关，支持普通/OEM/API 三类代理的分销、品牌定制、套餐与开放 API。栈为 Go 1.25（后端）+ React/TypeScript（前端 <code>web/default</code>）+ MySQL 8 + Redis + Nginx，Docker Compose 部署。自研层集中在 <code>internal/</code>（22 个领域子包，约 4.8 万行 Go）与 <code>internal/mtwire/</code> 集成缝合层，配 113 个 Go 测试文件；前端自研约 50 个 feature 模块。本次审计**重点在自研多租户层**，New API 上游基线仅作边界标注（见覆盖矩阵）。</p>
+      <p style="margin-top:12px"><strong>核心结论——这不是"屎山"。</strong> 我们独立核实了全部四条资金关键路径，均健全：<strong>额度扣减用原子 SQL</strong>（<code>quota = quota - ?</code>）、<strong>支付入账是先验签后取信 + CAS 幂等状态机 + 反篡改</strong>（金额一律以库内订单为准）、<strong>代理分润是带负值守卫的纯函数 + 唯一约束幂等台账</strong>、<strong>提现是托管两阶段状态机</strong>（冻结→审核→打款，原子 CAS）。跨租户隔离经逐端点核查无 IDOR（<code>tenant_id</code> 一律服务端派生、仓储层强制 <code>WHERE tenant_id=?</code>），管理端跨租户视图叠加 <code>AdminAuth</code> 把关。代码内可见历次审计编号（C1、M1–M5、L3）与端口/适配器式设计（<code>internal/risk</code> 堪称范例），工程纪律真实存在。<strong>全程无 Critical、仅 2 个 High。</strong></p>
+      <p style="margin-top:12px"><strong>主要风险：</strong> 集中在**异步/报表层与运维侧**，而非核心记账。① <span style="color:var(--danger)"><strong>后台定时任务首次 panic 即永久静默停摆</strong></span>——支付卡单对账、额度快照、套餐到期三个 loop 把 <code>for range ticker.C</code> 整体放进单个 gopool 任务，单轮 panic 会终结整个任务且无人重启、无健康告警，最坏情形是"已付未回调"的用户永不被补入账。② <span style="color:var(--danger)"><strong>刚上线的额度沉淀监控读取一列生产从不更新的 <code>used_usd</code></strong></span>（tokenplan 计费桶未装配、生产走原生订阅桶、二者无同步），导致该功能恒显 0 消耗、100% 沉淀、买家用量恒 0%、满额告警永不触发。③ **性能成体系**：每请求同步 fsync 写库（<code>BATCH_UPDATE</code> 默认关闭）叠加自研 hook 的额外同步写，实测吞吐封顶 ~95rps 而 CPU 仅 75% 空闲；多处列表/明细查询无 LIMIT、全量物化到内存。④ **CI 不跑任何测试**——113 个后端测试与前端测试均无自动化门禁，质量完全依赖开发者本地跑 <code>deploy.sh</code>。</p>
+      <p style="margin-top:12px"><strong>亮点：</strong> 资金路径的事务/幂等/CAS 纪律；<code>internal/risk</code> 的端口-适配器-fakes 分层；后端测试的真实性（真库 + httptest + 领域不变量断言，非桩测）；<code>deploy.sh</code> 的预检门（build/vet/<code>go test -race</code>/前端 build）+ 部署前备份 + 健康轮询 + 失败自动回滚；密钥卫生（无密钥入库、内网端点恒定时间比较 + deny-by-default）；上传双重把关（扩展名白名单 + 内容嗅探，拒 SVG/HTML）；供应链锁定（go.sum + web/bun.lock + 正规支付 SDK）。</p>
+      <p style="margin-top:12px"><strong>优先修复：</strong> （1）给三个后台 loop 加逐轮 <code>recover</code> + 心跳/告警（半天内，最高杠杆）；（2）修 <code>used_usd</code> 数据源，让沉淀监控读真实用量（1–2 天）；（3）加一条跑 <code>go test -race</code> + 前端 build 的 CI（1–2 小时，复用 <code>preflight.sh</code>）；（4）开 <code>BATCH_UPDATE</code> 并压测校验，随后异步化自研计费写、给无界列表加分页。</p>
+      <p style="margin-top:12px"><strong>总评：</strong> <strong>B（6.4）</strong>——对一个从 3 天 MVP 起步的 fork 而言，工程质量明显高于预期：核心资金与隔离逻辑扎实、后端测试可信、部署脚本成熟。扣分来自成体系的性能债、异步/报表层两个真实 High，以及"有测试却无 CI 强制、有硬约束表却全为 TODO"的护栏缺位。**核心是稳的，短板是明确且可修的**，不需要重写，属"值得在下一个发布前定向投入"的量级。</p>
+    </div>
+  </div>
+
+  <!-- COVERAGE MATRIX -->
+  <h3 class="section-title" id="coverage">🧭 覆盖矩阵</h3>
+  <div class="card">
+    <div class="card-body">
+      <p class="small"><strong>覆盖说明：</strong> 以 <code>scripts/project_inventory.py</code> 盘点（3213 文件）起步，用 <code>rg</code> 建项目地图后，由 1 个主审计员 + 4 个并行维度子代理系统性通读自研层：<code>internal/</code> 全 22 子包、<code>internal/mtwire/</code> 缝合层、<code>internal/payment/</code>、<code>auth-service/</code>、<code>common/limiter/</code>、<code>middleware/</code> 自研改动、<code>web/default/src/features/</code> 前端、<code>.github/workflows/</code>、<code>deploy/</code>、<code>doc/</code>。主审计员独立复核了四条资金路径与两个 High 的机制。<strong>排除项：</strong> New API 上游基线（<code>relay/</code>、<code>controller/</code>、<code>model/</code> 中非自研部分、多渠道 relay 适配器）仅作边界标注不评分；生成物/构建产物/<code>node_modules</code>/二进制资产（含 <code>bulb-orbit/</code> 动画资产、<code>repomix-output.xml</code>）排除；未在服务器实跑测试套件或压测（结论引用项目 MEMORY 的既有实测）。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>维度</th><th style="width:110px">覆盖</th><th>已检证据</th><th>排除 / 限制</th></tr></thead>
+          <tbody>
+            <tr><td>Security 安全</td><td><span class="badge badge-confirmed">High</span></td><td>逐端点核查代理自助 IDOR、路由中间件、支付验签/反篡改、密钥处理、SQL 参数化、上传把关</td><td>未做动态渗透/DAST；上游 <code>middleware/auth.go</code> 仅标注未深挖</td></tr>
+            <tr><td>Stability 稳定性</td><td><span class="badge badge-confirmed">High</span></td><td>通读充值/兑换/收益/提现/订阅/代理套餐激活的事务与幂等；后台 loop 结构；<code>used_usd</code> 写读链路</td><td>未注入故障实测；并发竞态部分为静态推断</td></tr>
+            <tr><td>Performance 性能</td><td><span class="badge badge-confirmed">High</span></td><td>逐层追踪 /v1 计费写路径、gormrepo 查询、限流 lua、报表聚合；比对上游 BATCH_UPDATE 覆盖面</td><td>未现场压测（引用 MEMORY 既有 ~31/95rps 实测）；索引存在性未逐一 EXPLAIN</td></tr>
+            <tr><td>Testing 测试</td><td><span class="badge badge-suspected">Medium</span></td><td>抽读 distribution/risk/credit 等测试装配与断言；统计前后端测试文件数与 CI 门</td><td>未在服务器实跑 <code>go test</code>；未测覆盖率数字</td></tr>
+            <tr><td>Maintainability 可维护</td><td><span class="badge badge-confirmed">High</span></td><td>最大文件行数/函数数/职责盘点（agent.go/reportrepo.go/report.go/前端巨型组件）；依赖方向 grep</td><td>圈复杂度为目测非工具测量</td></tr>
+            <tr><td>Design 设计</td><td><span class="badge badge-confirmed">High</span></td><td>对照 principles 逐条核查 SRP/DRY/KISS/fail-fast/CQS；USD→quota 换算三处比对</td><td>—</td></tr>
+            <tr><td>Release 发布</td><td><span class="badge badge-confirmed">High</span></td><td>读全 7 个 workflow、<code>deploy/ops/*.sh</code>、<code>preflight.sh</code>、版本注入、回滚脚本</td><td>未实跑部署流水线</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small" style="margin-top:12px">注：Accessibility 与 AI-Safety 为条件相关维度，按项目形态（B/S 后台 + relay 网关，非对话 Agent）覆盖为 Medium/有限，详见对应分节。</p>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">33</div><div class="desc">总发现</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-critical)">0</div><div class="desc">Critical</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-high)">2</div><div class="desc">High</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">15</div><div class="desc">Medium</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-low)">12</div><div class="desc">Low</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-info)">4</div><div class="desc">Info</div></div>
+  </div>
+
+  <!-- TOP RISKS -->
+  <h3 class="section-title" id="top-risks">⚠️ 主要风险清单</h3>
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:50px">#</th><th>发现</th><th style="width:100px">严重程度</th><th style="width:110px">维度</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>后台定时任务首次 panic 即永久静默停摆（含支付对账），无健康告警</td><td><span class="badge badge-high">High</span></td><td>稳定性</td></tr>
+            <tr><td>2</td><td>额度沉淀监控读取生产从不更新的 <code>used_usd</code> 列 → 恒显 0 消耗 / 100% 沉淀</td><td><span class="badge badge-high">High</span></td><td>数据完整</td></tr>
+            <tr><td>3</td><td>计费未批量：每请求同步 fsync 写 MySQL（BATCH_UPDATE 默认关闭）</td><td><span class="badge badge-medium">Medium</span></td><td>性能</td></tr>
+            <tr><td>4</td><td>自研计费 hook 追加 BATCH_UPDATE 无法覆盖的每请求同步写</td><td><span class="badge badge-medium">Medium</span></td><td>性能</td></tr>
+            <tr><td>5</td><td>租户级停用在 /v1 层 fail-open（Redis 关闭时风控引擎未装配）</td><td><span class="badge badge-medium">Medium</span></td><td>安全</td></tr>
+            <tr><td>6</td><td>兑换码"翻 used"与"入账额度"跨事务非原子，无对账兜底</td><td><span class="badge badge-medium">Medium</span></td><td>数据完整</td></tr>
+            <tr><td>7</td><td>代理套餐激活 provision 先于 CAS 状态门，并发双回调或致孤儿租户</td><td><span class="badge badge-medium">Medium</span></td><td>并发</td></tr>
+            <tr><td>8</td><td>breakage/消耗明细全量物化到内存再 Go 分页，内存不设界</td><td><span class="badge badge-medium">Medium</span></td><td>性能/稳定</td></tr>
+            <tr><td>9</td><td>无界列表查询：收益台账/兑换码/我的用户无 LIMIT 无分页</td><td><span class="badge badge-medium">Medium</span></td><td>性能</td></tr>
+            <tr><td>10</td><td>CI 不执行任何测试/构建，唯一 PR 门是反灌水 bot</td><td><span class="badge badge-medium">Medium</span></td><td>发布</td></tr>
+            <tr><td>11</td><td>定价页向用户展示编造的可用率/延迟数据，无"示例"标注</td><td><span class="badge badge-medium">Medium</span></td><td>设计/文档</td></tr>
+            <tr><td>12</td><td>USD→quota 换算三处重复且取整语义不一致（DRY） <span class="badge badge-fixed">✅ 已修</span></td><td><span class="badge badge-medium">Medium</span></td><td>设计</td></tr>
+            <tr><td>13</td><td><code>mtwire/agent.go</code> 1254 行/46 函数/6 类职责（SRP）</td><td><span class="badge badge-medium">Medium</span></td><td>可维护</td></tr>
+            <tr><td>14</td><td><code>channel-mutate-drawer.tsx</code> ~3700 行单组件（SRP）</td><td><span class="badge badge-medium">Medium</span></td><td>前端状态</td></tr>
+            <tr><td>15</td><td>前端测试近乎为零（5 文件 / 458 组件），无门执行</td><td><span class="badge badge-medium">Medium</span></td><td>测试</td></tr>
+            <tr><td>16</td><td>计费热路径重复点查 <code>users.tenant_id</code>（3-4 次/请求）</td><td><span class="badge badge-medium">Medium</span></td><td>性能</td></tr>
+            <tr><td>17</td><td>消耗趋势把原始 logs 行拉进 Go 分桶而非 SQL GROUP BY</td><td><span class="badge badge-medium">Medium</span></td><td>性能</td></tr>
+            <tr><td>18–29</td><td>12 项 Low（详见各维度分节）：非恒定时间比较、金额≤0 跳过反篡改、限流键不过期、裸数组接口、reportrepo 1714 行、C1–C8 全 TODO、App god-object、agentplan 0 测试、nil=全租户约定、loop 无心跳、本地占位密钥、report.go 1112 行</td><td><span class="badge badge-low">Low</span></td><td>多维度</td></tr>
+            <tr><td>30–33</td><td>4 项 Info：微信回调日志泄露传输头、moderation 忽略字段 footgun、未装配演示服务非事务、三套 DB 驱动编入</td><td><span class="badge badge-info">Info</span></td><td>多维度</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- DETAILED FINDINGS -->
+  <h3 class="section-title" id="findings">🔍 详细发现</h3>
+
+  <!-- H1 -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>1. 后台定时任务首次 panic 即永久静默停摆（含支付对账）</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed · 已复核</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 稳定性 / 可观测</span>
+      <span>📍 internal/mtwire/reconcile_loop.go:39-46</span>
+      <span>🎯 StartReconcileLoop / runReconcileOnce</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>三个后台 loop（支付卡单对账 <code>reconcile_loop.go</code>、额度快照 <code>breakage_snapshot_loop.go</code>、套餐到期 <code>agent_plan_expiry.go</code>）都把整个 <code>for range ticker.C { a.runXxxOnce() }</code> 放进<strong>单个</strong> <code>gopool.Go</code> 任务，而 <code>runXxxOnce</code> 内部<strong>无 recover</strong>（仅 <code>atomic</code> 防重入）。gopool 的 recover 在任务边界，整个循环是一个任务——循环体任一次 panic 会展开到任务闭包、被 worker 记一行 <code>GOPOOL: panic</code> 后<strong>任务结束</strong>，<code>defer ticker.Stop()</code> 触发，无人重新提交。周期任务从此永久死亡（进程不崩，作业死掉），且除翻日志外无任何存活告警。
+    </div>
+    <div class="evidence">- 文件: internal/mtwire/reconcile_loop.go:39-46
+- 结构: gopool.Go(func(){ ticker:=NewTicker(); defer ticker.Stop(); runReconcileOnce(); for range ticker.C { runReconcileOnce() } })
+- runReconcileOnce (:53-62): 仅 reconcileRunning.CompareAndSwap + defer Store(false)，无 recover → panic 直接上穿循环
+- 同构: breakage_snapshot_loop.go:67-75 / agent_plan_expiry.go:29-38（runOnce 均无内层 recover）
+- 复核: gopool@v0.1.3 recover 在 worker 任务边界，for-range 全体属一个任务</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（半天内 · 最高杠杆）</div>
+      <code>// 每轮调用包一层 recover，隔离单轮 panic、令循环存活
+for range ticker.C {
+    func() {
+        defer func() {
+            if r := recover(); r != nil {
+                common.SysError(fmt.Sprintf("reconcile loop iteration panic: %v", r))
+            }
+        }()
+        a.runReconcileOnce()
+    }()
+}</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 30 分钟（recover）+ 2-4 小时（每轮 <code>last_success_at</code> 心跳 + 超 N 周期无成功经 AlertSink 告警）&nbsp;·&nbsp; <strong>回归测试：</strong> 注入会 panic 的 <code>runOnce</code> 桩，断言 ticker 下一轮仍被调用（循环存活）+ 心跳时间戳前移
+    </div>
+  </div>
+
+  <!-- H2 -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>2. 额度沉淀监控读取生产从不更新的 used_usd 列 → 恒显 0 消耗</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed · 已复核</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 数据完整（报表）</span>
+      <span>📍 internal/tokenplan/gormrepo/gormrepo.go:399 · internal/breakage/gormrepo/gormrepo.go:136</span>
+      <span>🎯 Meter（唯一写者）vs breakage 读者</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong><code>tokenplan_subscriptions.used_usd</code> 的<strong>唯一写入者</strong>是 <code>Meter</code>（<code>used_usd += cost</code>），而 <code>Meter</code> 只被 tokenplan 计费桶（<code>quota_sub.go</code>/<code>subscription.go</code>）调用——该桶的 <code>billing.NewService</code>/<code>wallet.NewService</code> 在 <code>wire.go</code>/<code>main.go</code> 中<strong>均未装配</strong>（已 grep 确认）。生产 /v1 计费实际走<strong>原生</strong> <code>user_subscriptions</code> 桶，且全仓<strong>无任何"原生用量 → used_usd"同步代码</strong>。但刚上线的额度沉淀监控（P2-BRK-01，commit 4ebd993）与买家"我的订阅"页却全都读 <code>used_usd</code> 算 <code>month_limit_usd − used_usd</code>。结果：每笔订阅激活时 <code>used_usd=0</code> 后永不更新，监控把每笔订阅都当成 0 消耗。
+    </div>
+    <div class="evidence">- 写侧唯一: internal/tokenplan/gormrepo/gormrepo.go:399  gorm.Expr("used_usd + ?", costUSD)
+  调用者仅 quota_sub.go:75 / subscription.go:181（tokenplan 计费桶，未装配）
+- 装配核实: main.go / wire.go 中 billing.NewService、wallet.NewService = 0 命中
+- 生产计费桶: subscription_bridge.go:248 CreateUserSubscriptionFromPlanTx（原生 user_subscriptions）
+- 读侧: breakage/gormrepo/gormrepo.go:136/143/250/401、breakage_snapshot_loop.go:146、买家页 http.go:338/340
+- 后果: ExpiredUnusedUSD≈Σ全额limit（沉淀率≈100%）；countExhaustedActiveSubs（used≥95%limit）永不触发；usage_pct 恒 0%</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（二选一）</div>
+      <code>// 方案 a（推荐）：breakage 读真实来源——原生 user_subscriptions 的已用额度
+//   经 mt_subscription_orders.native_sub_id 关联原生桶取 used，替换对 used_usd 的读取
+// 方案 b：新增"原生用量 → tokenplan_subscriptions.used_usd"同步
+//   在 agenthook.ConsumeCommission 的 billingSource=="subscription" 分支顺带回写，或独立对账 loop</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 1-2 天（含"读原生桶 vs 回写台账"口径决策）&nbsp;·&nbsp; <strong>回归测试：</strong> E2E 购买→原生 /v1 消耗 $X→断言 breakage Overview 与买家页 <code>used_usd≈X</code> 而非 0；断言满额告警在 used≥95%limit 时触发
+    </div>
+  </div>
+
+  <!-- M1 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>3. 计费未批量：每请求同步 fsync 写 MySQL（BATCH_UPDATE 默认关闭）</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed · 已复核</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 性能</span>
+      <span>📍 common/constants.go:181 · service/quota.go:407 · service/text_quota.go:370</span>
+      <span>🎯 PostConsumeQuota / PostTextConsumeQuota</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong><code>BatchUpdateEnabled</code> 默认 <code>false</code>，且 <code>PostTextConsumeQuota</code> 由各 relay handler 在请求 goroutine 上<strong>同步调用</strong>。批量关闭时单次文本请求同步产生 users.quota、tokens、users.used_quota/request_count、channels 四条 UPDATE + logs INSERT，每条独立事务各触发一次 fsync。与项目 MEMORY 记录的"~30ms 计费尾延迟、75% CPU 空闲但吞吐卡 ~95rps"实测吻合——这是首要性能杠杆，且熔断因 fsync CPU 尖峰被过早触发。
+    </div>
+    <div class="evidence">- common/constants.go:181  var BatchUpdateEnabled = false（main.go:147 仅 BATCH_UPDATE_ENABLED=="true" 才开）
+- service/quota.go:407 PostConsumeQuota → DecreaseUserQuota(...,false)（user.go:939 同步 UPDATE）+ DecreaseTokenQuota（同步）
+- service/text_quota.go:370-371,463 UpdateUserUsedQuotaAndRequestCount + UpdateChannelUsedQuota + RecordConsumeLog(INSERT)
+- 实测（MEMORY）: 单用户 ~31rps / 聚合 ~95rps，CPU 仅 75% 空闲 → 非硬件瓶颈，计费写放大所致</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（零代码改动）</div>
+      <code># 服务器 .env（注意：开启后 quota 变为最终一致，需配合 M4 观测）
+BATCH_UPDATE_ENABLED=true
+BATCH_UPDATE_INTERVAL=5</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 分钟（改配置）+ 半天（压测验证）&nbsp;·&nbsp; <strong>回归测试：</strong> 开启前后跑 mock 多用户 token 压测比对 /v1 单用户 rps 与 P99；核对批量 flush 后 users.quota/used_quota 最终值守恒
+    </div>
+  </div>
+
+  <!-- M2 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>4. 自研计费 hook 追加了 BATCH_UPDATE 无法覆盖的每请求同步写</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed · 已复核</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 性能</span>
+      <span>📍 internal/mtwire/agent.go:211-244 · wallet_consume_log.go:56</span>
+      <span>🎯 creditConsumeCommission → recordWalletConsume / AppendEarning</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>上游 BATCH_UPDATE 只批量 5 类原生计数。自研的钱包消耗台账 INSERT（<code>mt_wallet_consume_log</code>）与收益入账事务（<code>agent_earning_logs</code> + <code>agent_wallets</code>，含 2 条语句）<strong>不在批量覆盖内</strong>。即便开启 BATCH_UPDATE，归属代理的用户每笔 /v1 消费仍同步产生 1 次 INSERT + 1 个 2 语句事务（各一次 fsync）——这是 vanilla New API 没有的自研写放大，且 <code>agent_earning_logs</code> 按请求线性膨胀（见发现 #9）。
+    </div>
+    <div class="evidence">- service/quota.go:454 同步调 agenthook.ConsumeCommission → agent.go:211 creditConsumeCommission
+- :233 recordWalletConsume（wallet_consume_log.go:56 INSERT mt_wallet_consume_log）
+- :241/:244 AppendEarning（agent/gormrepo/gormrepo.go:247 db.Transaction{ INSERT agent_earning_logs + UPSERT agent_wallets }）
+- 二者均已 ON CONFLICT 幂等 → 天然可异步/可重试</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// recordWalletConsume 与 AppendEarning 改异步提交（已幂等，best-effort 允许延迟落库）
+gopool.Go(func() { a.recordWalletConsume(...); a.AppendEarning(...) })
+// 或引入按 requestID 聚合的自研批量缓冲，定时 flush</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 半天&nbsp;·&nbsp; <strong>回归测试：</strong> 压测"代理名下用户" vs "主站直客"/v1 吞吐差；异步化后验证幂等键在并发重放下不双计
+    </div>
+  </div>
+
+  <!-- M3 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>5. 租户级停用在 /v1 层 fail-open（Redis 关闭时风控引擎未装配）</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed · 已复核</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 安全（业务控制绕过）/ 稳定性</span>
+      <span>📍 internal/mtwire/risk.go:35-37 · wire.go:188-195</span>
+      <span>🎯 checkCallHook / RiskEngine 装配条件</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>多租户风控（RPM 限流 + 整租户 suspended/deleted 拦截）整体挂在 <code>RiskEngine</code> 上，而 <code>RiskEngine</code> 仅在 <code>RedisEnabled &amp;&amp; RDB != nil</code> 时装配，否则为 nil；<code>checkCallHook</code> 在 <code>RiskEngine == nil</code> 时无条件放行。<code>tenantStatusChecker.Active</code> 是唯一在 /v1 前判租户 <code>status=="active"</code> 的地方——因此 Redis 关闭/宕机时，"停用某代理→切断其名下用户 API"这一租户维度控制静默失效（原生 per-user/token 状态仍生效）。生产栈当前启用 Redis，故此项主要是容错/降级风险。此外该 hook 用 <code>defer func(){ _ = recover() }()</code> 静默吞 panic（与 <code>attributeRegistration</code>/<code>resolveTenantGroupRatio</code> 会记日志的 recover 不一致）。
+    </div>
+    <div class="evidence">- risk.go:34  defer func(){ _ = recover() }()（静默，无日志）
+- risk.go:35-37  if a.RiskEngine == nil { return nil }（Redis 关即放行）
+- wire.go:188-195  RiskEngine 仅 common.RedisEnabled && common.RDB != nil 时装配
+- 对比: agent.go:133 / grouphook.go:29 的 recover 均 common.SysError 记日志 → 安全 hook 反而失声</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// 把 tenantStatusChecker 从 RiskEngine 解耦，即使 Redis 关也独立跑一次租户状态校验
+// 且 recover 内改为记日志/增指标，而非静默吞：
+defer func(){ if r:=recover(); r!=nil { common.SysError(fmt.Sprintf("checkCallHook panic: %v", r)) } }()</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 2-3 小时&nbsp;·&nbsp; <strong>回归测试：</strong> Redis 关 + 租户 suspended + 该租户用户调 /v1 → 期望 403（当前放行）
+    </div>
+  </div>
+
+  <!-- M4 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>6. 兑换码"翻 used"与"入账额度"跨事务非原子，无对账兜底</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 数据完整</span>
+      <span>📍 internal/mtwire/distribution.go:343-355</span>
+      <span>🎯 HandleRedeem</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong><code>HandleRedeem</code> 先 <code>RedeemCode</code>（CAS 翻 used 并返回面额），<strong>随后单独</strong>调 <code>model.IncreaseUserQuota</code>。两步跨事务：CAS 成功把码置 used 后若入账因 DB 错误失败，兑换码永久作废但用户余额未增，且<strong>无重试/无对账 loop</strong>（不像支付有 <code>ReconcileStuck*</code>），代码注释自认此风险但仅 <code>SysError</code> 记日志。与充值/建码路径的"同事务"标准不一致。
+    </div>
+    <div class="evidence">- distribution.go:343-349  RedeemCode（wallet/gormrepo:246-272 CAS 翻 used）→ 之后单独 IncreaseUserQuota(userID, credit, true)
+- :350-352 注释自认"CAS 已翻 used 但入账失败"仅记日志、无兜底
+- 对比 CreateCodesWithDeduction（wallet/gormrepo:196-236）：扣减+建码同一事务</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// 把"CAS 翻 used + 额度入账"放进同一事务（在 RedeemCode 内用 tx 完成 users.quota += credit）
+// 与 CreateCodesWithDeduction 对称；或增兑换对账台账供重驱动</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 2-4 小时&nbsp;·&nbsp; <strong>回归测试：</strong> 注入 IncreaseUserQuota 失败，断言事务回滚、码仍 enabled 可重兑
+    </div>
+  </div>
+
+  <!-- M5 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>7. 代理套餐激活：provision 先于 CAS 状态门，并发双回调或致孤儿租户</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-suspected">Suspected</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 并发 / 数据完整</span>
+      <span>📍 internal/mtwire/agent_plan_bridge.go:121-161</span>
+      <span>🎯 ActivatePaidAgentPlanOrder</span>
+      <span>🔎 置信度 Medium</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>该路径先读订单判 <code>pending</code> → <code>provisionAgentFromOrder</code>（建/升租户 + SetAgentType + upsertMembership，跨多表、<strong>无外层事务</strong>）→ <strong>之后</strong>才 CAS <code>pending→activated</code>。对比 SUB 路径是"事务内 CAS 先行"。支付平台常秒级重推回调，两个并发回调都读到 <code>pending</code>、都过金额校验、都进 provision；对新代理两者都会 <code>TenantService.Create(slug)</code>——是否安全完全取决于 <code>tenants.slug</code> 是否有唯一约束，否则产生两个租户 + 两个子域名，后续 <code>agentTenantByOwner</code> 用 <code>Order(id ASC).Limit(1)</code> 取其一留孤儿。<em>（Suspected：需确认 slug 唯一约束是否存在。）</em>
+    </div>
+    <div class="evidence">- agent_plan_bridge.go:121-161  读 pending → provisionAgentFromOrder(:144, 无外层事务) → 之后 CAS(:150)
+- 对比 subscription_bridge.go:281  事务内 CAS 先行（pending→activated）再建原生订阅
+- 依赖点: tenants.slug 是否 UNIQUE（未在本次核实）</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// 复刻 SUB 路径：把 CAS pending→activated 提到 provision 之前并置于同一事务
+// 或在 provisionAgentFromOrder 入口对 owner 加去重锁 / 给 tenants.slug 加唯一约束</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 2-4 小时&nbsp;·&nbsp; <strong>回归测试：</strong> 并发两次调用同一新代理订单，断言只建一个租户、只一条 membership
+    </div>
+  </div>
+
+  <!-- M6 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>8. breakage/消耗明细全量物化到内存再 Go 分页，内存不设界</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 性能 / 稳定性</span>
+      <span>📍 internal/breakage/gormrepo/gormrepo.go:246-252 · reportrepo.go:988</span>
+      <span>🎯 Detail / DetailConsumption</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>因 <code>alert_level</code>/派生级是非持久列无法 SQL 过滤，<code>Detail</code> 用<strong>无 SQL LIMIT</strong> 的 <code>Scan</code> 把全部匹配订阅读入内存，再在 Go 里过滤 + <code>paginateSlice</code>；导出路径还主动设 <code>PageSize=breakageExportMaxRows</code>。管理端 <code>tenantID=nil</code> 跨租户时等于"全平台订阅表读入内存"，随规模线性增长，数十万行后单请求大内存分配 + 慢查询可能 OOM。
+    </div>
+    <div class="evidence">- breakage/gormrepo/gormrepo.go:246-252  base().Select(...).Order(...).Scan(&scan) 无 SQL LIMIT
+  → :299 Go 侧按 alert_level 过滤并 paginateSlice
+- reportrepo.go:988 DetailConsumption 注释同构（取行 + Go 分页）</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// 把可下推的过滤（时间/plan_code/租户）先分页取窗口；alert_level 阈值改等价 SQL 条件
+// (used/limit 阈值可表达为 WHERE used_usd >= month_limit_usd * 0.95 等)；或加硬上限 + 游标</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 2-4 小时&nbsp;·&nbsp; <strong>回归测试：</strong> 造 N 万行订阅，断言 Detail 查询扫描行数/内存有界
+    </div>
+  </div>
+
+  <!-- M8 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>9. 无界列表查询：收益台账 / 兑换码 / 我的用户无 LIMIT 无分页</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 性能 / 后端 API</span>
+      <span>📍 agent/gormrepo/gormrepo.go:504 · wallet/gormrepo:276 · distribution.go:209</span>
+      <span>🎯 ListEarningsByTenant / ListCodesByTenant / HandleAgentListUsers</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>三个 List 均 <code>Order(...).Find</code> <strong>无 Limit</strong>。而 <code>agent_earning_logs</code> 按每笔计费请求线性增长（见 #4），<code>ListEarningsByTenant</code> 一次性 <code>Find</code> 全租户收益行进内存——活跃代理数月后可达数百万行，<code>GET /api/tenant/earnings</code> 有 OOM/长阻塞风险。兑换码、下级用户同理累积（代码注释亦自认"后续规模增长需分页"）。
+    </div>
+    <div class="evidence">- agent/gormrepo/gormrepo.go:504 ListEarningsByTenant（Where(tenant_id).Order(created_at desc).Find 无 Limit）
+- wallet/gormrepo:276 ListCodesByTenant（无 Limit）
+- distribution.go:209 HandleAgentListUsers（Order(id desc).Find 无 Limit，注释自认需分页）
+- 已有分页范例可复用: reportrepo.go:856 DetailEarnings</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// 三个 List 加分页（Limit/Offset + Count），复用报表侧 DetailEarnings 的 {items,total,page,page_size} 信封</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 半天&nbsp;·&nbsp; <strong>回归测试：</strong> 造 10 万+ 收益行的租户，断言接口响应时间 O(page_size) 而非 O(total)
+    </div>
+  </div>
+
+  <!-- M10 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>10. CI 不执行任何测试/构建，唯一 PR 门是反灌水 bot</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed · 已复核</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 发布 / 测试真实性</span>
+      <span>📍 .github/workflows/pr-check.yml · 全 7 个 workflow</span>
+      <span>🎯 CI 质量门</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>项目有 113 个 Go 测试 + 5 个前端测试，但<strong>没有任何 CI 运行它们</strong>。7 个 workflow 中唯一的 PR 门 <code>pr-check.yml</code> 是 <code>peakoss/anti-slop</code>（反 AI 灌水 bot，且只触发 <code>opened/reopened</code>，连 <code>synchronize</code> 都不含）；<code>docker-build/release/nightly</code> 全是上游继承的构建推镜像，<code>grep 'go test|vitest|go vet'</code> 零命中。质量门完全依赖开发者本地跑 <code>deploy.sh</code> 的 preflight，且存在 <code>SKIP_PREFLIGHT=1</code> 逃生口。
+    </div>
+    <div class="evidence">- .github/workflows/pr-check.yml  仅 peakoss/anti-slop（require-pr-template + blocked-terms）
+- grep -rlE 'go test|vitest|npm test|go vet' .github/workflows/ = 0 命中（已复核）
+- 测试执行仅在 scripts/preflight.sh（本地 deploy 时），SKIP_PREFLIGHT=1 可绕过</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（复用 preflight.sh 内容）</div>
+      <code># .github/workflows/ci.yml（push/PR 触发）
+jobs:
+  test:
+    steps:
+      - run: go build ./... && go vet ./... && go test ./... -race
+      - run: cd web && bun install && bun run build && bun test</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 1-2 小时&nbsp;·&nbsp; <strong>回归测试：</strong> 故意提一个测试红的 PR，确认新 workflow 阻断合并
+    </div>
+  </div>
+
+  <!-- M11 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>11. mtwire/agent.go 1254 行 / 46 函数 / 6 类职责（SRP）</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 可维护性</span>
+      <span>📍 internal/mtwire/agent.go:52-1249</span>
+      <span>🎯 违反原则 SRP (1.1) / 文件大小 (1.2)</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>单个文件同时承担 DB schema 迁移、注册归因、分润业务、租户解析、收益适配器、<strong>gin 认证中间件</strong>（AgentOwnerAuth/RequireAgentLevel）、约 20 个 HTTP handler、DTO 映射六类职责。改任一职责都要在 1254 行里定位，合并冲突高发，测一个 handler 需装配全套依赖。
+    </div>
+    <div class="evidence">- internal/mtwire/agent.go: 迁移(52-114) + 归因(131-210) + 分润(211-284) + 租户解析(286-324)
+  + 收益适配器(325-357) + 认证中间件(359-475) + ~20 HTTP handler(657-1178) + DTO 映射(1178-1249)</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（纯文件切分，不改逻辑）</div>
+      <code>agent_migrations.go / agent_middleware.go（Auth/RequireLevel）
+agent_handlers.go / agent_commission.go</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 半天&nbsp;·&nbsp; <strong>回归测试：</strong> 拆分后 <code>go test ./internal/mtwire/ -race</code> 全绿即等价
+    </div>
+  </div>
+
+  <!-- M14 -->
+  <div class="finding severity-medium fixed">
+    <div class="finding-header">
+      <h4>12. USD→quota 换算三处重复且取整语义不一致（DRY）</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+      <span class="badge badge-fixed">✅ 已修复 2026-07-09</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 设计</span>
+      <span>📍 distribution.go:34 · subscription_bridge.go:158 · recharge.go:176</span>
+      <span>🎯 违反原则 DRY (4.1)</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>同一"$→quota"概念有 3 份实现、3 种取整：充值 <code>int(usd*QuotaPerUnit)</code>（截断）、订阅 <code>decimal.Ceil().IntPart()</code>（进位）、分销 <code>int64(usd*QuotaPerUnit)</code>（截断）。单笔金额影响极小（&lt;1 quota ≈ &lt;$0.000002，不构成资损），真实风险是<strong>维护发散</strong>——<code>QuotaPerUnit</code> 口径若变更或需统一取整策略极易漏改其一，且"充值和订阅对同一美元给出不同 quota"违反直觉、给对账埋坑。
+    </div>
+    <div class="evidence">- distribution.go:34  usdToQuotaUnits = int64(usd*QuotaPerUnit)      // 截断
+- subscription_bridge.go:158  usdToQuota = decimal…Ceil().IntPart()   // 进位
+- recharge.go:176  rechargeQuota = int(amountUSD*QuotaPerUnit)        // 截断</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// 收敛为一个 money 小包/单函数，三处调用它并显式声明各自取整策略
+func usdToQuota(usd float64, r Rounding) int64 { /* Truncate | Ceil */ }</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 半天&nbsp;·&nbsp; <strong>回归测试：</strong> 表驱动测边界值（<code>$0.000001</code>、<code>$6.90</code>）断言三条路径 quota 与预期取整一致
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#f0fff4;border-color:#a7e9bd">
+      <div class="fix-label" style="color:#248a3d">✅ 已修复 · 2026-07-09</div>
+      收敛为单一核心 <code>usdToQuotaRound(usd float64, r rounding) int64</code>（新文件 <code>internal/mtwire/money.go</code>，走 decimal 精确乘法）；三处收敛为薄 adapter 并<strong>显式声明取整</strong>：<code>rechargeQuota</code> / <code>usdToQuotaUnits</code> = <code>roundDown</code>（截断）、<code>usdToQuota</code> = <code>roundUp</code>（进位，仍对齐原生 <code>calcSubscriptionBalanceQuota</code>）——各调用点与签名不变、行为不变；顺带把两处 float 截断改 decimal，消除 <code>int(0.29×QuotaPerUnit)=144999</code> 这类少算 1 quota 的浮点误差。
+      <div style="margin-top:8px">
+        <strong>回归：</strong>新增表驱动 <code>TestUsdToQuotaRound</code>（<code>$0.29→145000</code> 精确性 + <code>$0.000001</code> 取整边界 + 非正归零）。&nbsp;
+        <strong>复核：</strong>Mac go1.26.3 与服务器 <code>golang:1.26.1-alpine</code>（<code>CGO_ENABLED=0</code>，隔离副本）<code>go build+vet+test ./internal/mtwire/</code> 全绿。&nbsp;
+        <strong>部署：</strong>已提交 <code>main</code>(<code>ba22be2</code>,仅 5 文件、与并行 WIP 解耦);服务器<span style="color:#248a3d;font-weight:600">已部署验证 2026-07-09</span>——<code>git apply</code> 定向打补丁(保留他人 WIP)→ <code>up -d --build</code>(<code>go build</code> 实跑 87.6s 重编译),容器重建健康、内网 3100 + 三域名 200。
+      </div>
+    </div>
+  </div>
+
+  <!-- M15 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>13. 定价页向用户展示编造的可用率/延迟数据，无"示例"标注</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 设计 / 文档</span>
+      <span>📍 web/default/src/features/pricing/lib/mock-stats.ts</span>
+      <span>🎯 model-details-* 5 个生产组件</span>
+      <span>🔎 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>模型详情页的 30 天可用率、TTFT 分位、吞吐、App 排行全是按模型名 seed 的确定性假数据（<code>mock-stats.ts</code> 自注"backend has not yet implemented… generate plausible mock values"），被 5 个生产组件真实调用并直接当真实指标渲染给终端用户，<strong>无任何"示例数据"标识</strong>。用户可能据编造的"99.x% 可用率/延迟"做选型决策，上线代理站尤甚，一旦被识破损害信任。
+    </div>
+    <div class="evidence">- pricing/lib/mock-stats.ts（842 行，注释自陈"generate plausible, deterministic mock values seeded from model name"）
+- 被 model-details-apps/-api/-performance/-charts/-uptime-sparkline.tsx 调用，pricing/lib/index.ts 再导出
+- model-details-performance.tsx 内 grep 无 "示例/模拟/demo/占位" 任何免责文案</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// 给这些图表加显式"示例数据/即将上线"角标；或用 feature flag 默认隐藏该区块直到真实指标接入</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 2-4 小时&nbsp;·&nbsp; <strong>回归测试：</strong> 组件测试断言 mock 区块带 disclaimer 或在 flag 关闭时不渲染
+    </div>
+  </div>
+
+  <p class="small" style="margin:-4px 0 20px 4px">另有 Medium #14（channel-mutate-drawer.tsx ~3700 行单组件）、#15（前端测试近乎为零）、#16（热路径重复点查 tenant_id）、#17（消耗趋势 Go 分桶）详见「前端状态」「测试」「性能」分节的发现表；12 项 Low 与 4 项 Info 详见各维度分节。</p>
+
+  <!-- ══════════ PER-DIMENSION SECTIONS ══════════ -->
+
+  <!-- 1. Architecture -->
+  <h3 class="section-title" id="architecture">🏗 架构与模块边界</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> <code>internal/</code> 22 子包分层与依赖方向（grep 确认 0 个子包反向 import mtwire）、端口/适配器设计（<code>internal/risk</code>）、<code>wire.go</code> 装配、代理端 <code>agentScope</code> fail-closed。</p>
+      <p><strong>排除/限制：</strong> 未做依赖图工具分析；上游 New API 分层不评。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 2 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>mtwire <code>App</code> 为 30+ 字段 god-object，约 150 个 handler 均为其方法，包内无子边界（SRP/ISP）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>"<code>nil</code> = 全租户"作用域约定依赖纪律而非类型（当前路径 fail-closed 安全，未来新 handler 漏设即泄露）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> <code>internal/risk</code> 教科书级端口/适配器（doc.go + 接口 + fakes.go）</div>
+      <div class="check-item"><span class="check">✓</span> 依赖方向无环——0 个 internal 子包反向 import mtwire</div>
+      <div class="check-item"><span class="check">✓</span> 代理端财务接口 fail-closed（<code>agentScope</code>，<code>tid&lt;=0</code> 即 AGENT_FORBIDDEN）</div>
+      <div class="check-item"><span class="check">✓</span> ReportRepo 刻意用 raw <code>Table()</code> 不 import 兄弟 model，解耦</div>
+    </div></div>
+  </div>
+
+  <!-- 2. Security -->
+  <h3 class="section-title" id="security">🔒 安全</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> 逐一核查代理自助全部 <code>:id</code> 端点 IDOR、<code>mt-router.go</code> 路由中间件、支付验签/反篡改、密钥处理、SQL 参数化、上传把关、内网端点鉴权。</p>
+      <p><strong>排除/限制：</strong> 未做动态渗透测试；上游 <code>middleware/auth.go</code> 双头鉴权仅标注。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 3 个发现（+2 Info）</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>租户级停用在 /v1 层 fail-open（Redis 关闭时风控引擎未装配）— 见详细发现 #5</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>auth-service 内网查单端点用非恒定时间 <code>!=</code> 比较共享密钥（server.go:363；退役中 + nginx 限内网）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>支付反篡改金额校验在回调金额 ≤0 时被跳过（<code>credit.go:17-22</code>；需已验签但金额缺失才触发，非直接可利用）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>微信回调 handler 把传输层头（Serial/Timestamp/Nonce）写入错误串并落日志（<code>wxpay.go:121-127</code> 调试残留）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td><code>moderationWordInput</code> 绑定被忽略的 <code>tenant_id</code> 字段（当前 IDOR 已被 WHERE tenant_id 挡住，属未来 footgun）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证安全（主审计员独立复核）</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 跨租户无 IDOR：代理端 <code>tenant_id</code> 一律服务端派生，仓储层 <code>WHERE tenant_id=?</code></div>
+      <div class="check-item"><span class="check">✓</span> 管理端跨租户视图叠加 <code>AdminAuth</code> 把关（Host 只在授权上下文内决定 scope）</div>
+      <div class="check-item"><span class="check">✓</span> 支付先验签后取信（微信 RSA+AES-GCM、支付宝公钥）+ 强制 appid/mchid 校验</div>
+      <div class="check-item"><span class="check">✓</span> 入账金额以库内订单为准，回调金额仅反篡改比对</div>
+      <div class="check-item"><span class="check">✓</span> 内网端点 <code>InternalSecretAuth</code> 恒定时间比较 + deny-by-default</div>
+      <div class="check-item"><span class="check">✓</span> 上传双重把关：扩展名白名单 + 内容嗅探，拒 SVG/HTML、2MB 上限</div>
+      <div class="check-item"><span class="check">✓</span> SQL 全参数化，动态标识符经白名单归一，无拼接注入面</div>
+      <div class="check-item"><span class="check">✓</span> 无密钥入库（<code>.env</code>/<code>.pem</code>/<code>config.yaml</code> 均 gitignore，仅留规范占位 example）</div>
+    </div></div>
+  </div>
+
+  <!-- 3. Stability -->
+  <h3 class="section-title" id="stability">⚡ 稳定性与错误处理</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> 充值/兑换/收益/提现/订阅/代理套餐激活的事务与幂等；三个后台 loop 结构；<code>used_usd</code> 写读链路；relay hook 的 recover。</p>
+      <p><strong>排除/限制：</strong> 未注入故障实测；并发部分为静态推断。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 5 个发现（+1 Info）</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>后台定时任务首次 panic 即永久静默停摆（含支付对账）— 详细发现 #1</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>兑换码"翻 used"与"入账额度"跨事务非原子，无对账兜底 — 详细发现 #6</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>代理套餐激活 provision 先于 CAS，无外层事务 — 详细发现 #7</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr>
+        <tr><td>breakage/消耗明细全量物化到内存 — 详细发现 #8</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>消耗分润双挂钩点共用 <code>requestId</code> 幂等键，若一次请求两处都触发则后者被静默丢弃（疑二者互斥）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr>
+        <tr><td><code>billing.Service</code>/<code>wallet.Credit</code> 为未装配的演示实现（非事务 TODO），勿误接线为生产资金代码</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证稳健（主审计员独立复核资金路径）</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 额度扣减原子 SQL（<code>quota = quota - ?</code>），并发安全</div>
+      <div class="check-item"><span class="check">✓</span> 充值入账强幂等（<code>order_no</code> 主键台账 + 台账/自增/补写同事务）</div>
+      <div class="check-item"><span class="check">✓</span> 代理收益强幂等（<code>idem_key</code> 唯一 + 同事务累加 decimal(20,8)）</div>
+      <div class="check-item"><span class="check">✓</span> 提现托管两阶段状态机（冻结↔可提现原子 CAS，approved 不动钱、paid 才出账）</div>
+      <div class="check-item"><span class="check">✓</span> 订阅激活事务内 CAS 先行 + settled 标记兜底</div>
+      <div class="check-item"><span class="check">✓</span> 后台 loop 统一 <code>IsMasterNode + sync.Once + atomic</code> 防多副本/重入</div>
+    </div></div>
+  </div>
+
+  <!-- 4. Performance -->
+  <h3 class="section-title" id="performance">🚀 性能与可扩展</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> 逐层追踪 /v1 文本请求计费写路径、各 gormrepo 查询、限流 <code>rate_limit.lua</code>、报表聚合；比对上游 BATCH_UPDATE 覆盖面。</p>
+      <p><strong>排除/限制：</strong> 未现场压测（引用 MEMORY 既有 ~31/95rps 实测）；索引存在性未逐一 EXPLAIN。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 6 个发现（+2 Low）</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>计费未批量：每请求同步 fsync 写 MySQL — 详细发现 #3</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>自研计费 hook 追加 BATCH_UPDATE 无法覆盖的同步写 — 详细发现 #4</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>breakage/消耗明细全量物化到内存 — 详细发现 #8</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>无界列表查询无 LIMIT 无分页 — 详细发现 #9</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>计费热路径重复点查 <code>users.tenant_id</code>（同一请求 3-4 次相同 SELECT，无请求级缓存）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>消耗趋势把区间内每条 <code>logs</code> 原始行拉进 Go 分桶而非 SQL GROUP BY（reportrepo.go:509-522）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>令牌桶限流 Redis 键永不过期（rate_limit.lua 末尾 EXPIRE 被注释；上游文件）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr>
+        <tr><td>风控 RPM <code>Incr</code> 后 <code>Expire</code> 错误被 <code>_</code> 吞，罕见遗留无 TTL 键（engine.go:114-121）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 模型分组查找走进程内 <code>sync.RWMutex</code>+map 缓存，无每请求 DB round-trip</div>
+      <div class="check-item"><span class="check">✓</span> 报表区间硬性封顶 366 天，聚合全部 <code>WHERE created_at BETWEEN</code></div>
+      <div class="check-item"><span class="check">✓</span> 收益入账幂等 + 同事务原子累加，无浮点漂移</div>
+      <div class="check-item"><span class="check">✓</span> 工单分页 clamp（默认 20 / 上限 100）</div>
+    </div></div>
+  </div>
+
+  <!-- 5. Testing -->
+  <h3 class="section-title" id="testing">🧪 测试质量</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium</p>
+      <p><strong>已检证据：</strong> 抽读 distribution/risk/credit 等测试装配与断言；统计前后端测试文件数（113 Go / 5 前端）与 CI 门。</p>
+      <p><strong>排除/限制：</strong> 未在服务器实跑 <code>go test</code>；无覆盖率数字（零 finding 结论限于抽读范围）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 2 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>前端测试近乎为零（5 文件 / 458 组件，且只覆盖纯 lib 函数），且无 CI/runner 执行入口</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td><code>internal/agentplan</code> 包 0 测试（含 <code>Validate()</code>/<code>validAmount</code> NaN/Inf 校验逻辑）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 后端 113 个测试用真实内存 sqlite+gorm + <code>httptest</code> 打真实 handler</div>
+      <div class="check-item"><span class="check">✓</span> 断言真实领域不变量（等级门控、底价 floor、RPM=0 无限、金额不符拒绝）</div>
+      <div class="check-item"><span class="check">✓</span> 支付并发/幂等有专测（<code>TestCreditPaidOrderConcurrentCreditsOnce</code> 等）</div>
+    </div></div>
+  </div>
+
+  <!-- 6. Maintainability -->
+  <h3 class="section-title" id="maintainability">📐 可维护性</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> 最大文件行数/函数数/职责盘点、命名与响应封套一致性、react-query 使用、注释密度。</p>
+      <p><strong>排除/限制：</strong> 圈复杂度目测非工具测量。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 4 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td><code>mtwire/agent.go</code> 1254 行/46 函数/6 类职责（SRP）— 详细发现 #11</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td><code>reportrepo.go</code> 1714 行/49 函数，混查询/货币换算/SQL 分桶/分页；raw SQL 标识符字符串拼接（白名单守卫，当前无注入）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td><code>mtwire/report.go</code> 1112 行混 handler+编排+解析+格式化，parse* 与 repo 归一化重复</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>自研列表接口返回裸数组，与工单分页信封不一致（distribution.go:229/319/147）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 统一 <code>Handle*</code> 命名 + <code>{success,message,code,data}</code> 响应封套 + <code>*_cny</code>/<code>*_usd</code> 后缀</div>
+      <div class="check-item"><span class="check">✓</span> 103/120 feature 用 react-query 管服务端状态，无 useState 重复持有</div>
+      <div class="check-item"><span class="check">✓</span> 分润换算集中复用（<code>consumeCommissionCNY</code>），非平凡逻辑注释到位</div>
+    </div></div>
+  </div>
+
+  <!-- 7. Design -->
+  <h3 class="section-title" id="design">📋 设计原则符合度</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> 对照 principles 逐条核查 SRP/DRY/KISS/fail-fast/CQS/least-surprise；USD→quota 换算三处比对；fail-closed 作用域。</p>
+      <p><strong>排除/限制：</strong> —</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 3 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>USD→quota 换算三处重复且取整不一致（DRY 4.1）— 详细发现 #12</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-fixed">✅ 已修复</span></td></tr>
+        <tr><td>定价页展示编造指标无免责标注（诚实性/least-surprise）— 详细发现 #13</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>"nil = 全租户"作用域为 fail-open 默认，靠约定而非类型（让非法状态可表达）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> fail-closed：代理端作用域缺失即拒绝，非默认放行</div>
+      <div class="check-item"><span class="check">✓</span> 幂等键贯穿资金写（order_no / idem_key / requestId）</div>
+      <div class="check-item"><span class="check">✓</span> markup 纯函数带负值/边界守卫（belt-and-suspenders）</div>
+      <div class="check-item"><span class="check">✓</span> 编译期接口断言（<code>var _ Interface = (*T)(nil)</code>）广泛使用</div>
+    </div></div>
+  </div>
+
+  <!-- 8. Release -->
+  <h3 class="section-title" id="release">🚢 发布与部署</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> 全 7 个 workflow、<code>deploy/ops/*.sh</code>、<code>preflight.sh</code>、版本注入、回滚脚本。</p>
+      <p><strong>排除/限制：</strong> 未实跑部署流水线。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 1 个发现（+2 Low）</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>CI 不执行任何测试/构建，唯一 PR 门是反灌水 bot — 详细发现 #10</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>版本占位 <code>v0.0.0</code> 且无 fork git tag——难知线上部署的确切版本</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>三套 DB 驱动（mysql/postgres/clickhouse）+ Bedrock SDK 编入二进制，实际仅用 MySQL（上游基线，不建议动）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> <code>deploy.sh</code> 预检门（gofmt/build/vet/<code>go test -race</code>/前端 build）</div>
+      <div class="check-item"><span class="check">✓</span> <code>:prev</code> 镜像 + 部署前备份 + 健康轮询 + 失败自动回滚</div>
+      <div class="check-item"><span class="check">✓</span> 完整运维脚本（backup/restore/rollback/healthcheck/reconcile/migrate-note/go-live）</div>
+    </div></div>
+  </div>
+
+  <!-- 9. Documentation -->
+  <h3 class="section-title" id="documentation">📚 文档准确性</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium</p>
+      <p><strong>已检证据：</strong> CLAUDE.md、doc/（15+ 子文档）、RETRO.md、api-contract、STATUS.md 抽查一致性。</p>
+      <p><strong>排除/限制：</strong> 未逐句核对全部 doc 与代码。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 3 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>CLAUDE.md「部署硬约束 C1–C8」8/8 行全为 <code>TODO</code> 占位（W3 要求把 RETRO 经验固化于此，护栏名存实亡）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>文档漂移：CLAUDE.md 称 "internal 24 个子包"，实为 22</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>过期注释：<code>mt-router.go:75</code> "下单 → 调 auth-service"，实际支付已改进程内（<code>payment_inprocess.go</code>）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> doc/ 路由式子文档 + api-contract + RETRO 复盘 + STATUS 现状权威页</div>
+      <div class="check-item"><span class="check">✓</span> 非平凡逻辑代码内注释详尽（含取整对齐、审计编号引用）</div>
+    </div></div>
+  </div>
+
+  <!-- 10. Configuration -->
+  <h3 class="section-title" id="configuration">⚙️ 配置安全</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> <code>auth-service/config.*</code>、<code>.env.example</code>、<code>common/init.go</code> 环境变量、支付凭据落库、缺失凭据 fail-closed。</p>
+      <p><strong>排除/限制：</strong> 未审服务器实际 <code>.env</code>（不在仓库）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 1 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>本地 <code>auth-service/config.yaml</code>（已 gitignore、未提交）用可猜占位 <code>dev-internal-secret-change-me</code>；git 追踪的 <code>config.example.yaml</code> 已正确用 <code>REPLACE_WITH_STRONG_RANDOM</code>——须确保生产 <code>MT_INTERNAL_SECRET</code> 为强随机（该密钥守护在用内网证书回写端点）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 支付凭据"单门"：DB 配置齐全即启用，缺失 fail-closed（<code>validate()</code> 要求非空）</div>
+      <div class="check-item"><span class="check">✓</span> 环境变量覆盖（<code>MT_PAY_NOTIFY_BASE</code>、<code>AUTH_SIGN_SECRET</code> 等）+ deny-by-default 内网密钥</div>
+      <div class="check-item"><span class="check">✓</span> 仅 <code>.env.example</code>/<code>config.example.yaml</code> 入库，真实配置 gitignore</div>
+    </div></div>
+  </div>
+
+  <!-- 11. Observability -->
+  <h3 class="section-title" id="observability">🩺 可观测性</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium</p>
+      <p><strong>已检证据：</strong> <code>common.SysLog/SysError</code> 使用、<code>AlertSink</code>、后台 loop 日志、recover 处理、健康检查脚本。</p>
+      <p><strong>排除/限制：</strong> 未审运行期指标/追踪栈（Prometheus 等未在仓库）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 2 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>后台 loop 无健康心跳/存活指标——配合详细发现 #1，静默停摆无从告警（AlertSink 只覆盖业务告警不覆盖 job 自身）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>安全相关 hook（违禁词扫描 <code>scanUserInputHook</code>、风控 <code>checkCallHook</code>）用 <code>_ = recover()</code> 静默吞 panic，与会记日志的兄弟 hook 不一致</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 结构化系统日志 + <code>AlertSink</code> 业务告警（收编 7c-2 满额推送）</div>
+      <div class="check-item"><span class="check">✓</span> <code>healthcheck.sh</code> + 部署健康轮询；对账 <code>reconcile_runs</code> 历史留痕</div>
+    </div></div>
+  </div>
+
+  <!-- 12. Data Integrity -->
+  <h3 class="section-title" id="data-integrity">🧱 数据完整性</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> 各资金写的事务边界/幂等键/CAS；迁移；<code>used_usd</code> 写读；decimal 精度；备份/恢复脚本。</p>
+      <p><strong>排除/限制：</strong> 未核对全部表的唯一约束 DDL（部分为静态推断，如 <code>tenants.slug</code>）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 3 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>额度沉淀监控读取生产从不更新的 <code>used_usd</code> 列 — 详细发现 #2</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>兑换码"翻 used"与"入账额度"跨事务非原子 — 详细发现 #6</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>代理套餐激活 provision 先于 CAS，并发或致孤儿租户 — 详细发现 #7</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 生产资金写全部事务内 + 幂等台账 + CAS，无双扣/透支/浮点漂移</div>
+      <div class="check-item"><span class="check">✓</span> 用"唯一约束错误"判幂等而非 RowsAffected（避开 clientFoundRows 陷阱）</div>
+      <div class="check-item"><span class="check">✓</span> 金额一律 decimal(20,8)；backup/restore 脚本齐备</div>
+    </div></div>
+  </div>
+
+  <!-- 13. Privacy -->
+  <h3 class="section-title" id="privacy">🛡 隐私 / 数据治理</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium</p>
+      <p><strong>已检证据：</strong> 支付回调日志内容、密钥/凭据落库与日志、租户数据边界、违规日志。</p>
+      <p><strong>排除/限制：</strong> 未审数据保留/删除/导出策略（GDPR 类治理不在自研重点）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 1 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>微信回调 handler 把传输层头（Serial/Timestamp/Nonce）写入错误串并 <code>SysLog</code>（低敏度传输元数据，调试残留，CLAUDE.md 亦标注"可撤"）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 无密钥/私钥/API v3 密钥落日志（仅传输元数据，已建议清理）</div>
+      <div class="check-item"><span class="check">✓</span> 租户数据经 <code>WHERE tenant_id</code> 硬隔离，违规日志仅 super-admin 跨租户可见</div>
+    </div></div>
+  </div>
+
+  <!-- 14. Accessibility -->
+  <h3 class="section-title" id="accessibility">⌨️ 可访问性 / UX 正确性</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Low（条件相关 · 有限评估）</p>
+      <p><strong>已检证据：</strong> 前端基于 shadcn/ui（Radix 原语，内建焦点管理/ARIA/键盘）；grep 长列表虚拟化。</p>
+      <p><strong>排除/限制：</strong> 未做键盘导航/屏幕阅读器/对比度实测；巨型组件的加载/错误/空状态未逐一核查。此为管理后台类应用，非公众可访问性合规场景。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 无高优发现（有限评估）</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 组件层用 shadcn/ui（Radix）——对话框/下拉/表单具备基础 ARIA 与焦点陷阱</div>
+      <div class="check-item"><span class="cross">✗</span> 全站无列表虚拟化，超长模型/日志表滚动性能待验（已登记于性能，非 a11y 阻断）</div>
+      <div class="check-item"><span class="cross">✗</span> 巨型表单组件的加载/错误/空状态一致性未审——建议纳入前端测试补齐</div>
+    </div></div>
+  </div>
+
+  <!-- 15. Supply Chain -->
+  <h3 class="section-title" id="supply-chain">🔗 供应链 / 可复现</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> <code>go.sum</code>(3188 行)、<code>web/bun.lock</code>、<code>electron/package-lock.json</code>、支付 SDK 来源与版本、入库密钥扫描、CI 完整性。</p>
+      <p><strong>排除/限制：</strong> 未跑 <code>govulncheck</code>/SCA；无 SBOM/构件签名（对自部署 SaaS 优先级低）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 无高优发现</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> Go 依赖 <code>go.sum</code> 全 pinned；前端 <code>web/bun.lock</code> 锁定，构建可复现</div>
+      <div class="check-item"><span class="check">✓</span> 支付 SDK 为正规 pinned 版本（<code>wechatpay-go v0.2.21</code>、<code>smartwalle/alipay/v3 v3.2.29</code>）</div>
+      <div class="check-item"><span class="check">✓</span> 无密钥/凭据入库（见配置维度）</div>
+      <div class="check-item"><span class="cross">✗</span> 缺 SBOM/签名/依赖漏洞扫描门（建议随 CI 一并加 <code>govulncheck</code>）</div>
+    </div></div>
+  </div>
+
+  <!-- 16. Cost -->
+  <h3 class="section-title" id="cost">💸 成本 / 资源经济性</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium</p>
+      <p><strong>已检证据：</strong> 无界增长点（earnings/codes/logs）、限流键 TTL、报表区间封顶、建码批量上限。</p>
+      <p><strong>排除/限制：</strong> 未审上游模型调用真实计费/配额（属渠道侧）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 2 个发现（与性能同源）</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>令牌桶限流 Redis 键永不过期（EXPIRE 注释）+ RPM Expire 错误被吞 — 缓慢泄漏，非爆炸</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr>
+        <tr><td><code>agent_earning_logs</code>/兑换码/日志随请求线性增长且列表无界（见 #9）——存储与查询成本随时间累积</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 报表区间硬封顶 366 天；建码单批上限 1000</div>
+      <div class="check-item"><span class="check">✓</span> 后台 loop 仅 master 节点跑，避免多副本重复开销</div>
+    </div></div>
+  </div>
+
+  <!-- 17. AI Safety -->
+  <h3 class="section-title" id="ai-safety">🤖 AI / LLM 安全</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium（条件相关）</p>
+      <p><strong>已检证据：</strong> 本项目是 relay/网关（转发上游模型），非自主 Agent，故经典 prompt 注入/工具授权/RAG 泄露面小。相关自研安全面是违禁词审核（<code>agenthook.ScanUserInput</code>）+ 风控 RPM/租户状态。</p>
+      <p><strong>排除/限制：</strong> 未评上游模型自身安全；无 LLM 输出评测（evals）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 相关项（已计入安全/可观测）</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>违禁词扫描与风控为 best-effort 且 Redis 关时/panic 时静默 fail-open（见详细发现 #5、可观测分节）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> relay 转发前扫描用户输入（违禁词库 + 违规日志 + 管理员/代理词库 CRUD）</div>
+      <div class="check-item"><span class="check">✓</span> 上游渠道密钥由网关注入，终端用户不接触；分组访问经可用组校验</div>
+    </div></div>
+  </div>
+
+  <!-- 18. Fallback -->
+  <h3 class="section-title" id="fallback">🕳 兜底 / 防御性代码</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> 全部 <code>recover()</code> 站点、best-effort hook 的失败语义、未装配的演示实现、silent fallback。</p>
+      <p><strong>排除/限制：</strong> —</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 3 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>后台 loop 首次 panic 即静默停摆（gopool 任务边界 recover 掩盖循环死亡）— 详细发现 #1</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>安全 hook <code>_ = recover()</code> 静默吞 panic 无日志（见可观测分节）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td><code>billing.Service</code>/<code>wallet.Credit</code> 演示实现非事务 <code>TODO(txn)</code>，未装配但易被误接线</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 计费旁路 hook best-effort：记账失败/panic 绝不阻断扣费，也绝不破坏计费（miss 回退平台基准倍率）</div>
+      <div class="check-item"><span class="check">✓</span> 支付入账失败回滚状态供上游重试，不静默吞错（credit.go 上报观测）</div>
+    </div></div>
+  </div>
+
+  <!-- 19. Testing Authenticity -->
+  <h3 class="section-title" id="testing-authenticity">✅ 测试真实性</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium</p>
+      <p><strong>已检证据：</strong> 抽读 distribution_test.go / risk/engine_test.go / credit_test.go 的装配与断言；统计 mock 定义数（15，多为端口内存实现）。</p>
+      <p><strong>排除/限制：</strong> 未逐个测试文件核查。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 后端测试可信（无新发现，前端缺口已计入测试维度）</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 装配真实 gorm(sqlite :memory:) + 真实 repo + gin httptest，非桩测</div>
+      <div class="check-item"><span class="check">✓</span> 断言领域不变量而非实现细节（RPM=0 无限、Level1 门控、底价 floor）</div>
+      <div class="check-item"><span class="check">✓</span> 15 个 mock 多为端口内存实现（<code>fakes.go</code>），非"mock 掉核心逻辑"</div>
+      <div class="check-item"><span class="check">✓</span> 未见为过测试而改的生产代码——绿灯有含金量</div>
+    </div></div>
+  </div>
+
+  <!-- 20. Type Safety -->
+  <h3 class="section-title" id="type-safety">🔤 类型安全</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium</p>
+      <p><strong>已检证据：</strong> gin ctx 类型断言、<code>interface{}</code> 使用、编译期接口断言、边界 DTO 绑定。</p>
+      <p><strong>排除/限制：</strong> 未审前端 TS <code>any</code> 密度。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 1 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td><code>moderationWordInput</code> 绑定语义暗示"可指定租户"却被忽略的 <code>tenant_id</code> 字段（未来 footgun，当前安全）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 编译期接口断言（<code>var _ realSDK = (*realpay.SDK)(nil)</code> 等）广泛使用</div>
+      <div class="check-item"><span class="check">✓</span> gin ctx 类型断言带 ok 双返回保护，无裸断言 panic 面</div>
+    </div></div>
+  </div>
+
+  <!-- 21. Frontend State -->
+  <h3 class="section-title" id="frontend-state">🎛 前端状态</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium</p>
+      <p><strong>已检证据：</strong> feature 组件行数/hook 密度、react-query vs 手写 fetch 统计、巨型组件状态。</p>
+      <p><strong>排除/限制：</strong> 未用 React Profiler 实测重渲染。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 2 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td><code>channel-mutate-drawer.tsx</code> 单组件约 3700 行（64 hook / 10 条件 JSX 分支），无法单独测试或安全增改某渠道类型（SRP）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>超大弹窗聚集：<code>param-override-editor-dialog.tsx</code> 3319 行、<code>payment-settings-section.tsx</code> 2241 行、<code>tiered-pricing-editor.tsx</code> 1877 行</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 服务端状态统一走 react-query（103/120 feature），未被 useState 重复持有</div>
+      <div class="check-item"><span class="check">✓</span> 仅 17 个手写 <code>useEffect+fetch</code>，模式基本收敛</div>
+    </div></div>
+  </div>
+
+  <!-- 22. Backend API -->
+  <h3 class="section-title" id="backend-api">🔌 后端 API 设计</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> 响应封套一致性、请求体校验、tenant_id 来源、分页、错误码结构。</p>
+      <p><strong>排除/限制：</strong> —</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 2 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>自研列表接口返回裸数组（HandleAgentListUsers/Redemptions/Channels），与工单 <code>{items,total,page,page_size}</code> 分页信封不一致</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        <tr><td>上述裸数组接口天然无分页位（与无界查询 #9 互为因果）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 统一错误信封 + 模块前缀错误码，非 AppError 一律安全兜底 500</div>
+      <div class="check-item"><span class="check">✓</span> <code>tenant_id</code> 一律取自 authed ctx，从不信任客户端传入</div>
+      <div class="check-item"><span class="check">✓</span> 工单等分页有 clamp（默认 20 / 上限 100）</div>
+    </div></div>
+  </div>
+
+  <!-- 23. Dependency Weight -->
+  <h3 class="section-title" id="dependency-weight">📦 依赖重量</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium</p>
+      <p><strong>已检证据：</strong> <code>go.mod</code>(151 require) 多 DB 驱动/云 SDK、前端 59 deps、构建工具链、Go 版本注释。</p>
+      <p><strong>排除/限制：</strong> 未做未用依赖静态分析（knip/depcheck）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 1 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>三套 DB 驱动 + Bedrock SDK 编入二进制，实际仅用 MySQL；<code>// +heroku goVersion go1.18</code> 陈旧注释（实为 go 1.25）——均上游携带，不建议动（rebase 成本高）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 依赖 pinned + 锁文件齐全；无发现自研引入的过重/可疑依赖</div>
+    </div></div>
+  </div>
+
+  <!-- 24. Code Consistency -->
+  <h3 class="section-title" id="code-consistency">🧩 代码一致性</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> High</p>
+      <p><strong>已检证据：</strong> 命名约定、响应封套、字段后缀、错误处理模式、导入组织抽样。</p>
+      <p><strong>排除/限制：</strong> 未跑 linter 全量。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 1 个发现</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>列表接口封套不一致（裸数组 vs 分页信封）+ recover 处理不一致（安全 hook 静默 vs 其它记日志）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 统一 <code>Handle*</code> 命名、<code>{success,message,code,data}</code> 封套、<code>*_cny</code>/<code>*_usd</code> 后缀</div>
+      <div class="check-item"><span class="check">✓</span> 错误码统一模块前缀，DTO 一律 snake_case</div>
+    </div></div>
+  </div>
+
+  <!-- 25. Comment Coverage -->
+  <h3 class="section-title" id="comment-coverage">💬 注释覆盖</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖</div>
+    <div class="card-body">
+      <p><strong>覆盖：</strong> Medium</p>
+      <p><strong>已检证据：</strong> 公共函数 doc 注释、非平凡逻辑解释、过期注释、TODO/FIXME 密度（自研仅 4 处）。</p>
+      <p><strong>排除/限制：</strong> 未逐文件统计注释率。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span class="small" style="font-weight:400">· 1 个发现（+已计入文档维度）</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+      <tbody>
+        <tr><td>过期注释 <code>mt-router.go:75</code> "调 auth-service"（已改进程内）+ CLAUDE.md C1–C8 全 TODO——见文档维度</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 非平凡逻辑注释详尽（取整对齐、幂等口径、审计编号引用），过度注释少</div>
+      <div class="check-item"><span class="check">✓</span> 自研代码 TODO/FIXME 仅 4 处，无大面积"临时"堆积</div>
+    </div></div>
+  </div>
+
+  <!-- DESIGN PRINCIPLES -->
+  <h3 class="section-title" id="principles">📏 工程原则符合度</h3>
+  <div class="card">
+    <div class="card-header">违反项（聚焦造成真实风险者）</div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>原则</th><th style="width:80px">次数</th><th style="width:100px">严重程度</th><th>位置</th></tr></thead>
+      <tbody>
+        <tr><td>SRP 单一职责 (1.1) / 文件大小 (1.2)</td><td>6+</td><td><span class="badge badge-medium">Medium</span></td><td>agent.go(1254)、reportrepo.go(1714)、report.go(1112)、channel-drawer(3700)、param-override(3319)、payment-settings(2241)、App god-object</td></tr>
+        <tr><td>DRY 不重复 (4.1)</td><td>3</td><td><span class="badge badge-medium">Medium</span></td><td>USD→quota 三处取整不一致；parse* 与 repo 归一化双份</td></tr>
+        <tr><td>Fail-Fast (4.4) / 配置缺失应快失败 (9.2)</td><td>2</td><td><span class="badge badge-medium">Medium</span></td><td>租户停用 Redis 关时 fail-open；金额≤0 跳过反篡改</td></tr>
+        <tr><td>不吞错 (6.1) / 无静默兜底</td><td>3</td><td><span class="badge badge-low">Low</span></td><td>后台 loop 无逐轮 recover；安全 hook <code>_ = recover()</code>；RPM Expire 错误吞</td></tr>
+        <tr><td>让非法状态不可表达 / 显式依赖 (7.3)</td><td>2</td><td><span class="badge badge-low">Low</span></td><td><code>nil=全租户</code> 作用域约定；App 巨型 DI 容器兼接收者</td></tr>
+        <tr><td>Least Surprise (3.1) / 诚实呈现</td><td>1</td><td><span class="badge badge-medium">Medium</span></td><td>定价页编造指标当真实数据渲染</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 遵循良好的原则</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span> 幂等 + CAS + 事务——资金写严守数据一致性</div>
+      <div class="check-item"><span class="check">✓</span> Fail-Closed——代理端作用域缺失即拒绝</div>
+      <div class="check-item"><span class="check">✓</span> 依赖倒置——<code>internal/risk</code> 端口/适配器 + fakes</div>
+      <div class="check-item"><span class="check">✓</span> 显式依赖——生产资金桶经 wire 装配，非全局单例</div>
+      <div class="check-item"><span class="check">✓</span> 防御性适度——外部输入校验 + 编译期接口断言</div>
+      <div class="check-item"><span class="check">✓</span> 最小惊讶（命名）——统一 Handle*/封套/字段后缀</div>
+    </div></div>
+  </div>
+
+  <!-- FIX ORDER -->
+  <h3 class="section-title" id="fix-order">🎯 修复顺序</h3>
+  <div class="card">
+    <div class="card-header">
+      <span>⚡ 立即（下个发布前）</span>
+      <span class="badge badge-high">高优</span>
+    </div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th style="width:40px">#</th><th>修复</th><th style="width:130px">工作量</th><th>风险</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>三个后台 loop 加逐轮 <code>recover</code> + <code>last_success_at</code> 心跳 + 超期 AlertSink 告警</td><td>30min + 2-4h</td><td>支付对账静默停摆 → 用户已付未到账无人知</td></tr>
+        <tr><td>2</td><td>修 <code>used_usd</code> 数据源（读原生桶或回写台账），恢复额度沉淀监控真实性</td><td>1-2 天</td><td>刚上线功能全量数据失真、误告警、买家用量恒 0</td></tr>
+        <tr><td>3</td><td>加 CI workflow 跑 <code>go test -race</code> + 前端 build（复用 preflight.sh）</td><td>1-2h</td><td>113 测试无自动化门禁，回归无拦截</td></tr>
+        <tr><td>4</td><td>开 <code>BATCH_UPDATE_ENABLED=true</code> 并压测校验 quota 最终一致</td><td>分钟 + 半天压测</td><td>吞吐封顶 ~95rps，性能瓶颈</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span>📅 近期排期（1–2 迭代内）</span>
+      <span class="badge badge-medium">中优</span>
+    </div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th style="width:40px">#</th><th>修复</th><th style="width:130px">工作量</th></tr></thead>
+      <tbody>
+        <tr><td>5</td><td>兑换码"翻 used + 入账"合并同事务（M4）</td><td>2-4h</td></tr>
+        <tr><td>6</td><td>代理套餐激活 CAS 提前 + 同事务 / slug 唯一约束（M5）</td><td>2-4h</td></tr>
+        <tr><td>7</td><td>收益/兑换码/我的用户列表加分页（M8/M9），breakage 明细下推过滤（M6）</td><td>1 天</td></tr>
+        <tr><td>8</td><td>自研计费写异步化（M2）+ 请求级缓存 tenant_id（M7）</td><td>半天–1 天</td></tr>
+        <tr><td>9</td><td>租户停用从 RiskEngine 解耦，Redis 关也强制（M5-安全）</td><td>2-3h</td></tr>
+        <tr><td>10</td><td>USD→quota 收敛单一 money 函数（M14 <span class="badge badge-fixed">✅ 已修</span>）+ 定价页假数据加免责/flag（M15）</td><td>半天 + 2-4h</td></tr>
+        <tr><td>11</td><td>拆分 god-file：agent.go / channel-drawer / reportrepo（M11/M12/L）</td><td>各半天–2 天</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+
+  <!-- QUICK WINS -->
+  <h3 class="section-title">⚡ 速赢清单（各 &lt; 1 小时）</h3>
+  <div class="win-grid">
+    <div class="win-card"><div class="win-title">CI 加测试门</div><div class="win-meta">复用 preflight.sh，1-2h 拦住所有回归</div></div>
+    <div class="win-card"><div class="win-title">后台 loop 逐轮 recover</div><div class="win-meta">30min 防支付对账永久停摆（最高性价比）</div></div>
+    <div class="win-card"><div class="win-title">恒定时间比较密钥</div><div class="win-meta">auth-service:363 换 subtle.ConstantTimeCompare，10min</div></div>
+    <div class="win-card"><div class="win-title">删微信回调调试日志</div><div class="win-meta">wxpay.go:121-127 移除传输头拼接，10min</div></div>
+    <div class="win-card"><div class="win-title">RPM Expire 失败记 warn</div><div class="win-meta">engine.go:114-121 不再 <code>_</code> 吞错，分钟级</div></div>
+    <div class="win-card"><div class="win-title">安全 hook recover 记日志</div><div class="win-meta">moderation/risk 的 <code>_ = recover()</code> 改记日志</div></div>
+    <div class="win-card"><div class="win-title">填 CLAUDE.md C1–C8</div><div class="win-meta">把 RETRO 已固化经验落硬约束表，1-2h</div></div>
+    <div class="win-card"><div class="win-title">删 moderation footgun 字段</div><div class="win-meta">moderation_http.go:16 去掉被忽略的 tenant_id，15min</div></div>
+    <div class="win-card"><div class="win-title">修文档漂移</div><div class="win-meta">"24 子包"→22、mt-router:75 过期注释，5min</div></div>
+  </div>
+
+  <div style="text-align:center;padding:40px 0 20px;color:var(--text-secondary);font-size:12px">
+    Fuck My Shit Mountain v1.0 · newapi628 全量审计（25 维度）· 2026-07-09 · 分支 main @ 577fb31 · 仅审计不改码<br>
+    方法：项目盘点 + 1 主审计员逐路径复核 + 4 并行维度子代理系统通读 · 重点自研多租户层，New API 上游基线仅作边界标注<br>
+    评分为工程质量判断（高分=更好），非机械扣分 · 每项发现均附文件行号证据、失败场景、最小修复与回归测试建议
+  </div>
+
+</div>
+
+<script>
+  const sections = document.querySelectorAll('[id]');
+  const navLinks = document.querySelectorAll('.sidebar-nav a');
+
+  const observer = new IntersectionObserver((entries) => {
+    let activeId = null;
+    entries.forEach(entry => {
+      if (entry.isIntersecting) activeId = entry.target.id;
+    });
+    if (activeId) {
+      navLinks.forEach(a => {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + activeId);
+      });
+    }
+  }, { rootMargin: '-10% 0px -60% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+
+  navLinks.forEach(a => {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+
+</body>
+</html>
