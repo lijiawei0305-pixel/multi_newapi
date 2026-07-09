@@ -26,11 +26,13 @@ package gormrepo
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/breakage"
 )
 
@@ -63,6 +65,9 @@ func newBreakageTestDB(t *testing.T) *gorm.DB {
 			expire_at DATETIME,
 			source_order_id TEXT
 		)`,
+		// 原生桶真源 + 桥接（used_usd 死列 → 读侧投影 amount_used/QuotaPerUnit，见 nativeUsedUSD）。
+		`CREATE TABLE mt_subscription_orders (order_no TEXT PRIMARY KEY, native_sub_id INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE user_subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, amount_used INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE token_plans (id INTEGER PRIMARY KEY, code TEXT NOT NULL DEFAULT '')`,
 		`CREATE TABLE user_balances (tenant_id INTEGER NOT NULL, user_id INTEGER NOT NULL, balance_usd REAL NOT NULL DEFAULT 0)`,
 		`CREATE TABLE payment_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 0, status TEXT, created_at DATETIME, updated_at DATETIME)`,
@@ -95,11 +100,26 @@ type subSpec struct {
 
 func seedSub(t *testing.T, db *gorm.DB, s subSpec) {
 	t.Helper()
+	// 用量走生产真源：原生 user_subscriptions.amount_used(quota)，经 mt_subscription_orders.native_sub_id
+	// 关联。tokenplan_subscriptions.used_usd 是死列，恒置 0（坐实读侧只投影原生桶、不读死列，P2-BRK-02）。
+	if err := db.Exec(`INSERT INTO user_subscriptions (amount_used) VALUES (?)`,
+		int64(s.used*common.QuotaPerUnit)).Error; err != nil {
+		t.Fatalf("seed native sub: %v", err)
+	}
+	var nativeSubID int64
+	if err := db.Raw(`SELECT last_insert_rowid()`).Scan(&nativeSubID).Error; err != nil {
+		t.Fatalf("native sub id: %v", err)
+	}
+	orderNo := fmt.Sprintf("ord-%d", nativeSubID)
+	if err := db.Exec(`INSERT INTO mt_subscription_orders (order_no, native_sub_id) VALUES (?,?)`,
+		orderNo, nativeSubID).Error; err != nil {
+		t.Fatalf("seed bridge order: %v", err)
+	}
 	if err := db.Exec(
 		`INSERT INTO tokenplan_subscriptions (tenant_id, user_id, plan_id, month_limit_usd, used_usd, status, start_at, expire_at, source_order_id)
 		 VALUES (?,?,?,?,?,?,?,?,?)`,
-		s.tenantID, s.userID, s.planID, s.monthLimit, s.used, s.status,
-		unixT(s.expireEpoch-86400), unixT(s.expireEpoch), "ord-",
+		s.tenantID, s.userID, s.planID, s.monthLimit, 0, s.status,
+		unixT(s.expireEpoch-86400), unixT(s.expireEpoch), orderNo,
 	).Error; err != nil {
 		t.Fatalf("seed sub (tenant=%d user=%d): %v", s.tenantID, s.userID, err)
 	}

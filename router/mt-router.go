@@ -31,6 +31,12 @@ func SetMtRouter(router *gin.Engine) {
 	// （只对模型分组生效、受组合下限保护，见 §2.15 Phase 2），故不再单设独立钩子。
 	app.InstallHooks()
 
+	// 自研计费 hook 异步批量落库 writer（**所有节点**，各自缓冲各自 flush；AGENT_HOOK_ASYNC_ENABLED 开启才启动）。
+	// 把每请求的 mt_wallet_consume_log INSERT + agent_earning_logs/agent_wallets 收益事务缓冲成定时批量，
+	// 消除自研写放大与 agent_wallets 热行的跨请求争用；SIGTERM 优雅 flush 兜底计划重启。须在 InstallHooks 后
+	// （hook 装配即可能触发 /v1 计费），关闭时无副作用（hook 走同步）。
+	app.StartBillingWriter()
+
 	if common.IsMasterNode {
 		if err := app.Migrate(); err != nil {
 			common.FatalLog("mt-router: AutoMigrate multitenant tables failed: " + err.Error())

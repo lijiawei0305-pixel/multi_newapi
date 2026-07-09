@@ -7,7 +7,6 @@ package mtwire
 import (
 	"context"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agent"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
@@ -77,14 +76,12 @@ func (a *App) creditRatioMarkup(ctx context.Context, tenantID, userID, quotaUnit
 	if cny <= 0 {
 		return
 	}
-	if err := a.AgentEarnings.AddEarning(ctx, agent.EarningEntry{
+	a.creditEarning(ctx, agent.EarningEntry{
 		TenantID:   tenantID,
 		UserID:     userID,
 		SourceType: agent.SourceRatioMarkup,
 		SourceID:   requestID,
 		Amount:     cny,
 		Remark:     "ratio_markup:" + usingGroup + ":" + billingSource,
-	}); err != nil {
-		common.SysError("mtwire: credit ratio markup failed: " + err.Error())
-	}
+	})
 }

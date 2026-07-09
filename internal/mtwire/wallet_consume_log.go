@@ -46,14 +46,20 @@ func (a *App) recordWalletConsume(ctx context.Context, tenantID, userID, walletQ
 	if walletQuota <= 0 || tenantID <= 0 || requestID == "" {
 		return
 	}
-	row := &walletConsumeRow{
+	row := walletConsumeRow{
 		TenantID:    tenantID,
 		UserID:      userID,
 		WalletQuota: walletQuota,
 		RequestID:   requestID,
-		CreatedAt:   time.Now(),
+		CreatedAt:   time.Now(), // 以消费发生时刻入账（缓冲期不改），保报表时间口径准
 	}
-	if err := a.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error; err != nil {
+	// AGENT_HOOK_ASYNC_ENABLED 开启：进程内缓冲 + 定时批量多行 INSERT（消除每请求 1 次同步写）；
+	// 关闭：维持逐请求同步写。二者皆 (user_id, request_id) 唯一 + ON CONFLICT DoNothing 幂等，重放不双计。
+	if common.AgentHookAsyncEnabled && a.billing != nil {
+		a.billing.enqueueConsume(row)
+		return
+	}
+	if err := a.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
 		common.SysError("mtwire: recordWalletConsume failed: " + err.Error())
 	}
 }

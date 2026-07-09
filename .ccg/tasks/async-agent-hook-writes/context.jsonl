@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "service/quota.go:454", "reason": "PostConsumeQuota 同步调 agenthook.ConsumeCommission（每笔 /v1 消费收口，钱包桶+订阅桶都过）"}
+{"file": "internal/mtwire/agent.go:211", "reason": "creditConsumeCommission：hook 实现；:233 recordWalletConsume；:241/:244 按档 AppendEarning"}
+{"file": "internal/mtwire/wallet_consume_log.go:45", "reason": "recordWalletConsume→INSERT mt_wallet_consume_log（display-only，ON CONFLICT DoNothing 幂等，每 agent 用户请求 1 次 fsync）"}
+{"file": "internal/agent/gormrepo/gormrepo.go:241", "reason": "AppendEarning：db.Transaction{ INSERT agent_earning_logs(ON CONFLICT DoNothing) + UPSERT agent_wallets 累加 }，每 agent 用户请求 1 个 2 语句事务"}
+{"file": "internal/mtwire/consume_markup.go:80", "reason": "creditRatioMarkup(L1 差价)→AddEarning(ratio_markup)，同样走 AppendEarning 事务"}
+{"file": "internal/agent/earning.go:17", "reason": "earningSink.AddEarning→Validate→repo.AppendEarning（接口注入点，异步化可在此包一层）"}
+{"file": "model/utils.go:42", "reason": "原生 batcher：map[int]int 按 id 求和合并——只适合数值计数器，不适合 append-log（每请求唯一 requestID 行）"}
+{"file": "internal/mtwire/wire.go:262", "reason": "AgentEarnings 注入点；异步 writer 的生命周期/启动/优雅关闭 flush 需挂在此装配处"}

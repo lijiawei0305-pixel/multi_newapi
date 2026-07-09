@@ -21,9 +21,13 @@ For commercial licensing, please contact support@quantumnous.com
 // db.Table()/Joins() 跨表做 SUM/GROUP BY，绝不 import 兄弟模块的 model 结构（升级 rebase 安全，
 // 对齐 internal/report/reportrepo/reportrepo.go 范式）。本包只借用列名，不借用别包的 struct。
 //
-// 数据来源四表：
-//   - tokenplan_subscriptions  订阅台账（列：tenant_id/user_id/plan_id/month_limit_usd/used_usd/
+// 数据来源六表：
+//   - tokenplan_subscriptions  订阅台账（列：tenant_id/user_id/plan_id/month_limit_usd/source_order_id/
 //     status/start_at/expire_at；start_at/expire_at 为 DATETIME）—— 活跃剩余 / 到期未用 / 明细 / 快照采集。
+//     注意：本表 used_usd 是永为 0 的死列（tokenplan 计费桶未装配，见 nativeUsedUSD 注释）；已用量一律
+//     经下两张原生桶表投影，绝不读 used_usd。
+//   - mt_subscription_orders   桥接订单（order_no ← source_order_id，native_sub_id → 原生订阅）—— JOIN 关联真源。
+//   - user_subscriptions       原生订阅桶（amount_used 为 quota 单位真实用量）—— 真实已用 = amount_used/QuotaPerUnit。
 //   - token_plans              套餐定义（id → code）—— JOIN 回填 plan_code（订阅表无 plan_code 列）。
 //   - user_balances            钱包余额（balance_usd 已是 USD，decimal(20,8)）—— 钱包未消耗。
 //   - payment_orders           支付订单（status/updated_at）—— 系统异常卡单计数（对齐对账 updated_at 口径）。
@@ -44,6 +48,7 @@ package gormrepo
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"gorm.io/gorm"
@@ -68,6 +73,29 @@ const anomalyMinAgeSec int64 = 5 * 60
 
 // snapshotBackfillBatch 是回填/采集游标分批大小（按 id 升序游标翻页，避免一次性全表加载）。
 const snapshotBackfillBatch = 500
+
+// nativeUsedUSD 是「真实已用 USD」的 SQL 表达式片段（P2-BRK-02 修复）。
+//
+// 背景：tokenplan_subscriptions.used_usd 是永为 0 的死列——其唯一写入者是 tokenplan 计费桶的
+// Meter，而该桶（billing/wallet Service）在 wire.go 从未装配；生产 /v1 计费实际走原生订阅桶，
+// 每笔用量记在 user_subscriptions.amount_used（quota 单位）。故读侧一律经 s.source_order_id →
+// mt_subscription_orders.native_sub_id → user_subscriptions 关联到真源，amount_used/QuotaPerUnit
+// 还原为 USD；无原生订阅（缺链/非桥接行）时 COALESCE 兜底 0。仍遵本包「只借列名、不 import 兄弟
+// model」硬约束（跨表 raw JOIN）。
+//
+// 除数用浮点字面量（500000.0 而非 500000）——sqlite 对两整数相除会截断归零，浮点字面量强制实数
+// 除法，跨 MySQL/sqlite 方言一致。QuotaPerUnit 恒 >0。
+var nativeUsedUSD = "COALESCE(us.amount_used / " +
+	strconv.FormatFloat(common.QuotaPerUnit, 'f', 1, 64) + ", 0)"
+
+// joinNativeUsage 在以 `tokenplan_subscriptions AS s` 为基表的查询上追加两条 LEFT JOIN，关联到
+// 原生订阅桶（真实用量所在）。o.order_no 为主键、us.id 为主键 → 至多一行匹配，不产生行放大；
+// 缺链行 us.amount_used 为 NULL，由 nativeUsedUSD 的 COALESCE 兜底为 0。
+func joinNativeUsage(q *gorm.DB) *gorm.DB {
+	return q.
+		Joins("LEFT JOIN mt_subscription_orders AS o ON o.order_no = s.source_order_id AND o.native_sub_id > 0").
+		Joins("LEFT JOIN user_subscriptions AS us ON us.id = o.native_sub_id")
+}
 
 // snapshotRow 是 breakage_snapshots 表的 GORM 模型（本包新表；AutoMigrate 建）。
 //
@@ -155,11 +183,11 @@ func (r *Repo) Overview(ctx context.Context, tenantID *int64, now int64) (breaka
 		var row struct {
 			Remaining float64
 		}
-		q := r.db.WithContext(ctx).Table("tokenplan_subscriptions").
-			Select("COALESCE(SUM(month_limit_usd - used_usd),0) AS remaining").
-			Where("status = ?", subStatusActive).
-			Where("expire_at > ?", nowT)
-		q = applyTenantScope(q, "tenant_id", tenantID)
+		q := joinNativeUsage(r.db.WithContext(ctx).Table("tokenplan_subscriptions AS s")).
+			Select("COALESCE(SUM(s.month_limit_usd - " + nativeUsedUSD + "),0) AS remaining").
+			Where("s.status = ?", subStatusActive).
+			Where("s.expire_at > ?", nowT)
+		q = applyTenantScope(q, "s.tenant_id", tenantID)
 		if err := q.Scan(&row).Error; err != nil {
 			return breakage.Overview{}, err
 		}
@@ -172,11 +200,11 @@ func (r *Repo) Overview(ctx context.Context, tenantID *int64, now int64) (breaka
 		var row struct {
 			Unused float64
 		}
-		q := r.db.WithContext(ctx).Table("tokenplan_subscriptions").
-			Select("COALESCE(SUM(month_limit_usd - used_usd),0) AS unused").
-			Where("expire_at < ?", nowT).
-			Where("month_limit_usd - used_usd > 0")
-		q = applyTenantScope(q, "tenant_id", tenantID)
+		q := joinNativeUsage(r.db.WithContext(ctx).Table("tokenplan_subscriptions AS s")).
+			Select("COALESCE(SUM(s.month_limit_usd - " + nativeUsedUSD + "),0) AS unused").
+			Where("s.expire_at < ?", nowT).
+			Where("s.month_limit_usd - " + nativeUsedUSD + " > 0")
+		q = applyTenantScope(q, "s.tenant_id", tenantID)
 		if err := q.Scan(&row).Error; err != nil {
 			return breakage.Overview{}, err
 		}
@@ -245,6 +273,7 @@ func (r *Repo) Detail(ctx context.Context, f breakage.Filter, now int64) ([]brea
 			Joins("LEFT JOIN token_plans AS tp ON tp.id = s.plan_id").
 			Joins("LEFT JOIN tenants AS t ON t.id = s.tenant_id").
 			Joins("LEFT JOIN users AS u ON u.id = s.user_id")
+		q = joinNativeUsage(q)
 		q = applyTenantScope(q, "s.tenant_id", f.TenantID)
 		if f.PlanCode != "" {
 			q = q.Where("tp.code = ?", f.PlanCode)
@@ -278,7 +307,7 @@ func (r *Repo) Detail(ctx context.Context, f breakage.Filter, now int64) ([]brea
 		Select("s.tenant_id AS tenant_id, COALESCE(t.name,'') AS tenant_name, " +
 			"s.user_id AS user_id, COALESCE(u.username,'') AS username, " +
 			"COALESCE(tp.code,'') AS plan_code, s.status AS status, " +
-			"s.month_limit_usd AS month_limit_usd, s.used_usd AS used_usd, s.expire_at AS expire_at").
+			"s.month_limit_usd AS month_limit_usd, " + nativeUsedUSD + " AS used_usd, s.expire_at AS expire_at").
 		Order("s.expire_at DESC, s.id DESC").
 		Limit(lim(f.PageSize)).Offset(off(f.Page, f.PageSize)).
 		Scan(&scan).Error; err != nil {
@@ -445,12 +474,12 @@ func (r *Repo) CollectSnapshots(ctx context.Context, tenantID *int64, now int64)
 	var lastID int64 = 0
 	for {
 		var batch []collectScanRow
-		q := r.db.WithContext(ctx).
+		q := joinNativeUsage(r.db.WithContext(ctx).
 			Table("tokenplan_subscriptions AS s").
-			Joins("LEFT JOIN token_plans AS tp ON tp.id = s.plan_id").
+			Joins("LEFT JOIN token_plans AS tp ON tp.id = s.plan_id")).
 			Select("s.id AS id, s.tenant_id AS tenant_id, s.user_id AS user_id, " +
 				"COALESCE(tp.code,'') AS plan_code, s.month_limit_usd AS month_limit_usd, " +
-				"s.used_usd AS used_usd, s.status AS status, s.expire_at AS expire_at").
+				nativeUsedUSD + " AS used_usd, s.status AS status, s.expire_at AS expire_at").
 			Where("s.id > ?", lastID)
 		q = applyTenantScope(q, "s.tenant_id", tenantID)
 		if err := q.Order("s.id ASC").Limit(snapshotBackfillBatch).Scan(&batch).Error; err != nil {

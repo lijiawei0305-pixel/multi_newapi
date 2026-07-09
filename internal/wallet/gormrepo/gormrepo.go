@@ -235,17 +235,17 @@ func (r *Repo) CreateCodesWithDeduction(ctx context.Context, tenantID, ownerUser
 	})
 }
 
-// RedeemCode 用户兑换：查码（按 tenant+code）→ 状态机校验 → 单赢家 CAS（WHERE status='enabled'
-// AND tenant_id=?）翻 used 并记录使用者。返回该码面额 amount_usd 供调用方入账原生 quota。
+// redeemCAS 在给定 db 句柄（可为 r.db 或事务 tx）上执行用户兑换的核心：查码（按 tenant+code）→
+// 状态机校验 → 单赢家 CAS（WHERE status='enabled' AND tenant_id=?）翻 used 并记录使用者，返回面额。
+// 抽为共享内核，供 RedeemCode（仅 CAS）与 RedeemCodeAndCredit（CAS+入账同事务）复用，逻辑不分叉。
 //
 //	不存在/禁用/过期            -> wallet.ErrRedeemCodeInvalid
 //	已用（含并发竞态败者）       -> wallet.ErrRedeemCodeUsed
 //
-// CAS 是单赢家闸门：并发兑换同一码仅一人 RowsAffected==1。本方法不碰 quota，入账由 mtwire 调
-// 原生 IncreaseUserQuota（与充值入账一致）。跨租户：tenant 不匹配则查码即 invalid（越权防线）。
-func (r *Repo) RedeemCode(ctx context.Context, tenantID int64, code string, userID int64, now time.Time) (float64, error) {
+// CAS 是单赢家闸门：并发兑换同一码仅一人 RowsAffected==1。跨租户：tenant 不匹配则查码即 invalid（越权防线）。
+func redeemCAS(db *gorm.DB, tenantID int64, code string, userID int64, now time.Time) (float64, error) {
 	var row redemptionRow
-	err := r.db.WithContext(ctx).Take(&row, "tenant_id = ? AND code = ?", tenantID, code).Error
+	err := db.Take(&row, "tenant_id = ? AND code = ?", tenantID, code).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return 0, wallet.ErrRedeemCodeInvalid
@@ -255,7 +255,7 @@ func (r *Repo) RedeemCode(ctx context.Context, tenantID int64, code string, user
 	if e := toRedemption(&row).RedeemableError(now); e != nil {
 		return 0, e // used / invalid（含过期、禁用）—— 快速失败，省一次 CAS
 	}
-	res := r.db.WithContext(ctx).Model(&redemptionRow{}).
+	res := db.Model(&redemptionRow{}).
 		Where("id = ? AND tenant_id = ? AND status = ?", row.ID, tenantID, string(wallet.RedemptionEnabled)).
 		Updates(map[string]interface{}{
 			"status":          string(wallet.RedemptionUsed),
@@ -269,6 +269,43 @@ func (r *Repo) RedeemCode(ctx context.Context, tenantID int64, code string, user
 		return 0, wallet.ErrRedeemCodeUsed // 并发竞态败者
 	}
 	return row.AmountUSD, nil
+}
+
+// RedeemCode 仅执行单赢家 CAS 翻 used 并返回面额（不碰 quota）——保留给纯状态机路径与并发测试。
+// 生产兑换入账请用 RedeemCodeAndCredit（CAS + 原生 quota 入账在同一事务内原子完成）。
+func (r *Repo) RedeemCode(ctx context.Context, tenantID int64, code string, userID int64, now time.Time) (float64, error) {
+	return redeemCAS(r.db.WithContext(ctx), tenantID, code, userID, now)
+}
+
+// RedeemCodeAndCredit 在**单一事务**内原子完成用户兑换：① 单赢家 CAS 翻 used（redeemCAS）；
+// ② 同事务把面额折算成原生 quota 记入 users.quota（WHERE id=? 加 quota+credit）。任一失败整体回滚——
+// 从根上消除「CAS 已翻 used 但入账另起事务失败 → 码永久作废、额度不到账、无对账兜底」的跨事务窗口，
+// 对齐充值 OnPaid / CreateCodesWithDeduction 的同事务标准。
+//
+// quotaPerUnit 由 mtwire 传入（$1 = quotaPerUnit），使本仓储保持与 new-api model 解耦；换算沿用
+// int64(amount_usd × quotaPerUnit)，入账数额与旧「两步」路径逐位一致。额度缓存失效由调用方在
+// 事务提交成功后调 InvalidateUserCache 负责（DB 为真相源，缓存永不与 DB 发散）。
+//
+// 返回：面额 amount_usd 与实际入账 quota 单位数 creditUnits（供调用方回执/日志）。
+func (r *Repo) RedeemCodeAndCredit(ctx context.Context, tenantID int64, code string, userID int64, now time.Time, quotaPerUnit float64) (amountUSD float64, creditUnits int64, err error) {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		amt, e := redeemCAS(tx, tenantID, code, userID, now)
+		if e != nil {
+			return e // REDEEM_CODE_INVALID / REDEEM_CODE_USED —— 回滚（CAS 本就无副作用）
+		}
+		credit := int64(amt * quotaPerUnit)
+		if credit > 0 {
+			// 与 CAS 同事务落 users.quota，二者原子：要么都成、要么都回滚。入账失败 → 整个事务
+			// 回滚、CAS 一并撤销，码保持 enabled 可再兑，无「作废且不到账」的悬空态。
+			if e := tx.Table("users").Where("id = ?", userID).
+				UpdateColumn("quota", gorm.Expr("quota + ?", credit)).Error; e != nil {
+				return e
+			}
+		}
+		amountUSD, creditUnits = amt, credit
+		return nil
+	})
+	return amountUSD, creditUnits, err
 }
 
 // redemptionListCap 是自助兑换码列表「最新 N 条」的安全上限，防止无界 Find 随建码累积而 OOM/长阻塞（按 id 倒序取最新 N 条）。

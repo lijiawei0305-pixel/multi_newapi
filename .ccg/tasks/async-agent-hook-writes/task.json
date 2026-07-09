@@ -1,0 +1,13 @@
+{
+  "id": "async-agent-hook-writes",
+  "title": "自研计费 hook 写放大：每请求同步 INSERT mt_wallet_consume_log + 事务 agent_earning_logs/agent_wallets，改异步/批量",
+  "status": "in_progress",
+  "strategy": "optimize-measure",
+  "currentPhase": "4-await-offpeak-activate",
+  "nextAction": "低峰期把 deploy/docker-compose.test.yml 的 AGENT_HOOK_ASYNC_ENABLED 改 true → `docker compose -p newapi_test -f deploy/docker-compose.test.yml up -d --build app`（需带 --build 让新代码进镜像）→ 核 `docker exec newapi_test-app-1 printenv AGENT_HOOK_ASYNC_ENABLED` 为 true + 日志 'agent hook async billing writer started' → 量吞吐对比 ~95rps 基线（Phase 4）+ 灰度核对账目一致",
+  "gate": "await-user: off-peak activation + throughput measurement",
+  "branch": "500L",
+  "scope": "async-agent-hook-writes",
+  "serverValidated": "2026-07-09: go build ./internal/... ./router/... ./common/... + package main 通过；单测 6/6 PASS（gormrepo + mtwire），full internal/... 无回归。scratch 已清，运行栈未动。",
+  "createdAt": "2026-07-09T09:34:14Z"
+}

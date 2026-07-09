@@ -167,15 +167,27 @@ func (a *App) creditL0Commission(ctx context.Context, tenantID, userID, quotaUni
 	if cny <= 0 {
 		return
 	}
-	if err := a.AgentEarnings.AddEarning(ctx, agent.EarningEntry{
+	a.creditEarning(ctx, agent.EarningEntry{
 		TenantID:   tenantID,
 		UserID:     userID,
 		SourceType: agent.SourceConsumeCommission,
 		SourceID:   requestID,
 		Amount:     cny,
 		Remark:     "consume:" + billingSource,
-	}); err != nil {
-		common.SysError("mtwire: credit consume commission failed: " + err.Error())
+	})
+}
+
+// creditEarning 是「消耗分润入账」的统一收口（L0 提成 / L1 差价共用）：AGENT_HOOK_ASYNC_ENABLED 开启时进程内
+// 缓冲 + 定时批量落库（单事务多行 INSERT + 按租户合并 UPSERT 钱包，消除 agent_wallets 热行的跨请求争用），
+// 关闭时维持逐请求同步入账。两条路径语义完全一致：同 requestID 幂等键不重复增余额，best-effort 失败只记日志、
+// 绝不阻断扣费（异步路径的校验在 enqueueEarning 内复刻 earningSink 的 Validate）。
+func (a *App) creditEarning(ctx context.Context, e agent.EarningEntry) {
+	if common.AgentHookAsyncEnabled && a.billing != nil {
+		a.billing.enqueueEarning(e)
+		return
+	}
+	if err := a.AgentEarnings.AddEarning(ctx, e); err != nil {
+		common.SysError("mtwire: credit earning failed: " + err.Error())
 	}
 }
 

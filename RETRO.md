@@ -115,6 +115,13 @@
 - **解决/规避**：照 `internal/report/reportrepo/migrate.go` 已在生产 MySQL 验证的方言分支：MySQL 先查 `information_schema.statistics` 判索引存在、缺失才 `CREATE INDEX`（**无** IF NOT EXISTS）；sqlite/pg 用原生 IF NOT EXISTS。`dbType` 取 `common.MainDatabaseType()`（sqlite 单测未设 → "" → 走 IF NOT EXISTS 分支，不受影响）。修后重新部署，两索引（唯一键 + tenant_period）均建成、日志无 1064。
 - **升级**：补 `AutoMigrate` 不自动建的组合/perf 索引，一律用方言分支 `ensureIndex(db, common.MainDatabaseType(), ...)`；**别用 `CREATE INDEX IF NOT EXISTS`（MySQL 会炸）**。凡涉及只跑 MySQL 的原生 SQL，sqlite 单测过不代表生产过——必上服务器容器验证。已存记忆 [[mysql-create-index-if-not-exists]]。
 
+### [已解决] 计费吞吐卡 ~95rps / CPU 75% 空闲——根因是 MySQL per-commit fsync 天花板，非 app 逻辑
+- **现象**：文本请求吞吐卡 ~95rps（单用户 ~31rps）、~30ms 计费尾延迟，但 CPU 仅 75% 占用（≈25% 空闲）→ 非硬件瓶颈。初判为「计费未批量：每请求同步写 users/tokens/channels + logs INSERT，各独立事务各触发 fsync」。
+- **根因**：MySQL 默认 `innodb_flush_log_at_trx_commit=1` + `sync_binlog=1`（本栈 `log_bin=ON`）→ **每次 commit 都要 fsync（redo，且开了 binlog 再来一次）**，单盘 fsync 延迟把提交吞吐钉死。实测：scratch 表单连接串行单行提交仅 **523 commits/s**、~1.19 fsync/commit。聚合 ~95rps × 每请求约 5 次 commit（钱包 4 UPDATE+1 log，或订阅桶 1 FOR UPDATE 事务+1 log）≈ 475 commits/s，**正好顶到 523 天花板**——CPU 在等磁盘 fsync 返回，故空闲。
+- **解决/规避**：**先量后改（optimize-measure）**。DB 杠杆（零代码/零停机/可秒回退，覆盖钱包/订阅桶/日志三条同步路径）：`SET GLOBAL` 即时生效 + `SET PERSIST innodb_flush_log_at_trx_commit=2; sync_binlog=0`（写入数据卷 `mysqld-auto.cnf`，重启/recreate 保留）+ `deploy/docker-compose.test.yml` mysql `command:` 兜底（全新卷）。同基准复测 **523→5763 commits/s（11×）**，fsync/commit 1.19→0.076。durability：进程崩溃不丢已提交扣费，仅宿主机断电丢 ≤1s（用户拍板可接受）。第二杠杆 app 层 batch-update（`BATCH_UPDATE_ENABLED`，机制早在 `model/utils.go` 只是默认关）已 staged 待低峰重启激活，用于消除 `channels.used_quota` 热行锁竞争（非 fsync）；安全前提=Redis 为额度权威（`cacheDecr*` 同步扣 Redis）故 DB 列滞后不超扣。
+- **坑点**：① 症状「CPU 空闲 + 吞吐卡 + 尾延迟」= 典型 **fsync-bound**（等盘），别往 app 算法上找。② 诊断用 **scratch 表 `SET PERSIST`+存储过程 loop 提交** 隔离 fsync 天花板，零上游成本/零真实数据变更/可精确复测，胜过在生产压测（费真实 token + 扰动用户）。③ MySQL 8 用 `SET PERSIST` 持久化动态变量（写 `mysqld-auto.cnf`，落在挂载卷）——比改 compose `command` 免 recreate mysql。
+- **升级**：暂不升级为硬约束（属调优而非红线）。记忆 [[billing-fsync-tuning-and-batch]]；相关 [[used-usd-dead-column-real-usage-native-bucket]]。
+
 ---
 
 ## 二、构建与依赖
@@ -357,3 +364,10 @@
 - **根因**：页面用 `requestAnimationFrame` 驱动常驻 WebGL 渲染循环（`loop3d`/`renderTick`），无头 Chrome 的虚拟时间预算机制与这类常驻 rAF 循环叠加时不按预算推进，捕获时刻实际由启动到就绪的真实时间决定，与 `--virtual-time-budget` 参数值无关。
 - **解决/规避**：需要「动画播完之后」状态的截图改用 playwright：固定视口（本例 1920×990）→ 导航 → 等待 ≥3s 真实墙钟时间 → 截图；`#final` 场景因同文档 fragment 导航不会重新执行脚本，须先导航到 `about:blank` 再导航到带 `#final` 的完整 URL，确保是真实整页加载后再等待截图。
 - **升级**：含 WebGL/rAF 常驻循环的页面，今后截「动画播完之后」的状态一律用 playwright + 真实等待，不再用无头 CLI 的 `--virtual-time-budget` 作为时间控制手段。
+
+### [已解决] 额度沉淀监控读「死列」used_usd → 恒显 0 消耗（真源在原生 user_subscriptions.amount_used）
+- **现象**：P2-BRK-01 额度沉淀监控上线后，每笔订阅都被当成 0 消耗——`ExpiredUnusedUSD≈Σ全额 limit`（沉淀率≈100%）、`countExhaustedActiveSubs`（used≥95%limit）永不触发、明细 `usage_pct` 恒 0%；买家「我的订阅」页剩余额度也恒等于满额。
+- **根因**：`tokenplan_subscriptions.used_usd` 的**唯一写入者是 tokenplan 计费桶的 `Meter`（`gormrepo.go:399` `used_usd += cost`）**，而该桶（`billing.NewService`/`wallet.NewService`）在 `wire.go`/`main.go` **从未装配**（grep 0 命中）。生产 `/v1` 计费实际走**原生订阅桶**（`subscription_bridge.go` `defaultActivateNativeSub` → `model.CreateUserSubscriptionFromPlanTx`），用量记在 **`user_subscriptions.amount_used`（quota 单位）**，由 `PreConsumeUserSubscription`/`PostConsumeUserSubscriptionDelta` 维护。全仓无任何「原生用量 → used_usd」同步代码 → `used_usd` 是永为 0 的**死列**。而监控（`breakage/gormrepo` Overview/Detail/CollectSnapshots + `breakage_snapshot_loop.go` countExhausted）与买家/管理端页全都读这列算 `limit − used`。
+- **解决（方案 A · 读侧投影 · 只前向）**：真源经 `s.source_order_id → mt_subscription_orders.native_sub_id → user_subscriptions.amount_used` 关联；`真实 used_usd = amount_used / common.QuotaPerUnit`。① `breakage/gormrepo` 四处查询（Overview 活跃剩余/到期未用、Detail、CollectSnapshots）LEFT JOIN 原生桶投影（新增 `nativeUsedUSD` 片段 + `joinNativeUsage` helper，仍守本包「只借列名不 import 兄弟 model」硬约束）；② `mtwire` `countExhaustedActiveSubs` 同投影；③ 买家/管理端在 mtwire 层（bridge 归属层）`fillNativeUsedUSD` 批量覆盖 `UsedUSD`，保持 tokenplan 仓储不感知原生桶。历史快照不回填（前向修正）。单测 harness（gormrepo_test + mtwire breakage_test）改为把 `used_usd` 置 0、真值只塞 `amount_used`，坐实「只读真源」。服务器 `golang:1.25.1` 容器 `go build ./internal/... ./router/...` + `go test ./internal/breakage/... ./internal/mtwire/...` 全绿。
+- **坑点**：SQL 除数须用**浮点字面量**（`500000.0` 而非 `500000`）——sqlite 两整数相除会**截断归零**，浮点字面量强制实数除法，跨 MySQL/sqlite 一致。
+- **升级**：**给某列做聚合/监控前，先确认它在生产路径上真的被写**（grep 写入者 + 核实其调用链在 wire.go 是否装配）——「有列且有读逻辑」不等于「有数据」；未装配的计费桶留下的列就是恒零死列。参见 [[used-usd-dead-column-real-usage-native-bucket]]。

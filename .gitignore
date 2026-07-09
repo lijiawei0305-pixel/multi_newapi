@@ -85,3 +85,5 @@ repomix-output.xml
 .ccg/tasks/agent-plan-purchase/
 .ccg/tasks/breakage-monitor/
 .ccg/tasks/homepage-header-nav/
+.ccg/tasks/fix-breakage-used-usd-projection/
+.ccg/tasks/batch-billing-writes/

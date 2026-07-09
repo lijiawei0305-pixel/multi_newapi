@@ -222,3 +222,61 @@ func TestRedeemCode_InvalidAndDisabled(t *testing.T) {
 		t.Fatalf("expired = %v, want ErrRedeemCodeInvalid", err)
 	}
 }
+
+// TestRedeemCodeAndCredit_AtomicCreditAndRollback 锁定「翻 used 与入账额度同事务原子」：
+//   - 正常：CAS 翻 used + 原生 quota 入账在同一事务内落地，redeemer.quota 精确增加、码翻 used；
+//   - 回滚：入账 UPDATE 失败（此处删 users 表制造）→ 整个事务回滚，CAS 一并撤销，码保持 enabled
+//     可再兑——杜绝旧「两步跨事务」下「码作废却不到账、无对账兜底」的悬空态。
+func TestRedeemCodeAndCredit_AtomicCreditAndRollback(t *testing.T) {
+	ctx := context.Background()
+	const owner = int64(10)
+	const redeemer = int64(200)
+	const perUnit = 100.0 // $5 × 100 = 500 单位
+
+	// —— 正常路径 ——
+	r := newRedemptionTestRepo(t)
+	seedUserQuota(t, r, owner, 100000)
+	seedUserQuota(t, r, redeemer, 0)
+	if err := r.CreateCodesWithDeduction(ctx, 1, owner, 50000, mkCodes(1, 5, "GIFT")); err != nil {
+		t.Fatalf("create code: %v", err)
+	}
+	amt, credit, err := r.RedeemCodeAndCredit(ctx, 1, "GIFT", redeemer, time.Now(), perUnit)
+	if err != nil {
+		t.Fatalf("redeem+credit: %v", err)
+	}
+	if amt != 5 || credit != 500 {
+		t.Fatalf("(amount,credit) = (%v,%d), want (5,500)", amt, credit)
+	}
+	if q := userQuota(t, r, redeemer); q != 500 {
+		t.Fatalf("redeemer quota = %d, want 500 (credited in same tx)", q)
+	}
+	// 再兑换同一码：USED（已消费，幂等防重复入账）。
+	if _, _, err := r.RedeemCodeAndCredit(ctx, 1, "GIFT", redeemer, time.Now(), perUnit); err != wallet.ErrRedeemCodeUsed {
+		t.Fatalf("re-redeem = %v, want ErrRedeemCodeUsed", err)
+	}
+	if q := userQuota(t, r, redeemer); q != 500 {
+		t.Fatalf("redeemer quota after re-redeem = %d, want 500 (no double credit)", q)
+	}
+
+	// —— 回滚路径：入账失败必须连带撤销 CAS ——
+	r2 := newRedemptionTestRepo(t)
+	seedUserQuota(t, r2, owner, 100000)
+	if err := r2.CreateCodesWithDeduction(ctx, 1, owner, 50000, mkCodes(1, 5, "GIFT2")); err != nil {
+		t.Fatalf("create code2: %v", err)
+	}
+	// 删掉 users 表 → 同事务内 UPDATE users 必报错，触发回滚。
+	if err := r2.db.Migrator().DropTable(&userRow{}); err != nil {
+		t.Fatalf("drop users: %v", err)
+	}
+	if _, _, err := r2.RedeemCodeAndCredit(ctx, 1, "GIFT2", redeemer, time.Now(), perUnit); err == nil {
+		t.Fatalf("redeem with broken credit should error, got nil")
+	}
+	// 关键断言：CAS 随事务回滚，码仍 enabled（未被作废），无「作废且不到账」的悬空态。
+	list, err := r2.ListCodesByTenant(ctx, 1)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 || list[0].Status != wallet.RedemptionEnabled {
+		t.Fatalf("code status after rollback = %+v, want 1 code still Enabled", list)
+	}
+}
