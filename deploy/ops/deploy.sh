@@ -112,7 +112,7 @@ echo
 
 # ── 8) 结果：成功收尾 / 失败自动回滚 ────────────────────────────────────────────
 if [ "$healthy" = "1" ]; then
-  ok "8/8 健康通过：app /api/status success（$STACK）"
+  ok "8/8 健康通过：app /api/status success（${STACK}）"
   remote "$SERVER_REPO/deploy/ops/healthcheck.sh || true"   # 打印完整巡检（不阻断）
   ok "部署成功 ✅ tag=${TAG}。回滚命令：ssh $SSH_HOST '$SERVER_REPO/deploy/ops/rollback.sh'"
   exit 0
