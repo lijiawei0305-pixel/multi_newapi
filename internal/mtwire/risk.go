@@ -5,6 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/platform/appctx"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 	"github.com/QuantumNous/new-api/internal/risk"
@@ -28,14 +29,30 @@ func (s tenantStatusChecker) Active(ctx context.Context, p *appctx.Principal) (b
 	return row.Status == "active", nil // tenant.StatusActive
 }
 
-// checkCallHook 是 agenthook.CheckCall 的实现：/v1 转发前调用风控（本轮 RPM 限流 + 租户状态）。
-// best-effort：装配缺失/内部异常一律放行；仅确切命中限流/状态时返回 4xx 拦截（429/403）。
+// checkCallHook 是 agenthook.CheckCall 的实现：/v1 转发前调用风控。两层解耦：
+//  1. 租户状态（整租户 suspended/deleted 拦截）——纯 DB 点查，**与 Redis 无关**，任何时候都强制
+//     （fail-closed：确切非 active 即 403）。"停用某代理→切断其名下用户 /v1"由此保证，不因
+//     Redis 关/宕而静默失效（历史 bug：此校验曾绑死在仅 Redis 时装配的 RiskEngine 上）。
+//  2. RPM 固定窗口限流——需 Redis 共享计数，故仅 RiskEngine 装配（Redis 就绪）时运行。
+//
+// best-effort：panic / DB 查询错误一律放行（绝不误杀正常流量，故 recover 记日志而非静默）；
+// 仅确切命中状态/限流时返回 4xx 拦截（403/429）。
 func (a *App) checkCallHook(ctx context.Context, userID, tokenID int64, model, clientIP, requestID string) *types.NewAPIError {
-	defer func() { _ = recover() }()
+	defer func() {
+		if r := recover(); r != nil {
+			common.SysError("mtwire: checkCallHook panic recovered")
+		}
+	}()
+	p := &appctx.Principal{UserID: userID, TenantID: a.userTenantID(ctx, userID), Role: appctx.RoleUser}
+	// 1) 租户状态：DB-only，Redis 无关 → 恒强制。Active 在查不到/出错时返回 true（旁路，绝不误杀），
+	//    仅确切 status != active 才返回 false → 复用 risk.ErrStatusForbidden（403）透传给 relay。
+	if active, err := (tenantStatusChecker{db: a.DB}).Active(ctx, p); err == nil && !active {
+		return types.NewErrorWithStatusCode(risk.ErrStatusForbidden, types.ErrorCodeAccessDenied, apperr.HTTPStatusOf(risk.ErrStatusForbidden))
+	}
+	// 2) RPM 限流：需共享计数 → 仅 Redis 装配时运行；未装配即到此为止（状态已在上方恒强制）。
 	if a.RiskEngine == nil {
 		return nil
 	}
-	p := &appctx.Principal{UserID: userID, TenantID: a.userTenantID(ctx, userID), Role: appctx.RoleUser}
 	if err := a.RiskEngine.CheckCall(ctx, p, risk.CallContext{
 		Model:     model,
 		Endpoint:  "/v1",

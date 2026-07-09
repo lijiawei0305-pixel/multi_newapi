@@ -114,8 +114,9 @@ type App struct {
 	TicketService ticket.TicketService
 
 	// --- risk 模块（多档风控，7c · §2.13）---
-	// RiskEngine 调用前风控（本轮 RPM 限流 + 租户状态），由 checkCallHook 经 agenthook.CheckCall 在 /v1 调用。
-	// nil = Redis 未启用 → 风控旁路（CheckCall 直接放行，限流需共享计数）。
+	// RiskEngine 调用前 RPM 固定窗口限流，由 checkCallHook 经 agenthook.CheckCall 在 /v1 调用。
+	// nil = Redis 未启用 → 仅跳过 RPM（限流需共享计数）；租户状态（suspended/deleted）拦截由
+	// checkCallHook 直接经 DB 恒强制，不随此字段 fail-open（见 risk.go）。
 	RiskEngine risk.RiskEngine
 
 	// --- report 模块（财务报表聚合，§财务报表契约）---
@@ -186,13 +187,14 @@ func New(db *gorm.DB) *App {
 	ticketRepo := ticketrepo.New(db)
 	ticketSvc := ticket.NewService(ticketRepo)
 
-	// risk（7c）：调用前风控引擎。RPM 固定窗口限流需共享计数 → 仅 Redis 启用时装配；
-	// 否则置 nil（checkCallHook 旁路放行）。RPM 默认阈值来自 env RISK_DEFAULT_RPM（0=不限）。
+	// risk（7c）：调用前 RPM 固定窗口限流引擎。限流需 Redis 共享计数 → 仅 Redis 启用时装配；
+	// 否则置 nil（checkCallHook 只跳过 RPM）。RPM 默认阈值来自 env RISK_DEFAULT_RPM（0=不限）。
+	// 注：租户状态（suspended/deleted）拦截**不再**作为 StatusChecker 注入此引擎——它是纯 DB 判定，
+	// 不应随 Redis 开关 fail-open，改由 checkCallHook 直接经 DB 恒强制（见 risk.go tenantStatusChecker）。
 	var riskEngine risk.RiskEngine
 	if common.RedisEnabled && common.RDB != nil {
 		riskEngine = risk.NewEngine(
 			risk.NewRedisKVCache(common.RDB),
-			risk.WithStatusChecker(tenantStatusChecker{db: db}),
 			risk.WithConfig(risk.Config{DefaultRPM: common.GetEnvOrDefault("RISK_DEFAULT_RPM", 0)}),
 		)
 	}

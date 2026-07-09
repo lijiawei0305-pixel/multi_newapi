@@ -1,0 +1,16 @@
+{
+  "id": "fix-tenant-status-fail-open",
+  "title": "租户级停用在 /v1 层 fail-open：租户状态校验被绑死在仅 Redis 时装配的 RiskEngine 上，Redis 关即静默放行；且 checkCallHook recover 静默吞 panic",
+  "status": "in_progress",
+  "strategy": "direct-fix",
+  "currentPhase": "4-verify",
+  "nextAction": "服务器编译验证（本机无 Go 工具链）：rsync→/root/newapi-test→deploy.sh 或 go build ./internal/mtwire/...；生产栈 Redis-on 行为不变，仅关闭 Redis-off fail-open 洞",
+  "gate": "await-user: 服务器编译+部署时机",
+  "branch": "500L",
+  "scope": "fix-tenant-status-fail-open",
+  "createdAt": "2026-07-09T10:14:29Z",
+  "changes": [
+    "internal/mtwire/risk.go: checkCallHook 重写——recover 记日志(common.SysError, 对齐 agent.go:133/grouphook.go:31)；租户状态(DB-only)恒强制 fail-closed；RPM 仅 RiskEngine!=nil 时运行。加 common 导入",
+    "internal/mtwire/wire.go: RiskEngine 移除 risk.WithStatusChecker(状态改由 hook 恒强制，避免 Redis-on 时双 DB 查)；字段/装配注释同步"
+  ]
+}
