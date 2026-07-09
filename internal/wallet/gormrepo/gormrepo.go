@@ -271,12 +271,15 @@ func (r *Repo) RedeemCode(ctx context.Context, tenantID int64, code string, user
 	return row.AmountUSD, nil
 }
 
-// ListCodesByTenant 列出某租户的全部兑换码（按 id 倒序）。
+// redemptionListCap 是自助兑换码列表「最新 N 条」的安全上限，防止无界 Find 随建码累积而 OOM/长阻塞（按 id 倒序取最新 N 条）。
+const redemptionListCap = 1000
+
+// ListCodesByTenant 列出某租户的兑换码（按 id 倒序，上限最新 redemptionListCap 条）。
 // 强制 WHERE tenant_id=? —— 代理自助列表的越权防线（scopeByTenant）。
 func (r *Repo) ListCodesByTenant(ctx context.Context, tenantID int64) ([]wallet.RedemptionCode, error) {
 	var rows []redemptionRow
 	if err := r.db.WithContext(ctx).
-		Where("tenant_id = ?", tenantID).Order("id desc").Find(&rows).Error; err != nil {
+		Where("tenant_id = ?", tenantID).Order("id desc").Limit(redemptionListCap).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]wallet.RedemptionCode, 0, len(rows))
