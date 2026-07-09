@@ -122,6 +122,7 @@ func (a *App) ActivatePaidAgentPlanOrder(ctx context.Context, orderNo string, pa
 	if !IsAgentPlanOrderNo(orderNo) {
 		return payment.ErrOrderInvalid
 	}
+	// 先轻量读一次拿 owner,用于按 owner 串行化激活(下方 lockAgentActivation)。
 	var ord agentPlanOrderRow
 	if err := a.DB.WithContext(ctx).Take(&ord, "order_no = ?", orderNo).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -129,8 +130,24 @@ func (a *App) ActivatePaidAgentPlanOrder(ctx context.Context, orderNo string, pa
 		}
 		return err
 	}
+
+	// 按 owner 串行化:支付平台常并发重推回调,若两个回调都读到 pending 都进 provision,新代理
+	// 会各自建同一 owner 派生的同一 slug 租户(唯一键兜底不产生孤儿,但会撞键报错 + 无谓重试)。
+	// 串行后同一 owner 至多一个激活在跑,其余在临界区内重读到 activated 即幂等短路,杜绝双 provision。
+	// 刻意保持 provision 先行、CAS 后置的既有顺序 → 维持「activated ⟹ 已 provision」不变量(AGT 无
+	// 对账兜底,绝不能留 activated-未provision 卡单)。锁细节见 activation_lock.go。
+	unlock := lockAgentActivation(ord.OwnerUserID)
+	defer unlock()
+
+	// 临界区内重读订单:拿锁前可能已被并发赢家激活(owner/amount/grant 快照不会变,仅状态会变)。
+	if err := a.DB.WithContext(ctx).Take(&ord, "order_no = ?", orderNo).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return payment.ErrOrderInvalid
+		}
+		return err
+	}
 	if ord.Status == agtOrderActivated {
-		return nil // 幂等：已激活
+		return nil // 幂等：已激活（含并发败者在此短路，不再进 provision）
 	}
 	if ord.Status != agtOrderPending {
 		return payment.ErrOrderInvalid
@@ -140,7 +157,7 @@ func (a *App) ActivatePaidAgentPlanOrder(ctx context.Context, orderNo string, pa
 		return payment.ErrAmountMismatch
 	}
 
-	// ③ 开通/升级代理 + 写会员台账（幂等）。
+	// ③ 开通/升级代理 + 写会员台账（幂等；已由上方 owner 锁保证同一 owner 串行进入）。
 	agentTenantID, err := a.provisionAgentFromOrder(ctx, &ord)
 	if err != nil {
 		return err
