@@ -360,19 +360,24 @@ func (r *Repo) Detail(ctx context.Context, f breakage.Filter, now int64) ([]brea
 //	statusExhausted || pct>=100 → exhausted;  pct>=95 → critical;  pct>=80 → warn;  否则 none
 //
 // 仅 warn/critical/exhausted 有片段;AlertNone("") 语义是「不过滤」→ 返回空片段(不加 WHERE)。
-// 列走别名 s.*(与 Detail 的 base 同源)。阈值用「used*100 与 limit*阈值」的乘法比较:既规避除零,
-// 又在 MySQL DECIMAL 列上是精确算术(避免 used/limit 浮点在边界与 Go 分歧)。exhausted 判据里的
-// status='exhausted' 对齐 Detail 中 `status == "exhausted"`(惰性过期只把 active→expired,不改 exhausted)。
+// 已用量用 nativeUsedUSD（原生桶 us.amount_used 投影，与 Detail 展示 SELECT 同一表达式）——**绝不读死列
+// s.used_usd**（恒 0，见 nativeUsedUSD 注释）：合并 500L「used_usd→原生桶真源」后，过滤源必须与展示源一致，
+// 否则 s.used_usd=0 使谓词永假、alert 过滤恒空（merge 回归，2026-07-09 修）。us 别名由 Detail base 的
+// joinNativeUsage 供给，本片段总在其后 Where 追加，故列可解析。阈值仍用「used*100 与 limit*阈值」乘法比较
+// （规避除零）；used 与展示同一 COALESCE(amount_used/QuotaPerUnit) 表达式，SQL 过滤与 Go AlertLevelForPct(pct)
+// 边界完全同源、无分歧。exhausted 判据里 status='exhausted' 对齐 Detail 中 `status == "exhausted"`
+// (惰性过期只把 active→expired,不改 exhausted)。
 func alertLevelWhere(level breakage.AlertLevel) (string, []any) {
+	u := nativeUsedUSD // 真实已用 USD（原生桶投影），与 Detail 展示口径同源；不读死列 s.used_usd
 	switch level {
 	case breakage.AlertExhausted:
-		return "(s.status = ? OR (s.month_limit_usd > 0 AND s.used_usd >= s.month_limit_usd))",
+		return "(s.status = ? OR (s.month_limit_usd > 0 AND " + u + " >= s.month_limit_usd))",
 			[]any{"exhausted"}
 	case breakage.AlertCritical:
-		return "(s.status <> ? AND s.month_limit_usd > 0 AND s.used_usd < s.month_limit_usd AND s.used_usd * 100 >= s.month_limit_usd * 95)",
+		return "(s.status <> ? AND s.month_limit_usd > 0 AND " + u + " < s.month_limit_usd AND " + u + " * 100 >= s.month_limit_usd * 95)",
 			[]any{"exhausted"}
 	case breakage.AlertWarn:
-		return "(s.status <> ? AND s.month_limit_usd > 0 AND s.used_usd * 100 < s.month_limit_usd * 95 AND s.used_usd * 100 >= s.month_limit_usd * 80)",
+		return "(s.status <> ? AND s.month_limit_usd > 0 AND " + u + " * 100 < s.month_limit_usd * 95 AND " + u + " * 100 >= s.month_limit_usd * 80)",
 			[]any{"exhausted"}
 	default:
 		return "", nil
