@@ -73,3 +73,15 @@ mysql_data/
 .playwright-cli/
 node_modules/
 repomix-output.xml
+
+# ============================================================
+# CCG 本地专用产物——只留本地、不入库 (2026-07-08)
+# server-backup: 14MB 整树归档 tar.gz;server-wip-backup: 源码快照 + .env 密钥(红线禁库)
+# tasks/*: 本地 CCG 任务元数据(与已跟踪的 add-support-tickets/archive 分开,仅忽略这批新目录)
+# ============================================================
+.ccg/server-backup/
+.ccg/server-wip-backup/
+.ccg/tasks/agent-join-landing/
+.ccg/tasks/agent-plan-purchase/
+.ccg/tasks/breakage-monitor/
+.ccg/tasks/homepage-header-nav/
