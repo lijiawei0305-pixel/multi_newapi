@@ -41,8 +41,8 @@ remote() { ssh "$SSH_HOST" "$@"; }
 DC="docker compose -p $STACK --env-file $ENV_FILE -f $COMPOSE_FILE"
 
 # 红线校验。
-[ "$STACK" != "$PROD_STACK" ] || die "拒绝部署现网栈 $PROD_STACK。"
-case "$COMPOSE_FILE$ENV_FILE$SERVER_REPO" in *"$PROD_STACK"*) die "路径指向现网 $PROD_STACK。";; esac
+[ "$STACK" != "${PROD_STACK}" ] || die "拒绝部署现网栈 ${PROD_STACK}。"
+case "$COMPOSE_FILE$ENV_FILE$SERVER_REPO" in *"${PROD_STACK}"*) die "路径指向现网 ${PROD_STACK}。";; esac
 
 TS="$(date +%Y%m%d-%H%M%S)"
 TAG="deploy-$TS"
@@ -56,9 +56,9 @@ else
 fi
 
 # ── 2) 打 git tag（回滚标记；本地轻量 tag，不 push）────────────────────────────────
-log "2/8 打 git tag $TAG（回滚标记）"
-( cd "$LOCAL_REPO" && git tag -f "$TAG" >/dev/null 2>&1 ) \
-  && ok "已打 tag $TAG" || log "（git tag 跳过：非 git 环境或无变更）"
+log "2/8 打 git tag ${TAG}（回滚标记）"
+( cd "$LOCAL_REPO" && git tag -f "${TAG}" >/dev/null 2>&1 ) \
+  && ok "已打 tag ${TAG}" || log "（git tag 跳过：非 git 环境或无变更）"
 
 # ── 3) 存 :prev 镜像（重建前；供 rollback.sh 秒级回滚）────────────────────────────
 log "3/8 服务器保存当前镜像为 :prev（回滚用）"
@@ -114,7 +114,7 @@ echo
 if [ "$healthy" = "1" ]; then
   ok "8/8 健康通过：app /api/status success（$STACK）"
   remote "$SERVER_REPO/deploy/ops/healthcheck.sh || true"   # 打印完整巡检（不阻断）
-  ok "部署成功 ✅ tag=$TAG。回滚命令：ssh $SSH_HOST '$SERVER_REPO/deploy/ops/rollback.sh'"
+  ok "部署成功 ✅ tag=${TAG}。回滚命令：ssh $SSH_HOST '$SERVER_REPO/deploy/ops/rollback.sh'"
   exit 0
 fi
 
