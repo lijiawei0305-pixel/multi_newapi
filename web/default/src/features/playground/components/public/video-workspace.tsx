@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
-import { Clapperboard, Loader2, RotateCcw, VideoOff } from 'lucide-react'
+import { Clapperboard, Download, Loader2, RotateCcw, VideoOff } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,7 +36,6 @@ import type { WorkspaceProps } from '../../types'
 export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
   const [prompt, setPrompt] = useState('')
   const [duration, setDuration] = useState('')
-  const [size, setSize] = useState('')
   const [seed, setSeed] = useState('')
 
   const { submit, status, progress, videoUrl, error, reset } =
@@ -61,7 +60,6 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
       ...(seed !== '' && !isNaN(Number(seed))
         ? { seed: Number(seed) }
         : {}),
-      ...(size.trim() !== '' ? { response_format: size.trim() } : {}),
     }
 
     void submit(apiKey, params)
@@ -71,14 +69,24 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
     reset()
     setPrompt('')
     setDuration('')
-    setSize('')
     setSeed('')
+  }
+
+  const handleDownload = () => {
+    if (!videoUrl) return
+    // videoUrl 是 blob: 或 data:（同源/内联），原生 a[download] 即可下载
+    const a = document.createElement('a')
+    a.href = videoUrl
+    a.download = '生成视频.mp4'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
   }
 
   return (
     <div className='flex h-full flex-col gap-4 p-4'>
       {/* 可选参数区域 */}
-      <div className='grid grid-cols-3 gap-3'>
+      <div className='grid grid-cols-2 gap-3'>
         <div className='flex flex-col gap-1.5'>
           <Label htmlFor='video-duration'>时长（秒）</Label>
           <Input
@@ -88,17 +96,6 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
             placeholder='例如：5'
             value={duration}
             onChange={(e) => setDuration(e.target.value)}
-            disabled={isGenerating}
-          />
-        </div>
-        <div className='flex flex-col gap-1.5'>
-          <Label htmlFor='video-size'>格式</Label>
-          <Input
-            id='video-size'
-            type='text'
-            placeholder='例如：720p'
-            value={size}
-            onChange={(e) => setSize(e.target.value)}
             disabled={isGenerating}
           />
         </div>
@@ -147,6 +144,13 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
       </PromptInput>
 
       {/* 状态展示区域 */}
+      {status === 'idle' && (
+        <div className='flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground'>
+          <Clapperboard className='size-12 opacity-30' />
+          <p className='text-sm'>输入提示词，点击「生成」开始创作视频</p>
+        </div>
+      )}
+
       {isGenerating && (
         <div className='bg-muted/50 flex items-center gap-3 rounded-lg border border-border p-4'>
           <Loader2 className='text-primary size-5 shrink-0 animate-spin' />
@@ -161,20 +165,34 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
           <video
             controls
             src={videoUrl}
+            aria-label='生成的视频'
             className={cn(
               'w-full max-w-2xl rounded-xl border border-border bg-muted',
               'shadow-md'
             )}
-          />
-          <Button
-            variant='outline'
-            size='sm'
-            className='w-fit'
-            onClick={handleReset}
           >
-            <RotateCcw className='mr-1.5 size-3.5' />
-            重新生成
-          </Button>
+            您的浏览器不支持视频播放
+          </video>
+          <div className='flex gap-2'>
+            <Button
+              variant='outline'
+              size='sm'
+              className='w-fit'
+              onClick={handleDownload}
+            >
+              <Download className='mr-1.5 size-3.5' />
+              下载视频
+            </Button>
+            <Button
+              variant='outline'
+              size='sm'
+              className='w-fit'
+              onClick={handleReset}
+            >
+              <RotateCcw className='mr-1.5 size-3.5' />
+              重新生成
+            </Button>
+          </div>
         </div>
       )}
 

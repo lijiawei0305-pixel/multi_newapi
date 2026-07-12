@@ -114,3 +114,12 @@ export const CATALOG_FILTERS: { value: CatalogFilter; label: string }[] = [
   { value: 'image', label: '图片' },
   { value: 'video', label: '视频' },
 ]
+
+/**
+ * 计费展示文案。按次计费（quota_type=1，图片/视频模型多为此）其 model_ratio
+ * 常为 0，直接展示会得到误导性的「倍率 0」；此处按 quota_type 区分展示。
+ */
+export function formatModelRate(m: PricingModel): string {
+  if (m.quota_type === 1) return '按次计费'
+  return m.model_ratio && m.model_ratio > 0 ? `倍率 ${m.model_ratio}×` : '—'
+}

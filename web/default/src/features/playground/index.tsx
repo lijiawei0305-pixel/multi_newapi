@@ -83,7 +83,6 @@ function PlaygroundPublicContent() {
   const [selectedKeyId, setSelectedKeyId] = useState<number | null>(() =>
     readLastKeyId(),
   )
-  const [selectedKeyName, setSelectedKeyName] = useState<string | null>(null)
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
   const [filter, setFilter] = useState<CatalogFilter>('all')
   const [search, setSearch] = useState('')
@@ -109,6 +108,8 @@ function PlaygroundPublicContent() {
     models,
     isLoading: modelsLoading,
     counts,
+    error: modelsError,
+    refetch: refetchModels,
   } = useModelCatalog({ group, filter, search })
 
   // ── 选中 key 的懒揭示（仅对选中单个 id 揭示一次，不预揭示整表）───────────────
@@ -116,7 +117,6 @@ function PlaygroundPublicContent() {
     // 未登录或未选 → 清空凭据
     if (!isAuthed || selectedKeyId == null) {
       setRevealedKey(null)
-      setSelectedKeyName(null)
       setApiKey(null)
       return
     }
@@ -130,7 +130,6 @@ function PlaygroundPublicContent() {
       setSelectedKeyId(null)
       writeLastKeyId(null)
       setRevealedKey(null)
-      setSelectedKeyName(null)
       setApiKey(null)
       return
     }
@@ -138,12 +137,9 @@ function PlaygroundPublicContent() {
     // 仅可用（status=1）密钥才揭示；否则不注入凭据
     if (key.status !== API_KEY_STATUS.ENABLED) {
       setRevealedKey(null)
-      setSelectedKeyName(key.name)
       setApiKey(null)
       return
     }
-
-    setSelectedKeyName(key.name)
 
     let cancelled = false
     void reveal(selectedKeyId)
@@ -172,11 +168,15 @@ function PlaygroundPublicContent() {
   // ── 门控判定（§5）─────────────────────────────────────────────────────────
   // 未登录 / 已登录未选（或未成功揭示）→ 禁用发送 + 显示提示
   const hasCredential = isAuthed && !!revealedKey
-  const gatingMessage = !isAuthed
-    ? '请先登录并选择 API 密钥'
-    : !hasCredential
-      ? '请先在顶部选择 API 密钥后再生成'
-      : null
+  const hasNoKeys = isAuthed && !keysLoading && keys.length === 0
+  let gatingMessage: string | null = null
+  if (!isAuthed) {
+    gatingMessage = '请先登录并选择 API 密钥'
+  } else if (hasNoKeys) {
+    gatingMessage = '您还没有可用的 API 密钥，请点击「创建 API 密钥」'
+  } else if (!hasCredential) {
+    gatingMessage = '请先在顶部选择 API 密钥后再生成'
+  }
 
   // ── 当前能力工作区 ─────────────────────────────────────────────────────────
   const capability = selectedModel ? getPrimaryCapability(selectedModel) : 'chat'
@@ -188,11 +188,14 @@ function PlaygroundPublicContent() {
   function renderWorkspace() {
     switch (capability) {
       case 'video':
-        return <VideoWorkspace {...workspaceProps} />
+        // key=模型名：切换到不同视频模型时重挂载，清空上一次的轮询/结果
+        return <VideoWorkspace key={workspaceProps.model} {...workspaceProps} />
       case 'image':
-        return <ImageWorkspace {...workspaceProps} />
+        // key=模型名：切换到不同图片模型时重挂载，清空上一次生成的图片
+        return <ImageWorkspace key={workspaceProps.model} {...workspaceProps} />
       case 'chat':
       default:
+        // 聊天不加 key：切换模型应保留对话历史
         return <ChatWorkspace {...workspaceProps} />
     }
   }
@@ -241,6 +244,8 @@ function PlaygroundPublicContent() {
             onSelect={setSelectedModel}
             loading={modelsLoading}
             counts={counts}
+            error={modelsError}
+            onRetry={refetchModels}
           />
         </div>
 

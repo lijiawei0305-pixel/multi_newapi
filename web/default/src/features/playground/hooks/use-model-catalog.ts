@@ -51,7 +51,7 @@ export function useModelCatalog({
   filter,
   search,
 }: UseModelCatalogOptions) {
-  const { models: allModels, isLoading, error } = usePricingData()
+  const { models: allModels, isLoading, error, refetch } = usePricingData()
 
   /** Step 1 — apply group filter */
   const groupFiltered = useMemo(() => {
@@ -82,5 +82,5 @@ export function useModelCatalog({
     [capFiltered, search]
   )
 
-  return { models, isLoading, error, counts }
+  return { models, isLoading, error, counts, refetch }
 }

@@ -26,9 +26,9 @@ interface GatingAlertProps {
 
 export function GatingAlert({ message }: GatingAlertProps) {
   return (
-    <Alert className="border-warning/30 bg-warning/10 text-warning-foreground">
-      <AlertTriangle />
-      <AlertDescription className='text-warning-foreground'>
+    <Alert className="border-warning/30 bg-warning/10">
+      <AlertTriangle className="text-warning" />
+      <AlertDescription className="text-foreground">
         {message}
       </AlertDescription>
     </Alert>

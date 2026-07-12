@@ -110,7 +110,7 @@ export function useTopNavLinks(): TopNavLink[] {
   // Agent Join（代理加盟）—— 公开落地页
   if (modules?.agentJoin !== false) {
     links.push({
-      title: t('Agent Program', { defaultValue: 'Agent Program' }),
+      title: t('Agent Program', { defaultValue: '代理加盟' }),
       href: '/agent-join',
     })
   }

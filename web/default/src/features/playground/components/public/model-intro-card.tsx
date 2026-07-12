@@ -29,7 +29,7 @@ import {
 import type { PricingModel } from '@/features/pricing/types'
 import { cn } from '@/lib/utils'
 
-import { getModelCapabilities } from '../../lib/capabilities'
+import { formatModelRate, getModelCapabilities } from '../../lib/capabilities'
 import type { PlaygroundCapability } from '../../types'
 
 // ---------------------------------------------------------------------------
@@ -85,6 +85,9 @@ export function ModelIntroCard({ model, className }: ModelIntroCardProps) {
             src={iconSrc}
             alt={model.model_name}
             className="size-10 rounded-lg object-contain"
+            onError={(e) => {
+              ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+            }}
           />
         )}
         <div className="min-w-0 flex-1">
@@ -114,12 +117,12 @@ export function ModelIntroCard({ model, className }: ModelIntroCardProps) {
           </div>
         )}
 
-        {/* Ratio */}
+        {/* 计费方式 */}
         <div className="flex flex-col gap-1.5">
-          <p className="text-muted-foreground text-xs font-medium">模型倍率</p>
+          <p className="text-muted-foreground text-xs font-medium">计费方式</p>
           <div className="bg-muted rounded-lg px-3 py-2">
             <span className="text-foreground text-sm font-medium">
-              {model.model_ratio}×
+              {formatModelRate(model)}
             </span>
           </div>
         </div>

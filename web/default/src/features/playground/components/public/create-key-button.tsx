@@ -41,7 +41,7 @@ export function CreateKeyButton({ className }: CreateKeyButtonProps) {
 
   return (
     <Button
-      variant="link"
+      variant="outline"
       size="default"
       className={cn('gap-1', className)}
       onClick={handleClick}

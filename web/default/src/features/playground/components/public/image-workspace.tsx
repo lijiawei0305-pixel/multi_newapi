@@ -141,7 +141,7 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
             className={cn(
               'overflow-auto p-1',
               isGrid
-                ? 'grid grid-cols-2 gap-3'
+                ? 'grid grid-cols-1 gap-3 sm:grid-cols-2'
                 : 'flex items-center justify-center'
             )}
           >
@@ -158,8 +158,8 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
                   className='group relative overflow-hidden rounded-lg border border-border bg-muted'
                 >
                   <img
-                    alt={item.revised_prompt ?? prompt}
-                    className='h-auto w-full object-cover'
+                    alt={item.revised_prompt || prompt || `生成图片 ${index + 1}`}
+                    className='h-auto max-h-full w-full object-contain'
                     src={src}
                   />
                   {/* 下载按钮，悬停显示 */}
@@ -201,7 +201,7 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
             <PromptInputTools>
               {/* 数量选择 */}
               <Select
-                defaultValue={n}
+                value={n}
                 onValueChange={(val) => setN(val)}
               >
                 <SelectTrigger size='sm' className='h-7 min-w-[72px] text-xs'>
@@ -218,7 +218,7 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
 
               {/* 尺寸选择 */}
               <Select
-                defaultValue={size}
+                value={size}
                 onValueChange={(val) => setSize(val)}
               >
                 <SelectTrigger size='sm' className='h-7 min-w-[120px] text-xs'>

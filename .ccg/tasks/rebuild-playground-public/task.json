@@ -4,7 +4,7 @@
   "status": "in_progress",
   "strategy": "full-collaborate",
   "currentPhase": "6-final",
-  "nextAction": "代码完成（4 Critical + 5 Warning 已修，1 Critical 判定误报）。待用户定服务器构建验证时机：rsync→/root/newapi-test→build:check（tsgo -b && rsbuild build）",
+  "nextAction": "打磨 8 项 + Workflow⑤ 对抗验证抓出的 4 Critical(CI门)+5 Warning 全部已修并复核干净。静态层面 lint/copyright/typecheck 应通过。仅剩服务器 build:check 实测 + A类布局响应式实测调优，待用户定时机",
   "gate": "await-user-server-build",
   "execMode": "claude-workflows-orchestrated",
   "branch": "500L",

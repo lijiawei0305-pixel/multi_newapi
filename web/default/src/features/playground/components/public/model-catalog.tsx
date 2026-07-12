@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Sparkles } from 'lucide-react'
+import { PackageOpen, Sparkles } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils'
 import type { PricingModel } from '@/features/pricing/types'
 import {
   CATALOG_FILTERS,
+  formatModelRate,
   getModelCapabilities,
 } from '../../lib/capabilities'
 import type { CatalogFilter } from '../../types'
@@ -58,6 +59,8 @@ export interface ModelCatalogProps {
   onSelect: (m: PricingModel) => void
   loading: boolean
   counts: Record<CatalogFilter, number>
+  error?: Error | null
+  onRetry?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -76,10 +79,20 @@ function ModelCard({ model, selected, onSelect }: ModelCardProps) {
   return (
     <Card
       size='sm'
+      role='button'
+      tabIndex={0}
+      aria-pressed={selected}
       onClick={() => onSelect(model)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect(model)
+        }
+      }}
       className={cn(
         'cursor-pointer transition-shadow',
         'hover:ring-2 hover:ring-foreground/15',
+        'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
         selected && 'ring-2 ring-foreground/30 bg-muted/40'
       )}
     >
@@ -128,9 +141,9 @@ function ModelCard({ model, selected, onSelect }: ModelCardProps) {
             )}
           </div>
 
-          {/* Ratio badge */}
+          {/* Ratio / 计费 badge */}
           <Badge variant='outline' className='ml-auto shrink-0 self-start text-xs'>
-            倍率&nbsp;{model.model_ratio}
+            {formatModelRate(model)}
           </Badge>
         </div>
       </CardHeader>
@@ -159,18 +172,21 @@ export function ModelCatalog({
   onSelect,
   loading,
   counts,
+  error,
+  onRetry,
 }: ModelCatalogProps) {
   return (
     <div className='flex h-full flex-col gap-3'>
       {/* Header */}
       <div className='shrink-0 px-1'>
-        <p className='text-base font-medium text-foreground'>AI 大模型聚合平台</p>
+        <p className='text-base font-medium text-foreground'>模型目录</p>
       </div>
 
       {/* Search */}
       <div className='shrink-0 px-1'>
         <Input
           placeholder='搜索模型'
+          aria-label='搜索模型'
           value={search}
           onChange={(e) => onSearch(e.target.value)}
           className='h-8 rounded-lg'
@@ -189,7 +205,14 @@ export function ModelCatalog({
           >
             {label}
             {counts[value] !== undefined && (
-              <span className='ml-1 text-muted-foreground'>
+              <span
+                className={cn(
+                  'ml-1 tabular-nums',
+                  filter === value
+                    ? 'text-secondary-foreground/60'
+                    : 'text-muted-foreground'
+                )}
+              >
                 {counts[value]}
               </span>
             )}
@@ -204,13 +227,33 @@ export function ModelCatalog({
             {Array.from({ length: 5 }).map((_, i) => (
               <div
                 key={i}
-                className='h-16 animate-pulse rounded-xl bg-muted'
-              />
+                className='flex items-start gap-2.5 rounded-xl bg-card p-3 ring-1 ring-foreground/10'
+              >
+                <div className='size-8 shrink-0 animate-pulse rounded-md bg-muted' />
+                <div className='flex-1 space-y-2 py-0.5'>
+                  <div className='h-3.5 w-1/2 animate-pulse rounded bg-muted' />
+                  <div className='h-3 w-4/5 animate-pulse rounded bg-muted' />
+                </div>
+              </div>
             ))}
           </div>
+        ) : error ? (
+          <div className='flex h-40 flex-col items-center justify-center gap-3 px-4 text-center'>
+            <p className='text-sm text-muted-foreground'>
+              模型加载失败，请稍后重试
+            </p>
+            {onRetry && (
+              <Button size='sm' variant='outline' onClick={onRetry}>
+                重试
+              </Button>
+            )}
+          </div>
         ) : models.length === 0 ? (
-          <div className='flex h-32 items-center justify-center'>
-            <p className='text-sm text-muted-foreground'>暂无模型</p>
+          <div className='flex h-40 flex-col items-center justify-center gap-3 px-4 text-center text-muted-foreground'>
+            <div className='flex size-12 items-center justify-center rounded-full bg-muted'>
+              <PackageOpen className='size-6' />
+            </div>
+            <p className='text-sm'>没有匹配的模型，试试其他关键词或筛选</p>
           </div>
         ) : (
           <div className='space-y-2 pb-2 pt-1'>
