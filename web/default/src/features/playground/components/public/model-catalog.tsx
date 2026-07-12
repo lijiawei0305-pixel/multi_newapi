@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { PackageOpen, Sparkles } from 'lucide-react'
+import { PackageOpen } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 import type { PricingModel } from '@/features/pricing/types'
 import {
@@ -66,7 +67,12 @@ interface ModelCardProps {
 
 function ModelCard({ model, selected, onSelect }: ModelCardProps) {
   const capabilities = getModelCapabilities(model)
-  const iconSrc = model.icon ?? model.vendor_icon
+  // icon / vendor_icon 是 lobe-icon 的「key」（如 "Gemini"），不是图片 URL；
+  // 必须经 getLobeIcon 解析为真实厂商 logo 组件（与「模型广场」一致），
+  // 直接塞进 <img src> 会永远加载失败并回退占位图标。
+  const iconKey = model.icon || model.vendor_icon
+  const initial = model.model_name?.charAt(0).toUpperCase() || '?'
+  const vendorName = model.vendor_name?.trim()
 
   return (
     <Card
@@ -90,40 +96,31 @@ function ModelCard({ model, selected, onSelect }: ModelCardProps) {
     >
       <CardHeader>
         <div className='flex items-start gap-2.5'>
-          {/* Model icon */}
-          <div className='mt-0.5 flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted'>
-            {iconSrc ? (
-              <img
-                src={iconSrc}
-                alt={model.model_name}
-                className='size-full object-contain'
-                onError={(e) => {
-                  // fallback to placeholder on broken image
-                  ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                  const next = e.currentTarget.nextElementSibling as HTMLElement | null
-                  if (next) next.style.display = 'flex'
-                }}
-              />
-            ) : null}
-            <span
-              className={cn(
-                'flex size-full items-center justify-center text-muted-foreground',
-                iconSrc ? 'hidden' : 'flex'
-              )}
-            >
-              <Sparkles className='size-4' />
-            </span>
+          {/* Model icon —— 真实厂商 logo，缺省回退首字母 */}
+          <div className='mt-0.5 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/60'>
+            {iconKey ? (
+              getLobeIcon(iconKey, 22)
+            ) : (
+              <span className='text-sm font-semibold text-muted-foreground'>
+                {initial}
+              </span>
+            )}
           </div>
 
-          {/* Name + badges */}
+          {/* Name + vendor + badges */}
           <div className='min-w-0 flex-1'>
             <CardTitle className='truncate text-sm leading-5'>
               {model.model_name}
             </CardTitle>
+            {vendorName && (
+              <p className='mt-0.5 truncate text-xs text-muted-foreground'>
+                {vendorName}
+              </p>
+            )}
 
             {/* Capability badges */}
             {capabilities.length > 0 && (
-              <div className='mt-1 flex flex-wrap gap-1'>
+              <div className='mt-1.5 flex flex-wrap gap-1'>
                 {capabilities.map((cap) => (
                   <Badge key={cap} variant='secondary'>
                     {CAPABILITY_LABELS[cap] ?? cap}
@@ -143,13 +140,12 @@ function ModelCard({ model, selected, onSelect }: ModelCardProps) {
         </div>
       </CardHeader>
 
-      {model.description && (
-        <CardContent>
-          <CardDescription className='line-clamp-2 text-xs'>
-            {model.description}
-          </CardDescription>
-        </CardContent>
-      )}
+      {/* 描述常显 + 兜底占位，令卡片等高、信息更饱满 */}
+      <CardContent>
+        <CardDescription className='line-clamp-2 min-h-[2rem] text-xs leading-relaxed'>
+          {model.description || '暂无模型简介'}
+        </CardDescription>
+      </CardContent>
     </Card>
   )
 }

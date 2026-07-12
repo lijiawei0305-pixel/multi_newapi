@@ -42,6 +42,7 @@ import { cn } from '@/lib/utils'
 import { PROMPT_INPUT_SHELL_CLASS } from '../../constants'
 import { useImageGeneration } from '../../hooks/use-image-generation'
 import type { WorkspaceProps } from '../../types'
+import { ModelIntroHero } from './model-intro-card'
 
 // 触发浏览器下载：临时 <a download> 点击后即移除
 function triggerDownload(href: string, filename: string) {
@@ -68,7 +69,7 @@ const SIZE_OPTIONS = [
   { value: '1792x1024', label: '1792×1024（横版）' },
 ]
 
-export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
+export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
   const [prompt, setPrompt] = useState('')
   const [n, setN] = useState<string>('1')
   const [size, setSize] = useState<string>('1024x1024')
@@ -143,9 +144,9 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
       {/* 结果区域 */}
       <div className='flex min-h-0 flex-1 flex-col'>
         {status === 'idle' && (
-          <div className='flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground'>
-            <ImageIcon className='size-12 opacity-30' />
-            <p className='text-sm'>输入提示词，点击「生成」开始创作</p>
+          <div className='flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto py-6 text-muted-foreground'>
+            <ModelIntroHero model={introModel ?? null} />
+            <p className='text-xs'>输入提示词，点击「生成」开始创作</p>
           </div>
         )}
 

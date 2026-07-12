@@ -35,7 +35,7 @@ import { getPrimaryCapability } from './lib/capabilities'
 import { KeySelector } from './components/public/key-selector'
 import { CreateKeyButton } from './components/public/create-key-button'
 import { ModelCatalog } from './components/public/model-catalog'
-import { ModelIntroCard } from './components/public/model-intro-card'
+import { ModelIntroHero } from './components/public/model-intro-card'
 import { GatingAlert } from './components/public/gating-alert'
 import { ChatWorkspace } from './components/public/chat-workspace'
 import { ImageWorkspace } from './components/public/image-workspace'
@@ -197,6 +197,7 @@ function PlaygroundPublicContent() {
     apiKey: revealedKey ?? '',
     model: selectedModel?.model_name ?? '',
     group: selectedKey?.group ?? '',
+    introModel: selectedModel,
   }
 
   function renderWorkspace() {
@@ -273,14 +274,16 @@ function PlaygroundPublicContent() {
           />
         </div>
 
-        {/* 右：模型介绍 + 当前能力工作区 */}
-        <div className='grid min-h-0 grid-rows-[auto_1fr] gap-4 overflow-hidden'>
-          <div className='max-h-[45%] min-h-0'>
-            <ModelIntroCard model={selectedModel} />
-          </div>
-          <div className='min-h-0 overflow-hidden rounded-xl border border-border bg-card'>
-            {renderWorkspace()}
-          </div>
+        {/* 右：工作区（未选模型时以「模型介绍」英雄区占据主区居中引导；
+            选中后由各工作区在空态内渲染介绍卡作为中央主角） */}
+        <div className='min-h-0 overflow-hidden rounded-xl border border-border bg-card'>
+          {selectedModel ? (
+            renderWorkspace()
+          ) : (
+            <div className='flex h-full items-center justify-center overflow-y-auto p-6'>
+              <ModelIntroHero model={null} />
+            </div>
+          )}
         </div>
       </div>
     </div>

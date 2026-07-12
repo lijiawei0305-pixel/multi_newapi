@@ -37,7 +37,12 @@ import type { WorkspaceProps } from '../../types'
  * 抽取迁移而来。凭据已由 use-stream-request 经 credential context 注入，
  * 此处无需传 Authorization；apiKey 为空时禁用发送（外层门控亦会拦截）。
  */
-export function ChatWorkspace({ apiKey, model, group }: WorkspaceProps) {
+export function ChatWorkspace({
+  apiKey,
+  model,
+  group,
+  introModel,
+}: WorkspaceProps) {
   const {
     config,
     parameterEnabled,
@@ -147,6 +152,7 @@ export function ChatWorkspace({ apiKey, model, group }: WorkspaceProps) {
       <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
         <PlaygroundChat
           messages={messages}
+          introModel={introModel}
           isLoadingMessages={isLoadingMessages}
           onRegenerateMessage={handleRegenerate}
           onEditMessage={handleEditMessage}

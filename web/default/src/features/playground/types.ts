@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { PricingModel } from '@/features/pricing/types'
+
 // Message types
 export type MessageRole = 'user' | 'assistant' | 'system'
 
@@ -160,6 +162,8 @@ export interface WorkspaceProps {
   model: string
   /** 选中 key 所属分组；聊天用于同步 config.group，使模型列表拉取正确的组 */
   group?: string
+  /** 当前选中模型的完整对象；用于在工作区空态渲染「模型介绍」英雄区 */
+  introModel?: PricingModel | null
 }
 
 export interface ImageGenParams {

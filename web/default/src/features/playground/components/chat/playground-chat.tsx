@@ -27,6 +27,8 @@ import {
 import { Loader } from '@/components/ai-elements/loader'
 import { Message } from '@/components/ai-elements/message'
 
+import type { PricingModel } from '@/features/pricing/types'
+
 import {
   getChatMessageRenderState,
   getEditingMessageContent,
@@ -60,6 +62,8 @@ interface PlaygroundChatProps {
   onCancelEdit?: (open: boolean) => void
   onSaveEditAndSubmit?: (newContent: string) => void
   messageLayoutMode?: PlaygroundMessageLayoutMode
+  /** 当前选中模型：空态时以「模型介绍」英雄区呈现 */
+  introModel?: PricingModel | null
 }
 
 export function PlaygroundChat({
@@ -76,6 +80,7 @@ export function PlaygroundChat({
   onCancelEdit,
   onSaveEditAndSubmit,
   messageLayoutMode = 'alternating',
+  introModel,
 }: PlaygroundChatProps) {
   const { t } = useTranslation()
   const [editText, setEditText] = useState('')
@@ -195,7 +200,11 @@ export function PlaygroundChat({
 
   if (visibleMessages.length === 0 && onSelectPrompt) {
     chatContent = [
-      <PlaygroundEmptyState key='empty' onSelectPrompt={onSelectPrompt} />,
+      <PlaygroundEmptyState
+        key='empty'
+        onSelectPrompt={onSelectPrompt}
+        model={introModel}
+      />,
     ]
   }
 
