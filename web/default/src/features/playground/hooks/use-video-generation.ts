@@ -76,10 +76,14 @@ function extractTaskId(payload: unknown): string | null {
  * CORS 预检并失败（视频虽生成成功却播放不出）。对该代理端点归一为【同源相对路径】，
  * 使 blob 抓取始终同源、无预检；非代理端点（外链 CDN 等）保持原样。
  */
+// 代理端点形状：/v1/videos/<task_id>/content（后端 BuildProxyURL 固定拼接）。
+// 用精确形状而非仅 includes('/v1/videos/')，避免外链 CDN 路径恰好含该子串被误判为代理。
+const VIDEO_PROXY_PATH_RE = /\/v1\/videos\/[^/]+\/content$/
+
 function toSameOriginProxyPath(u: string): string {
   try {
     const parsed = new URL(u, window.location.origin)
-    if (parsed.pathname.includes('/v1/videos/')) {
+    if (VIDEO_PROXY_PATH_RE.test(parsed.pathname)) {
       return parsed.pathname + parsed.search
     }
     return u

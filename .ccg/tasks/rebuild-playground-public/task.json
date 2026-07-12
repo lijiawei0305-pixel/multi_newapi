@@ -4,7 +4,7 @@
   "status": "in_progress",
   "strategy": "full-collaborate",
   "currentPhase": "6-final",
-  "nextAction": "Workflow⑪展示审查抓出并已修: 视频外链直链直接<video src>(不再误走blob鉴权CORS挂)+代理走鉴权blob+MIME兜底 · revoke延后防播放中断 · 图片半失败项过滤(防<img src=''>) · 图片跨域下载不带Bearer直接新标签 → Workflow⑫验证。服务器build仍待",
+  "nextAction": "图片/视频展示专项审查+修复+Workflow⑫验证通过(代理判定收紧已补)。图片视频展示/播放三路径(data:/代理/外链直链)全覆盖。前端静态层面已无已知缺陷。唯剩服务器 rsbuild build(重生成routeTree)+build:check+部署 · 后台配图片/视频模型 · 上游渠道 待用户/运维",
   "gate": "await-user-server-build",
   "execMode": "claude-workflows-orchestrated",
   "branch": "500L",

@@ -106,3 +106,27 @@ imports/类型/JSX/令牌 + 组件 API（Alert flex 覆盖 grid、Card ring 合�
 
 ### 归到后续（未盲改）
 四态抽公共组件(大重构) · 聊天冗余模型/分组下拉隐藏(需改共享 PlaygroundInput) · video 布局翻转(结果上/输入下) · 介绍卡 max-h 比例 · 三步走清单 · 无密钥态强调 CreateKeyButton —— 大重构或需浏览器实测。
+
+---
+
+## 追加轮 6：图片/视频「能否真正播放展示」专项审查（Workflow⑪）+ 修复 + 验证（Workflow⑫）
+
+用户问「都能正常播放展示吗」。2 员对抗式追浏览器渲染链路（含真实 Go 后端证据）。
+
+### 后端实证结论
+- **图片 url = 免鉴权上游 CDN 直链**（image_handler.go IOCopy 原样透传，无 /v1/images 代理化）→ `<img src>` 无 401，展示 OK。
+- **视频 result_url 可能是免鉴权 CDN 直链**（task_polling.go:537 Kling/Ali/Doubao/Vidu/Jimeng）**或** newapi 代理 `/v1/videos/<id>/content`（需 Bearer, TokenOrUserAuth）。
+
+### 抓出并已修的真实展示缺陷
+- 🔴 **视频外链直链被误走 blob 鉴权取流** → 跨域 CORS 必挂 → 本可播的视频报「加载失败」。**修**：按地址分流——外链直链直接 `<video src>`；代理端点归一同源+鉴权 blob 取流。
+- 🔴 **图片 n>1 半失败项 `<img src=''>`** 破图+误请求页面。**修**：hook 逐项过滤（仅留有 url/b64_json 的项）。
+- 🟠 **代理 blob Content-Type 非视频** → `<video>` 拒解码。**修**：非 video/* 强制 `new Blob(..,{type:'video/mp4'})`。
+- 🟠 **播放中点「重新生成」立即 revoke blob** → 中断黑屏。**修**：revoke 延后宏任务（先卸载 `<video>`）。
+- 🟡 **图片跨域下载带 Bearer** 触发 CORS。**修**：非同源直接 window.open，同源才鉴权 blob。
+- 🟡（验证⑫补）**代理判定 includes('/v1/videos/') 过宽** → 外链路径含该子串会误判。**修**：精确正则 `/\/v1\/videos\/[^/]+\/content$/`。
+
+### 验证（Workflow⑫）
+图片修复全干净(0)；视频修复整体正确，Warning(判定过宽)已按建议收紧、Info(Blob 重包内存)无需改。
+
+### 结论
+**图片与视频修复后均能正常展示/播放**（三条路径 data:/代理/外链直链全覆盖）。真实跑通仍需：①服务器构建部署 ②后台配图片/视频模型 ③上游渠道可用。
