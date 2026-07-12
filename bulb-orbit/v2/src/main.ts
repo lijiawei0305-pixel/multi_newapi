@@ -1,9 +1,12 @@
 // ==========================================
-// 临时最小启动器（TEMPORARY） —— 仅为 Task 9 粒子灯泡提供一个可见的宿主页面，供视觉门截图核对。
-// Task 11 会整体重写本文件（轨道卫星、HUD、交互、后期 UnrealBloomPass 等），这里刻意保持最小。
+// 临时最小启动器（TEMPORARY） —— 为 Task 9 粒子灯泡 + Task 10 轨道/卫星提供一个可见的宿主页面，
+// 供视觉门截图核对。Task 11 会整体重写本文件（HUD、悬停/点击交互、后期 UnrealBloomPass 等），
+// 这里刻意保持最小。
 // ==========================================
 import * as THREE from 'three'
 import { createBulb } from './scene/bulb'
+import { createOrbits } from './scene/orbits'
+import { createSatellites, updateSatellites } from './scene/satellites'
 import { CAMERA_Z } from './scene/config'
 
 const canvas = document.getElementById('webgl-canvas')
@@ -48,11 +51,20 @@ async function main(): Promise<void> {
   const bulb = await createBulb()
   scene.add(bulb.group)
 
+  const rig = createOrbits()
+  scene.add(...rig.groups)
+  const satellites = await createSatellites(rig)
+
   const clock = new THREE.Clock()
 
   function animate(): void {
     requestAnimationFrame(animate)
-    bulb.update(clock.getElapsedTime(), mouse, hasPointer, camera)
+    const t = clock.getElapsedTime()
+    bulb.update(t, mouse, hasPointer, camera)
+    // 顺序要求：rig.update 先写入本帧的轨道进动 rotation.y，updateSatellites 的 billboard 抵消
+    // 父级（轨道组）世界旋转时才能读到本帧的值，否则贴图朝向会滞后一帧、随进动缓慢歪斜。
+    rig.update(t, camera)
+    updateSatellites(satellites, t, camera)
     renderer.render(scene, camera)
   }
   animate()
