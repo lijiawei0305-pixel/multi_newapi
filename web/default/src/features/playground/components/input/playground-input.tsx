@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -45,6 +45,11 @@ interface PlaygroundInputProps {
   onGroupChange: (value: string) => void
   hasMessages?: boolean
   onClearMessages?: () => void
+  /** 输入框文本（受控）——外层持有，便于 starter 提示词「填入而非发送」 */
+  text: string
+  onTextChange: (value: string) => void
+  /** 变化即聚焦输入框并把光标移到末尾（用于 starter 提示词填入后聚焦） */
+  focusSignal?: number
 }
 
 export function PlaygroundInput({
@@ -61,20 +66,37 @@ export function PlaygroundInput({
   onGroupChange,
   hasMessages = false,
   onClearMessages,
+  text,
+  onTextChange,
+  focusSignal,
 }: PlaygroundInputProps) {
   const { t } = useTranslation()
-  const [text, setText] = useState('')
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  // starter 提示词填入后聚焦输入框（光标移到末尾），方便用户继续编辑
+  useEffect(() => {
+    if (!focusSignal) return
+    const ta = rootRef.current?.querySelector('textarea')
+    if (!ta) return
+    ta.focus()
+    const end = ta.value.length
+    try {
+      ta.setSelectionRange(end, end)
+    } catch {
+      // 某些输入类型不支持 setSelectionRange，忽略
+    }
+  }, [focusSignal])
 
   const handleSubmit = (message: PromptInputMessage) => {
     const submittableText = getSubmittableInputText(message, disabled)
 
     if (!submittableText) return
     onSubmit(submittableText)
-    setText('')
+    onTextChange('')
   }
 
   return (
-    <div className='grid shrink-0 gap-4 px-1 md:pb-4'>
+    <div ref={rootRef} className='grid shrink-0 gap-4 px-1 md:pb-4'>
       <PromptInput
         className='relative'
         groupClassName='bg-background/95 dark:bg-background/80 border-border/70 shadow-[0_18px_60px_-32px_rgba(0,0,0,0.65)] ring-1 ring-foreground/5 rounded-xl overflow-hidden transition-all duration-200 focus-within:border-primary/45 focus-within:ring-primary/15 focus-within:shadow-[0_22px_70px_-34px_rgba(0,0,0,0.75)]'
@@ -87,7 +109,7 @@ export function PlaygroundInput({
           spellCheck={false}
           className='min-h-20 px-5 pt-4 pb-3 leading-7 md:min-h-24 md:text-base'
           disabled={disabled}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => onTextChange(event.target.value)}
           placeholder={t('Ask anything')}
           value={text}
         />

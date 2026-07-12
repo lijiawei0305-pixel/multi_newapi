@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -122,6 +122,15 @@ export function ChatWorkspace({
     [canSend, handleSendMessage]
   )
 
+  // 输入框受控文本 + 聚焦信号：starter 提示词点击后「填入输入框」而非立即发送，
+  // 让用户可先编辑再发送（对齐目标交互）。
+  const [inputText, setInputText] = useState('')
+  const [promptFillSignal, setPromptFillSignal] = useState(0)
+  const handleSelectPrompt = useCallback((prompt: string) => {
+    setInputText(prompt)
+    setPromptFillSignal((n) => n + 1)
+  }, [])
+
   const handleRegenerate = useCallback(
     (message: Parameters<typeof handleRegenerateMessage>[0]) => {
       if (!canSend) return
@@ -177,7 +186,7 @@ export function ChatWorkspace({
           onRegenerateMessage={handleRegenerate}
           onEditMessage={handleEditMessage}
           onDeleteMessage={handleDeleteMessage}
-          onSelectPrompt={handleSend}
+          onSelectPrompt={handleSelectPrompt}
           isGenerating={isGenerating}
           editingKey={editingMessageKey}
           onCancelEdit={handleEditOpenChange}
@@ -202,6 +211,9 @@ export function ChatWorkspace({
           onStop={stopGeneration}
           onSubmit={handleSend}
           hasMessages={messages.length > 0}
+          text={inputText}
+          onTextChange={setInputText}
+          focusSignal={promptFillSignal}
         />
       </div>
     </div>
