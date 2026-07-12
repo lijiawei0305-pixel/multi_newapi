@@ -4,7 +4,7 @@
   "status": "in_progress",
   "strategy": "full-collaborate",
   "currentPhase": "6-final",
-  "nextAction": "多会话历史已部署(commit ae822a2, image 1d62008dc1e9, /playground 200, marker新建对话入二进制): useConversationHistory(localStorage持久化/防抖同步/新建切换删除不丢会话) + ConversationHistoryBar(新建对话+历史下拉) 接入 ChatWorkspace 顶部。浏览器实测 www.wedreamhub.com/playground 全绿: 选中模型渲染英雄空态+starter, 新建对话清空回英雄且旧会话保留(历史计数不变), 历史下拉列出会话(标题+计数), 点击切换载入消息, 无 JS 错误。build:check 6 处既有类型债(非本次)。前置: 042a43e 左栏重设计+密钥可不选(已实测); 图标无需配置(vendor 已配 lobe key, 全渲染). 剩:后台配图片/视频模型 · 上游渠道 待用户/运维. 注:042a43e+ae822a2 本地已提交未 push origin/500L。",
+  "nextAction": "gpt-image-2 图片生成 + 分组倍率已部署(commit f95d9d4, image 6cc82994715f, /playground 200): 实测 gpt-image-2 只支持 /v1/images/generations(chat/completions 被上游硬拒), 已在后端 DB 把 models.id=4 endpoints 覆盖为 image-generation → 前端正确识别为图片模型走图片工作区(实测: 点 gpt-image-2 → 图片工作区+尺寸选择, 图片filter=1), 尺寸改 gpt-image 有效值 1024x1024(默认)/1536x1024/1024x1536; formatModelRate 改展示 group_ratio(实测 gpt-5.5 model_ratio=2 → 显示倍率1×=gpt-pro组倍率). build:check 类型债 6→4(修了 image-workspace 2处). 累计本会话6个提交(042a43e/ae822a2/7ebf6ce/f27a4c7/f95d9d4 + docs 23ffd82)全未 push origin/500L. 后端 gpt-image-2 endpoints 是 DB 变更非 git(整库重建需重跑 UPDATE). 剩: 用户登录态下端到端生图实测(Turnstile 挡自动登录, API 侧 curl 已验证返图) · 视频模型/上游渠道 待运维.",
   "gate": null,
   "execMode": "claude-workflows-orchestrated",
   "branch": "500L",
