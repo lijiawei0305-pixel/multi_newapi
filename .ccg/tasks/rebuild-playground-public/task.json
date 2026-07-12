@@ -1,0 +1,13 @@
+{
+  "id": "rebuild-playground-public",
+  "title": "Playground 公开创作页重建（聊天/图片/视频，共用选 key→生成门控与 /v1 计费）",
+  "status": "in_progress",
+  "strategy": "full-collaborate",
+  "currentPhase": "6-final",
+  "nextAction": "gpt-image-2 图片生成 + 分组倍率已部署(commit f95d9d4, image 6cc82994715f, /playground 200): 实测 gpt-image-2 只支持 /v1/images/generations(chat/completions 被上游硬拒), 已在后端 DB 把 models.id=4 endpoints 覆盖为 image-generation → 前端正确识别为图片模型走图片工作区(实测: 点 gpt-image-2 → 图片工作区+尺寸选择, 图片filter=1), 尺寸改 gpt-image 有效值 1024x1024(默认)/1536x1024/1024x1536; formatModelRate 改展示 group_ratio(实测 gpt-5.5 model_ratio=2 → 显示倍率1×=gpt-pro组倍率). build:check 类型债 6→4(修了 image-workspace 2处). 累计本会话6个提交(042a43e/ae822a2/7ebf6ce/f27a4c7/f95d9d4 + docs 23ffd82)全未 push origin/500L. 后端 gpt-image-2 endpoints 是 DB 变更非 git(整库重建需重跑 UPDATE). 剩: 用户登录态下端到端生图实测(Turnstile 挡自动登录, API 侧 curl 已验证返图) · 视频模型/上游渠道 待运维.",
+  "gate": null,
+  "execMode": "claude-workflows-orchestrated",
+  "branch": "500L",
+  "scope": "rebuild-playground-public",
+  "createdAt": "2026-07-12T03:59:56Z"
+}

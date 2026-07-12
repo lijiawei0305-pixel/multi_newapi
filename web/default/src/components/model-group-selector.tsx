@@ -20,7 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   Command,
   CommandEmpty,
@@ -610,19 +610,24 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
     [onGroupChange]
   )
 
+  // 用「原生 button」而非嵌套的 Button 基元作为 Popover 触发器：
+  // base-ui 通过 render 合并触发器行为并需要拿到真实 DOM 节点做「点击触发器不算 outside-press」。
+  // 嵌套两层基元（PopoverTrigger render={<Button/>}）会让 ref 透传不干净，导致点击触发器时
+  // outside-press 关闭与 trigger toggle 双触发（先关再开）→「点击关闭不流畅」。改原生 button + 显式
+  // type='button'（避免在 PromptInput 的 <form> 内被当作 submit）后，开合识别恢复顺滑。
   const renderTrigger = () => (
-    <Button
+    <button
+      type='button'
       aria-expanded={open}
+      role='combobox'
+      disabled={disabled}
       className={cn(
+        buttonVariants({ variant: 'outline', size: 'sm' }),
         'h-8 max-w-[15rem] justify-start gap-2 border px-2.5 font-medium shadow-none',
         'bg-background/80 hover:bg-accent/70 text-foreground',
         'focus:!ring-0 focus:!outline-none',
         className
       )}
-      disabled={disabled}
-      role='combobox'
-      size='sm'
-      variant='outline'
     >
       <CpuIcon className='text-muted-foreground size-4 shrink-0' />
       <span className='min-w-0 truncate text-xs'>
@@ -632,7 +637,7 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
         {currentGroup?.label || t('Group')}
       </span>
       <ChevronsUpDown className='text-muted-foreground ml-auto size-3.5 shrink-0 opacity-60' />
-    </Button>
+    </button>
   )
 
   const renderGroupList = () => (
