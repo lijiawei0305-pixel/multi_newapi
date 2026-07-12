@@ -269,7 +269,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
               {/* 数量选择 */}
               <Select
                 value={n}
-                onValueChange={(val) => setN(val)}
+                onValueChange={(val) => val && setN(val)}
               >
                 <SelectTrigger size='sm' className='h-7 min-w-[72px] text-xs'>
                   <SelectValue placeholder='张数' />
@@ -286,7 +286,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
               {/* 尺寸选择 */}
               <Select
                 value={size}
-                onValueChange={(val) => setSize(val)}
+                onValueChange={(val) => val && setSize(val)}
               >
                 <SelectTrigger size='sm' className='h-7 min-w-[120px] text-xs'>
                   <SelectValue placeholder='尺寸' />
