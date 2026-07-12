@@ -9,7 +9,13 @@ import { BULB_SCALE } from './config'
 // ==========================================
 
 const BIN_URL = '/models/dengpao_points_smooth.bin'
-const POINT_COUNT = 40000
+const POINT_COUNT = 40000 // bin 文件里的点数固定为 40000（Task 6 产物）——createBulb() 的可选
+                           // particleCount 入参不改变要抓取/解析的文件，只在解析后做跨步降采样。
+
+// 供 scene.ts 的 mountScene() 在 opts.particleCount 缺省时使用，与 createBulb() 自身的缺省值同源，
+// 避免两处（scene.ts 的 opts 缺省值、bulb.ts 的 loadParticleGeometry 降采样上限）各自硬编码 40000
+// 造成数值漂移（Task 12：移动端粒子降采样）。
+export const DEFAULT_PARTICLE_COUNT = POINT_COUNT
 
 const DEFAULT_COLOR = '#00f0ff'
 
@@ -212,25 +218,34 @@ function setupGlassCore(): GlassCore {
 }
 
 // ---- 3. 加载平滑点云 bin（Task 6 产物：40000 点 × 6 float = 位置 xyz + 单位法线 xyz）----
+// Task 12：移动端用更少的粒子数省 GPU——但 bin 文件本身固定是 40000 点、写入顺序未必均匀覆盖灯泡
+// 表面（不能保证只截取「前 N 个」就是一个视觉完整的子集），所以降采样用等间隔跨步索引
+// （Math.floor(i * stride)，stride = POINT_COUNT / count），让抽到的 count 个点始终稀疏但均匀地
+// 撒在整个 [0, POINT_COUNT) 索引范围内。count === POINT_COUNT（默认桌面路径）时 stride === 1，
+// src === i 对每个 i 成立，产出与降采样前逐字节相同的位置/法线数据。
 
-async function loadParticleGeometry(): Promise<THREE.BufferGeometry> {
+async function loadParticleGeometry(particleCount: number): Promise<THREE.BufferGeometry> {
   const response = await fetch(BIN_URL)
   if (!response.ok) throw new Error(`Failed to load ${BIN_URL}`)
   const arrayBuffer = await response.arrayBuffer()
   const floatArray = new Float32Array(arrayBuffer)
 
-  const positions = new Float32Array(POINT_COUNT * 3)
-  const normals = new Float32Array(POINT_COUNT * 3)
-  const randoms = new Float32Array(POINT_COUNT)
+  const count = Math.min(particleCount, POINT_COUNT)
+  const stride = POINT_COUNT / count
 
-  for (let i = 0; i < POINT_COUNT; i++) {
-    positions[i * 3] = floatArray[i * 6]
-    positions[i * 3 + 1] = floatArray[i * 6 + 1]
-    positions[i * 3 + 2] = floatArray[i * 6 + 2]
+  const positions = new Float32Array(count * 3)
+  const normals = new Float32Array(count * 3)
+  const randoms = new Float32Array(count)
 
-    normals[i * 3] = floatArray[i * 6 + 3]
-    normals[i * 3 + 1] = floatArray[i * 6 + 4]
-    normals[i * 3 + 2] = floatArray[i * 6 + 5]
+  for (let i = 0; i < count; i++) {
+    const src = Math.min(POINT_COUNT - 1, Math.floor(i * stride))
+    positions[i * 3] = floatArray[src * 6]
+    positions[i * 3 + 1] = floatArray[src * 6 + 1]
+    positions[i * 3 + 2] = floatArray[src * 6 + 2]
+
+    normals[i * 3] = floatArray[src * 6 + 3]
+    normals[i * 3 + 1] = floatArray[src * 6 + 4]
+    normals[i * 3 + 2] = floatArray[src * 6 + 5]
 
     randoms[i] = Math.random()
   }
@@ -270,8 +285,10 @@ export interface Bulb {
   update(t: number, mouse: { x: number; y: number }, hasPointer: boolean, camera: THREE.Camera): void
 }
 
-export async function createBulb(): Promise<Bulb> {
-  const geometry = await loadParticleGeometry()
+// particleCount 可选，默认 40000（桌面/Task 11 原始行为，未传参时逐字节不变）；移动端由 scene.ts
+// 传入 layout.ts 的 particleCount(bp) 做降采样。
+export async function createBulb(particleCount: number = DEFAULT_PARTICLE_COUNT): Promise<Bulb> {
+  const geometry = await loadParticleGeometry(particleCount)
 
   const uniforms: ParticleUniforms = {
     uTime: { value: 0 },

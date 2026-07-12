@@ -26,4 +26,35 @@ html,body { margin:0; height:100%; background:var(--bg); color:#eaf2ff;
 #hud-name { font-weight:700; } #hud-provider { color:#6fd0ff; font-size:12px; letter-spacing:.08em; }
 .hud-desc { color:#b9c8dd; font-size:13px; line-height:1.6; }
 .hud-foot { display:flex; justify-content:space-between; color:#7d90ab; font-size:12px; border-top:1px solid rgba(255,255,255,.08); padding-top:10px; }
-/* 响应式在 Task 12 补全 */
+
+/* ---- Task 12: WebGL 兜底海报 ---- */
+.poster { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-index:0; }
+
+/* ---- Task 12: 响应式竖排（<1024px 平板/移动，<768px 进一步收紧字号/换行）---- */
+@media (max-width:1023px) {
+  /* 桌面基础规则里 html,body height:100%+overflow:hidden 是配合「单屏 100vh 英雄区、内容永远不超
+     一屏」成立的；竖排后 padding-top 12vh + hero-left 文案块 + gap + hero-stage 60vh + hero-right/
+     HUD 在矮一点的机型（如 390×844）上实测总高 ~1140px > 844px 视口，HUD 卡片被推到第一屏之外。
+     曾经尝试直接给 html,body 解锁 overflow-y:auto——实测无效（Playwright 模拟真实 wheel 手势后
+     document.body.scrollTop 仍是 0）：body 显式 height:100% 精确贴合 html 的高度，html 从自身盒子
+     角度看不到 body 有任何溢出（子元素的可视/可滚动溢出不会撑大父元素在 auto 高度计算里的贡献，
+     这与 scrollHeight 属性单独统计可视溢出是两套不同算法），加上 #webgl-canvas 是 position:fixed
+     （脱离普通文档流，滚轮的默认滚动目标解析会径直指向 document.scrollingElement 而非按 DOM 祖先
+     链去发现 body 的内部溢出），最终两边都没有真正可滚动的溢出量——document.scrollingElement（=
+     html，因为 html 自身 overflow 已被基础规则显式设为非 visible，不满足触发"body 溢出量代理到
+     viewport"这条 quirk 的前提）没有溢出，body 有溢出但不是浏览器实际派发滚轮默认动作的目标。
+     改为只在 .hero 自身（一个普通非根元素，不涉及 scrollingElement/quirk 的任何歧义）上开
+     overflow-y:auto——.hero 的 height:100vh 维持不变（不改基础规则),配合它自己变成"定高容器+溢出
+     子元素"就是最基础、随处可见、100%可靠的可滚动区写法。overflow-y 单独设为非 visible 时，CSS
+     Overflow 规范会把同一元素另一轴（overflow-x，未显式设置、初始值 visible）的计算值一并提升为
+     auto——为避免这样意外打开横向滚动（违反下面 Step 5 的"无横向滚动"验收），显式把 overflow-x
+     锁回 hidden。 */
+  .hero { grid-template-columns:1fr; grid-auto-rows:auto; align-content:start; padding-top:12vh; gap:4vh; overflow-x:hidden; overflow-y:auto; }
+  .hero-stage { height:60vh; }
+  .hero-right { justify-content:center; }
+  .hud { width:min(92vw,360px); }
+}
+@media (max-width:767px) {
+  #brand-title { font-size:34px; } .slogan { font-size:26px; }
+  .metrics { flex-wrap:wrap; gap:10px 18px; }
+}

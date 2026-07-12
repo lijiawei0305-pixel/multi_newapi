@@ -5,7 +5,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 
-import { createBulb } from './bulb'
+import { createBulb, DEFAULT_PARTICLE_COUNT } from './bulb'
 import { createOrbits } from './orbits'
 import { createSatellites, updateSatellites } from './satellites'
 import { CAMERA_Z, VIEW_OFFSET_X_RATIO } from './config'
@@ -26,7 +26,15 @@ export interface SceneHandle {
   onResize(): void
 }
 
-export async function mountScene(canvas: HTMLCanvasElement): Promise<SceneHandle> {
+// Task 12：移动端性能降级——两个字段都可选，省略时保持 Task 11 桌面行为不变（40000 粒子、bloom
+// 开）。opts 整体也可选（mountScene(canvas) 单参调用与 Task 11 时期签名保持源码兼容）。
+export interface SceneOptions {
+  particleCount?: number
+  bloomEnabled?: boolean
+}
+
+export async function mountScene(canvas: HTMLCanvasElement, opts: SceneOptions = {}): Promise<SceneHandle> {
+  const { particleCount = DEFAULT_PARTICLE_COUNT, bloomEnabled = true } = opts
   const hudEls = getHudEls()
 
   const scene = new THREE.Scene()
@@ -58,16 +66,24 @@ export async function mountScene(canvas: HTMLCanvasElement): Promise<SceneHandle
   const ambientLight = new THREE.AmbientLight('#040d20', 1.5)
   scene.add(ambientLight)
 
-  const bulb = await createBulb()
+  const bulb = await createBulb(particleCount)
   scene.add(bulb.group)
 
   const rig = createOrbits()
   scene.add(...rig.groups)
   const satellites = await createSatellites(rig)
 
+  // composer 管线固定是 RenderPass → [UnrealBloomPass] → OutputPass：OutputPass 是应用 ACES 色调
+  // 映射的那一步，Task 7 的 24 张品牌 logo PNG 是按「最终经 ACES + OutputPass」这条管线反向预补偿过
+  // 的（inverse-ACES bake）。移动端（bloomEnabled=false）只跳过中间的 UnrealBloomPass 这一条 pass
+  // 省 GPU，RenderPass/OutputPass 与下面 animate() 里的 composer.render() 调用完全不变——不能整体
+  // 退回 renderer.render()、也不能连带丢掉 OutputPass，否则 24 个品牌色会因缺一次 ACES 映射而渲染
+  // 错误（相当于被反向补偿了却没有正向映射抵消回来）。
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
-  composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.45, 0.85))
+  if (bloomEnabled) {
+    composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.45, 0.85))
+  }
   composer.addPass(new OutputPass())
 
   // 相机取景偏移：把灯泡视觉中心从屏幕正中推到 x≈60%（落在 index.html 的 hero-stage 中栏），
