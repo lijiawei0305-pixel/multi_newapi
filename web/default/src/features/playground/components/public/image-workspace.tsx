@@ -62,11 +62,11 @@ const N_OPTIONS = [
   { value: '4', label: '4 张' },
 ]
 
-// 可选尺寸
+// 可选尺寸（gpt-image 系列支持 1024×1024 / 1536×1024 / 1024×1536，默认方形）
 const SIZE_OPTIONS = [
   { value: '1024x1024', label: '1024×1024（方形）' },
-  { value: '1024x1792', label: '1024×1792（竖版）' },
-  { value: '1792x1024', label: '1792×1024（横版）' },
+  { value: '1536x1024', label: '1536×1024（横版）' },
+  { value: '1024x1536', label: '1024×1536（竖版）' },
 ]
 
 export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {

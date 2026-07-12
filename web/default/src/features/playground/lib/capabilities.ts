@@ -129,8 +129,14 @@ export const CAPABILITY_LABELS: Record<PlaygroundCapability, string> = {
 /**
  * 计费展示文案。按次计费（quota_type=1，图片/视频模型多为此）其 model_ratio
  * 常为 0，直接展示会得到误导性的「倍率 0」；此处按 quota_type 区分展示。
+ *
+ * 倍率数值按用户要求「直接展示模型所在分组的分组倍率（group_ratio）」而非模型自身
+ * 倍率——group_ratio 是该分组用户实际计费的倍率。group_ratio 缺失时回退 model_ratio。
  */
 export function formatModelRate(m: PricingModel): string {
   if (m.quota_type === 1) return '按次计费'
-  return m.model_ratio && m.model_ratio > 0 ? `倍率 ${m.model_ratio}×` : '—'
+  const group = m.enable_groups?.[0]
+  const groupRatio = group ? m.group_ratio?.[group] : undefined
+  const ratio = groupRatio ?? m.model_ratio
+  return ratio && ratio > 0 ? `倍率 ${ratio}×` : '—'
 }
