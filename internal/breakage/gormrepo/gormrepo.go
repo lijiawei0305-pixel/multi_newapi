@@ -287,6 +287,21 @@ func (r *Repo) Detail(ctx context.Context, f breakage.Filter, now int64) ([]brea
 		return q
 	}
 
+	// alert_level 过滤下推 SQL（等价 breakage.AlertLevelForPct）：alert_level 虽是派生级(非持久列)，
+	// 但其判据仅依赖持久列 status/used_usd/month_limit_usd,故可完全表达为 SQL WHERE。下推后 count 与
+	// 分页均走 SQL,不再「全表物化后 Go 过滤+分页」(管理端跨租户全表进内存的 OOM 风险，性能审计 M8)。
+	if where, args := alertLevelWhere(f.AlertLevel); where != "" {
+		orig := base
+		base = func() *gorm.DB { return orig().Where(where, args...) }
+	}
+
+	// total 由 SQL COUNT 得出（含 alert 谓词），不再是「全表物化后 len」。
+	var total int64
+	if err := base().Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// 只取当前页（SQL LIMIT/OFFSET，与既有 lim/off 归一化口径一致），杜绝全表读入内存。
 	var scan []detailScanRow
 	if err := base().
 		Select("s.tenant_id AS tenant_id, COALESCE(t.name,'') AS tenant_name, " +
@@ -294,13 +309,15 @@ func (r *Repo) Detail(ctx context.Context, f breakage.Filter, now int64) ([]brea
 			"COALESCE(tp.code,'') AS plan_code, s.status AS status, " +
 			"s.month_limit_usd AS month_limit_usd, " + nativeUsedUSD + " AS used_usd, s.expire_at AS expire_at").
 		Order("s.expire_at DESC, s.id DESC").
+		Limit(lim(f.PageSize)).Offset(off(f.Page, f.PageSize)).
 		Scan(&scan).Error; err != nil {
 		return nil, 0, err
 	}
 
-	// 组装派生字段 + alert_level 过滤。惰性过期口径（read-only，不回写库）：expire_at<now 且库里仍
+	// 组装派生字段（仅当前页）。惰性过期口径（read-only，不回写库）：expire_at<now 且库里仍
 	// 'active' 时，展示 status 定格为 expired——与 CollectSnapshots 一致，使明细 status 列真实反映到期，
 	// 而非依赖持久化翻牌（订阅台账的惰性翻牌发生在计量/激活路径，只读投影不触发）。
+	// alert_level 过滤已在 SQL 完成,此处只按已过滤的页算展示字段。
 	rows := make([]breakage.DetailRow, 0, len(scan))
 	for i := range scan {
 		x := &scan[i]
@@ -320,10 +337,6 @@ func (r *Repo) Detail(ctx context.Context, f breakage.Filter, now int64) ([]brea
 			status = "expired"
 		}
 		statusExhausted := status == "exhausted"
-		level := breakage.AlertLevelForPct(pct, statusExhausted)
-		if f.AlertLevel != "" && level != f.AlertLevel {
-			continue
-		}
 		rows = append(rows, breakage.DetailRow{
 			TenantID:   x.TenantID,
 			TenantName: x.TenantName,
@@ -335,13 +348,40 @@ func (r *Repo) Detail(ctx context.Context, f breakage.Filter, now int64) ([]brea
 			UsedUSD:    used,
 			UnusedUSD:  unused,
 			UsagePct:   pct,
-			AlertLevel: level,
+			AlertLevel: breakage.AlertLevelForPct(pct, statusExhausted),
 			PeriodEnd:  expireEpoch,
 		})
 	}
+	return rows, total, nil
+}
 
-	total := int64(len(rows))
-	return paginateSlice(rows, f.Page, f.PageSize), total, nil
+// alertLevelWhere 把 alert_level 过滤下推为 SQL WHERE 片段,口径与 breakage.AlertLevelForPct 严格等价:
+//
+//	statusExhausted || pct>=100 → exhausted;  pct>=95 → critical;  pct>=80 → warn;  否则 none
+//
+// 仅 warn/critical/exhausted 有片段;AlertNone("") 语义是「不过滤」→ 返回空片段(不加 WHERE)。
+// 已用量用 nativeUsedUSD（原生桶 us.amount_used 投影，与 Detail 展示 SELECT 同一表达式）——**绝不读死列
+// s.used_usd**（恒 0，见 nativeUsedUSD 注释）：合并 500L「used_usd→原生桶真源」后，过滤源必须与展示源一致，
+// 否则 s.used_usd=0 使谓词永假、alert 过滤恒空（merge 回归，2026-07-09 修）。us 别名由 Detail base 的
+// joinNativeUsage 供给，本片段总在其后 Where 追加，故列可解析。阈值仍用「used*100 与 limit*阈值」乘法比较
+// （规避除零）；used 与展示同一 COALESCE(amount_used/QuotaPerUnit) 表达式，SQL 过滤与 Go AlertLevelForPct(pct)
+// 边界完全同源、无分歧。exhausted 判据里 status='exhausted' 对齐 Detail 中 `status == "exhausted"`
+// (惰性过期只把 active→expired,不改 exhausted)。
+func alertLevelWhere(level breakage.AlertLevel) (string, []any) {
+	u := nativeUsedUSD // 真实已用 USD（原生桶投影），与 Detail 展示口径同源；不读死列 s.used_usd
+	switch level {
+	case breakage.AlertExhausted:
+		return "(s.status = ? OR (s.month_limit_usd > 0 AND " + u + " >= s.month_limit_usd))",
+			[]any{"exhausted"}
+	case breakage.AlertCritical:
+		return "(s.status <> ? AND s.month_limit_usd > 0 AND " + u + " < s.month_limit_usd AND " + u + " * 100 >= s.month_limit_usd * 95)",
+			[]any{"exhausted"}
+	case breakage.AlertWarn:
+		return "(s.status <> ? AND s.month_limit_usd > 0 AND " + u + " * 100 < s.month_limit_usd * 95 AND " + u + " * 100 >= s.month_limit_usd * 80)",
+			[]any{"exhausted"}
+	default:
+		return "", nil
+	}
 }
 
 // ============================================================================

@@ -56,14 +56,14 @@ die()  { printf '\033[1;31m[err]\033[0m %s\n' "$*" >&2; exit 1; }
 
 # guard_not_prod：拒绝任何指向现网 newapi_YFNf 的配置（违反即中止）。
 guard_not_prod() {
-  [ "$STACK" != "$PROD_STACK" ] || die "拒绝操作现网栈 $PROD_STACK（红线）。"
+  [ "$STACK" != "$PROD_STACK" ] || die "拒绝操作现网栈 ${PROD_STACK}（红线）。"
   case "$COMPOSE_FILE$ENV_FILE$SERVER_REPO" in
-    *"$PROD_STACK"*) die "路径指向现网 $PROD_STACK，已中止。" ;;
+    *"$PROD_STACK"*) die "路径指向现网 ${PROD_STACK}，已中止。" ;;
   esac
 }
 
 # dc：固化 compose 调用（-p 项目名 + --env-file + 绝对 -f，cwd 无关）。
-# 绝对 -f 时 build context（compose 里 `..`）解析为 compose 文件目录的上级 = $SERVER_REPO。
+# 绝对 -f 时 build context（compose 里 `..`）解析为 compose 文件目录的上级 = ${SERVER_REPO}。
 dc() { docker compose -p "$STACK" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"; }
 
 # confirm <提示>：危险操作二次确认；需键入 yes。可用 ASSUME_YES=1 跳过（供 cron/自动化）。

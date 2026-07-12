@@ -45,6 +45,7 @@ import {
   type SupportedParameter,
 } from '../lib/mock-stats'
 import { replaceModelInPath } from '../lib/model-helpers'
+import { SampleDataBadge } from './sample-data-badge'
 import type { PricingModel } from '../types'
 
 // ---------------------------------------------------------------------------
@@ -671,7 +672,10 @@ function RateLimitsSection(props: { model: PricingModel }) {
 
   return (
     <section>
-      <SectionTitle icon={Gauge}>{t('Rate limits')}</SectionTitle>
+      <SectionTitle icon={Gauge}>
+        {t('Rate limits')}
+        <SampleDataBadge className='ml-1' />
+      </SectionTitle>
       <StaticDataTable
         className={tableStyles.sectionContainer}
         headerRowClassName={tableStyles.mutedHeaderRow}

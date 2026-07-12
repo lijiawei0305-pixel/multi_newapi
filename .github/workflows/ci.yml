@@ -1,0 +1,93 @@
+name: CI
+
+# 云端质量门 —— 把 scripts/preflight.sh 的 `go build → vet → test -race` 序列
+# 搬进 GitHub Actions，并补上 preflight 从未跑过的前端测试。
+#
+# 背景（audit #10）：此前 7 个 workflow 里，唯一的 PR 门是 peakoss/anti-slop
+# （反 AI 灌水 bot，且只在 opened/reopened 触发）；docker/release/nightly 全是
+# 上游继承的构建推镜像。仓库有 1000+ 个 Go 测试函数与 5 个前端测试，却没有任何
+# CI 执行它们——质量门只剩本地 deploy 时的 preflight，还留了 SKIP_PREFLIGHT=1 逃生口。
+# 本 workflow 在服务器侧强制执行同一套检查，绕不过。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支/PR 有新提交时，取消尚在跑的旧 run，节省 runner 分钟。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend · go build / vet / test -race
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod   # 跟随 go.mod 的 `go 1.25.x`，单一真源
+          cache: true
+
+      # 只检查本项目自有代码（internal/）。仓库其余是上游 new-api fork 代码、并非全部
+      # gofmt-clean。**暂设为仅告警**：首次 CI 发现 committed internal/ 尚有 13 个历史
+      # 未格式化文件，其中 3 个正被并行 WIP 占用，无法此刻干净 `gofmt -w`。待 WIP 落地后
+      # 跑一次 `gofmt -w internal` 清账，再把本步改回 `exit 1` 阻断（TODO）。
+      - name: gofmt (internal, advisory)
+        run: |
+          fmt=$(gofmt -l internal)
+          if [ -n "$fmt" ]; then
+            echo "::warning::internal/ 下列文件未 gofmt（暂不阻断，清账后改回阻断）:"
+            echo "$fmt"
+          fi
+
+      # main.go 有 //go:embed web/*/dist（前端产物）。dist 被 gitignore、不在 checkout 里，
+      # 本 job 又只编译/测试后端不真服务前端 —— 造占位 index.html 满足 embed，令 go build/vet/test
+      # 能跑（真前端产物由 frontend job 的 bun run build 独立校验）。
+      - name: stub frontend dist (satisfy go:embed)
+        run: |
+          mkdir -p web/default/dist web/classic/dist
+          printf '<!doctype html>\n' > web/default/dist/index.html
+          printf '<!doctype html>\n' > web/classic/dist/index.html
+
+      - name: go build
+        run: go build ./...
+
+      # vet/test 只跑我们自己的 internal/。整棵树含上游 new-api 代码（relay/channel/* 等有
+      # unreachable-code 之类 vet 违规、部分测试需外部依赖），非我们所有、不该 gate 我们的 PR。
+      # go build 仍对 ./... 全树编译校验（确保我们对 controller/relay/model 的改动能编过）。
+      - name: go vet (internal)
+        run: go vet ./internal/...
+
+      - name: go test -race (internal)
+        run: go test ./internal/... -race -count=1
+
+  frontend:
+    name: frontend · bun test / build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11   # 与本地验证所用版本一致（bun.lock 为真源）
+
+      # bun.lock 在 web/（workspace 根）；--frozen-lockfile 保证与锁文件一致。
+      - name: bun install (frozen)
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      # 5 个测试混用 node:test 与 vitest 两种写法且无 vitest 依赖/配置；
+      # `bun test` 是唯一能同时跑通两者的命令（内建 node:test + 自动别名 vitest→bun:test）。
+      - name: bun test
+        working-directory: web/default
+        run: bun test
+
+      - name: bun run build
+        working-directory: web/default
+        run: bun run build

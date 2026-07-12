@@ -583,11 +583,16 @@ func (r *Repo) ListWithdrawals(ctx context.Context, status string) ([]agent.With
 	return toWithdrawals(rows), nil
 }
 
-// ListEarningsByTenant 列出某租户的收益台账（按时间倒序）。供代理自助 GET /api/tenant/earnings。
+// earningsListCap 是自助收益台账「最新 N 条」明细流的安全上限。agent_earning_logs 每笔计费请求线性增长
+// （月级可达百万行），无界 Find 会 OOM/长阻塞；此处只截最新 N 条（顶部汇总卡取自钱包聚合、不受影响），
+// 完整分页历史走 GET /api/tenant/finance/detail（DetailEarnings，page + CSV 导出），一条不丢。
+const earningsListCap = 1000
+
+// ListEarningsByTenant 列出某租户的收益台账（按时间倒序，上限最新 earningsListCap 条）。供代理自助 GET /api/tenant/earnings。
 func (r *Repo) ListEarningsByTenant(ctx context.Context, tenantID int64) ([]agent.EarningEntry, error) {
 	var rows []earningRow
 	if err := r.db.WithContext(ctx).Where("tenant_id = ?", tenantID).
-		Order("created_at desc").Find(&rows).Error; err != nil {
+		Order("created_at desc").Limit(earningsListCap).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]agent.EarningEntry, 0, len(rows))

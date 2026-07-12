@@ -30,13 +30,13 @@ rollback_git() {
   local ref="$1"
   [ -n "$ref" ] || die "--git 需指定 tag/commit"
   require git
-  log "git 回滚：$SERVER_REPO → $ref（将重建镜像）"
+  log "git 回滚：$SERVER_REPO → ${ref}（将重建镜像）"
   confirm "确认 checkout $ref 并重建 $STACK ?"
   git -C "$SERVER_REPO" fetch --tags --quiet || warn "git fetch 失败（离线？继续用本地引用）"
   git -C "$SERVER_REPO" checkout "$ref" || die "git checkout $ref 失败"
   log "重建并重起…"
   dc up -d --build
-  ok "git 回滚完成（$ref）。运行 ./healthcheck.sh 验证。"
+  ok "git 回滚完成（${ref}）。运行 ./healthcheck.sh 验证。"
 }
 
 rollback_image() {

@@ -30,9 +30,11 @@ services:
       #   收益事务（agent_wallets 是每租户热行，同租户并发全串行在其行锁上，是吞吐天花板主嫌）。开启后二者
       #   改进程内缓冲 + 定时批量落库（单事务多行 INSERT + 按租户合并 UPSERT，消除热行争用）；均以 requestID
       #   幂等，SIGTERM 优雅 flush 兜底计划重启，缓冲打满退回同步写。方向安全（只会少计代理收益、绝不多付）。
-      #   **默认关闭**（触钱、新上）：服务器构建 + 单测通过 + 小流量灰度核对账目一致后，低峰期改 "true" 再
-      #   `docker compose -p newapi_test -f deploy/docker-compose.test.yml up -d app` 激活。INTERVAL=硬崩溃最坏丢账窗口(秒)。
-      AGENT_HOOK_ASYNC_ENABLED: "false"
+      #   **默认开启**（2026-07-09 低峰激活）：服务器构建 + 单测通过后启用；真实小流量灰度核对因上游渠道暂缺
+      #   未能做，但方向安全（只会少计代理收益、绝不多付）+ requestID 幂等 + SIGTERM 优雅 flush 兜底，故先低峰
+      #   开启、生产观察账目一致性。关闭回退：改 "false" 再
+      #   `docker compose -p newapi_test -f deploy/docker-compose.test.yml --env-file .env up -d app`。INTERVAL=硬崩溃最坏丢账窗口(秒)。
+      AGENT_HOOK_ASYNC_ENABLED: "true"
       AGENT_HOOK_ASYNC_INTERVAL: "2"
       # —— 上游渠道凭据：仅引用服务器 .env 的同名变量，值不入库（compose 自动插值），供后续 relay 自测（5b）用 ——
       UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL}"

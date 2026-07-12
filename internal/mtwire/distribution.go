@@ -29,9 +29,9 @@ import (
 // maxRedemptionBatch 单次建码张数上限（防刷 / 限制批量插入规模）。
 const maxRedemptionBatch = 1000
 
-// usdToQuotaUnits 把美元额折算为 new-api 内部 quota 单位（$1 = common.QuotaPerUnit）。
-// 建码预扣与兑换入账共用同一换算，保证额度严格守恒。
-func usdToQuotaUnits(usd float64) int64 { return int64(usd * common.QuotaPerUnit) }
+// usdToQuotaUnits 把美元额折算为 new-api 内部 quota 单位（$1 = common.QuotaPerUnit；截断）。
+// 建码预扣与兑换入账共用同一换算，保证额度严格守恒。换算走统一核心 usdToQuotaRound（见 money.go）。
+func usdToQuotaUnits(usd float64) int64 { return usdToQuotaRound(usd, roundDown) }
 
 // ============================================================================
 // 1) 套餐上架 / 改价（复用 App.Retail，经成本保护线）
@@ -187,8 +187,11 @@ type tenantUserOut struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-// HandleAgentListUsers GET /api/tenant/users —— 本代理名下用户（WHERE tenant_id=ctx），返裸数组。
-// 列表天然受限于本代理下级规模（按 tenant_id 索引）；如后续规模增长需服务端分页可在此叠加（前端契约：裸数组）。
+// tenantUsersListCap 是自助下级用户列表「最新 N 条」的安全上限，防止无界 Find 随下级规模增长而 OOM/长阻塞（按 id 倒序取最新 N 条）。
+const tenantUsersListCap = 1000
+
+// HandleAgentListUsers GET /api/tenant/users —— 本代理名下用户（WHERE tenant_id=ctx），返裸数组（上限最新 tenantUsersListCap 条）。
+// 前端契约：裸数组（前端 res.data||[] 直接 rows.map）。完整服务端分页为日后前端专项——届时改信封须同步重写该消费方。
 func (a *App) HandleAgentListUsers(c *gin.Context) {
 	tenantID := agentTenantID(c)
 	if tenantID <= 0 {
@@ -209,7 +212,7 @@ func (a *App) HandleAgentListUsers(c *gin.Context) {
 	if err := a.DB.WithContext(reqCtx(c)).Table("users").
 		Where("tenant_id = ? AND deleted_at IS NULL", tenantID).
 		Select("id, username, display_name, quota, used_quota, status, `group`, created_at").
-		Order("id desc").Find(&rows).Error; err != nil {
+		Order("id desc").Limit(tenantUsersListCap).Find(&rows).Error; err != nil {
 		respondErr(c, err)
 		return
 	}

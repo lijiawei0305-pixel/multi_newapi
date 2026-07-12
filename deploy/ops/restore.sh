@@ -22,8 +22,8 @@ BACKUP="${1:-}"
 [ -f "$BACKUP" ] || die "找不到备份文件：$BACKUP"
 case "$BACKUP" in *.sql.gz) : ;; *) die "需 .sql.gz（backup.sh 的 DB 产物）：$BACKUP" ;; esac
 
-log "目标栈   ：$STACK（库 $DB_NAME）"
-log "恢复来源 ：$BACKUP（$(du -h "$BACKUP" | cut -f1)，mtime $(date -r "$BACKUP" '+%F %T' 2>/dev/null || true)）"
+log "目标栈   ：${STACK}（库 ${DB_NAME}）"
+log "恢复来源 ：${BACKUP}（$(du -h "$BACKUP" | cut -f1)，mtime $(date -r "$BACKUP" '+%F %T' 2>/dev/null || true)）"
 warn "此操作将用备份覆盖 $STACK 的 $DB_NAME 现有数据，且不可逆。"
 confirm "确认恢复到 $STACK / $DB_NAME ?"
 

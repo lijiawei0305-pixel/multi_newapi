@@ -170,12 +170,10 @@ func isDuplicateLedgerErr(err error) bool {
 	return false
 }
 
-// rechargeQuota 把充值美元额折算为 new-api 内部 quota 单位（$1 = common.QuotaPerUnit）。
+// rechargeQuota 把充值美元额折算为 new-api 内部 quota 单位（$1 = common.QuotaPerUnit；截断）。
+// int 返回值供充值入账（IncreaseUserQuota）使用；换算走统一核心 usdToQuotaRound（见 money.go）。
 func rechargeQuota(amountUSD float64) int {
-	if amountUSD <= 0 {
-		return 0
-	}
-	return int(amountUSD * common.QuotaPerUnit)
+	return int(usdToQuotaRound(amountUSD, roundDown))
 }
 
 // actualPaidCNY 计算用户实付人民币 = 美元额 × 汇率（收益币种；差价基准）。
