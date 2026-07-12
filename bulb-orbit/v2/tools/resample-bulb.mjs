@@ -1,4 +1,4 @@
-// 用法：node tools/resample-bulb.mjs [<dengpao.glb 路径>]（省略则用下面 DEFAULT_GLB）
+// 用法：node tools/resample-bulb.mjs <dengpao.glb 路径>（必填，无默认路径）
 // 依赖 three 的 GLTFLoader + BufferGeometryUtils。IO/装载编排，不单测（纯采样数学见 sampler.mjs + sampler.test.mjs）。
 //
 // GLTFLoader 内部引用浏览器全局 `self`（纹理加载路径用到 self.URL.createObjectURL），
@@ -14,10 +14,13 @@ import { areaWeightedSample, laplacianSmooth } from './sampler.mjs'
 const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
 const BufferGeometryUtils = await import('three/examples/jsm/utils/BufferGeometryUtils.js')
 
-// 源 GLB（83MB）本次会话已一次性下载到 scratchpad，不入库、不进仓库；
-// 可用 argv 覆盖指向其它路径（例如以后 yun 换了新模型）。
-const DEFAULT_GLB = '/private/tmp/claude-501/-Users-cc-newapi628/4025aa17-29a1-4b05-9fdc-84abc4e724c8/scratchpad/dengpao.glb'
-const glbPath = process.argv[2] || DEFAULT_GLB
+// 源 GLB（数十 MB）不入库、不进仓库；调用方必须显式传入本地路径（例如以后 yun 换了新模型，
+// 下载到本机后指过去），不再提供仓库外/会话临时目录的默认路径兜底。
+const glbPath = process.argv[2]
+if (!glbPath) {
+  console.error('usage: node tools/resample-bulb.mjs <path-to-dengpao.glb>')
+  process.exit(1)
+}
 const outPath = 'public/models/dengpao_points_smooth.bin'
 
 const buf = readFileSync(glbPath)

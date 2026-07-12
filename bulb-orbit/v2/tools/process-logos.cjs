@@ -41,9 +41,9 @@ const DOMESTIC_IDS = [
 ];
 
 // Inline SVGs extracted from the old bulb-orbit/index.html LOGOS map (gradient ids
-// de-duplicated across files). Staged outside the repo for this one-off generation run
-// — see doc/tasks (task 7) for provenance; only the rendered PNG output is committed.
-const INTL_SVG_DIR = '/private/tmp/claude-501/-Users-cc-newapi628/4025aa17-29a1-4b05-9fdc-84abc4e724c8/scratchpad/intl-svgs';
+// de-duplicated across files), committed under assets/intl-svg/ so this pipeline is
+// reproducible from a clean checkout.
+const INTL_SVG_DIR = path.join(__dirname, '..', 'assets', 'intl-svg');
 const INTL_IDS = [
   'openai', 'anthropic', 'gemini', 'meta', 'mistral', 'deepseek',
   'xai', 'cohere', 'midjourney', 'stability', 'huggingface', 'perplexity',

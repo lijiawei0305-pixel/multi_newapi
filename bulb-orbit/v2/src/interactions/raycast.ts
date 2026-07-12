@@ -7,10 +7,6 @@ import type { Satellite } from '../scene/satellites'
 // 不含：HUD 联动、灯泡换色——那些是调用方（scene.ts）的接线职责，不属于本模块契约。
 // ==========================================
 
-// yun 原始注释：Default Points threshold is 1 WORLD unit — with badge-scale satellite groups that
-// would make every satellite's hit zone far larger than its visible icon. Keep it near icon scale.
-const POINTS_HOVER_THRESHOLD = 0.02
-
 export interface SatelliteRaycaster {
   hover(mouse: THREE.Vector2): string | null
   click(mouse: THREE.Vector2): string | null
@@ -18,7 +14,6 @@ export interface SatelliteRaycaster {
 
 export function makeRaycaster(camera: THREE.Camera, satellites: Satellite[]): SatelliteRaycaster {
   const raycaster = new THREE.Raycaster()
-  raycaster.params.Points.threshold = POINTS_HOVER_THRESHOLD
 
   // 命中测试用卫星顶层 group 数组：intersectObjects(groups, true) 递归命中每个 group 下的子网格
   // （金属环/图标平面——光晕 Sprite 与轨道线均已在各自模块把 raycast 设为空操作，不会被命中），

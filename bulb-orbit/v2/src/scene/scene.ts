@@ -178,6 +178,11 @@ export async function mountScene(canvas: HTMLCanvasElement, opts: SceneOptions =
     renderer.setSize(fullW, fullH)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     composer.setSize(fullW, fullH)
+    // EffectComposer caches the renderer's pixel ratio at construction time and reuses it for every
+    // render-target resize; renderer.setPixelRatio() above doesn't propagate to it. Without this,
+    // dragging the window across monitors of differing DPI leaves the bloom render targets sized for
+    // the old ratio (blurry/misaligned bloom) until a full page reload.
+    composer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     applyViewOffset()
   }
 
