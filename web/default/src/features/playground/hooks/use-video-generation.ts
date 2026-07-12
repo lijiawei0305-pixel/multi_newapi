@@ -113,9 +113,12 @@ export function useVideoGeneration(): UseVideoGenerationResult {
   const pollResolveRef = useRef<(() => void) | null>(null)
 
   const revokeObjectUrl = useCallback(() => {
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current)
-      objectUrlRef.current = null
+    const url = objectUrlRef.current
+    objectUrlRef.current = null
+    if (url) {
+      // 延后到宏任务再吊销：先让 React 卸载 / 换掉 <video> 的 src，避免「元素还在、
+      // src 已 revoke」的瞬时窗口导致播放中断 / 黑屏（用户播放中点「重新生成」场景）。
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
     }
   }, [])
 
@@ -281,17 +284,36 @@ export function useVideoGeneration(): UseVideoGenerationResult {
             return
           }
 
-          // Otherwise the proxied URL needs the Bearer token, which a native
-          // <video src> can't carry — fetch it as an authenticated blob.
+          // 区分「需鉴权代理端点」与「免鉴权外链直链」。
+          const proxyPath = toSameOriginProxyPath(resultUrl)
+          if (!proxyPath.startsWith('/v1/videos/')) {
+            // 免鉴权 CDN 直链（Kling/Ali/Doubao/Vidu/Jimeng 等上游直链）——原生 <video>
+            // 跨域播放不需要 CORS，直接作为 src；若像代理那样带 Bearer 抓 blob，反而会
+            // 触发跨域预检失败，把本可播的视频弄成「加载失败」。
+            if (runId !== runIdRef.current) return
+            setVideoUrl(resultUrl)
+            setStatus('success')
+            setProgress(null)
+            return
+          }
+          // newapi 视频代理端点 /v1/videos/<id>/content 需 Bearer，而原生 <video src>
+          // 带不了 Authorization —— 归一同源后鉴权抓 blob 再 createObjectURL 播放。
           try {
-            const blobResp = await api.get(toSameOriginProxyPath(resultUrl), {
+            const blobResp = await api.get(proxyPath, {
               responseType: 'blob',
               headers: authHeaders,
               skipErrorHandler: true,
               disableDuplicate: true,
             })
             if (runId !== runIdRef.current) return
-            const objectUrl = URL.createObjectURL(blobResp.data as Blob)
+            // Content-Type 兜底：代理透传若为 octet-stream / 空，<video> 依 Blob.type
+            // 判定可播性，非 video/* 会拒绝解码 → 强制 video/mp4。
+            const rawBlob = blobResp.data as Blob
+            const playableBlob =
+              rawBlob.type && rawBlob.type.startsWith('video/')
+                ? rawBlob
+                : new Blob([rawBlob], { type: 'video/mp4' })
+            const objectUrl = URL.createObjectURL(playableBlob)
             objectUrlRef.current = objectUrl
             setVideoUrl(objectUrl)
             setStatus('success')

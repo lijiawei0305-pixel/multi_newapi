@@ -97,6 +97,19 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
       triggerDownload(src, filename)
       return
     }
+    // 跨域外链 CDN：download 属性对跨域被忽略、带 Bearer 抓 blob 会 CORS 预检失败，
+    // 直接新标签打开另存（图片 url 是免鉴权直链，无需鉴权取流）。
+    let sameOrigin = false
+    try {
+      sameOrigin =
+        new URL(src, window.location.origin).origin === window.location.origin
+    } catch {
+      sameOrigin = false
+    }
+    if (!sameOrigin) {
+      window.open(src, '_blank', 'noopener')
+      return
+    }
     try {
       const resp = await api.get(src, {
         responseType: 'blob',

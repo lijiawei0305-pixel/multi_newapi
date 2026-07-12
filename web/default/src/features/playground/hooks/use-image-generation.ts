@@ -64,15 +64,20 @@ export function useImageGeneration(): UseImageGenerationReturn {
         )
 
         const resultItems = res.data?.data
-        if (!Array.isArray(resultItems) || resultItems.length === 0) {
-          const msg = '图片生成未返回结果，请重试'
+        // 逐项过滤：只保留真正带 url 或 b64_json 的图。n>1 部分失败时，某项可能只有
+        // revised_prompt 而无图，直接渲染会得到 <img src=''> 破图并误请求当前页面。
+        const validItems = Array.isArray(resultItems)
+          ? resultItems.filter((it) => it.b64_json || (it.url && it.url.trim()))
+          : []
+        if (validItems.length === 0) {
+          const msg = '图片生成未返回有效结果，请重试'
           setError(msg)
           setStatus('error')
           toast.error(msg)
           return
         }
 
-        setImages(resultItems)
+        setImages(validItems)
         setStatus('success')
       } catch (err: unknown) {
         let msg = '图片生成失败，请稍后重试'
