@@ -17,6 +17,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SetupIndexRouteImport } from './routes/setup/index'
 import { Route as RankingsIndexRouteImport } from './routes/rankings/index'
 import { Route as PricingIndexRouteImport } from './routes/pricing/index'
+import { Route as PlaygroundIndexRouteImport } from './routes/playground/index'
+import { Route as DocsIndexRouteImport } from './routes/docs/index'
 import { Route as AgentJoinIndexRouteImport } from './routes/agent-join/index'
 import { Route as AboutIndexRouteImport } from './routes/about/index'
 import { Route as OauthProviderRouteImport } from './routes/oauth/$provider'
@@ -47,13 +49,11 @@ import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedSubscriptionMonitorIndexRouteImport } from './routes/_authenticated/subscription-monitor/index'
-import { Route as AuthenticatedBreakageMonitorIndexRouteImport } from './routes/_authenticated/breakage-monitor/index'
 import { Route as AuthenticatedSiteBrandingIndexRouteImport } from './routes/_authenticated/site-branding/index'
 import { Route as AuthenticatedRedemptionsIndexRouteImport } from './routes/_authenticated/redemptions/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedPromotionChannelsIndexRouteImport } from './routes/_authenticated/promotion-channels/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
-import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
 import { Route as AuthenticatedPlansIndexRouteImport } from './routes/_authenticated/plans/index'
 import { Route as AuthenticatedPaymentReconcileIndexRouteImport } from './routes/_authenticated/payment-reconcile/index'
 import { Route as AuthenticatedMyViolationsIndexRouteImport } from './routes/_authenticated/my-violations/index'
@@ -68,6 +68,7 @@ import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authentica
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedCustomDomainIndexRouteImport } from './routes/_authenticated/custom-domain/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
+import { Route as AuthenticatedBreakageMonitorIndexRouteImport } from './routes/_authenticated/breakage-monitor/index'
 import { Route as AuthenticatedBecomeAgentIndexRouteImport } from './routes/_authenticated/become-agent/index'
 import { Route as AuthenticatedAgentsIndexRouteImport } from './routes/_authenticated/agents/index'
 import { Route as AuthenticatedAgentTicketsIndexRouteImport } from './routes/_authenticated/agent-tickets/index'
@@ -137,6 +138,16 @@ const RankingsIndexRoute = RankingsIndexRouteImport.update({
 const PricingIndexRoute = PricingIndexRouteImport.update({
   id: '/pricing/',
   path: '/pricing/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PlaygroundIndexRoute = PlaygroundIndexRouteImport.update({
+  id: '/playground/',
+  path: '/playground/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsIndexRoute = DocsIndexRouteImport.update({
+  id: '/docs/',
+  path: '/docs/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentJoinIndexRoute = AgentJoinIndexRouteImport.update({
@@ -299,12 +310,6 @@ const AuthenticatedSubscriptionMonitorIndexRoute =
     path: '/subscription-monitor/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
-const AuthenticatedBreakageMonitorIndexRoute =
-  AuthenticatedBreakageMonitorIndexRouteImport.update({
-    id: '/breakage-monitor/',
-    path: '/breakage-monitor/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
 const AuthenticatedSiteBrandingIndexRoute =
   AuthenticatedSiteBrandingIndexRouteImport.update({
     id: '/site-branding/',
@@ -333,12 +338,6 @@ const AuthenticatedProfileIndexRoute =
   AuthenticatedProfileIndexRouteImport.update({
     id: '/profile/',
     path: '/profile/',
-    getParentRoute: () => AuthenticatedRouteRoute,
-  } as any)
-const AuthenticatedPlaygroundIndexRoute =
-  AuthenticatedPlaygroundIndexRouteImport.update({
-    id: '/playground/',
-    path: '/playground/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedPlansIndexRoute = AuthenticatedPlansIndexRouteImport.update({
@@ -421,6 +420,12 @@ const AuthenticatedChannelsIndexRoute =
   AuthenticatedChannelsIndexRouteImport.update({
     id: '/channels/',
     path: '/channels/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedBreakageMonitorIndexRoute =
+  AuthenticatedBreakageMonitorIndexRouteImport.update({
+    id: '/breakage-monitor/',
+    path: '/breakage-monitor/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedBecomeAgentIndexRoute =
@@ -637,6 +642,8 @@ export interface FileRoutesByFullPath {
   '/oauth/$provider': typeof OauthProviderRoute
   '/about/': typeof AboutIndexRoute
   '/agent-join/': typeof AgentJoinIndexRoute
+  '/docs/': typeof DocsIndexRoute
+  '/playground/': typeof PlaygroundIndexRoute
   '/pricing/': typeof PricingIndexRoute
   '/rankings/': typeof RankingsIndexRoute
   '/setup/': typeof SetupIndexRoute
@@ -657,6 +664,7 @@ export interface FileRoutesByFullPath {
   '/agent-tickets/': typeof AuthenticatedAgentTicketsIndexRoute
   '/agents/': typeof AuthenticatedAgentsIndexRoute
   '/become-agent/': typeof AuthenticatedBecomeAgentIndexRoute
+  '/breakage-monitor/': typeof AuthenticatedBreakageMonitorIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
@@ -671,14 +679,12 @@ export interface FileRoutesByFullPath {
   '/my-violations/': typeof AuthenticatedMyViolationsIndexRoute
   '/payment-reconcile/': typeof AuthenticatedPaymentReconcileIndexRoute
   '/plans/': typeof AuthenticatedPlansIndexRoute
-  '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/promotion-channels/': typeof AuthenticatedPromotionChannelsIndexRoute
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/redemptions/': typeof AuthenticatedRedemptionsIndexRoute
   '/site-branding/': typeof AuthenticatedSiteBrandingIndexRoute
   '/subscription-monitor/': typeof AuthenticatedSubscriptionMonitorIndexRoute
-  '/breakage-monitor/': typeof AuthenticatedBreakageMonitorIndexRoute
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
@@ -727,6 +733,8 @@ export interface FileRoutesByTo {
   '/oauth/$provider': typeof OauthProviderRoute
   '/about': typeof AboutIndexRoute
   '/agent-join': typeof AgentJoinIndexRoute
+  '/docs': typeof DocsIndexRoute
+  '/playground': typeof PlaygroundIndexRoute
   '/pricing': typeof PricingIndexRoute
   '/rankings': typeof RankingsIndexRoute
   '/setup': typeof SetupIndexRoute
@@ -747,6 +755,7 @@ export interface FileRoutesByTo {
   '/agent-tickets': typeof AuthenticatedAgentTicketsIndexRoute
   '/agents': typeof AuthenticatedAgentsIndexRoute
   '/become-agent': typeof AuthenticatedBecomeAgentIndexRoute
+  '/breakage-monitor': typeof AuthenticatedBreakageMonitorIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/custom-domain': typeof AuthenticatedCustomDomainIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
@@ -761,14 +770,12 @@ export interface FileRoutesByTo {
   '/my-violations': typeof AuthenticatedMyViolationsIndexRoute
   '/payment-reconcile': typeof AuthenticatedPaymentReconcileIndexRoute
   '/plans': typeof AuthenticatedPlansIndexRoute
-  '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/promotion-channels': typeof AuthenticatedPromotionChannelsIndexRoute
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
   '/redemptions': typeof AuthenticatedRedemptionsIndexRoute
   '/site-branding': typeof AuthenticatedSiteBrandingIndexRoute
   '/subscription-monitor': typeof AuthenticatedSubscriptionMonitorIndexRoute
-  '/breakage-monitor': typeof AuthenticatedBreakageMonitorIndexRoute
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
@@ -821,6 +828,8 @@ export interface FileRoutesById {
   '/oauth/$provider': typeof OauthProviderRoute
   '/about/': typeof AboutIndexRoute
   '/agent-join/': typeof AgentJoinIndexRoute
+  '/docs/': typeof DocsIndexRoute
+  '/playground/': typeof PlaygroundIndexRoute
   '/pricing/': typeof PricingIndexRoute
   '/rankings/': typeof RankingsIndexRoute
   '/setup/': typeof SetupIndexRoute
@@ -841,6 +850,7 @@ export interface FileRoutesById {
   '/_authenticated/agent-tickets/': typeof AuthenticatedAgentTicketsIndexRoute
   '/_authenticated/agents/': typeof AuthenticatedAgentsIndexRoute
   '/_authenticated/become-agent/': typeof AuthenticatedBecomeAgentIndexRoute
+  '/_authenticated/breakage-monitor/': typeof AuthenticatedBreakageMonitorIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/custom-domain/': typeof AuthenticatedCustomDomainIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
@@ -855,14 +865,12 @@ export interface FileRoutesById {
   '/_authenticated/my-violations/': typeof AuthenticatedMyViolationsIndexRoute
   '/_authenticated/payment-reconcile/': typeof AuthenticatedPaymentReconcileIndexRoute
   '/_authenticated/plans/': typeof AuthenticatedPlansIndexRoute
-  '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/promotion-channels/': typeof AuthenticatedPromotionChannelsIndexRoute
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/_authenticated/redemptions/': typeof AuthenticatedRedemptionsIndexRoute
   '/_authenticated/site-branding/': typeof AuthenticatedSiteBrandingIndexRoute
   '/_authenticated/subscription-monitor/': typeof AuthenticatedSubscriptionMonitorIndexRoute
-  '/_authenticated/breakage-monitor/': typeof AuthenticatedBreakageMonitorIndexRoute
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
@@ -914,6 +922,8 @@ export interface FileRouteTypes {
     | '/oauth/$provider'
     | '/about/'
     | '/agent-join/'
+    | '/docs/'
+    | '/playground/'
     | '/pricing/'
     | '/rankings/'
     | '/setup/'
@@ -934,6 +944,7 @@ export interface FileRouteTypes {
     | '/agent-tickets/'
     | '/agents/'
     | '/become-agent/'
+    | '/breakage-monitor/'
     | '/channels/'
     | '/custom-domain/'
     | '/dashboard/'
@@ -948,14 +959,12 @@ export interface FileRouteTypes {
     | '/my-violations/'
     | '/payment-reconcile/'
     | '/plans/'
-    | '/playground/'
     | '/profile/'
     | '/promotion-channels/'
     | '/redemption-codes/'
     | '/redemptions/'
     | '/site-branding/'
     | '/subscription-monitor/'
-    | '/breakage-monitor/'
     | '/subscriptions/'
     | '/system-info/'
     | '/system-settings/'
@@ -1004,6 +1013,8 @@ export interface FileRouteTypes {
     | '/oauth/$provider'
     | '/about'
     | '/agent-join'
+    | '/docs'
+    | '/playground'
     | '/pricing'
     | '/rankings'
     | '/setup'
@@ -1024,6 +1035,7 @@ export interface FileRouteTypes {
     | '/agent-tickets'
     | '/agents'
     | '/become-agent'
+    | '/breakage-monitor'
     | '/channels'
     | '/custom-domain'
     | '/dashboard'
@@ -1038,14 +1050,12 @@ export interface FileRouteTypes {
     | '/my-violations'
     | '/payment-reconcile'
     | '/plans'
-    | '/playground'
     | '/profile'
     | '/promotion-channels'
     | '/redemption-codes'
     | '/redemptions'
     | '/site-branding'
     | '/subscription-monitor'
-    | '/breakage-monitor'
     | '/subscriptions'
     | '/system-info'
     | '/system-settings'
@@ -1097,6 +1107,8 @@ export interface FileRouteTypes {
     | '/oauth/$provider'
     | '/about/'
     | '/agent-join/'
+    | '/docs/'
+    | '/playground/'
     | '/pricing/'
     | '/rankings/'
     | '/setup/'
@@ -1117,6 +1129,7 @@ export interface FileRouteTypes {
     | '/_authenticated/agent-tickets/'
     | '/_authenticated/agents/'
     | '/_authenticated/become-agent/'
+    | '/_authenticated/breakage-monitor/'
     | '/_authenticated/channels/'
     | '/_authenticated/custom-domain/'
     | '/_authenticated/dashboard/'
@@ -1131,14 +1144,12 @@ export interface FileRouteTypes {
     | '/_authenticated/my-violations/'
     | '/_authenticated/payment-reconcile/'
     | '/_authenticated/plans/'
-    | '/_authenticated/playground/'
     | '/_authenticated/profile/'
     | '/_authenticated/promotion-channels/'
     | '/_authenticated/redemption-codes/'
     | '/_authenticated/redemptions/'
     | '/_authenticated/site-branding/'
     | '/_authenticated/subscription-monitor/'
-    | '/_authenticated/breakage-monitor/'
     | '/_authenticated/subscriptions/'
     | '/_authenticated/system-info/'
     | '/_authenticated/system-settings/'
@@ -1182,6 +1193,8 @@ export interface RootRouteChildren {
   OauthProviderRoute: typeof OauthProviderRoute
   AboutIndexRoute: typeof AboutIndexRoute
   AgentJoinIndexRoute: typeof AgentJoinIndexRoute
+  DocsIndexRoute: typeof DocsIndexRoute
+  PlaygroundIndexRoute: typeof PlaygroundIndexRoute
   PricingIndexRoute: typeof PricingIndexRoute
   RankingsIndexRoute: typeof RankingsIndexRoute
   SetupIndexRoute: typeof SetupIndexRoute
@@ -1244,6 +1257,20 @@ declare module '@tanstack/react-router' {
       path: '/pricing'
       fullPath: '/pricing/'
       preLoaderRoute: typeof PricingIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/playground/': {
+      id: '/playground/'
+      path: '/playground'
+      fullPath: '/playground/'
+      preLoaderRoute: typeof PlaygroundIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/': {
+      id: '/docs/'
+      path: '/docs'
+      fullPath: '/docs/'
+      preLoaderRoute: typeof DocsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agent-join/': {
@@ -1456,13 +1483,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSubscriptionMonitorIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/breakage-monitor/': {
-      id: '/_authenticated/breakage-monitor/'
-      path: '/breakage-monitor'
-      fullPath: '/breakage-monitor/'
-      preLoaderRoute: typeof AuthenticatedBreakageMonitorIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/site-branding/': {
       id: '/_authenticated/site-branding/'
       path: '/site-branding'
@@ -1496,13 +1516,6 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/profile/'
       preLoaderRoute: typeof AuthenticatedProfileIndexRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
-    '/_authenticated/playground/': {
-      id: '/_authenticated/playground/'
-      path: '/playground'
-      fullPath: '/playground/'
-      preLoaderRoute: typeof AuthenticatedPlaygroundIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/plans/': {
@@ -1601,6 +1614,13 @@ declare module '@tanstack/react-router' {
       path: '/channels'
       fullPath: '/channels/'
       preLoaderRoute: typeof AuthenticatedChannelsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/breakage-monitor/': {
+      id: '/_authenticated/breakage-monitor/'
+      path: '/breakage-monitor'
+      fullPath: '/breakage-monitor/'
+      preLoaderRoute: typeof AuthenticatedBreakageMonitorIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/become-agent/': {
@@ -1932,6 +1952,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAgentTicketsIndexRoute: typeof AuthenticatedAgentTicketsIndexRoute
   AuthenticatedAgentsIndexRoute: typeof AuthenticatedAgentsIndexRoute
   AuthenticatedBecomeAgentIndexRoute: typeof AuthenticatedBecomeAgentIndexRoute
+  AuthenticatedBreakageMonitorIndexRoute: typeof AuthenticatedBreakageMonitorIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedCustomDomainIndexRoute: typeof AuthenticatedCustomDomainIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
@@ -1946,14 +1967,12 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedMyViolationsIndexRoute: typeof AuthenticatedMyViolationsIndexRoute
   AuthenticatedPaymentReconcileIndexRoute: typeof AuthenticatedPaymentReconcileIndexRoute
   AuthenticatedPlansIndexRoute: typeof AuthenticatedPlansIndexRoute
-  AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedPromotionChannelsIndexRoute: typeof AuthenticatedPromotionChannelsIndexRoute
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
   AuthenticatedRedemptionsIndexRoute: typeof AuthenticatedRedemptionsIndexRoute
   AuthenticatedSiteBrandingIndexRoute: typeof AuthenticatedSiteBrandingIndexRoute
   AuthenticatedSubscriptionMonitorIndexRoute: typeof AuthenticatedSubscriptionMonitorIndexRoute
-  AuthenticatedBreakageMonitorIndexRoute: typeof AuthenticatedBreakageMonitorIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
   AuthenticatedTicketsIndexRoute: typeof AuthenticatedTicketsIndexRoute
@@ -1988,6 +2007,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAgentTicketsIndexRoute: AuthenticatedAgentTicketsIndexRoute,
   AuthenticatedAgentsIndexRoute: AuthenticatedAgentsIndexRoute,
   AuthenticatedBecomeAgentIndexRoute: AuthenticatedBecomeAgentIndexRoute,
+  AuthenticatedBreakageMonitorIndexRoute:
+    AuthenticatedBreakageMonitorIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedCustomDomainIndexRoute: AuthenticatedCustomDomainIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
@@ -2005,7 +2026,6 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedPaymentReconcileIndexRoute:
     AuthenticatedPaymentReconcileIndexRoute,
   AuthenticatedPlansIndexRoute: AuthenticatedPlansIndexRoute,
-  AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
   AuthenticatedPromotionChannelsIndexRoute:
     AuthenticatedPromotionChannelsIndexRoute,
@@ -2015,7 +2035,6 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSiteBrandingIndexRoute: AuthenticatedSiteBrandingIndexRoute,
   AuthenticatedSubscriptionMonitorIndexRoute:
     AuthenticatedSubscriptionMonitorIndexRoute,
-  AuthenticatedBreakageMonitorIndexRoute: AuthenticatedBreakageMonitorIndexRoute,
   AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
   AuthenticatedTicketsIndexRoute: AuthenticatedTicketsIndexRoute,
@@ -2047,6 +2066,8 @@ const rootRouteChildren: RootRouteChildren = {
   OauthProviderRoute: OauthProviderRoute,
   AboutIndexRoute: AboutIndexRoute,
   AgentJoinIndexRoute: AgentJoinIndexRoute,
+  DocsIndexRoute: DocsIndexRoute,
+  PlaygroundIndexRoute: PlaygroundIndexRoute,
   PricingIndexRoute: PricingIndexRoute,
   RankingsIndexRoute: RankingsIndexRoute,
   SetupIndexRoute: SetupIndexRoute,
