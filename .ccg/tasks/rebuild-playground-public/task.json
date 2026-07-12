@@ -4,7 +4,7 @@
   "status": "in_progress",
   "strategy": "full-collaborate",
   "currentPhase": "6-final",
-  "nextAction": "审美重构(logo 复用 getLobeIcon/介绍卡英雄化/左卡信息饱满)已 2026-07-12 部署上线(commit 5f8b3b8, image 660c96b9d377, /playground 200, 标记入 go:embed 二进制)。build:check 揭示 7 处【既有】类型债(非本次改动:vitest 缺/base-ui Select string|null/2000 字面量/asChild)——不阻断 SWC 生产构建,待清理。剩:后台配图片/视频模型 · 上游渠道 待用户/运维",
+  "nextAction": "多会话历史已部署(commit ae822a2, image 1d62008dc1e9, /playground 200, marker新建对话入二进制): useConversationHistory(localStorage持久化/防抖同步/新建切换删除不丢会话) + ConversationHistoryBar(新建对话+历史下拉) 接入 ChatWorkspace 顶部。浏览器实测 www.wedreamhub.com/playground 全绿: 选中模型渲染英雄空态+starter, 新建对话清空回英雄且旧会话保留(历史计数不变), 历史下拉列出会话(标题+计数), 点击切换载入消息, 无 JS 错误。build:check 6 处既有类型债(非本次)。前置: 042a43e 左栏重设计+密钥可不选(已实测); 图标无需配置(vendor 已配 lobe key, 全渲染). 剩:后台配图片/视频模型 · 上游渠道 待用户/运维. 注:042a43e+ae822a2 本地已提交未 push origin/500L。",
   "gate": null,
   "execMode": "claude-workflows-orchestrated",
   "branch": "500L",
