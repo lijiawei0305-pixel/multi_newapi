@@ -36,7 +36,6 @@ import type { WorkspaceProps } from '../../types'
 export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
   const [prompt, setPrompt] = useState('')
   const [duration, setDuration] = useState('')
-  const [seed, setSeed] = useState('')
 
   const { submit, status, progress, videoUrl, error, reset } =
     useVideoGeneration()
@@ -57,9 +56,6 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
       ...(duration !== '' && !isNaN(Number(duration)) && Number(duration) > 0
         ? { duration: Number(duration) }
         : {}),
-      ...(seed !== '' && !isNaN(Number(seed))
-        ? { seed: Number(seed) }
-        : {}),
     }
 
     void submit(apiKey, params)
@@ -69,7 +65,6 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
     reset()
     setPrompt('')
     setDuration('')
-    setSeed('')
   }
 
   const handleDownload = () => {
@@ -96,17 +91,6 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
             placeholder='例如：5'
             value={duration}
             onChange={(e) => setDuration(e.target.value)}
-            disabled={isGenerating}
-          />
-        </div>
-        <div className='flex flex-col gap-1.5'>
-          <Label htmlFor='video-seed'>随机种子</Label>
-          <Input
-            id='video-seed'
-            type='number'
-            placeholder='可选'
-            value={seed}
-            onChange={(e) => setSeed(e.target.value)}
             disabled={isGenerating}
           />
         </div>

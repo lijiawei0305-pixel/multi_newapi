@@ -70,6 +70,25 @@ function extractTaskId(payload: unknown): string | null {
 }
 
 /**
+ * newapi 视频代理地址由后端用 ServerAddress 拼成绝对 URL（如
+ * https://api.example.com/v1/videos/<id>/content）。多租户下页面可能从代理域名访问，
+ * 而 ServerAddress 常为主 API 域，二者不同源 → 带 Authorization 的 blob 抓取会触发
+ * CORS 预检并失败（视频虽生成成功却播放不出）。对该代理端点归一为【同源相对路径】，
+ * 使 blob 抓取始终同源、无预检；非代理端点（外链 CDN 等）保持原样。
+ */
+function toSameOriginProxyPath(u: string): string {
+  try {
+    const parsed = new URL(u, window.location.origin)
+    if (parsed.pathname.includes('/v1/videos/')) {
+      return parsed.pathname + parsed.search
+    }
+    return u
+  } catch {
+    return u
+  }
+}
+
+/**
  * Asynchronous video generation hook: submit a create request, poll the task
  * envelope until a terminal state, then resolve a playable `videoUrl`.
  *
@@ -265,7 +284,7 @@ export function useVideoGeneration(): UseVideoGenerationResult {
           // Otherwise the proxied URL needs the Bearer token, which a native
           // <video src> can't carry — fetch it as an authenticated blob.
           try {
-            const blobResp = await api.get(resultUrl, {
+            const blobResp = await api.get(toSameOriginProxyPath(resultUrl), {
               responseType: 'blob',
               headers: authHeaders,
               skipErrorHandler: true,

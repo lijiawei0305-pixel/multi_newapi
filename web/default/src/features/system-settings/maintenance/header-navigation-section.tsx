@@ -169,7 +169,7 @@ export function HeaderNavigationSection({
     },
     {
       key: 'playground',
-      title: t('Playground Nav', { defaultValue: 'Playground' }),
+      title: t('Playground Nav', { defaultValue: '创作平台' }),
       description: t('Playground Nav Desc', {
         defaultValue: '游乐园对话入口，从控制台提升到顶栏。',
       }),

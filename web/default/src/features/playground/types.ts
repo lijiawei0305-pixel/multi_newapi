@@ -158,6 +158,8 @@ export type CatalogFilter = 'all' | PlaygroundCapability
 export interface WorkspaceProps {
   apiKey: string
   model: string
+  /** 选中 key 所属分组；聊天用于同步 config.group，使模型列表拉取正确的组 */
+  group?: string
 }
 
 export interface ImageGenParams {

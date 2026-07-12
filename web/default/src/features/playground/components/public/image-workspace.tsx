@@ -103,7 +103,8 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
       })
       const objectUrl = URL.createObjectURL(resp.data as Blob)
       triggerDownload(objectUrl, filename)
-      URL.revokeObjectURL(objectUrl)
+      // 延迟吊销：部分浏览器 a.click() 后异步启动下载，立即 revoke 可能截断
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
     } catch {
       window.open(src, '_blank', 'noopener')
     }

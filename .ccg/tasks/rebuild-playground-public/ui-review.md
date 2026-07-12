@@ -59,3 +59,31 @@ key-selector 加载 spinner（移前导位，改单图标）· 目录骨架对�
 
 ### 复核结论
 聚焦复核 agent 确认 6 处修复文件：无未用 import/变量、无未定义符号、无非法 JSX、无硬编码色、文案全中文。**静态层面 lint/copyright/typecheck 门应可通过**（真值仍以服务器 build:check 为准）。
+
+---
+
+## 追加轮 3：遗漏猎取（Workflow⑥）+ 修复验证（Workflow⑦）
+
+用户要求「静态审查找问题+遗漏」。开 4 员对抗式遗漏猎取（546k tokens），专攻前 5 轮纯前端视角的盲区：需求可追溯性 / 前端↔真实 Go 后端契约 / 改动爆炸半径 / 深层边界+i18n。
+
+### 🔴 Critical（只能服务器修 · DoD#8 阻断）
+**routeTree.gen.ts 陈旧**（2 员确认）：仍 import 已删的 _authenticated/playground/index（坏导入→tsgo -b 必挂）+ /playground 仍挂鉴权树 + 新公开路由未注册。本机无工具链无法重生成。**服务器解法**：`rsbuild build`（tanstackRouter 插件会重写 gen），随后提交重生成后的 gen；勿让 tsgo 先撞陈旧 gen。
+
+### 🟠🟡 已就地修 + Workflow⑦ 验证通过（0 Critical/Warning）
+- **api.ts 401 → 全站登出**（坏 Bearer 密钥把用户踢下线）：reset+toast 移入 !skipErrorHandler。**⑦爆炸半径核验**：枚举全仓 20+ 个 skipErrorHandler 调用方，无一依赖被删的被动 reset → 全局安全；非 skip 会话 401 仍正常登出。
+- **聊天选中模型被 fallback 回退**（config.group 恒 default）：WorkspaceProps 加 group、index 传 selectedKey.group、chat 同步 config.group。
+- **dev 代理漏 /v1**：rsbuild.config.ts proxy 加 /v1（仅本地 dev，生产 nginx 无影响）。
+- **视频 blob 跨域**（ServerAddress 绝对 URL 跨租户域 CORS）：toSameOriginProxyPath 归一 /v1/videos/ 为同源相对路径。
+- **视频 seed 死字段**（后端 TaskSubmitReq 无 seed）：删除。
+- **reveal 失败静默** → 中文 toast；**图片下载 revoke 竞态** → 延迟 1s；**i18n**：zh.json 去英文 playground + 设置页 defaultValue 中文。
+
+### ✅ 后端契约交叉验证通过（前几轮从未做）
+视频 create/poll 信封 + 大小写状态集 + url??result_url + /v1/videos/:id/content 代理 + 揭示裸串+sk- + pricing 匿名可取 —— 均与真实 Go 后端吻合。
+
+### 📌 注记（尊重 spec / 产品决策，未改）
+- 路由无模块禁用守卫（R1 明确选不加 beforeLoad）· 控制台侧栏 playground 保留（spec 意图）
+- 聊天 group 选择器对 /v1 无实效（死控件，需 PlaygroundInput 支持隐藏，产品决策）
+- pricing 非公开时降级 · reveal 缓存软窗口（key 禁用后 ≤2min）· 图片 b64 MIME 固定 png · 「游乐园 vs 创作平台」用词 —— 均 follow-up
+
+### 结论
+6 轮审查/验证闭环。前端代码**静态层面已无已知缺陷**（lint/copyright/typecheck/契约/边界/i18n 均过）。唯一剩余 = routeTree 重生成 + build:check，**必须在服务器**。

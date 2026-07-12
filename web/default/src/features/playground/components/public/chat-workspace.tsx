@@ -37,7 +37,7 @@ import type { WorkspaceProps } from '../../types'
  * 抽取迁移而来。凭据已由 use-stream-request 经 credential context 注入，
  * 此处无需传 Authorization；apiKey 为空时禁用发送（外层门控亦会拦截）。
  */
-export function ChatWorkspace({ apiKey, model }: WorkspaceProps) {
+export function ChatWorkspace({ apiKey, model, group }: WorkspaceProps) {
   const {
     config,
     parameterEnabled,
@@ -63,6 +63,19 @@ export function ChatWorkspace({ apiKey, model }: WorkspaceProps) {
       updateConfig('model', model)
     }
   }, [model, config.model, updateConfig])
+
+  // 同步选中 key 所属分组到 config.group：/v1 的分组由 key 决定，这里对齐是为了让
+  // usePlaygroundOptions 的 getUserModels 拉取正确分组的模型列表，令 catalog 选中的
+  // 模型始终在列表内、不被 getModelFallback/shouldClearModelForGroup 回退覆盖。
+  const lastSyncedGroupRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!group) return
+    if (lastSyncedGroupRef.current === group) return
+    lastSyncedGroupRef.current = group
+    if (config.group !== group) {
+      updateConfig('group', group)
+    }
+  }, [group, config.group, updateConfig])
 
   const { sendChat, stopGeneration, isGenerating } = useChatHandler({
     config,

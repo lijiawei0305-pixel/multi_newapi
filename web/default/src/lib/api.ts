@@ -101,13 +101,15 @@ api.interceptors.response.use(
     const status = error?.response?.status
 
     if (status === 401) {
-      try {
-        useAuthStore.getState().auth.reset()
-      } catch {
-        /* empty */
-      }
-
+      // 仅当未显式 skipErrorHandler 时才视为「会话过期」并登出。
+      // playground 等以 Bearer API 密钥打 /v1 的调用带 skipErrorHandler：其 401
+      // 来自密钥失效，不应连带把已登录用户从全站会话踢下线。
       if (!skip) {
+        try {
+          useAuthStore.getState().auth.reset()
+        } catch {
+          /* empty */
+        }
         toast.error(t('Session expired!'))
       }
     } else if (!skip) {

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 
 import { PublicLayout } from '@/components/layout'
 import { useAuthStore } from '@/stores/auth-store'
@@ -152,6 +153,7 @@ function PlaygroundPublicContent() {
         if (cancelled) return
         setRevealedKey(null)
         setApiKey(null)
+        toast.error('获取 API 密钥失败，请重试或重新选择')
       })
 
     return () => {
@@ -183,6 +185,7 @@ function PlaygroundPublicContent() {
   const workspaceProps = {
     apiKey: revealedKey ?? '',
     model: selectedModel?.model_name ?? '',
+    group: selectedKey?.group ?? '',
   }
 
   function renderWorkspace() {
