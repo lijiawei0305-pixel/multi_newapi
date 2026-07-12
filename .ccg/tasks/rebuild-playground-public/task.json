@@ -4,7 +4,7 @@
   "status": "in_progress",
   "strategy": "full-collaborate",
   "currentPhase": "6-final",
-  "nextAction": "设计精修已应用并 Workflow⑩验证通过(0 Critical/Warning)。前端静态层面精致度已提升。剩: 服务器 rsbuild build(重生成 routeTree.gen.ts)+build:check+部署 · 像素/响应式实测 · 可选大重构。均待用户/服务器",
+  "nextAction": "用户追问「图片/视频能否正常播放展示」→ Workflow⑪ 播放/展示专项静态审查(浏览器渲染语义: img/video src加载/objectURL生命周期/blob MIME/代理URL鉴权vs外链直链/CORS/空src)→修真实展示缺陷。服务器build仍待",
   "gate": "await-user-server-build",
   "execMode": "claude-workflows-orchestrated",
   "branch": "500L",
