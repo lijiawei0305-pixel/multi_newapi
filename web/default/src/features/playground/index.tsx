@@ -163,8 +163,8 @@ function PlaygroundPublicContent() {
     }
   }, [isAuthed, selectedKeyId, keys, reveal, setApiKey])
 
-  // ── 选择 key 回调 ───────────────────────────────────────────────────────────
-  const handleSelectKey = useCallback((id: number) => {
+  // ── 选择 key 回调（id=选中；null=不指定密钥，浏览全部模型）──────────────────────
+  const handleSelectKey = useCallback((id: number | null) => {
     setSelectedKeyId(id)
     writeLastKeyId(id)
   }, [])

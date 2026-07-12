@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { KeyRound, Loader2 } from 'lucide-react'
+import { KeyRound, Layers, Loader2 } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -30,6 +30,9 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { API_KEY_STATUS } from '@/features/keys/constants'
 import type { ApiKey } from '@/features/keys/types'
+
+// 「不指定密钥·浏览全部模型」哨兵值（Select 需要一个非空 value 才能高亮该项）
+const NO_KEY_VALUE = '__no_key__'
 
 // ============================================================================
 // 状态标签映射（中文）
@@ -48,7 +51,8 @@ const STATUS_LABEL: Record<number, string> = {
 export interface KeySelectorProps {
   keys: ApiKey[]
   selectedId: number | null
-  onSelect: (id: number) => void
+  /** id=选中某密钥；null=不指定密钥（浏览全部模型，发送仍需选密钥） */
+  onSelect: (id: number | null) => void
   isAuthed: boolean
   loading?: boolean
 }
@@ -71,17 +75,14 @@ export function KeySelector({
   // 整个下拉禁用：未登录 或 正在加载
   const rootDisabled = !isAuthed || loading
 
-  // 触发器显示文案
-  const triggerLabel = !isAuthed
-    ? '请先登录后选择 API 密钥'
-    : selectedKey != null
-      ? selectedKey.name
-      : '选择 API 密钥'
-
   const enabledKeys = keys.filter((k) => k.status === API_KEY_STATUS.ENABLED)
   const disabledKeys = keys.filter((k) => k.status !== API_KEY_STATUS.ENABLED)
 
-  function handleValueChange(value: string) {
+  function handleValueChange(value: string | null) {
+    if (value == null || value === NO_KEY_VALUE) {
+      onSelect(null)
+      return
+    }
     const id = Number(value)
     if (!Number.isNaN(id)) {
       onSelect(id)
@@ -90,7 +91,7 @@ export function KeySelector({
 
   return (
     <Select
-      value={selectedId != null ? String(selectedId) : ''}
+      value={selectedId != null ? String(selectedId) : NO_KEY_VALUE}
       onValueChange={handleValueChange}
       disabled={rootDisabled}
     >
@@ -103,28 +104,35 @@ export function KeySelector({
       >
         {loading ? (
           <Loader2 className='text-muted-foreground size-3.5 shrink-0 animate-spin' />
-        ) : (
+        ) : selectedKey != null ? (
           <KeyRound className='text-muted-foreground size-3.5 shrink-0' />
+        ) : (
+          <Layers className='text-muted-foreground size-3.5 shrink-0' />
         )}
         {selectedKey != null ? (
           <span className='flex-1 truncate text-left text-sm'>
             {selectedKey.name}
           </span>
         ) : (
-          <span
-            className={cn(
-              'flex-1 truncate text-left text-sm',
-              !isAuthed || selectedId == null
-                ? 'text-muted-foreground'
-                : 'text-foreground',
-            )}
-          >
-            {triggerLabel}
+          <span className='flex-1 truncate text-left text-sm text-muted-foreground'>
+            {!isAuthed ? '请先登录后选择 API 密钥' : '浏览全部模型（未选密钥）'}
           </span>
         )}
       </SelectTrigger>
 
       <SelectContent align='start' className='min-w-[240px]'>
+        {/* 不指定密钥：浏览全部模型（发送仍需选密钥） */}
+        <SelectGroup>
+          <SelectItem value={NO_KEY_VALUE}>
+            <span className='flex flex-1 items-center gap-2 truncate'>
+              <Layers className='size-3.5 shrink-0' />
+              <span className='truncate'>浏览全部模型（不指定密钥）</span>
+            </span>
+          </SelectItem>
+        </SelectGroup>
+
+        {(enabledKeys.length > 0 || disabledKeys.length > 0) && <SelectSeparator />}
+
         {/* 可用密钥分组 */}
         {enabledKeys.length > 0 && (
           <SelectGroup>

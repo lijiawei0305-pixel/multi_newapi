@@ -19,13 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { PackageOpen } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { getLobeIcon } from '@/lib/lobe-icon'
@@ -67,86 +60,79 @@ interface ModelCardProps {
 
 function ModelCard({ model, selected, onSelect }: ModelCardProps) {
   const capabilities = getModelCapabilities(model)
-  // icon / vendor_icon 是 lobe-icon 的「key」（如 "Gemini"），不是图片 URL；
-  // 必须经 getLobeIcon 解析为真实厂商 logo 组件（与「模型广场」一致），
-  // 直接塞进 <img src> 会永远加载失败并回退占位图标。
+  // icon / vendor_icon 是 lobe-icon 的「key」（如 "Gemini.Color"），不是图片 URL；
+  // 必须经 getLobeIcon 解析为真实厂商 logo 组件（与「模型广场」一致）。
   const iconKey = model.icon || model.vendor_icon
   const initial = model.model_name?.charAt(0).toUpperCase() || '?'
   const vendorName = model.vendor_name?.trim()
 
   return (
-    <Card
-      size='sm'
-      role='button'
-      tabIndex={0}
+    <button
+      type='button'
       aria-pressed={selected}
       onClick={() => onSelect(model)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSelect(model)
-        }
-      }}
       className={cn(
-        'cursor-pointer transition-shadow',
-        'hover:ring-foreground/25',
+        'group w-full rounded-xl border p-2.5 text-left transition-colors',
         'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
-        selected && 'ring-1 ring-foreground bg-muted/40'
+        selected
+          ? 'border-primary/50 bg-primary/5 ring-1 ring-primary/25'
+          : 'border-border hover:border-border hover:bg-muted/40'
       )}
     >
-      <CardHeader>
-        <div className='flex items-start gap-2.5'>
-          {/* Model icon —— 真实厂商 logo，缺省回退首字母 */}
-          <div className='mt-0.5 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/60'>
-            {iconKey ? (
-              getLobeIcon(iconKey, 22)
-            ) : (
-              <span className='text-sm font-semibold text-muted-foreground'>
-                {initial}
-              </span>
-            )}
-          </div>
-
-          {/* Name + vendor + badges */}
-          <div className='min-w-0 flex-1'>
-            <CardTitle className='truncate text-sm leading-5'>
-              {model.model_name}
-            </CardTitle>
-            {vendorName && (
-              <p className='mt-0.5 truncate text-xs text-muted-foreground'>
-                {vendorName}
-              </p>
-            )}
-
-            {/* Capability badges */}
-            {capabilities.length > 0 && (
-              <div className='mt-1.5 flex flex-wrap gap-1'>
-                {capabilities.map((cap) => (
-                  <Badge key={cap} variant='secondary'>
-                    {CAPABILITY_LABELS[cap] ?? cap}
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Ratio / 计费 badge */}
-          <Badge
-            variant='outline'
-            className='ml-auto shrink-0 self-start tabular-nums'
-          >
-            {formatModelRate(model)}
-          </Badge>
+      {/* 头部：logo + 名称/厂商 + 计费 */}
+      <div className='flex items-center gap-2.5'>
+        <div
+          className={cn(
+            'flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg',
+            selected ? 'bg-background' : 'bg-muted/60'
+          )}
+        >
+          {iconKey ? (
+            getLobeIcon(iconKey, 22)
+          ) : (
+            <span className='text-sm font-semibold text-muted-foreground'>
+              {initial}
+            </span>
+          )}
         </div>
-      </CardHeader>
 
-      {/* 描述常显 + 兜底占位，令卡片等高、信息更饱满 */}
-      <CardContent>
-        <CardDescription className='line-clamp-2 min-h-[2rem] text-xs leading-relaxed'>
-          {model.description || '暂无模型简介'}
-        </CardDescription>
-      </CardContent>
-    </Card>
+        <div className='min-w-0 flex-1'>
+          <div className='truncate text-sm font-medium text-foreground'>
+            {model.model_name}
+          </div>
+          {vendorName && (
+            <div className='truncate text-xs text-muted-foreground'>
+              {vendorName}
+            </div>
+          )}
+        </div>
+
+        <Badge
+          variant='outline'
+          className='shrink-0 self-start text-[0.7rem] tabular-nums'
+        >
+          {formatModelRate(model)}
+        </Badge>
+      </div>
+
+      {/* 能力徽章 */}
+      {capabilities.length > 0 && (
+        <div className='mt-2 flex flex-wrap gap-1'>
+          {capabilities.map((cap) => (
+            <Badge key={cap} variant='secondary' className='text-[0.7rem]'>
+              {CAPABILITY_LABELS[cap] ?? cap}
+            </Badge>
+          ))}
+        </div>
+      )}
+
+      {/* 描述（仅在有值时显示；无简介不占位，保持清爽） */}
+      {model.description && (
+        <p className='mt-1.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground'>
+          {model.description}
+        </p>
+      )}
+    </button>
   )
 }
 
@@ -169,8 +155,11 @@ export function ModelCatalog({
   return (
     <div className='flex h-full flex-col gap-3'>
       {/* Header */}
-      <div className='shrink-0 px-1'>
-        <h2 className='text-sm font-medium text-muted-foreground'>模型目录</h2>
+      <div className='flex shrink-0 items-baseline justify-between px-1'>
+        <h2 className='text-sm font-semibold text-foreground'>模型目录</h2>
+        <span className='text-xs tabular-nums text-muted-foreground'>
+          {counts.all} 个模型
+        </span>
       </div>
 
       {/* Search */}
@@ -250,9 +239,9 @@ export function ModelCatalog({
           <div className='space-y-2 pb-2 pt-1'>
             {models.map((m) => (
               <ModelCard
-                key={m.id}
+                key={m.model_name}
                 model={m}
-                selected={selectedModel?.id === m.id}
+                selected={selectedModel?.model_name === m.model_name}
                 onSelect={onSelect}
               />
             ))}
