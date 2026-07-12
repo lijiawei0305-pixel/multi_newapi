@@ -65,14 +65,18 @@ export function getModelCapabilities(m: PricingModel): PlaygroundCapability[] {
 /**
  * Returns the single "primary" capability for display / workspace routing.
  * Priority order: video > image > chat.
- * Falls back to 'chat' when no recognised endpoint types are present.
+ * Returns `null` when the model exposes none of chat/image/video (e.g. an
+ * embedding / rerank / moderation model) — callers must NOT default such a
+ * model to chat, or they'd render a usable chat workspace for a model that
+ * can't chat and let the user fire a request that only errors out.
  */
-export function getPrimaryCapability(m: PricingModel): PlaygroundCapability {
+export function getPrimaryCapability(m: PricingModel): PlaygroundCapability | null {
   const types = m.supported_endpoint_types ?? []
 
   if (types.includes(VIDEO_ENDPOINT_TYPE)) return 'video'
   if (types.includes(IMAGE_ENDPOINT_TYPE)) return 'image'
-  return 'chat'
+  if (types.some((t) => CHAT_ENDPOINT_TYPES.has(t))) return 'chat'
+  return null
 }
 
 /**

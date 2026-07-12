@@ -37,6 +37,9 @@ import type { WorkspaceProps } from '../../types'
 export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
   const [prompt, setPrompt] = useState('')
   const [duration, setDuration] = useState('')
+  // <video> 加载/解码失败（直链过期/403/CORS、blob 损坏、MIME 误判）。hook 置
+  // status='success' 后不再关心元素能否解码，无此兜底则用户只见黑框、无任何提示。
+  const [playbackError, setPlaybackError] = useState(false)
 
   const { submit, status, progress, videoUrl, error, reset } =
     useVideoGeneration()
@@ -51,6 +54,7 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
     if (!apiKey) return
     if (!prompt.trim()) return
 
+    setPlaybackError(false)
     const params = {
       model,
       prompt: prompt.trim(),
@@ -66,6 +70,7 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
     reset()
     setPrompt('')
     setDuration('')
+    setPlaybackError(false)
   }
 
   const handleDownload = () => {
@@ -145,7 +150,7 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
         </div>
       )}
 
-      {isSuccess && videoUrl && (
+      {isSuccess && videoUrl && !playbackError && (
         <div className='flex flex-col gap-2'>
           <video
             controls
@@ -155,6 +160,9 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
               'w-full max-w-2xl rounded-xl border border-border bg-muted',
               'shadow-md'
             )}
+            // 加载/解码失败切错误态；成功加载则清除（防上一次的失败态残留）。
+            onError={() => setPlaybackError(true)}
+            onLoadedData={() => setPlaybackError(false)}
           >
             您的浏览器不支持视频播放
           </video>
@@ -172,6 +180,26 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
               variant='outline'
               size='sm'
               className='w-fit'
+              onClick={handleReset}
+            >
+              <RotateCcw className='mr-1.5 size-3.5' />
+              重新生成
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {isSuccess && videoUrl && playbackError && (
+        <div className='flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-destructive'>
+          <VideoOff className='mt-0.5 size-4 shrink-0' />
+          <div className='flex flex-col gap-1.5'>
+            <span className='text-sm font-medium'>
+              视频加载失败，可能是链接已失效或格式不受支持
+            </span>
+            <Button
+              variant='outline'
+              size='sm'
+              className='w-fit border-destructive/30 text-destructive hover:bg-destructive/10'
               onClick={handleReset}
             >
               <RotateCcw className='mr-1.5 size-3.5' />

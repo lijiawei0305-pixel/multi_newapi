@@ -208,9 +208,19 @@ function PlaygroundPublicContent() {
         // key=模型名：切换到不同图片模型时重挂载，清空上一次生成的图片
         return <ImageWorkspace key={workspaceProps.model} {...workspaceProps} />
       case 'chat':
-      default:
         // 聊天不加 key：切换模型应保留对话历史
         return <ChatWorkspace {...workspaceProps} />
+      default:
+        // capability===null：选中的模型既非聊天/图片/视频（embedding/rerank 等），
+        // 不给可发送的工作区，改渲染禁用占位，避免对错误能力的模型发请求。
+        return (
+          <div className='flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground'>
+            <p className='text-sm'>该模型暂不支持在创作台使用</p>
+            <p className='text-xs'>
+              仅支持 embedding / rerank 等非创作接口，请从左侧选择聊天 / 图片 / 视频模型
+            </p>
+          </div>
+        )
     }
   }
 

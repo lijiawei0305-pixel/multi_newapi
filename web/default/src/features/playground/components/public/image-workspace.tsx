@@ -34,6 +34,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { toast } from 'sonner'
+
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -70,6 +72,9 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
   const [prompt, setPrompt] = useState('')
   const [n, setN] = useState<string>('1')
   const [size, setSize] = useState<string>('1024x1024')
+  // 加载失败（url 过期/403/CDN 挂）的图片索引：<img onError> 命中后切占位，
+  // 避免用户「生成成功却只见破图」而无任何提示。
+  const [failedIndices, setFailedIndices] = useState<Set<number>>(new Set())
 
   const { generate, status, images, error, reset } = useImageGeneration()
 
@@ -81,6 +86,7 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
     if (!resolvedPrompt) return
 
     reset()
+    setFailedIndices(new Set())
     void generate(apiKey, {
       model,
       prompt: resolvedPrompt,
@@ -121,12 +127,16 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
       // 延迟吊销：部分浏览器 a.click() 后异步启动下载，立即 revoke 可能截断
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
     } catch {
+      // blob 抓取失败：此处已脱离原始点击手势，window.open 常被弹窗拦截而静默失败，
+      // 故显式 toast 反馈，再尽力打开新标签（成功则用户可另存）。
+      toast.error('下载失败，请右键图片另存或稍后重试')
       window.open(src, '_blank', 'noopener')
     }
   }
 
-  const numImages = Number(n)
-  const isGrid = numImages > 1
+  // 布局按【实际渲染的图片数量】判定，而非张数下拉框 n：n>1 部分失败被过滤、
+  // 或生成后改选 n，都会让 n 与 images.length 失配，导致网格空格 / 多图挤在单列。
+  const isGrid = images.length > 1
 
   return (
     <div className='flex h-full flex-col gap-4'>
@@ -182,27 +192,56 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
                   key={index}
                   className='group relative overflow-hidden rounded-lg border border-border bg-muted'
                 >
-                  <img
-                    alt={item.revised_prompt || prompt || `生成图片 ${index + 1}`}
-                    className='h-auto max-h-full w-full object-contain'
-                    src={src}
-                  />
-                  {/* 下载按钮，悬停显示 */}
-                  <button
-                    type='button'
-                    aria-label='下载图片'
-                    className={cn(
-                      'absolute right-2 top-2 flex size-8 items-center justify-center rounded-md',
-                      'bg-card/80 text-foreground opacity-0 backdrop-blur-sm transition-opacity',
-                      'hover:bg-card group-hover:opacity-100',
-                      'focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
-                    )}
-                    onClick={() => handleDownload(src, filename)}
-                    title='下载图片'
-                  >
-                    <DownloadIcon className='size-4' />
-                    <span className='sr-only'>下载图片</span>
-                  </button>
+                  {failedIndices.has(index) ? (
+                    // url 失效/403/CDN 挂：<img onError> 命中后展示占位 + 新标签打开兜底，
+                    // 而非留一个静默破图图标让用户不知所措。
+                    <div className='flex aspect-square w-full flex-col items-center justify-center gap-2 p-4 text-center text-muted-foreground'>
+                      <ImageIcon className='size-8 opacity-40' />
+                      <p className='text-xs'>图片加载失败</p>
+                      {src && (
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          onClick={() =>
+                            window.open(src, '_blank', 'noopener')
+                          }
+                        >
+                          在新标签打开
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <img
+                        alt={
+                          item.revised_prompt || prompt || `生成图片 ${index + 1}`
+                        }
+                        className='h-auto max-h-full w-full object-contain'
+                        src={src}
+                        onError={() =>
+                          setFailedIndices((prev) =>
+                            new Set(prev).add(index)
+                          )
+                        }
+                      />
+                      {/* 下载按钮，悬停显示 */}
+                      <button
+                        type='button'
+                        aria-label='下载图片'
+                        className={cn(
+                          'absolute right-2 top-2 flex size-8 items-center justify-center rounded-md',
+                          'bg-card/80 text-foreground opacity-0 backdrop-blur-sm transition-opacity',
+                          'hover:bg-card group-hover:opacity-100',
+                          'focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+                        )}
+                        onClick={() => handleDownload(src, filename)}
+                        title='下载图片'
+                      >
+                        <DownloadIcon className='size-4' />
+                        <span className='sr-only'>下载图片</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               )
             })}

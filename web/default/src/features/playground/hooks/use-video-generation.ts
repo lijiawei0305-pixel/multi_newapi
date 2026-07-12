@@ -83,8 +83,13 @@ const VIDEO_PROXY_PATH_RE = /\/v1\/videos\/[^/]+\/content$/
 function toSameOriginProxyPath(u: string): string {
   try {
     const parsed = new URL(u, window.location.origin)
-    if (VIDEO_PROXY_PATH_RE.test(parsed.pathname)) {
-      return parsed.pathname + parsed.search
+    // 归一多余前导斜杠：当 ServerAddress 配了尾斜杠时后端 BuildProxyURL 拼出
+    // `https://host//v1/videos/x/content`，pathname 会是 `//v1/videos/...`，
+    // 既让下游 startsWith('/v1/videos/') 判否（误当 CDN 直链），又会被 <video>
+    // 解析成协议相对 URL（host 变字面量 v1）永久播不出。先压成单斜杠再判定。
+    const pathname = parsed.pathname.replace(/^\/{2,}/, '/')
+    if (VIDEO_PROXY_PATH_RE.test(pathname)) {
+      return pathname + parsed.search
     }
     return u
   } catch {
@@ -311,12 +316,22 @@ export function useVideoGeneration(): UseVideoGenerationResult {
             })
             if (runId !== runIdRef.current) return
             // Content-Type 兜底：代理透传若为 octet-stream / 空，<video> 依 Blob.type
-            // 判定可播性，非 video/* 会拒绝解码 → 强制 video/mp4。
+            // 判定可播性，非 video/* 会拒绝解码。兜底 MIME 优先取轮询信封的 format
+            // （Gemini/Vertex 通道返回完整 mimeType 如 'video/webm'；亦兼容短码），
+            // 避免把真实 WebM 硬贴 video/mp4 致严格浏览器(WebKit)拒解码 → 黑屏。
             const rawBlob = blobResp.data as Blob
+            const fmt = (data?.format ?? '').toLowerCase()
+            const fallbackType = fmt.startsWith('video/')
+              ? fmt
+              : fmt === 'webm'
+                ? 'video/webm'
+                : fmt === 'mov'
+                  ? 'video/quicktime'
+                  : 'video/mp4'
             const playableBlob =
               rawBlob.type && rawBlob.type.startsWith('video/')
                 ? rawBlob
-                : new Blob([rawBlob], { type: 'video/mp4' })
+                : new Blob([rawBlob], { type: fallbackType })
             const objectUrl = URL.createObjectURL(playableBlob)
             objectUrlRef.current = objectUrl
             setVideoUrl(objectUrl)
