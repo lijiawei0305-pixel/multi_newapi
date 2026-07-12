@@ -4,7 +4,7 @@
   "status": "in_progress",
   "strategy": "full-collaborate",
   "currentPhase": "6-final",
-  "nextAction": "遗漏猎取+修复+Workflow⑦验证全通过(0 Critical/Warning)。前端静态层面无已知缺陷。唯一剩余: 服务器 rsbuild build 重生成 routeTree.gen.ts(移动路由后必须) + build:check + 部署。待用户定时机",
+  "nextAction": "设计精修已应用并 Workflow⑩验证通过(0 Critical/Warning)。前端静态层面精致度已提升。剩: 服务器 rsbuild build(重生成 routeTree.gen.ts)+build:check+部署 · 像素/响应式实测 · 可选大重构。均待用户/服务器",
   "gate": "await-user-server-build",
   "execMode": "claude-workflows-orchestrated",
   "branch": "500L",

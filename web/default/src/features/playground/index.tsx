@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { toast } from 'sonner'
 
 import { PublicLayout } from '@/components/layout'
@@ -79,6 +80,7 @@ function PlaygroundPublicContent() {
   const isAuthed = !!user
 
   const { setApiKey } = usePlaygroundCredential()
+  const navigate = useNavigate()
 
   // ── 状态机 ────────────────────────────────────────────────────────────────
   const [selectedKeyId, setSelectedKeyId] = useState<number | null>(() =>
@@ -172,10 +174,19 @@ function PlaygroundPublicContent() {
   const hasCredential = isAuthed && !!revealedKey
   const hasNoKeys = isAuthed && !keysLoading && keys.length === 0
   let gatingMessage: string | null = null
+  let gatingAction: { label: string; onClick: () => void } | undefined
   if (!isAuthed) {
     gatingMessage = '请先登录并选择 API 密钥'
+    gatingAction = {
+      label: '去登录',
+      onClick: () => void navigate({ to: '/sign-in' }),
+    }
   } else if (hasNoKeys) {
-    gatingMessage = '您还没有可用的 API 密钥，请点击「创建 API 密钥」'
+    gatingMessage = '您还没有可用的 API 密钥'
+    gatingAction = {
+      label: '创建 API 密钥',
+      onClick: () => void navigate({ to: '/keys' }),
+    }
   } else if (!hasCredential) {
     gatingMessage = '请先在顶部选择 API 密钥后再生成'
   }
@@ -207,12 +218,12 @@ function PlaygroundPublicContent() {
     <div className='flex h-[calc(100svh-3.5rem)] min-h-0 flex-col overflow-hidden pt-14'>
       {/* 页面工具条 */}
       <div className='flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-3'>
-        <div className='mr-auto flex min-w-0 flex-col'>
+        <div className='mr-auto flex min-w-0 flex-col gap-0.5'>
           <h1 className='truncate text-lg font-semibold text-foreground'>
             AI 大模型聚合平台
           </h1>
-          <p className='truncate text-xs text-muted-foreground'>
-            选择 API 密钥与模型，开始聊天、图片与视频创作
+          <p className='truncate text-[0.8rem] leading-tight text-muted-foreground'>
+            选择密钥与模型，开始聊天 / 图片 / 视频创作
           </p>
         </div>
 
@@ -229,7 +240,7 @@ function PlaygroundPublicContent() {
       {/* 门控提示 */}
       {gatingMessage && !keysLoading && (
         <div className='shrink-0 px-4 pt-3'>
-          <GatingAlert message={gatingMessage} />
+          <GatingAlert message={gatingMessage} action={gatingAction} />
         </div>
       )}
 
@@ -254,7 +265,7 @@ function PlaygroundPublicContent() {
 
         {/* 右：模型介绍 + 当前能力工作区 */}
         <div className='grid min-h-0 grid-rows-[auto_1fr] gap-4 overflow-hidden'>
-          <div className='min-h-0'>
+          <div className='max-h-[45%] min-h-0'>
             <ModelIntroCard model={selectedModel} />
           </div>
           <div className='min-h-0 overflow-hidden rounded-xl border border-border bg-card'>

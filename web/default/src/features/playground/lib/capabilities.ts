@@ -115,6 +115,13 @@ export const CATALOG_FILTERS: { value: CatalogFilter; label: string }[] = [
   { value: 'video', label: '视频' },
 ]
 
+/** 能力中文标签（目录卡 / 介绍卡共用），键为 PlaygroundCapability */
+export const CAPABILITY_LABELS: Record<PlaygroundCapability, string> = {
+  chat: '聊天',
+  image: '图片',
+  video: '视频',
+}
+
 /**
  * 计费展示文案。按次计费（quota_type=1，图片/视频模型多为此）其 model_ratio
  * 常为 0，直接展示会得到误导性的「倍率 0」；此处按 quota_type 区分展示。

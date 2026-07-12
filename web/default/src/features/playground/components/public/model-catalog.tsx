@@ -31,20 +31,12 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import type { PricingModel } from '@/features/pricing/types'
 import {
+  CAPABILITY_LABELS,
   CATALOG_FILTERS,
   formatModelRate,
   getModelCapabilities,
 } from '../../lib/capabilities'
 import type { CatalogFilter } from '../../types'
-
-// ---------------------------------------------------------------------------
-// Capability label map (中文)
-// ---------------------------------------------------------------------------
-const CAPABILITY_LABELS: Record<string, string> = {
-  chat: '聊天',
-  image: '图片',
-  video: '视频',
-}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -91,9 +83,9 @@ function ModelCard({ model, selected, onSelect }: ModelCardProps) {
       }}
       className={cn(
         'cursor-pointer transition-shadow',
-        'hover:ring-2 hover:ring-foreground/15',
+        'hover:ring-foreground/25',
         'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
-        selected && 'ring-2 ring-foreground/30 bg-muted/40'
+        selected && 'ring-1 ring-foreground bg-muted/40'
       )}
     >
       <CardHeader>
@@ -133,7 +125,7 @@ function ModelCard({ model, selected, onSelect }: ModelCardProps) {
             {capabilities.length > 0 && (
               <div className='mt-1 flex flex-wrap gap-1'>
                 {capabilities.map((cap) => (
-                  <Badge key={cap} variant='secondary' className='text-xs'>
+                  <Badge key={cap} variant='secondary'>
                     {CAPABILITY_LABELS[cap] ?? cap}
                   </Badge>
                 ))}
@@ -142,7 +134,10 @@ function ModelCard({ model, selected, onSelect }: ModelCardProps) {
           </div>
 
           {/* Ratio / 计费 badge */}
-          <Badge variant='outline' className='ml-auto shrink-0 self-start text-xs'>
+          <Badge
+            variant='outline'
+            className='ml-auto shrink-0 self-start tabular-nums'
+          >
             {formatModelRate(model)}
           </Badge>
         </div>
@@ -179,7 +174,7 @@ export function ModelCatalog({
     <div className='flex h-full flex-col gap-3'>
       {/* Header */}
       <div className='shrink-0 px-1'>
-        <p className='text-base font-medium text-foreground'>模型目录</p>
+        <h2 className='text-sm font-medium text-muted-foreground'>模型目录</h2>
       </div>
 
       {/* Search */}

@@ -19,27 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 import { MousePointerClick } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import type { PricingModel } from '@/features/pricing/types'
 import { cn } from '@/lib/utils'
 
-import { formatModelRate, getModelCapabilities } from '../../lib/capabilities'
-import type { PlaygroundCapability } from '../../types'
-
-// ---------------------------------------------------------------------------
-// Capability badge label map
-// ---------------------------------------------------------------------------
-const CAPABILITY_LABELS: Record<PlaygroundCapability, string> = {
-  chat: '聊天',
-  image: '图片',
-  video: '视频',
-}
+import {
+  CAPABILITY_LABELS,
+  formatModelRate,
+  getModelCapabilities,
+} from '../../lib/capabilities'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -49,88 +37,98 @@ export interface ModelIntroCardProps {
   className?: string
 }
 
+// 小节字段标签（overline 风格，安静地区分「字段名」与「内容」）
+const SECTION_LABEL_CLASS =
+  'text-[0.7rem] font-medium tracking-wide text-muted-foreground'
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 export function ModelIntroCard({ model, className }: ModelIntroCardProps) {
-  // ── Empty state ──────────────────────────────────────────────────────────
+  // ── 空态：主副两行引导 + 与实态一致的图标托底 ──────────────────────────────
   if (!model) {
     return (
       <Card
         className={cn(
-          'flex h-full flex-col items-center justify-center gap-3 border-dashed',
+          'flex h-full flex-col items-center justify-center gap-3 border-dashed border-border text-center',
           className
         )}
       >
-        <div className="bg-muted flex size-12 items-center justify-center rounded-full">
-          <MousePointerClick className="text-muted-foreground size-6" />
+        <div className="flex size-12 items-center justify-center rounded-2xl bg-muted ring-1 ring-foreground/10">
+          <MousePointerClick className="size-6 text-muted-foreground" />
         </div>
-        <p className="text-muted-foreground text-sm">
-          从左侧选择一个模型开始创作
-        </p>
+        <div className="flex flex-col gap-0.5 px-4">
+          <p className="text-sm font-medium text-foreground">选择一个模型</p>
+          <p className="text-xs text-muted-foreground">
+            从左侧目录挑选，查看能力、计费与介绍
+          </p>
+        </div>
       </Card>
     )
   }
 
-  // ── Model icon (prefer model.icon, fallback vendor_icon) ─────────────────
   const iconSrc = model.icon ?? model.vendor_icon
   const capabilities = getModelCapabilities(model)
 
   return (
-    <Card className={cn('h-full', className)}>
-      {/* Header: icon + name + description */}
-      <CardHeader className="gap-3">
-        {iconSrc && (
-          <img
-            src={iconSrc}
-            alt={model.model_name}
-            className="size-10 rounded-lg object-contain"
-            onError={(e) => {
-              ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-            }}
-          />
-        )}
-        <div className="min-w-0 flex-1">
-          <CardTitle className="truncate text-base font-semibold">
+    <Card className={cn('h-full overflow-y-auto', className)}>
+      <CardContent className="flex flex-col gap-4 pt-5">
+        {/* 英雄区：居中图标托底 + 名称突出 + 能力徽章 */}
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="flex size-14 items-center justify-center overflow-hidden rounded-2xl bg-muted ring-1 ring-foreground/10">
+            {iconSrc ? (
+              <img
+                src={iconSrc}
+                alt={model.model_name}
+                className="size-9 object-contain"
+                onError={(e) => {
+                  ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                }}
+              />
+            ) : (
+              <span className="text-lg font-semibold text-muted-foreground">
+                {model.model_name.slice(0, 1).toUpperCase()}
+              </span>
+            )}
+          </div>
+          <h2 className="text-lg font-semibold tracking-tight text-foreground">
             {model.model_name}
-          </CardTitle>
-          {model.description && (
-            <CardDescription className="mt-0.5 line-clamp-2 text-sm">
-              {model.description}
-            </CardDescription>
-          )}
-        </div>
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-4">
-        {/* Capability badges */}
-        {capabilities.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <p className="text-muted-foreground text-xs font-medium">支持能力</p>
-            <div className="flex flex-wrap gap-1.5">
+          </h2>
+          {capabilities.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-1.5">
               {capabilities.map((cap) => (
                 <Badge key={cap} variant="secondary">
                   {CAPABILITY_LABELS[cap]}
                 </Badge>
               ))}
             </div>
-          </div>
+          )}
+        </div>
+
+        {/* 介绍正文（整段，独立成块，保留换行） */}
+        {model.description && (
+          <>
+            <div className="border-t border-border/60" />
+            <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+              {model.description}
+            </p>
+          </>
         )}
 
         {/* 计费方式 */}
         <div className="flex flex-col gap-1.5">
-          <p className="text-muted-foreground text-xs font-medium">计费方式</p>
-          <div className="bg-muted rounded-lg px-3 py-2">
-            <span className="text-foreground text-sm font-medium">
+          <p className={SECTION_LABEL_CLASS}>计费方式</p>
+          <div className="rounded-lg bg-muted px-3 py-2">
+            <span className="text-sm font-semibold tabular-nums text-foreground">
               {formatModelRate(model)}
             </span>
           </div>
         </div>
 
-        {/* Tags (if present) */}
+        {/* 标签 */}
         {model.tags && (
           <div className="flex flex-col gap-1.5">
-            <p className="text-muted-foreground text-xs font-medium">标签</p>
+            <p className={SECTION_LABEL_CLASS}>标签</p>
             <div className="flex flex-wrap gap-1.5">
               {model.tags
                 .split(',')

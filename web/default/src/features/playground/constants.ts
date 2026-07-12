@@ -56,6 +56,10 @@ export const VIDEO_STATUS_FAILURE = new Set(['FAILURE', 'failed'])
 // Task success code
 export const TASK_SUCCESS_CODE = 'success'
 
+// 三个工作区底部输入区的统一外观（克制中性，避免各写各的玻璃拟态 / 裸样式）
+export const PROMPT_INPUT_SHELL_CLASS =
+  'rounded-xl border-border/70 bg-background/95 dark:bg-background/80 ring-1 ring-foreground/5 shadow-sm transition-colors duration-200 focus-within:border-primary/45 focus-within:ring-primary/15'
+
 // Default group — uses 'default' as the safe fallback; auto-group is
 // only selected when the backend confirms it is available for the user.
 export const DEFAULT_GROUP = 'default' as const

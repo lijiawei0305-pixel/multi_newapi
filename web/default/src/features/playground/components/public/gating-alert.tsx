@@ -16,21 +16,35 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AlertTriangle } from 'lucide-react'
+import { Info } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 
 interface GatingAlertProps {
   message: string
+  /** 可选内联行动按钮（如「去登录」「创建 API 密钥」），缩短转化路径 */
+  action?: { label: string; onClick: () => void }
 }
 
-export function GatingAlert({ message }: GatingAlertProps) {
+export function GatingAlert({ message, action }: GatingAlertProps) {
+  // 门控是「常态引导」而非「警告」，用中性 muted 信息态更克制专业（非 warning 黄）。
   return (
-    <Alert className="border-warning/30 bg-warning/10">
-      <AlertTriangle className="text-warning" />
-      <AlertDescription className="text-foreground">
+    <Alert className="flex items-center gap-3 border-border bg-muted/40">
+      <Info className="text-muted-foreground" />
+      <AlertDescription className="flex-1 text-foreground">
         {message}
       </AlertDescription>
+      {action && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          onClick={action.onClick}
+        >
+          {action.label}
+        </Button>
+      )}
     </Alert>
   )
 }

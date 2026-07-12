@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
-import { DownloadIcon, ImageIcon, Loader2Icon } from 'lucide-react'
+import { DownloadIcon, ImageIcon, Loader2Icon, RotateCcw } from 'lucide-react'
 
 import {
   PromptInput,
@@ -33,9 +33,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
+import { PROMPT_INPUT_SHELL_CLASS } from '../../constants'
 import { useImageGeneration } from '../../hooks/use-image-generation'
 import type { WorkspaceProps } from '../../types'
 
@@ -132,8 +134,17 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
         )}
 
         {status === 'error' && error && (
-          <div className='flex flex-1 flex-col items-center justify-center gap-2'>
+          <div className='flex flex-1 flex-col items-center justify-center gap-3'>
             <p className='text-sm text-destructive'>{error}</p>
+            <Button
+              size='sm'
+              variant='outline'
+              onClick={() => handleSubmit(prompt)}
+              disabled={!apiKey || !prompt.trim()}
+            >
+              <RotateCcw className='mr-1.5 size-3.5' />
+              重试
+            </Button>
           </div>
         )}
 
@@ -166,10 +177,12 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
                   {/* 下载按钮，悬停显示 */}
                   <button
                     type='button'
+                    aria-label='下载图片'
                     className={cn(
                       'absolute right-2 top-2 flex size-8 items-center justify-center rounded-md',
                       'bg-card/80 text-foreground opacity-0 backdrop-blur-sm transition-opacity',
-                      'hover:bg-card group-hover:opacity-100'
+                      'hover:bg-card group-hover:opacity-100',
+                      'focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
                     )}
                     onClick={() => handleDownload(src, filename)}
                     title='下载图片'
@@ -187,7 +200,7 @@ export function ImageWorkspace({ apiKey, model }: WorkspaceProps) {
       {/* 输入区域 */}
       <div className='shrink-0'>
         <PromptInput
-          groupClassName='rounded-xl'
+          groupClassName={PROMPT_INPUT_SHELL_CLASS}
           onSubmit={({ text }) => {
             handleSubmit(text ?? '')
           }}

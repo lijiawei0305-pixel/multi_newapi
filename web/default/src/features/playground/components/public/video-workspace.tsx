@@ -30,6 +30,7 @@ import {
 } from '@/components/ai-elements/prompt-input'
 import { cn } from '@/lib/utils'
 
+import { PROMPT_INPUT_SHELL_CLASS } from '../../constants'
 import { useVideoGeneration } from '../../hooks/use-video-generation'
 import type { WorkspaceProps } from '../../types'
 
@@ -98,7 +99,7 @@ export function VideoWorkspace({ apiKey, model }: WorkspaceProps) {
 
       {/* 提示词输入区域 */}
       <PromptInput
-        groupClassName='bg-background/95 dark:bg-background/80 border-border/70 shadow-lg ring-1 ring-foreground/5 rounded-xl overflow-hidden transition-all duration-200 focus-within:border-primary/45 focus-within:ring-primary/15'
+        groupClassName={cn(PROMPT_INPUT_SHELL_CLASS, 'overflow-hidden')}
         onSubmit={() => handleSubmit()}
       >
         <PromptInputTextarea

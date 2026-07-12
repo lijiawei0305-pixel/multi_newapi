@@ -709,11 +709,19 @@ export function ModelMutateDrawer({
                     <FormLabel>{t('Description')}</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder={t('Describe this model...')}
-                        rows={3}
+                        placeholder={t('Describe the model source, purpose and use cases', {
+                          defaultValue:
+                            '介绍该模型的来源、用途与适用场景（支持换行）',
+                        })}
+                        rows={5}
                         {...field}
                       />
                     </FormControl>
+                    <FormDescription className='text-xs'>
+                      {t('Shown on the AI Workshop model intro card', {
+                        defaultValue: '将展示在 AI 工坊的模型介绍卡',
+                      })}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

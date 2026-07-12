@@ -87,3 +87,22 @@ key-selector 加载 spinner（移前导位，改单图标）· 目录骨架对�
 
 ### 结论
 6 轮审查/验证闭环。前端代码**静态层面已无已知缺陷**（lint/copyright/typecheck/契约/边界/i18n 均过）。唯一剩余 = routeTree 重生成 + build:check，**必须在服务器**。
+
+---
+
+## 追加轮 5：设计精修（Workflow⑨ 3 设计师批判 → 应用 → Workflow⑩ 验证）
+
+用户「仔细优化完善」。3 视角设计批判出 ~30 条 renderDependent=false 精修项，应用高价值项，Workflow⑩ 验证 **0 Critical/0 Warning，全干净无回归**。
+
+### 已应用
+- **模型介绍卡英雄化**（用户关注的中间卡）：图标 size-14 居中中性托底 · 名称 text-lg 突出(h2) · 能力徽章置名下 · **整段介绍独立成块**(分隔线+全宽 leading-relaxed+保留换行) · 计费 font-semibold tabular-nums · overline 字段标签 · 空态主副两行引导。
+- **门控条中性化 + 行动按钮**：去 warning 黄→border-border+bg-muted/40+Info；内联「去登录/创建 API 密钥」CTA（navigate）。
+- **卡片/令牌统一**：目录卡 ring 恒 1px 不跳动(hover 只加深/selected 单一强信号) · 倍率 tabular-nums · 去冗余 text-xs · 标题 p→h2 · CAPABILITY_LABELS 提到 lib 共用去重。
+- **三工作区输入统一**：共享 PROMPT_INPUT_SHELL_CLASS，去 video 重玻璃拟态阴影(shadow-lg)。
+- **图片工作区**：error 态补重试 Button · 下载按钮 focus-visible+aria-label 键盘可达。
+
+### 验证（Workflow⑩ 2 员）
+imports/类型/JSX/令牌 + 组件 API（Alert flex 覆盖 grid、Card ring 合并、Badge 变体、PromptInput groupClassName、gating action 可选）全部核实通过。仅 Info 级确认性观察，无需改。
+
+### 归到后续（未盲改）
+四态抽公共组件(大重构) · 聊天冗余模型/分组下拉隐藏(需改共享 PlaygroundInput) · video 布局翻转(结果上/输入下) · 介绍卡 max-h 比例 · 三步走清单 · 无密钥态强调 CreateKeyButton —— 大重构或需浏览器实测。
