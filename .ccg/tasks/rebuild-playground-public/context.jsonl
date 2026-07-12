@@ -1,0 +1,10 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "web/default/src/features/playground/{index.tsx,constants.ts,types.ts,hooks/,components/}", "reason": "主体重建位置；constants.ts:76-103 含需中文化的 ERROR_MESSAGES/MESSAGE_ACTION_LABELS"}
+{"file": "web/default/src/routes/_authenticated/playground/index.tsx", "reason": "现有受守卫路由，需删除并移出 _authenticated/ 为 routes/playground/index.tsx（去 beforeLoad）"}
+{"file": "web/default/src/hooks/use-top-nav-links.ts", "reason": "顶栏入口 75-82 已指向 /playground，含过时注释需更新"}
+{"file": "web/default/src/features/keys/{api.ts,types.ts,constants.ts,components/api-keys-provider.tsx}", "reason": "密钥列表(脱敏)/揭示(POST /api/token/:id/key)/状态常量 API_KEY_STATUS"}
+{"file": "web/default/src/features/chat/hooks/use-active-chat-key.ts", "reason": "list→筛 status=1→揭示→sk-${key} 现成模板，改为揭示选中 id"}
+{"file": "web/default/src/features/pricing/{api.ts,types.ts,lib/filters.ts,constants.ts,hooks/use-pricing-data.ts}", "reason": "GET /api/pricing 权威能力源；filterBySearch/filterByEndpointType；ENDPOINT_TYPES"}
+{"file": "web/default/src/features/home/index.tsx", "reason": "公开路由样板：PublicLayout/自裹 header + useAuthStore 读登录态"}
+{"file": "web/default/src/lib/api.ts", "reason": "共享 axios，baseURL='' withCredentials:true"}
+{"file": "web/default/src/features/playground/hooks/use-stream-request.ts", "reason": "聊天 SSE 请求 61-65 需加 Authorization: Bearer sk-xxx，端点改 /v1/chat/completions"}

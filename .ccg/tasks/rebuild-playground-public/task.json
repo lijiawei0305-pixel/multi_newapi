@@ -1,0 +1,13 @@
+{
+  "id": "rebuild-playground-public",
+  "title": "Playground 公开创作页重建（聊天/图片/视频，共用选 key→生成门控与 /v1 计费）",
+  "status": "in_progress",
+  "strategy": "full-collaborate",
+  "currentPhase": "6-final",
+  "nextAction": "代码完成（4 Critical + 5 Warning 已修，1 Critical 判定误报）。待用户定服务器构建验证时机：rsync→/root/newapi-test→build:check（tsgo -b && rsbuild build）",
+  "gate": "await-user-server-build",
+  "execMode": "claude-workflows-orchestrated",
+  "branch": "500L",
+  "scope": "rebuild-playground-public",
+  "createdAt": "2026-07-12T03:59:56Z"
+}

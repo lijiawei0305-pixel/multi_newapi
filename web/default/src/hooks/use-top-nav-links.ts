@@ -73,10 +73,10 @@ export function useTopNavLinks(): TopNavLink[] {
   }
 
   // Playground（游乐园）—— 从控制台提升到顶栏（控制台侧栏保留）
-  // 认证路由，未登录点击由路由守卫跳转登录，处理方式与「控制台」一致
+  // 公开路由，未登录可直接访问
   if (modules?.playground !== false) {
     links.push({
-      title: t('Playground Nav', { defaultValue: 'Playground' }),
+      title: t('Playground Nav', { defaultValue: '创作平台' }),
       href: '/playground',
     })
   }

@@ -1,0 +1,306 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
+
+import { api } from '@/lib/api'
+import {
+  API_ENDPOINTS,
+  TASK_SUCCESS_CODE,
+  VIDEO_POLL,
+  VIDEO_STATUS_FAILURE,
+  VIDEO_STATUS_SUCCESS,
+} from '../constants'
+import type {
+  VideoGenParams,
+  VideoTaskData,
+  VideoTaskEnvelope,
+} from '../types'
+
+export type VideoGenerationStatus =
+  | 'idle'
+  | 'submitting'
+  | 'polling'
+  | 'success'
+  | 'error'
+
+export interface UseVideoGenerationResult {
+  submit: (apiKey: string, params: VideoGenParams) => Promise<void>
+  status: VideoGenerationStatus
+  progress: string | null
+  videoUrl: string | null
+  error: string | null
+  reset: () => void
+}
+
+/**
+ * Extract the PublicTaskID (`task_xxxx`) from the rewritten create response.
+ * The upstream body is proxied/rewritten, so the platform task id may sit on
+ * `task_id`, `id`, or nested under `data.task_id`. We must poll with this id,
+ * never the raw upstream id.
+ */
+function extractTaskId(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null
+  const record = payload as Record<string, unknown>
+  const nested =
+    record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined
+  const candidate =
+    record.task_id ?? record.id ?? (nested ? nested.task_id : undefined)
+  return typeof candidate === 'string' && candidate.length > 0
+    ? candidate
+    : null
+}
+
+/**
+ * Asynchronous video generation hook: submit a create request, poll the task
+ * envelope until a terminal state, then resolve a playable `videoUrl`.
+ *
+ * Because the proxied media URL (`/v1/videos/<id>/content`) requires a Bearer
+ * token that a native `<video src>` cannot carry, a non-`data:` result URL is
+ * fetched as an authenticated blob and exposed via `createObjectURL`.
+ */
+export function useVideoGeneration(): UseVideoGenerationResult {
+  const [status, setStatus] = useState<VideoGenerationStatus>('idle')
+  const [progress, setProgress] = useState<string | null>(null)
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Currently created object URL (revoked on reset / unmount / re-submit).
+  const objectUrlRef = useRef<string | null>(null)
+  // Monotonic run id: any run whose id no longer matches must stop writing.
+  const runIdRef = useRef(0)
+  // Pending backoff timer, so an in-flight sleep can be cleared on teardown.
+  const pollTimerRef = useRef<number | null>(null)
+  // Resolver of the in-flight backoff wait, so teardown settles it early
+  // instead of leaving a hanging Promise/frame when the timer is cleared.
+  const pollResolveRef = useRef<(() => void) | null>(null)
+
+  const revokeObjectUrl = useCallback(() => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current)
+      objectUrlRef.current = null
+    }
+  }, [])
+
+  const stopPolling = useCallback(() => {
+    // Invalidate any in-flight run.
+    runIdRef.current += 1
+    if (pollTimerRef.current !== null) {
+      window.clearTimeout(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+    // Settle any awaiting backoff sleep so its async frame unwinds promptly
+    // (the post-await runId guard then bails out); avoids a hanging Promise.
+    if (pollResolveRef.current) {
+      const resolvePending = pollResolveRef.current
+      pollResolveRef.current = null
+      resolvePending()
+    }
+  }, [])
+
+  const reset = useCallback(() => {
+    stopPolling()
+    revokeObjectUrl()
+    setStatus('idle')
+    setProgress(null)
+    setVideoUrl(null)
+    setError(null)
+  }, [stopPolling, revokeObjectUrl])
+
+  // Stop polling and revoke the object URL when the component unmounts.
+  useEffect(
+    () => () => {
+      stopPolling()
+      revokeObjectUrl()
+    },
+    [stopPolling, revokeObjectUrl]
+  )
+
+  const fail = useCallback((message: string, runId: number) => {
+    if (runId !== runIdRef.current) return
+    setStatus('error')
+    setError(message)
+    setProgress(null)
+    toast.error(message)
+  }, [])
+
+  const submit = useCallback(
+    async (apiKey: string, params: VideoGenParams) => {
+      // 1) Client-side validation before touching the network.
+      const model = params.model?.trim()
+      const prompt = params.prompt?.trim()
+      if (!model) {
+        toast.error('请先选择要使用的模型')
+        return
+      }
+      if (!prompt) {
+        toast.error('请输入提示词后再生成')
+        return
+      }
+
+      // Start a fresh run: invalidate any previous run and clear old state.
+      stopPolling()
+      revokeObjectUrl()
+      const runId = ++runIdRef.current
+
+      setStatus('submitting')
+      setError(null)
+      setVideoUrl(null)
+      setProgress(null)
+
+      const authHeaders = { Authorization: `Bearer ${apiKey}` }
+
+      // 2) Create the generation task.
+      let taskId: string | null = null
+      try {
+        const createResp = await api.post(
+          API_ENDPOINTS.VIDEO_GENERATIONS,
+          params,
+          { headers: authHeaders, skipErrorHandler: true }
+        )
+        if (runId !== runIdRef.current) return
+        taskId = extractTaskId(createResp.data)
+      } catch {
+        fail('提交视频生成任务失败，请稍后重试', runId)
+        return
+      }
+
+      if (!taskId) {
+        fail('未获取到视频任务 ID，无法查询生成进度', runId)
+        return
+      }
+
+      // 3) Poll the task envelope with exponential backoff.
+      setStatus('polling')
+      const startedAt = Date.now()
+      let delay = VIDEO_POLL.initialMs
+
+      while (runId === runIdRef.current) {
+        if (Date.now() - startedAt > VIDEO_POLL.timeoutMs) {
+          fail('视频生成超时，请稍后重试', runId)
+          return
+        }
+
+        let envelope: VideoTaskEnvelope
+        try {
+          const pollResp = await api.get(API_ENDPOINTS.VIDEO_TASK(taskId), {
+            headers: authHeaders,
+            skipErrorHandler: true,
+            disableDuplicate: true,
+          })
+          if (runId !== runIdRef.current) return
+
+          // Guard: must be HTTP 200 with a `success` envelope code.
+          if (pollResp.status !== 200) {
+            fail('查询视频生成进度失败，请稍后重试', runId)
+            return
+          }
+          envelope = pollResp.data as VideoTaskEnvelope
+          if (!envelope || envelope.code !== TASK_SUCCESS_CODE) {
+            fail(
+              envelope?.message
+                ? `查询视频生成进度失败：${envelope.message}`
+                : '查询视频生成进度失败，请稍后重试',
+              runId
+            )
+            return
+          }
+        } catch {
+          // 401 / 4xx / network error mid-poll: abort immediately, never spin.
+          if (runId !== runIdRef.current) return
+          fail('查询视频生成进度失败，请稍后重试', runId)
+          return
+        }
+
+        const data: VideoTaskData | undefined = envelope.data
+        const taskStatus = data?.status ?? ''
+
+        // Progress is display-only.
+        if (data?.progress != null) {
+          setProgress(data.progress)
+        }
+
+        // Terminal: failure.
+        if (VIDEO_STATUS_FAILURE.has(taskStatus)) {
+          const reason = data?.error || data?.fail_reason
+          fail(reason ? `视频生成失败：${reason}` : '视频生成失败', runId)
+          return
+        }
+
+        // Terminal: success.
+        if (VIDEO_STATUS_SUCCESS.has(taskStatus)) {
+          const resultUrl = data?.url ?? data?.result_url
+          if (!resultUrl) {
+            fail('视频生成成功，但未返回可播放地址', runId)
+            return
+          }
+
+          // A `data:` URI can be used directly as the source.
+          if (resultUrl.startsWith('data:')) {
+            if (runId !== runIdRef.current) return
+            setVideoUrl(resultUrl)
+            setStatus('success')
+            setProgress(null)
+            return
+          }
+
+          // Otherwise the proxied URL needs the Bearer token, which a native
+          // <video src> can't carry — fetch it as an authenticated blob.
+          try {
+            const blobResp = await api.get(resultUrl, {
+              responseType: 'blob',
+              headers: authHeaders,
+              skipErrorHandler: true,
+              disableDuplicate: true,
+            })
+            if (runId !== runIdRef.current) return
+            const objectUrl = URL.createObjectURL(blobResp.data as Blob)
+            objectUrlRef.current = objectUrl
+            setVideoUrl(objectUrl)
+            setStatus('success')
+            setProgress(null)
+          } catch {
+            fail('视频加载失败，请稍后重试', runId)
+          }
+          return
+        }
+
+        // In-progress: back off and poll again. The wait can be settled early
+        // by stopPolling (reset / unmount / re-submit) via pollResolveRef, so a
+        // cancelled backoff never leaves a hanging Promise.
+        await new Promise<void>((resolve) => {
+          const timerId = window.setTimeout(() => {
+            pollTimerRef.current = null
+            pollResolveRef.current = null
+            resolve()
+          }, delay)
+          pollTimerRef.current = timerId
+          pollResolveRef.current = resolve
+        })
+        if (runId !== runIdRef.current) return
+        delay = Math.min(delay * 2, VIDEO_POLL.maxMs)
+      }
+    },
+    [stopPolling, revokeObjectUrl, fail]
+  )
+
+  return { submit, status, progress, videoUrl, error, reset }
+}

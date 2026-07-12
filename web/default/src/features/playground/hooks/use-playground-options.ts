@@ -39,6 +39,8 @@ type UsePlaygroundOptionsParams = {
     key: K,
     value: PlaygroundConfig[K]
   ) => void
+  /** 是否允许拉取（需登录）；未登录时禁用，避免对私有端点发 401 */
+  enabled?: boolean
 }
 
 export function usePlaygroundOptions({
@@ -47,6 +49,7 @@ export function usePlaygroundOptions({
   setGroups,
   setModels,
   updateConfig,
+  enabled = true,
 }: UsePlaygroundOptionsParams) {
   const { t } = useTranslation()
 
@@ -58,7 +61,7 @@ export function usePlaygroundOptions({
   } = useQuery({
     queryKey: ['playground-models', currentGroup],
     queryFn: () => getUserModels(currentGroup),
-    enabled: currentGroup !== '',
+    enabled: enabled && currentGroup !== '',
   })
 
   const {
@@ -68,6 +71,7 @@ export function usePlaygroundOptions({
   } = useQuery({
     queryKey: ['playground-groups'],
     queryFn: getUserGroups,
+    enabled,
   })
 
   useEffect(() => {

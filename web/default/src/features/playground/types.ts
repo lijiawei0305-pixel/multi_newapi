@@ -149,3 +149,63 @@ export interface GroupOption {
   ratio: number
   desc?: string
 }
+
+// Playground public page types
+export type PlaygroundCapability = 'chat' | 'image' | 'video'
+
+export type CatalogFilter = 'all' | PlaygroundCapability
+
+export interface WorkspaceProps {
+  apiKey: string
+  model: string
+}
+
+export interface ImageGenParams {
+  model: string
+  prompt: string
+  n?: number
+  size?: string
+  response_format?: 'url' | 'b64_json'
+}
+
+export interface ImageResultItem {
+  url?: string
+  b64_json?: string
+  revised_prompt?: string
+}
+
+export interface ImageGenResponse {
+  created: number
+  data: ImageResultItem[]
+}
+
+export interface VideoGenParams {
+  model: string
+  prompt: string
+  image?: string
+  duration?: number
+  width?: number
+  height?: number
+  fps?: number
+  seed?: number
+  n?: number
+  response_format?: string
+}
+
+export interface VideoTaskData {
+  task_id: string
+  status: string
+  url?: string
+  result_url?: string
+  format?: string
+  progress?: string
+  error?: string
+  fail_reason?: string
+  metadata?: unknown
+}
+
+export interface VideoTaskEnvelope {
+  code: string
+  message: string
+  data?: VideoTaskData
+}

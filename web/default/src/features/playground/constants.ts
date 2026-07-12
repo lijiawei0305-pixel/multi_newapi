@@ -34,10 +34,27 @@ export const MESSAGE_STATUS = {
 
 // API endpoints
 export const API_ENDPOINTS = {
-  CHAT_COMPLETIONS: '/pg/chat/completions',
+  CHAT_COMPLETIONS: '/v1/chat/completions',
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
+  IMAGES_GENERATIONS: '/v1/images/generations',
+  VIDEO_GENERATIONS: '/v1/video/generations',
+  VIDEO_TASK: (id: string) => `/v1/video/generations/${id}`,
 } as const
+
+// Video polling configuration
+export const VIDEO_POLL = {
+  initialMs: 2000,
+  maxMs: 5000,
+  timeoutMs: 180000,
+} as const
+
+// Video terminal status sets
+export const VIDEO_STATUS_SUCCESS = new Set(['SUCCESS', 'succeeded', 'completed'])
+export const VIDEO_STATUS_FAILURE = new Set(['FAILURE', 'failed'])
+
+// Task success code
+export const TASK_SUCCESS_CODE = 'success'
 
 // Default group — uses 'default' as the safe fallback; auto-group is
 // only selected when the backend confirms it is available for the user.

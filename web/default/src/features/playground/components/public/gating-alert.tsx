@@ -16,24 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
-import { isSidebarModuleEnabled } from '@/lib/nav-modules'
-import { Main } from '@/components/layout'
-import { Playground } from '@/features/playground'
+import { AlertTriangle } from 'lucide-react'
 
-export const Route = createFileRoute('/_authenticated/playground/')({
-  beforeLoad: () => {
-    if (!isSidebarModuleEnabled('chat', 'playground')) {
-      throw redirect({ to: '/dashboard' })
-    }
-  },
-  component: PlaygroundPage,
-})
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
-function PlaygroundPage() {
+interface GatingAlertProps {
+  message: string
+}
+
+export function GatingAlert({ message }: GatingAlertProps) {
   return (
-    <Main className='p-0'>
-      <Playground />
-    </Main>
+    <Alert className="border-warning/30 bg-warning/10 text-warning-foreground">
+      <AlertTriangle />
+      <AlertDescription className='text-warning-foreground'>
+        {message}
+      </AlertDescription>
+    </Alert>
   )
 }
