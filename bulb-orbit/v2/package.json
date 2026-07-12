@@ -8,13 +8,15 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "gsap": "^3.12.5",
     "three": "0.160.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/three": "0.160.0",
     "eslint": "^9.10.0",
     "happy-dom": "^15.0.0",
