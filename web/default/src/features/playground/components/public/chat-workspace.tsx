@@ -28,7 +28,9 @@ import {
   usePlaygroundOptions,
   usePlaygroundState,
 } from '../../hooks'
+import { useConversationHistory } from '../../hooks/use-conversation-history'
 import type { WorkspaceProps } from '../../types'
+import { ConversationHistoryBar } from './conversation-history-bar'
 
 /**
  * 聊天工作区 —— 公开创作页的聊天能力主体。
@@ -81,6 +83,13 @@ export function ChatWorkspace({
       updateConfig('group', group)
     }
   }, [group, config.group, updateConfig])
+
+  // 多会话历史：在单会话工作缓冲之上叠加「新建对话 / 历史」。
+  const conversationHistory = useConversationHistory({
+    messages,
+    onLoadMessages: updateMessages,
+    ready: !isLoadingMessages,
+  })
 
   const { sendChat, stopGeneration, isGenerating } = useChatHandler({
     config,
@@ -148,6 +157,17 @@ export function ChatWorkspace({
 
   return (
     <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>
+      {/* 顶部：新建对话 / 历史 */}
+      <div className='mx-auto w-full max-w-4xl shrink-0 px-3 pt-3'>
+        <ConversationHistoryBar
+          conversations={conversationHistory.conversations}
+          activeId={conversationHistory.activeId}
+          onNew={conversationHistory.newConversation}
+          onSwitch={conversationHistory.switchTo}
+          onDelete={conversationHistory.deleteConversation}
+        />
+      </div>
+
       {/* 全宽滚动容器：即便鼠标位于两侧留白区域也能滚动 */}
       <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
         <PlaygroundChat
