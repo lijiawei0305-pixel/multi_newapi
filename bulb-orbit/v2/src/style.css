@@ -53,6 +53,36 @@ html,body { margin:0; height:100%; background:var(--bg); color:#eaf2ff;
   .hero-stage { height:60vh; }
   .hero-right { justify-content:center; }
   .hud { width:min(92vw,360px); }
+
+  /* 灯泡贴脸可读性修复（Task 12 视觉门缺陷 2）：scene.ts 的 applyViewOffset() 在所有断点都无条件
+     生效，灯泡视觉中心固定在屏宽 x≈62–65%、纵向不偏移（offsetY 恒 0，亮核落在屏幕纵向正中附近）。
+     桌面靠 2fr:2fr:1fr 三栏布局天然把左栏文案让到灯泡左侧留白区；但上面这条 <1024px 规则把 .hero
+     退化成单列通栏后，hero-left 文案块占满全宽，与灯泡水平中心带直接重叠，实测亮核正好压在
+     hero-left 底部的数据指标行上。这里加一层 .hero::before 顶部渐变暗幕，把文案所在区域压暗、往下
+     渐隐到透明，让灯泡在 hero-stage/hero-right 一带的下半部分仍然清晰可见：
+       - position:absolute + inset:0 以 .hero 自身（基础规则已 position:relative）为定位容器，取
+         .hero 自己的 100vh 盒高（不是滚动后的内容高度），随 .hero 的 overflow-y:auto 一起滚动——
+         文案滚出视口时暗幕跟着一起滚走，滚到底部自带 backdrop-filter 毛玻璃背景的 .hud 卡片不需要
+         它，不会被误伤。绝对定位不产生新的行盒，不会撑大 .hero 的可滚动内容高度（不影响既有的
+         296px 滚动范围）。
+       - z-index:-1 只在 .hero 自己建立的层叠上下文内部生效（.hero 有 z-index:2，是独立层叠上下文
+         的根）：暗幕仍随 .hero 整体叠在 canvas/vignette（层叠上下文外、z-index:auto）之上，同时又
+         压在 hero-left/hero-right 默认 z-index:auto 的文字/按钮之下——纯背景装饰，不挡点击。
+       - 只用渐变、不用 backdrop-filter：大面积模糊在低端移动 GPU 上开销明显，Task 12 本身就是靠
+         降粒子数/关 bloom 换移动端性能，这里不该加回一块大面积高开销滤镜；纯渐变已经够用。
+       - 桌面（≥1024px）没有对应规则，.hero::before 在桌面宽度下不生成，桌面视觉零改动。 */
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(to bottom,
+      rgba(1,4,10,.86) 0%,
+      rgba(1,4,10,.8) 30%,
+      rgba(1,4,10,.5) 45%,
+      rgba(1,4,10,0) 62%);
+  }
 }
 @media (max-width:767px) {
   #brand-title { font-size:34px; } .slogan { font-size:26px; }
