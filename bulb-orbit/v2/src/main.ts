@@ -1,75 +1,28 @@
 // ==========================================
-// 临时最小启动器（TEMPORARY） —— 为 Task 9 粒子灯泡 + Task 10 轨道/卫星提供一个可见的宿主页面，
-// 供视觉门截图核对。Task 11 会整体重写本文件（HUD、悬停/点击交互、后期 UnrealBloomPass 等），
-// 这里刻意保持最小。
+// 入口 —— 装配全部落在 scene.ts 的 mountScene()；本文件只做必需 DOM 元素的存在性校验、
+// 调用 mountScene，并把它返回的 onResize 接到 window resize 事件上。
 // ==========================================
-import * as THREE from 'three'
-import { createBulb } from './scene/bulb'
-import { createOrbits } from './scene/orbits'
-import { createSatellites, updateSatellites } from './scene/satellites'
-import { CAMERA_Z } from './scene/config'
+import { mountScene } from './scene/scene'
 
 const canvas = document.getElementById('webgl-canvas')
 if (!(canvas instanceof HTMLCanvasElement)) throw new Error('#webgl-canvas not found')
 
-const scene = new THREE.Scene()
-
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100)
-camera.position.set(0, 0, CAMERA_Z)
-
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true })
-renderer.setSize(window.innerWidth, window.innerHeight)
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-
-// 灯泡自身的 point light 内置在 bulb.group 里（供 setCoreColor 调色，createBulb() 不接收外部
-// scene/light 引用）；这里只补一盏与 yun 一致的暗蓝环境光做基础补光。
-const ambientLight = new THREE.AmbientLight('#040d20', 1.5)
-scene.add(ambientLight)
-
-const mouse = { x: 0, y: 0 }
-let hasPointer = false
-
-window.addEventListener('mousemove', (event: MouseEvent) => {
-  mouse.x = (event.clientX / window.innerWidth) * 2 - 1
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1
-  hasPointer = true
-})
-
-// 光标离开页面：停止排斥场，让粒子回流复位
-document.addEventListener('mouseleave', () => {
-  hasPointer = false
-})
-
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight
-  camera.updateProjectionMatrix()
-  renderer.setSize(window.innerWidth, window.innerHeight)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-})
-
-async function main(): Promise<void> {
-  const bulb = await createBulb()
-  scene.add(bulb.group)
-
-  const rig = createOrbits()
-  scene.add(...rig.groups)
-  const satellites = await createSatellites(rig)
-
-  const clock = new THREE.Clock()
-
-  function animate(): void {
-    requestAnimationFrame(animate)
-    const t = clock.getElapsedTime()
-    bulb.update(t, mouse, hasPointer, camera)
-    // 顺序要求：rig.update 先写入本帧的轨道进动 rotation.y，updateSatellites 的 billboard 抵消
-    // 父级（轨道组）世界旋转时才能读到本帧的值，否则贴图朝向会滞后一帧、随进动缓慢歪斜。
-    rig.update(t, camera)
-    updateSatellites(satellites, t, camera)
-    renderer.render(scene, camera)
-  }
-  animate()
+const HUD_IDS = ['hud-panel', 'hud-name', 'hud-provider', 'hud-desc', 'hud-telemetry'] as const
+for (const id of HUD_IDS) {
+  if (!document.getElementById(id)) throw new Error(`#${id} not found`)
 }
 
-main().catch((err: unknown) => {
+// 不用顶层 await：Vite 生产构建的默认 esbuild target（chrome87/safari14 等）不支持顶层 await，
+// 会在 build 阶段（而非 typecheck）报错——包一层 async 函数规避。canvas 显式作为参数传入（而不是
+// 让 main() 直接闭包捕获外层 canvas）：TS 的控制流窄化不会跨越函数声明体传播（函数声明会被提升，
+// 编译器无法证明调用一定发生在上面 instanceof 校验之后），闭包捕获拿到的仍是校验前的
+// HTMLElement | null；显式传参则在调用处（校验之后的同一层作用域）取值，窄化后的
+// HTMLCanvasElement 类型能正确传入。
+async function main(canvasEl: HTMLCanvasElement): Promise<void> {
+  const { onResize } = await mountScene(canvasEl)
+  window.addEventListener('resize', onResize)
+}
+
+main(canvas).catch((err: unknown) => {
   console.error('Fatal bootstrap error:', err)
 })
