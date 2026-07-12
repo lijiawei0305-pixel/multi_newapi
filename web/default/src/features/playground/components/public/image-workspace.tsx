@@ -17,8 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
-import { DownloadIcon, ImageIcon, Loader2Icon, RotateCcw } from 'lucide-react'
+import { Loader2Icon, Trash2Icon } from 'lucide-react'
 
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+} from '@/components/ai-elements/conversation'
 import {
   PromptInput,
   PromptInputFooter,
@@ -37,11 +42,14 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 
 import { api } from '@/lib/api'
-import { cn } from '@/lib/utils'
 
 import { PROMPT_INPUT_SHELL_CLASS } from '../../constants'
-import { useImageGeneration } from '../../hooks/use-image-generation'
+import { useImageConversation } from '../../hooks/use-image-conversation'
+import type { ImageTurn } from '../../hooks/use-image-conversation'
 import type { WorkspaceProps } from '../../types'
+import { DEFAULT_IMAGE_SIZE, ImageSizeSelector } from './image-size-selector'
+import { ImageLightbox } from './image-lightbox'
+import { ImageTurnView } from './image-turn'
 import { ModelIntroHero } from './model-intro-card'
 
 // 触发浏览器下载：临时 <a download> 点击后即移除
@@ -54,7 +62,7 @@ function triggerDownload(href: string, filename: string) {
   a.remove()
 }
 
-// 可选张数
+// 可选张数（上游 gpt-image 系列原生支持 n，一次请求返回对应数量的图）
 const N_OPTIONS = [
   { value: '1', label: '1 张' },
   { value: '2', label: '2 张' },
@@ -62,44 +70,53 @@ const N_OPTIONS = [
   { value: '4', label: '4 张' },
 ]
 
-// 可选尺寸（gpt-image 系列支持 1024×1024 / 1536×1024 / 1024×1536，默认方形）
-const SIZE_OPTIONS = [
-  { value: '1024x1024', label: '1024×1024（方形）' },
-  { value: '1536x1024', label: '1536×1024（横版）' },
-  { value: '1024x1536', label: '1024×1536（竖版）' },
-]
+interface ZoomState {
+  src: string
+  alt: string
+}
 
 export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
   const [prompt, setPrompt] = useState('')
   const [n, setN] = useState<string>('1')
-  const [size, setSize] = useState<string>('1024x1024')
-  // 加载失败（url 过期/403/CDN 挂）的图片索引：<img onError> 命中后切占位，
-  // 避免用户「生成成功却只见破图」而无任何提示。
-  const [failedIndices, setFailedIndices] = useState<Set<number>>(new Set())
+  const [size, setSize] = useState<string>(DEFAULT_IMAGE_SIZE)
+  // 点击放大预览的当前图片；null 表示灯箱关闭
+  const [zoom, setZoom] = useState<ZoomState | null>(null)
 
-  const { generate, status, images, error, reset } = useImageGeneration()
+  const { turns, isGenerating, generate, clear } = useImageConversation()
 
-  const isLoading = status === 'loading'
+  function runGenerate(params: {
+    prompt: string
+    n: number
+    size: string
+  }) {
+    if (!apiKey) return
+    if (!params.prompt) return
+    void generate(apiKey, {
+      model,
+      prompt: params.prompt,
+      n: params.n,
+      size: params.size,
+      response_format: 'url',
+    })
+  }
 
   function handleSubmit(submittedPrompt: string) {
     const resolvedPrompt = submittedPrompt.trim() || prompt.trim()
-    if (!apiKey) return
     if (!resolvedPrompt) return
+    runGenerate({ prompt: resolvedPrompt, n: Number(n), size })
+    // 会话式：发送后清空输入框，历史回合已留住提示词
+    setPrompt('')
+  }
 
-    reset()
-    setFailedIndices(new Set())
-    void generate(apiKey, {
-      model,
-      prompt: resolvedPrompt,
-      n: Number(n),
-      size,
-      response_format: 'url',
-    })
+  // 重试：用该回合原始参数重新生成（追加为新回合，符合对话语义）
+  function handleRetry(turn: ImageTurn) {
+    runGenerate({ prompt: turn.prompt, n: turn.n, size: turn.size })
   }
 
   // 下载单张图片：data: 直接下载；其余（可能是需鉴权的代理 URL 或跨域 CDN）
   // 走鉴权 blob 下载，绕过跨域 download 属性被忽略的限制；失败兜底新标签打开。
   async function handleDownload(src: string, filename: string) {
+    if (!src) return
     if (src.startsWith('data:')) {
       triggerDownload(src, filename)
       return
@@ -135,123 +152,38 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
     }
   }
 
-  // 布局按【实际渲染的图片数量】判定，而非张数下拉框 n：n>1 部分失败被过滤、
-  // 或生成后改选 n，都会让 n 与 images.length 失配，导致网格空格 / 多图挤在单列。
-  const isGrid = images.length > 1
+  const hasTurns = turns.length > 0
 
   return (
-    <div className='flex h-full flex-col gap-4'>
-      {/* 结果区域 */}
-      <div className='flex min-h-0 flex-1 flex-col'>
-        {status === 'idle' && (
-          <div className='flex flex-1 flex-col items-center justify-center gap-4 overflow-y-auto py-6 text-muted-foreground'>
-            <ModelIntroHero model={introModel ?? null} />
-            <p className='text-xs'>输入提示词，点击「生成」开始创作</p>
-          </div>
-        )}
-
-        {isLoading && (
-          <div className='flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground'>
-            <Loader2Icon className='size-8 animate-spin' />
-            <p className='text-sm'>生成中…</p>
-          </div>
-        )}
-
-        {status === 'error' && error && (
-          <div className='flex flex-1 flex-col items-center justify-center gap-3'>
-            <p className='text-sm text-destructive'>{error}</p>
-            <Button
-              size='sm'
-              variant='outline'
-              onClick={() => handleSubmit(prompt)}
-              disabled={!apiKey || !prompt.trim()}
-            >
-              <RotateCcw className='mr-1.5 size-3.5' />
-              重试
-            </Button>
-          </div>
-        )}
-
-        {status === 'success' && images.length > 0 && (
-          <div
-            className={cn(
-              'overflow-auto p-1',
-              isGrid
-                ? 'grid grid-cols-1 gap-3 sm:grid-cols-2'
-                : 'flex items-center justify-center'
+    <div className='flex h-full flex-col'>
+      {/* 结果区域：对话式滚动，历史回合累积，向上滚动仍见每次提示词 */}
+      <Conversation>
+        <ConversationContent className='p-0'>
+          <div className='mx-auto w-full max-w-3xl px-4 py-4'>
+            {hasTurns ? (
+              turns.map((turn) => (
+                <ImageTurnView
+                  key={turn.id}
+                  turn={turn}
+                  onZoom={(src, alt) => setZoom({ src, alt })}
+                  onDownload={handleDownload}
+                  onRetry={() => handleRetry(turn)}
+                  retryDisabled={isGenerating || !apiKey}
+                />
+              ))
+            ) : (
+              <div className='flex min-h-[52vh] flex-col items-center justify-center gap-4 text-muted-foreground'>
+                <ModelIntroHero model={introModel ?? null} />
+                <p className='text-xs'>输入提示词，点击「生成」开始创作</p>
+              </div>
             )}
-          >
-            {images.map((item, index) => {
-              const src = item.b64_json
-                ? `data:image/png;base64,${item.b64_json}`
-                : (item.url ?? '')
-
-              const filename = `生成图片-${index + 1}.png`
-
-              return (
-                <div
-                  key={index}
-                  className='group relative overflow-hidden rounded-lg border border-border bg-muted'
-                >
-                  {failedIndices.has(index) ? (
-                    // url 失效/403/CDN 挂：<img onError> 命中后展示占位 + 新标签打开兜底，
-                    // 而非留一个静默破图图标让用户不知所措。
-                    <div className='flex aspect-square w-full flex-col items-center justify-center gap-2 p-4 text-center text-muted-foreground'>
-                      <ImageIcon className='size-8 opacity-40' />
-                      <p className='text-xs'>图片加载失败</p>
-                      {src && (
-                        <Button
-                          size='sm'
-                          variant='outline'
-                          onClick={() =>
-                            window.open(src, '_blank', 'noopener')
-                          }
-                        >
-                          在新标签打开
-                        </Button>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      <img
-                        alt={
-                          item.revised_prompt || prompt || `生成图片 ${index + 1}`
-                        }
-                        className='h-auto max-h-full w-full object-contain'
-                        src={src}
-                        onError={() =>
-                          setFailedIndices((prev) =>
-                            new Set(prev).add(index)
-                          )
-                        }
-                      />
-                      {/* 下载按钮，悬停显示 */}
-                      <button
-                        type='button'
-                        aria-label='下载图片'
-                        className={cn(
-                          'absolute right-2 top-2 flex size-8 items-center justify-center rounded-md',
-                          'bg-card/80 text-foreground opacity-0 backdrop-blur-sm transition-opacity',
-                          'hover:bg-card group-hover:opacity-100',
-                          'focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
-                        )}
-                        onClick={() => handleDownload(src, filename)}
-                        title='下载图片'
-                      >
-                        <DownloadIcon className='size-4' />
-                        <span className='sr-only'>下载图片</span>
-                      </button>
-                    </>
-                  )}
-                </div>
-              )
-            })}
           </div>
-        )}
-      </div>
+        </ConversationContent>
+        <ConversationScrollButton />
+      </Conversation>
 
       {/* 输入区域 */}
-      <div className='shrink-0'>
+      <div className='mx-auto w-full max-w-3xl shrink-0 px-4 pb-4'>
         <PromptInput
           groupClassName={PROMPT_INPUT_SHELL_CLASS}
           onSubmit={({ text }) => {
@@ -259,7 +191,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
           }}
         >
           <PromptInputTextarea
-            disabled={isLoading}
+            disabled={isGenerating}
             placeholder='输入提示词…'
             value={prompt}
             onChange={(e) => setPrompt(e.currentTarget.value)}
@@ -267,10 +199,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
           <PromptInputFooter>
             <PromptInputTools>
               {/* 数量选择 */}
-              <Select
-                value={n}
-                onValueChange={(val) => val && setN(val)}
-              >
+              <Select value={n} onValueChange={(val) => val && setN(val)}>
                 <SelectTrigger size='sm' className='h-7 min-w-[72px] text-xs'>
                   <SelectValue placeholder='张数' />
                 </SelectTrigger>
@@ -283,28 +212,31 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
                 </SelectContent>
               </Select>
 
-              {/* 尺寸选择 */}
-              <Select
+              {/* 尺寸选择：按真实宽高比绘制的 SVG 形状，直观区分方形/横版/竖版 */}
+              <ImageSizeSelector
                 value={size}
-                onValueChange={(val) => val && setSize(val)}
-              >
-                <SelectTrigger size='sm' className='h-7 min-w-[120px] text-xs'>
-                  <SelectValue placeholder='尺寸' />
-                </SelectTrigger>
-                <SelectContent>
-                  {SIZE_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onChange={setSize}
+                disabled={isGenerating}
+              />
+
+              {/* 清空当前会话（有历史回合时才出现） */}
+              {hasTurns && (
+                <Button
+                  type='button'
+                  size='sm'
+                  variant='ghost'
+                  className='h-7 px-2 text-xs text-muted-foreground'
+                  onClick={clear}
+                  disabled={isGenerating}
+                >
+                  <Trash2Icon className='mr-1 size-3.5' />
+                  清空
+                </Button>
+              )}
             </PromptInputTools>
 
-            <PromptInputSubmit
-              disabled={isLoading || !apiKey || !prompt.trim()}
-            >
-              {isLoading ? (
+            <PromptInputSubmit disabled={isGenerating || !apiKey || !prompt.trim()}>
+              {isGenerating ? (
                 <Loader2Icon className='size-4 animate-spin' />
               ) : (
                 <span className='px-1 text-xs font-medium'>生成</span>
@@ -313,6 +245,19 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
           </PromptInputFooter>
         </PromptInput>
       </div>
+
+      {/* 点击放大预览 */}
+      <ImageLightbox
+        src={zoom?.src ?? null}
+        alt={zoom?.alt}
+        open={zoom !== null}
+        onOpenChange={(open) => {
+          if (!open) setZoom(null)
+        }}
+        onDownload={
+          zoom ? () => handleDownload(zoom.src, '生成图片.png') : undefined
+        }
+      />
     </div>
   )
 }
