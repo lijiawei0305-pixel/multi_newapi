@@ -1,2 +1,39 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>WeDream AI</title></head>
-<body><script type="module" src="/src/main.ts"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WeDream AI · 让灵感不再受限</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="webgl-canvas"></canvas>
+  <div class="glow-bg glow-bg-1"></div><div class="glow-bg glow-bg-2"></div><div class="vignette"></div>
+  <main class="hero">
+    <section class="hero-left">
+      <div class="badge"><span class="badge-dot"></span>新一代 AI 聚合平台</div>
+      <h1 id="brand-title">WeDream AI</h1>
+      <p id="brand-slogan" class="slogan">让灵感不再受限</p>
+      <p id="brand-sub" class="sub">自由穿梭于顶尖大模型之间</p>
+      <div class="actions">
+        <a id="cta-primary" class="btn-primary" href="/console">立即开始</a>
+        <a id="cta-docs" class="btn-secondary" href="/docs">查看文档</a>
+      </div>
+      <div class="metrics">
+        <div><b>24+</b><span>顶尖模型</span></div><i></i>
+        <div><b>1</b><span>统一 API</span></div><i></i>
+        <div><b>99.9%</b><span>服务可用</span></div>
+      </div>
+    </section>
+    <section class="hero-stage"><!-- 画布铺底，此栏留白对齐灯泡 --></section>
+    <aside class="hero-right">
+      <div id="hud-panel" class="hud">
+        <div class="hud-head"><span class="hud-dot"></span><span id="hud-name">WeDream 核心</span><span id="hud-provider">系统运行中</span></div>
+        <p id="hud-desc" class="hud-desc">中央智能核心，环绕的卫星代表已接入的大模型，实时互联。</p>
+        <div class="hud-foot"><span>遥测</span><span id="hud-telemetry">核心负载 100%</span></div>
+      </div>
+    </aside>
+  </main>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
