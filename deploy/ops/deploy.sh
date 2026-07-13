@@ -96,6 +96,7 @@ COPYFILE_DISABLE=1 tar czf - \
   --exclude='./web/classic/dist' \
   --exclude='.DS_Store' \
   --exclude='._*' \
+  --exclude='./bulb-orbit' \
   -C "$LOCAL_REPO" . \
   | remote "tar xzf - -C $SERVER_REPO"
 ok "上传完成（服务器 Dockerfile 内构建前端 dist + go embed）"

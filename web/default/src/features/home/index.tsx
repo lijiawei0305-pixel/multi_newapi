@@ -56,15 +56,14 @@ export function Home() {
   // 代理站(kind==='tenant')跳过此块，走下方原生 React 段落，保留其原有首页。
   const isMainSite = resolution?.kind !== 'tenant'
   if (isMainSite && !content) {
+    // 主站落地页：全屏 iframe，不套 PublicLayout（首页不显示平台原生顶栏；顶栏/客服/语言在落地页内自带）。
     return (
-      <PublicLayout showMainContainer={false}>
-        <iframe
-          src='/landing/index.html'
-          className='h-screen w-full border-none'
-          title='WeDream AI'
-          sandbox='allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation'
-        />
-      </PublicLayout>
+      <iframe
+        src='/landing/index.html'
+        className='fixed inset-0 h-screen w-screen border-none'
+        title='WeDream AI'
+        sandbox='allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation'
+      />
     )
   }
 
