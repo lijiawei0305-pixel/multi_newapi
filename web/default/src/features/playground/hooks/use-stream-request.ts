@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { SSE } from 'sse.js'
 
 import { getCommonHeaders } from '@/lib/api'
 
+import { usePlaygroundCredential } from '../context/credential-context'
 import { API_ENDPOINTS, ERROR_MESSAGES } from '../constants'
 import {
   getStreamReadyStateError,
@@ -38,6 +39,13 @@ export function useStreamRequest() {
   const sseSourceRef = useRef<SSE | null>(null)
   const isStreamCompleteRef = useRef(false)
   const [isStreaming, setIsStreaming] = useState(false)
+  const { apiKey } = usePlaygroundCredential()
+  // 用 ref 持有最新凭据：sendStreamRequest 不把 apiKey 列入依赖（避免重建函数
+  // 导致下游引用失效），却始终读到切换密钥后的最新值，杜绝 stale-closure。
+  const apiKeyRef = useRef(apiKey)
+  useEffect(() => {
+    apiKeyRef.current = apiKey
+  }, [apiKey])
 
   const closeActiveStream = useCallback((source?: SSE) => {
     const streamSource = source ?? sseSourceRef.current
@@ -59,7 +67,12 @@ export function useStreamRequest() {
       sseSourceRef.current?.close()
 
       const source = new SSE(API_ENDPOINTS.CHAT_COMPLETIONS, {
-        headers: getCommonHeaders(),
+        headers: {
+          ...getCommonHeaders(),
+          ...(apiKeyRef.current
+            ? { Authorization: `Bearer ${apiKeyRef.current}` }
+            : {}),
+        },
         method: 'POST',
         payload: JSON.stringify(payload),
       })

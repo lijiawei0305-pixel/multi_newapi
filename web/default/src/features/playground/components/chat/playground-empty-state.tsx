@@ -26,9 +26,14 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import type { PricingModel } from '@/features/pricing/types'
+
+import { ModelIntroHero } from '../public/model-intro-card'
 
 type PlaygroundEmptyStateProps = {
   onSelectPrompt: (prompt: string) => void
+  /** 选中模型：有则以「模型介绍」英雄区替换通用图标标题（贴合目标设计） */
+  model?: PricingModel | null
 }
 
 const starterPrompts = [
@@ -40,28 +45,36 @@ const starterPrompts = [
 
 export function PlaygroundEmptyState({
   onSelectPrompt,
+  model,
 }: PlaygroundEmptyStateProps) {
   const { t } = useTranslation()
 
   return (
     <div className='flex min-h-[min(520px,calc(100svh-18rem))] items-center justify-center px-1 py-8 md:py-12'>
-      <div className='grid w-full max-w-2xl gap-5 text-center'>
-        <div className='bg-muted/50 text-muted-foreground mx-auto flex size-11 items-center justify-center rounded-xl border'>
-          <MessageSquarePlusIcon className='size-5' aria-hidden='true' />
-        </div>
+      <div className='grid w-full max-w-2xl justify-items-center gap-6 text-center'>
+        {model ? (
+          // 选中模型：模型介绍英雄区作为空态主角
+          <ModelIntroHero model={model} />
+        ) : (
+          // 未选模型：通用引导
+          <div className='grid gap-5'>
+            <div className='bg-muted/50 text-muted-foreground mx-auto flex size-11 items-center justify-center rounded-xl border'>
+              <MessageSquarePlusIcon className='size-5' aria-hidden='true' />
+            </div>
+            <div className='grid gap-2'>
+              <h2 className='text-xl font-semibold tracking-tight text-balance md:text-2xl'>
+                {t('Start a playground chat')}
+              </h2>
+              <p className='text-muted-foreground mx-auto max-w-lg text-sm leading-6 text-balance'>
+                {t(
+                  'Test a model with a starter prompt, or write your own request below.'
+                )}
+              </p>
+            </div>
+          </div>
+        )}
 
-        <div className='grid gap-2'>
-          <h2 className='text-xl font-semibold tracking-tight text-balance md:text-2xl'>
-            {t('Start a playground chat')}
-          </h2>
-          <p className='text-muted-foreground mx-auto max-w-lg text-sm leading-6 text-balance'>
-            {t(
-              'Test a model with a starter prompt, or write your own request below.'
-            )}
-          </p>
-        </div>
-
-        <div className='grid gap-2 sm:grid-cols-2'>
+        <div className='grid w-full max-w-xl gap-2 sm:grid-cols-2'>
           {starterPrompts.map(({ icon: Icon, text }) => {
             const prompt = t(text)
 

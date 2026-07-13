@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { PricingModel } from '@/features/pricing/types'
+
 // Message types
 export type MessageRole = 'user' | 'assistant' | 'system'
 
@@ -148,4 +150,68 @@ export interface GroupOption {
   value: string
   ratio: number
   desc?: string
+}
+
+// Playground public page types
+export type PlaygroundCapability = 'chat' | 'image' | 'video'
+
+export type CatalogFilter = 'all' | PlaygroundCapability
+
+export interface WorkspaceProps {
+  apiKey: string
+  model: string
+  /** 选中 key 所属分组；聊天用于同步 config.group，使模型列表拉取正确的组 */
+  group?: string
+  /** 当前选中模型的完整对象；用于在工作区空态渲染「模型介绍」英雄区 */
+  introModel?: PricingModel | null
+}
+
+export interface ImageGenParams {
+  model: string
+  prompt: string
+  n?: number
+  size?: string
+  response_format?: 'url' | 'b64_json'
+}
+
+export interface ImageResultItem {
+  url?: string
+  b64_json?: string
+  revised_prompt?: string
+}
+
+export interface ImageGenResponse {
+  created: number
+  data: ImageResultItem[]
+}
+
+export interface VideoGenParams {
+  model: string
+  prompt: string
+  image?: string
+  duration?: number
+  width?: number
+  height?: number
+  fps?: number
+  seed?: number
+  n?: number
+  response_format?: string
+}
+
+export interface VideoTaskData {
+  task_id: string
+  status: string
+  url?: string
+  result_url?: string
+  format?: string
+  progress?: string
+  error?: string
+  fail_reason?: string
+  metadata?: unknown
+}
+
+export interface VideoTaskEnvelope {
+  code: string
+  message: string
+  data?: VideoTaskData
 }

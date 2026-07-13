@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "internal/mtwire/risk.go", "reason": "checkCallHook 双 fail-open（recover 静默吞 panic + RiskEngine==nil 无条件放行）；tenantStatusChecker.Active 是 /v1 唯一租户状态门"}
+{"file": "internal/mtwire/wire.go", "reason": "RiskEngine 仅 RedisEnabled&&RDB!=nil 时装配（188-198）；tenantStatusChecker 作为 StatusChecker 注入其中（195）——租户状态被错误绑死在 Redis 开关上"}
+{"file": "internal/mtwire/agent.go", "reason": "agenthook.CheckCall=a.checkCallHook 装配点(121)；attributeRegistration recover 记日志(133) 作对比样板"}
+{"file": "internal/mtwire/grouphook.go", "reason": "resolveTenantGroupRatio recover 记日志(31) 作对比样板——安全 hook 应同样记日志"}
+{"file": "internal/risk/engine.go", "reason": "CheckCall 顺序 状态→IP→RPM；ErrStatusForbidden(403) 为状态拦截错误"}
+{"file": "internal/risk/errors.go", "reason": "ErrStatusForbidden=apperr.New(STATUS_FORBIDDEN,...,403) 复用此错误构造 403"}

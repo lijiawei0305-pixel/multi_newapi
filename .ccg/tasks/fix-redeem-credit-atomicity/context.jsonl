@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "internal/mtwire/distribution.go", "reason": "HandleRedeem:343-356 两步跨事务(RedeemCode→IncreaseUserQuota)，是本次修复入口"}
+{"file": "internal/wallet/gormrepo/gormrepo.go", "reason": "RedeemCode:246-272 CAS翻used；CreateCodesWithDeduction:196-236 同事务范式(参照)；新增 RedeemCodeAndCredit"}
+{"file": "internal/mtwire/recharge.go", "reason": "rechargeQuotaSink.OnPaid:82-143 = 同事务入账+提交后InvalidateUserCache 的黄金标准，对齐它"}
+{"file": "internal/wallet/gormrepo/gormrepo_redemption_test.go", "reason": "RedeemCode 的 CAS 状态机测试，需保绿并新增原子性/回滚测试"}
+{"file": "model/user.go", "reason": "IncreaseUserQuota:914 用全局DB+async cacheIncr，无法并入外部事务→这就是跨事务根因"}

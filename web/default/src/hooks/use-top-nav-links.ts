@@ -72,11 +72,11 @@ export function useTopNavLinks(): TopNavLink[] {
     links.push({ title: t('Console'), href: '/dashboard' })
   }
 
-  // Playground（游乐园）—— 从控制台提升到顶栏（控制台侧栏保留）
-  // 认证路由，未登录点击由路由守卫跳转登录，处理方式与「控制台」一致
+  // Playground（AI 工坊）—— 从控制台提升到顶栏（控制台侧栏保留）
+  // 公开路由，未登录可直接访问
   if (modules?.playground !== false) {
     links.push({
-      title: t('Playground Nav', { defaultValue: 'Playground' }),
+      title: t('Playground Nav', { defaultValue: 'AI 工坊' }),
       href: '/playground',
     })
   }
@@ -110,7 +110,7 @@ export function useTopNavLinks(): TopNavLink[] {
   // Agent Join（代理加盟）—— 公开落地页
   if (modules?.agentJoin !== false) {
     links.push({
-      title: t('Agent Program', { defaultValue: 'Agent Program' }),
+      title: t('Agent Program', { defaultValue: '代理加盟' }),
       href: '/agent-join',
     })
   }

@@ -83,6 +83,12 @@ fi
 # ── 5) tar-over-ssh 上传（COPYFILE_DISABLE=1，排除 .git/node_modules/dist/垃圾）──────
 log "5/8 上传源码 → $SSH_HOST:$SERVER_REPO"
 remote "mkdir -p $SERVER_REPO"
+# delete-sync 前端源码树（防孤儿）：tar 只覆盖不删除，路由/组件被移动或删除后
+# 服务器会留旧文件孤儿 → 前端构建挂（旧文件 import 已重命名/删除的符号）或 false-success。
+# web/default/src、web/classic/src 全为仓库文件（.env/node_modules/dist 均在其外），
+# 部署前清空可保证上传后与本机完全一致、零孤儿。（Go 侧孤儿由步骤 8 镜像 ID 校验兜底。）
+log "    delete-sync：清理前端源码树（防移动/删除文件残留孤儿）"
+remote "rm -rf $SERVER_REPO/web/default/src $SERVER_REPO/web/classic/src"
 COPYFILE_DISABLE=1 tar czf - \
   --exclude='./.git' \
   --exclude='node_modules' \
@@ -112,7 +118,19 @@ echo
 
 # ── 8) 结果：成功收尾 / 失败自动回滚 ────────────────────────────────────────────
 if [ "$healthy" = "1" ]; then
-  ok "8/8 健康通过：app /api/status success（${STACK}）"
+  # false-success 防护：构建失败时 compose 不重建容器、旧容器续跑 → /api/status 仍 success，
+  # 健康轮询会「假通过」。校验 app 新镜像 ID 与部署前保存的 :prev 不同（步骤 3 已 tag :prev
+  # = 构建前的 :latest）。相同 = 本次未产出新镜像 = 构建失败被旧容器掩盖 → 判失败并回滚。
+  # 首次部署无 :prev（PREV_ID 为空）则跳过此校验。
+  NEW_ID="$(remote "docker image inspect -f '{{.Id}}' $APP_IMG:latest 2>/dev/null || true")"
+  PREV_ID="$(remote "docker image inspect -f '{{.Id}}' $APP_IMG:prev 2>/dev/null || true")"
+  if [ -n "$PREV_ID" ] && [ "$NEW_ID" = "$PREV_ID" ]; then
+    log "⚠ 健康虽通过，但 $APP_IMG:latest 镜像 ID 未变（==:prev）→ 构建未产出新镜像（false-success）"
+    log "构建尾日志（排错用）："
+    remote "tail -n 40 $SERVER_REPO/deploy-build.log 2>/dev/null || true"
+    die "构建未产出新镜像（旧容器续跑致健康假通过）。改动未上线——排查上方构建日志后重试。"
+  fi
+  ok "8/8 健康通过：app /api/status success（${STACK}）｜镜像已更新（≠:prev）"
   remote "$SERVER_REPO/deploy/ops/healthcheck.sh || true"   # 打印完整巡检（不阻断）
   ok "部署成功 ✅ tag=${TAG}。回滚命令：ssh $SSH_HOST '$SERVER_REPO/deploy/ops/rollback.sh'"
   exit 0

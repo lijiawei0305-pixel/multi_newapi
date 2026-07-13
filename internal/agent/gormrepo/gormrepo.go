@@ -288,6 +288,89 @@ func (r *Repo) AppendEarning(ctx context.Context, e agent.EarningEntry) (bool, e
 	return applied, err
 }
 
+// AppendEarningsBatch 是 AppendEarning 的批处理版（非接口辅助方法，供 internal/mtwire 异步计费 writer 定时
+// flush 调用）：在**单个事务**内逐条 ON CONFLICT DO NOTHING 落 earning 日志（RowsAffected 甄别「首次入账」），
+// 按 tenant 合并所有首次入账金额后每租户仅一次 UPSERT 钱包累加。语义与逐条 AppendEarning 完全一致
+// （同 idem_key 不重复增余额；负数 manual_adjustment 亦可），仅把「N 事务 / N 次 agent_wallets 热行 UPSERT」
+// 压成「1 事务 / 每租户 1 次 UPSERT」——消除自研写放大与钱包热行的跨请求行锁争用。
+//
+// 返回本批「首次入账」条数。任一步 DB 异常整批回滚（applied=0），由调用方按幂等安全重排/重试——幂等键去重
+// 使重排绝不双计。钱包 user_id 采该租户本批**最后一条**首次入账的 owner，与逐条 UPSERT 的「后写覆盖」等价。
+func (r *Repo) AppendEarningsBatch(ctx context.Context, entries []agent.EarningEntry) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	now := r.now()
+	type tenantAcc struct {
+		sum    float64
+		userID int64
+	}
+	applied := 0
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		accs := make(map[int64]*tenantAcc)
+		order := make([]int64, 0, len(entries)) // 稳定 UPSERT 顺序（便于复现/审计）
+		for _, e := range entries {
+			if e.CreatedAt.IsZero() {
+				e.CreatedAt = now
+			}
+			log := earningRow{
+				TenantID:   e.TenantID,
+				UserID:     e.UserID,
+				SourceType: string(e.SourceType),
+				SourceID:   e.SourceID,
+				IdemKey:    e.IdempotencyKey(),
+				Amount:     e.Amount,
+				Remark:     e.Remark,
+				CreatedAt:  e.CreatedAt,
+			}
+			// ON CONFLICT DO NOTHING 吞掉 idem_key 幂等冲突；走到 res.Error 的是意外错误 → 整批回滚重排。
+			res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&log)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				continue // 幂等：同 idem_key 已入账，不重复动钱包
+			}
+			a, ok := accs[e.TenantID]
+			if !ok {
+				a = &tenantAcc{}
+				accs[e.TenantID] = a
+				order = append(order, e.TenantID)
+			}
+			a.sum += e.Amount
+			a.userID = e.UserID
+			applied++
+		}
+		// 每租户仅一次钱包 UPSERT（累加合并金额）——与 AppendEarning 单条 UPSERT 同列同表达式，仅合并了 N→1。
+		for _, tenantID := range order {
+			a := accs[tenantID]
+			w := walletRow{
+				TenantID:            tenantID,
+				UserID:              a.userID,
+				WithdrawableBalance: a.sum,
+				TotalEarned:         a.sum,
+				UpdatedAt:           now,
+			}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "tenant_id"}},
+				DoUpdates: clause.Assignments(map[string]interface{}{
+					"withdrawable_balance": gorm.Expr("withdrawable_balance + ?", a.sum),
+					"total_earned":         gorm.Expr("total_earned + ?", a.sum),
+					"user_id":              a.userID,
+					"updated_at":           now,
+				}),
+			}).Create(&w).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return applied, nil
+}
+
 // ---- AgentRepo：提现状态机（原子冻结 / 审核翻牌 + 资金守恒） ----
 
 // CreateWithdrawal 原子冻结可提现余额并建 pending 提现单。

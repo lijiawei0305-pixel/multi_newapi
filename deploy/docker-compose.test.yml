@@ -19,6 +19,23 @@ services:
       PORT: "3000"
       # —— 7c 多档风控：调用前 RPM 限流默认阈值（每分钟每用户，0=关闭）。压测后设 60=合理常用值（≈1 req/s/用户）。——
       RISK_DEFAULT_RPM: "60"
+      # —— 计费写放大优化（2026-07-09）：批量聚合额度/统计写，消除 channels.used_quota 等热行锁竞争。——
+      #   前提：Redis 为额度权威（cacheDecr* 同步扣 Redis），故 DB 列滞后 ≤INTERVAL 秒不会超扣。
+      #   INTERVAL=5：app 崩溃最多丢 5s 的 DB 统计列精度（used_quota/request_count/channel used_quota）；可花余额以 Redis 为准。
+      #   激活方式：docker compose -p newapi_test -f deploy/docker-compose.test.yml up -d app（仅重启 app，~5-15s）。
+      BATCH_UPDATE_ENABLED: "true"
+      BATCH_UPDATE_INTERVAL: "5"
+      # —— 自研计费 hook 写放大优化（2026-07-09，发现 #9）：BATCH_UPDATE 只批量 5 类原生计数，覆盖不到
+      #   本 fork 追加的两类自研每请求写——mt_wallet_consume_log INSERT + agent_earning_logs/agent_wallets
+      #   收益事务（agent_wallets 是每租户热行，同租户并发全串行在其行锁上，是吞吐天花板主嫌）。开启后二者
+      #   改进程内缓冲 + 定时批量落库（单事务多行 INSERT + 按租户合并 UPSERT，消除热行争用）；均以 requestID
+      #   幂等，SIGTERM 优雅 flush 兜底计划重启，缓冲打满退回同步写。方向安全（只会少计代理收益、绝不多付）。
+      #   **默认开启**（2026-07-09 低峰激活）：服务器构建 + 单测通过后启用；真实小流量灰度核对因上游渠道暂缺
+      #   未能做，但方向安全（只会少计代理收益、绝不多付）+ requestID 幂等 + SIGTERM 优雅 flush 兜底，故先低峰
+      #   开启、生产观察账目一致性。关闭回退：改 "false" 再
+      #   `docker compose -p newapi_test -f deploy/docker-compose.test.yml --env-file .env up -d app`。INTERVAL=硬崩溃最坏丢账窗口(秒)。
+      AGENT_HOOK_ASYNC_ENABLED: "true"
+      AGENT_HOOK_ASYNC_INTERVAL: "2"
       # —— 上游渠道凭据：仅引用服务器 .env 的同名变量，值不入库（compose 自动插值），供后续 relay 自测（5b）用 ——
       UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL}"
       UPSTREAM_API_KEY: "${UPSTREAM_API_KEY}"
@@ -39,7 +56,14 @@ services:
   mysql:
     image: mysql:8.2
     # 让 root 用 native_password，避免 caching_sha2 在非 TLS 下的公钥交换问题。
-    command: --default-authentication-plugin=mysql_native_password
+    # 计费写放大优化（2026-07-09）：放宽 per-commit fsync，将单连接提交吞吐从 ~523 抬到 ~5763 commits/s（11×）。
+    #   innodb-flush-log-at-trx-commit=2：每次 commit 刷 redo 到 OS cache、每秒 fsync 一次 → 进程崩溃不丢，仅宿主机断电丢 ≤1s。
+    #   sync-binlog=0：binlog 交由 OS 定期刷盘（本栈 binlog 仅本地、无从库/PITR 需求）。
+    # 运行中的实例已由 `SET PERSIST` 写入数据卷 mysqld-auto.cnf；此处 command 供全新卷（from-scratch 部署）兜底。
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --innodb-flush-log-at-trx-commit=2
+      --sync-binlog=0
     environment:
       MYSQL_ROOT_PASSWORD: "testpass123"
       MYSQL_DATABASE: "new-api-test"

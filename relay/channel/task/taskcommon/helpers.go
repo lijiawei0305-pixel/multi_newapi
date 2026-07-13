@@ -3,6 +3,7 @@ package taskcommon
 import (
 	"encoding/base64"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -62,8 +63,13 @@ func DecodeLocalTaskID(id string) (string, error) {
 
 // BuildProxyURL constructs the video proxy URL using the public task ID.
 // e.g., "https://your-server.com/v1/videos/task_xxxx/content"
+// TrimRight the trailing slash: a ServerAddress configured as "https://host/"
+// would otherwise yield "https://host//v1/videos/...", whose double slash the
+// frontend parses as a protocol-relative URL (host becomes literal "v1") and
+// the video never loads. Matches the TrimRight guard other ServerAddress
+// callers already apply (controller/return_path.go, payment_inprocess.go).
 func BuildProxyURL(taskID string) string {
-	return fmt.Sprintf("%s/v1/videos/%s/content", system_setting.ServerAddress, taskID)
+	return fmt.Sprintf("%s/v1/videos/%s/content", strings.TrimRight(system_setting.ServerAddress, "/"), taskID)
 }
 
 // Status-to-progress mapping constants for polling updates.
