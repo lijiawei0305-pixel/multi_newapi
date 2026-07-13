@@ -16,12 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
 import { isLikelyHtml } from '@/lib/content-format'
+import { resolveTenant } from '@/lib/tenant'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CTA, Features, Hero, HowItWorks, Stats } from './components'
@@ -32,13 +34,36 @@ export function Home() {
   const { auth } = useAuthStore()
   const isAuthenticated = !!auth.user
   const { content, isLoaded, isUrl } = useHomePageContent()
+  // 复用 root 的 ['tenant-resolution'] 查询（每会话一次 GET /api/tenant/current），按 Host 区分主站/代理站。
+  const { data: resolution, isLoading: isTenantLoading } = useQuery({
+    queryKey: ['tenant-resolution'],
+    queryFn: resolveTenant,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
 
-  if (!isLoaded) {
+  if (!isLoaded || isTenantLoading) {
     return (
       <PublicLayout showMainContainer={false}>
         <main className='flex min-h-screen items-center justify-center'>
           <div className='text-muted-foreground'>{t('Loading...')}</div>
         </main>
+      </PublicLayout>
+    )
+  }
+
+  // 主站默认首页 = WeDream 落地页（nginx 静态供于 /landing/）；管理员显式配置的自定义首页(HomePageContent)仍优先。
+  // 代理站(kind==='tenant')跳过此块，走下方原生 React 段落，保留其原有首页。
+  const isMainSite = resolution?.kind !== 'tenant'
+  if (isMainSite && !content) {
+    return (
+      <PublicLayout showMainContainer={false}>
+        <iframe
+          src='/landing/index.html'
+          className='h-screen w-full border-none'
+          title='WeDream AI'
+          sandbox='allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation'
+        />
       </PublicLayout>
     )
   }
