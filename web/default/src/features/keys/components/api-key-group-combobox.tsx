@@ -56,6 +56,7 @@ function formatGroupRatio(
   ratioLabel: string
 ) {
   if (ratio === undefined || ratio === null || ratio === '') return null
+  if (typeof ratio !== 'number') return String(ratio)
   return `${ratio}x ${ratioLabel}`
 }
 

@@ -49,13 +49,12 @@ func GetUserGroups(c *gin.Context) {
 			}
 		}
 	}
-	// "auto" 特殊组：2D 装配时也排除（建 Key 只留模型分组）。
-	if grouphook.ModelGroupDropdownResolver == nil {
-		if _, ok := userUsableGroups["auto"]; ok {
-			usableGroups["auto"] = map[string]interface{}{
-				"ratio": "自动",
-				"desc":  setting.GetUsableGroupDescription("auto"),
-			}
+	// "auto" 统一入口：只要在用户可用分组内即进下拉（含 2D 装配）。auto 不在 GroupRatio 主循环，
+	// 单独加入；实际扣费 = 命中的真实模型分组倍率 × 用户层级，动态决定，故 ratio 展示为「自动」。
+	if _, ok := userUsableGroups["auto"]; ok {
+		usableGroups["auto"] = map[string]interface{}{
+			"ratio": "自动",
+			"desc":  setting.GetUsableGroupDescription("auto"),
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
