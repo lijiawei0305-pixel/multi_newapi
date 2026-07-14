@@ -89,11 +89,11 @@ func TestReconcileStuckSubscriptions(t *testing.T) {
 	}
 }
 
-// TestReconcileStuckSubscriptions_ExpiryFallback SUB 对账 2h 过期兜底：
-//   - 查无此单(ErrOrderNotExist)+超时 → 过期终态；未超时 → Failed（不误杀）；
-//   - 确认未付+超时 → 过期；未付+未超时 → Unpaid；
-//   - 瞬时错误+超时 → Failed（绝不因超时误杀可重试错误）；
-//   - 已付即便超时 → 仍幂等激活（绝不漏真实付款）。
+// TestReconcileStuckSubscriptions_ExpiryFallback SUB 对账 2h 过期兜底 + 26h maxAge 兜底：
+//   - 查无此单(ErrOrderNotExist)+超2h → 过期；未超2h → Failed（不误杀）；
+//   - 确认未付+超2h → 过期；未付+未超2h → Unpaid；
+//   - 瞬时错误(超时/限流)在 2h~26h 窗口内 → Failed（绝不因瞬时错误误杀）；超26h → 兜底过期（网关不可达也清）；
+//   - 已付即便超26h → 仍幂等激活（maxAge 不覆盖已付，绝不漏真实付款）。
 func TestReconcileStuckSubscriptions_ExpiryFallback(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
 	if err != nil {
@@ -104,25 +104,28 @@ func TestReconcileStuckSubscriptions_ExpiryFallback(t *testing.T) {
 	}
 	app := &App{DB: db}
 
-	before := time.Unix(100000, 0)                                              // now=before+reconcileMinAge；expireCutoff=now-2h
-	oldT := time.Unix(0, 0)                                                     // 下单远早于 expireCutoff → 已超 2h
-	recentT := time.Unix(99000, 0)                                              // 已被扫(updated<before)但下单未超 2h(> expireCutoff)
-	seedSubOrder(t, db, "SUB-notexist-old", subOrderPending, false, oldT)       // 查无此单+超时 → 过期
-	seedSubOrder(t, db, "SUB-notexist-recent", subOrderPending, false, recentT) // 查无此单+未超时 → Failed
-	seedSubOrder(t, db, "SUB-unpaid-old", subOrderPending, false, oldT)         // 未付+超时 → 过期
-	seedSubOrder(t, db, "SUB-unpaid-recent", subOrderPending, false, recentT)   // 未付+未超时 → Unpaid
-	seedSubOrder(t, db, "SUB-transient-old", subOrderPending, false, oldT)      // 瞬时错误+超时 → Failed
-	seedSubOrder(t, db, "SUB-paid-old", subOrderPending, false, oldT)           // 已付+超时 → 仍激活
+	// now=before+reconcileMinAge(≈100300)；expireCutoff=now-2h(≈93100)；maxAgeCutoff=now-26h(≈6700)。
+	before := time.Unix(100000, 0)
+	recentT := time.Unix(99000, 0)                                                 // <2h：未超时
+	midT := time.Unix(50000, 0)                                                    // >2h 且 <26h：过期窗口内、未达 maxAge
+	ancientT := time.Unix(0, 0)                                                    // >26h：ancient，兜底强制过期
+	seedSubOrder(t, db, "SUB-notexist-mid", subOrderPending, false, midT)          // 查无此单+超2h → 过期
+	seedSubOrder(t, db, "SUB-notexist-recent", subOrderPending, false, recentT)    // 查无此单+未超2h → Failed
+	seedSubOrder(t, db, "SUB-unpaid-mid", subOrderPending, false, midT)            // 未付+超2h → 过期
+	seedSubOrder(t, db, "SUB-unpaid-recent", subOrderPending, false, recentT)      // 未付+未超2h → Unpaid
+	seedSubOrder(t, db, "SUB-transient-mid", subOrderPending, false, midT)         // 瞬时错误+窗口内(未达maxAge) → Failed
+	seedSubOrder(t, db, "SUB-transient-ancient", subOrderPending, false, ancientT) // 瞬时错误+超26h → 兜底过期
+	seedSubOrder(t, db, "SUB-paid-ancient", subOrderPending, false, ancientT)      // 已付+超26h → 仍激活
 
 	origQ := subOrderPaidQuery
 	t.Cleanup(func() { subOrderPaidQuery = origQ })
 	subOrderPaidQuery = func(_ *App, _ context.Context, orderNo, _ string) (bool, error) {
 		switch orderNo {
-		case "SUB-notexist-old", "SUB-notexist-recent":
+		case "SUB-notexist-mid", "SUB-notexist-recent":
 			return false, fmt.Errorf("wxpay query: %w", payment.ErrOrderNotExist)
-		case "SUB-transient-old":
-			return false, errors.New("dial tcp: i/o timeout") // 瞬时错误，非 not-exist
-		case "SUB-paid-old":
+		case "SUB-transient-mid", "SUB-transient-ancient":
+			return false, errors.New("context deadline exceeded (Client.Timeout exceeded)") // 瞬时错误，非 not-exist
+		case "SUB-paid-ancient":
 			return true, nil
 		default:
 			return false, nil // unpaid
@@ -141,40 +144,40 @@ func TestReconcileStuckSubscriptions_ExpiryFallback(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	// 过期：查无此单+超时、确认未付+超时。
-	if !containsAll(res.Expired, "SUB-notexist-old", "SUB-unpaid-old") || len(res.Expired) != 2 {
-		t.Fatalf("expired=%v, want [SUB-notexist-old SUB-unpaid-old]", res.Expired)
+	// 过期：查无此单+超2h、未付+超2h、瞬时错误但超26h(兜底)。
+	if !containsAll(res.Expired, "SUB-notexist-mid", "SUB-unpaid-mid", "SUB-transient-ancient") || len(res.Expired) != 3 {
+		t.Fatalf("expired=%v, want [SUB-notexist-mid SUB-unpaid-mid SUB-transient-ancient]", res.Expired)
 	}
 	// 已过期单落库终态 → 不再被扫。
-	for _, no := range []string{"SUB-notexist-old", "SUB-unpaid-old"} {
+	for _, no := range []string{"SUB-notexist-mid", "SUB-unpaid-mid", "SUB-transient-ancient"} {
 		var row subscriptionOrderRow
 		db.First(&row, "order_no = ?", no)
 		if row.Status != subOrderExpired {
 			t.Fatalf("%s status=%q, want %q", no, row.Status, subOrderExpired)
 		}
 	}
-	// 未超时的查无此单 + 瞬时错误(即便超时) → Failed，绝不误杀。
+	// 未超2h的查无此单 + 窗口内(未达maxAge)的瞬时错误 → Failed，绝不误杀。
 	if _, ok := res.Failed["SUB-notexist-recent"]; !ok {
-		t.Fatalf("SUB-notexist-recent 未超时不应过期，应 Failed；got Failed=%v", res.Failed)
+		t.Fatalf("SUB-notexist-recent 未超2h不应过期，应 Failed；got Failed=%v", res.Failed)
 	}
-	if _, ok := res.Failed["SUB-transient-old"]; !ok {
-		t.Fatalf("SUB-transient-old 瞬时错误绝不过期，应 Failed；got Failed=%v", res.Failed)
+	if _, ok := res.Failed["SUB-transient-mid"]; !ok {
+		t.Fatalf("SUB-transient-mid 窗口内瞬时错误不应过期，应 Failed；got Failed=%v", res.Failed)
 	}
 	if len(res.Failed) != 2 {
-		t.Fatalf("Failed=%v, want 恰 2 条(notexist-recent + transient-old)", res.Failed)
+		t.Fatalf("Failed=%v, want 恰 2 条(notexist-recent + transient-mid)", res.Failed)
 	}
-	// 未付未超时 → Unpaid。
+	// 未付未超2h → Unpaid。
 	if len(res.Unpaid) != 1 || res.Unpaid[0] != "SUB-unpaid-recent" {
 		t.Fatalf("unpaid=%v, want [SUB-unpaid-recent]", res.Unpaid)
 	}
-	// 已付即便超时仍激活（不漏真实付款），且不被误置 expired。
-	if len(activated) != 1 || activated[0] != "SUB-paid-old" {
-		t.Fatalf("activated=%v, want [SUB-paid-old]", activated)
+	// 已付即便超26h仍激活（maxAge 不覆盖已付），且不被误置 expired。
+	if len(activated) != 1 || activated[0] != "SUB-paid-ancient" {
+		t.Fatalf("activated=%v, want [SUB-paid-ancient]", activated)
 	}
 	var paidRow subscriptionOrderRow
-	db.First(&paidRow, "order_no = ?", "SUB-paid-old")
+	db.First(&paidRow, "order_no = ?", "SUB-paid-ancient")
 	if paidRow.Status == subOrderExpired {
-		t.Fatalf("SUB-paid-old 被误置 expired")
+		t.Fatalf("SUB-paid-ancient 被误置 expired")
 	}
 }
 
