@@ -32,3 +32,33 @@ export function applyFaviconToDom(url: string) {
     // Ignore malformed URLs
   }
 }
+
+/* ─── 站点品牌（document.title + favicon）的唯一入口 ───────────────────────────
+   两个调用方，且**顺序不确定**：
+     · main.tsx 的 initSystemBranding()：React 之前跑，用**平台** /api/status 的
+       system_name/logo 设置（缓存优先一次 + 后台 getStatus() 回来再一次）。
+     · useTenantBrand()（__root 内）：代理站解析出租户后，用**租户**的 site_name/logo_url
+       覆盖（仅当 brand_hidden）。
+   若不加锁，main.tsx 后台刷新那次会把已生效的租户品牌覆盖回主站的 —— 慢网下必现，
+   代理站标签页会显示主站名与图标（brand_hidden 的品牌泄漏）。
+   规则：**租户品牌一旦应用即锁定，此后平台侧的调用一律忽略。** */
+let tenantBrandLocked = false
+
+export function applySiteBranding(
+  name: string | null | undefined,
+  logo: string | null | undefined,
+  opts: { tenant?: boolean } = {}
+) {
+  if (typeof document === 'undefined') return
+  if (tenantBrandLocked && !opts.tenant) return
+  if (opts.tenant) tenantBrandLocked = true
+
+  if (name) {
+    document.title = name
+    const metaTitle = document.querySelector<HTMLMetaElement>(
+      'meta[name="title"]'
+    )
+    if (metaTitle) metaTitle.setAttribute('content', name)
+  }
+  if (logo) applyFaviconToDom(logo)
+}

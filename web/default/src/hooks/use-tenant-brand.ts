@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getCookie } from '@/lib/cookies'
+import { applySiteBranding } from '@/lib/dom-utils'
 import { resolveTenant } from '@/lib/tenant'
 import {
   THEME_COOKIE_KEYS,
@@ -65,6 +66,12 @@ export function useTenantBrand() {
     if (data.site_name) override.systemName = data.site_name
     if (data.logo_url) override.logo = data.logo_url
     if (Object.keys(override).length > 0) setConfig(override)
+
+    // 同步覆写 document.title / favicon —— 它们由 main.tsx 的启动脚本按**平台** /api/status
+    // 设置（React 之前），store 的覆盖管不到 DOM。不改这里，代理站的标签页会一直显示主站
+    // 的名字和图标（brand_hidden 的品牌泄漏）。{tenant:true} 会上锁，防止 main.tsx 的后台
+    // getStatus() 回来后把它盖回主站品牌（见 lib/dom-utils.ts 的注释）。
+    applySiteBranding(data.site_name, data.logo_url, { tenant: true })
   }, [statusLoading, data, setConfig])
 
   // Default theme preset for this tenant's site.
