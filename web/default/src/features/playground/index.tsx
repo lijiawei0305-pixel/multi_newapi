@@ -40,37 +40,8 @@ import { GatingAlert } from './components/public/gating-alert'
 import { ChatWorkspace } from './components/public/chat-workspace'
 import { ImageWorkspace } from './components/public/image-workspace'
 import { VideoWorkspace } from './components/public/video-workspace'
+import { AUTO_GROUP } from './constants'
 import type { CatalogFilter } from './types'
-
-// ============================================================================
-// localStorage：记住上次选中的 API 密钥
-// ============================================================================
-const LAST_KEY_STORAGE = 'playground:last-key-id'
-
-function readLastKeyId(): number | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(LAST_KEY_STORAGE)
-    if (raw == null) return null
-    const id = Number(raw)
-    return Number.isNaN(id) ? null : id
-  } catch {
-    return null
-  }
-}
-
-function writeLastKeyId(id: number | null): void {
-  if (typeof window === 'undefined') return
-  try {
-    if (id == null) {
-      window.localStorage.removeItem(LAST_KEY_STORAGE)
-    } else {
-      window.localStorage.setItem(LAST_KEY_STORAGE, String(id))
-    }
-  } catch {
-    // 忽略隐私模式等写入失败
-  }
-}
 
 // ============================================================================
 // 内层内容（位于 PlaygroundCredentialProvider 内部，可消费 credential context）
@@ -79,13 +50,13 @@ function PlaygroundPublicContent() {
   const user = useAuthStore((state) => state.auth.user)
   const isAuthed = !!user
 
-  const { setApiKey } = usePlaygroundCredential()
+  const { setCredential } = usePlaygroundCredential()
   const navigate = useNavigate()
 
   // ── 状态机 ────────────────────────────────────────────────────────────────
-  const [selectedKeyId, setSelectedKeyId] = useState<number | null>(() =>
-    readLastKeyId(),
-  )
+  // 默认 auto（不指定密钥）：目录展示全部模型，聊天走后端 auto 组自动路由。
+  // 刻意不从 localStorage 恢复上次密钥——每次进入都以 auto 为默认（用户诉求）。
+  const [selectedKeyId, setSelectedKeyId] = useState<number | null>(null)
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
   const [filter, setFilter] = useState<CatalogFilter>('all')
   const [search, setSearch] = useState('')
@@ -115,32 +86,41 @@ function PlaygroundPublicContent() {
     refetch: refetchModels,
   } = useModelCatalog({ group, filter, search })
 
-  // ── 选中 key 的懒揭示（仅对选中单个 id 揭示一次，不预揭示整表）───────────────
+  // ── 凭据决策：根据登录态 + 选择计算发送凭据（token / session / none）────────────
+  // - 未登录 → none（仅浏览）
+  // - auto（未选具体密钥）→ session：走 /pg 登录态端点，后端 auto 组自动路由，无需 sk-
+  // - 选中可用密钥 → token：懒揭示 sk-，走 /v1 + Bearer，分组由密钥决定
+  // - 选中不可用密钥 / 揭示失败 → none
   useEffect(() => {
-    // 未登录或未选 → 清空凭据
-    if (!isAuthed || selectedKeyId == null) {
+    if (!isAuthed) {
       setRevealedKey(null)
-      setApiKey(null)
+      setCredential({ apiKey: null, authMode: 'none', sendGroup: null })
+      return
+    }
+
+    // auto 分组：登录态即可发送聊天（session），不需要 sk- 密钥
+    if (selectedKeyId == null) {
+      setRevealedKey(null)
+      setCredential({ apiKey: null, authMode: 'session', sendGroup: AUTO_GROUP })
       return
     }
 
     // keys 尚未加载完成时等待
     if (keys.length === 0) return
 
-    // 找到选中项；不存在（如已删除的旧记忆 id）→ 清理选择
+    // 找到选中项；不存在（如已删除的旧 id）→ 回退 auto
     const key = keys.find((k) => k.id === selectedKeyId) ?? null
     if (key == null) {
       setSelectedKeyId(null)
-      writeLastKeyId(null)
       setRevealedKey(null)
-      setApiKey(null)
+      setCredential({ apiKey: null, authMode: 'session', sendGroup: AUTO_GROUP })
       return
     }
 
-    // 仅可用（status=1）密钥才揭示；否则不注入凭据
+    // 仅可用（status=1）密钥才揭示；否则不注入凭据（禁用发送）
     if (key.status !== API_KEY_STATUS.ENABLED) {
       setRevealedKey(null)
-      setApiKey(null)
+      setCredential({ apiKey: null, authMode: 'none', sendGroup: null })
       return
     }
 
@@ -149,54 +129,69 @@ function PlaygroundPublicContent() {
       .then((full) => {
         if (cancelled) return
         setRevealedKey(full)
-        setApiKey(full)
+        setCredential({
+          apiKey: full,
+          authMode: 'token',
+          sendGroup: key.group ? key.group : null,
+        })
       })
       .catch(() => {
         if (cancelled) return
         setRevealedKey(null)
-        setApiKey(null)
+        setCredential({ apiKey: null, authMode: 'none', sendGroup: null })
         toast.error('获取 API 密钥失败，请重试或重新选择')
       })
 
     return () => {
       cancelled = true
     }
-  }, [isAuthed, selectedKeyId, keys, reveal, setApiKey])
+  }, [isAuthed, selectedKeyId, keys, reveal, setCredential])
 
-  // ── 选择 key 回调（id=选中；null=不指定密钥，浏览全部模型）──────────────────────
+  // ── 选择 key 回调（id=选中密钥；null=切回 auto 分组，浏览全部模型）──────────────
   const handleSelectKey = useCallback((id: number | null) => {
     setSelectedKeyId(id)
-    writeLastKeyId(id)
   }, [])
 
-  // ── 门控判定（§5）─────────────────────────────────────────────────────────
-  // 未登录 / 已登录未选（或未成功揭示）→ 禁用发送 + 显示提示
-  const hasCredential = isAuthed && !!revealedKey
+  // ── 当前能力（video>image>chat；未选模型按 chat）─────────────────────────────
+  const capability = selectedModel ? getPrimaryCapability(selectedModel) : 'chat'
+
+  // ── 门控判定（§5，按能力区分）───────────────────────────────────────────────
+  // - auto（session）：聊天可发送；图片/视频后端无对应端点，仍需选具体密钥
+  // - token：选中可用密钥且已揭示 → 全能力可发送
+  const autoActive = isAuthed && selectedKeyId == null // auto/session 模式
+  const tokenReady = isAuthed && selectedKeyId != null && !!revealedKey
   const hasNoKeys = isAuthed && !keysLoading && keys.length === 0
   let gatingMessage: string | null = null
   let gatingAction: { label: string; onClick: () => void } | undefined
   if (!isAuthed) {
-    gatingMessage = '请先登录并选择 API 密钥'
+    gatingMessage = '请先登录后开始创作'
     gatingAction = {
       label: '去登录',
       onClick: () => void navigate({ to: '/sign-in' }),
     }
-  } else if (hasNoKeys) {
-    gatingMessage = '您还没有可用的 API 密钥'
-    gatingAction = {
-      label: '创建 API 密钥',
-      onClick: () => void navigate({ to: '/keys' }),
+  } else if (selectedKeyId != null && !tokenReady) {
+    // 选中了具体密钥但不可用 / 尚未就绪
+    gatingMessage = '所选密钥不可用，请重新选择，或切换到 auto'
+  } else if (capability !== 'chat' && !tokenReady) {
+    // 图片 / 视频：auto 分组无对应后端端点，必须选一个可用密钥
+    if (hasNoKeys) {
+      gatingMessage = '图片 / 视频生成需要 API 密钥，请先创建'
+      gatingAction = {
+        label: '创建 API 密钥',
+        onClick: () => void navigate({ to: '/keys' }),
+      }
+    } else {
+      gatingMessage = 'auto 分组暂不支持图片 / 视频生成，请在顶部选择一个 API 密钥'
     }
-  } else if (!hasCredential) {
-    gatingMessage = '请先在顶部选择 API 密钥后再生成'
   }
+  // 其余：聊天 + auto(session) 或 token 就绪 → 无门控，可发送
 
   // ── 当前能力工作区 ─────────────────────────────────────────────────────────
-  const capability = selectedModel ? getPrimaryCapability(selectedModel) : 'chat'
   const workspaceProps = {
     apiKey: revealedKey ?? '',
     model: selectedModel?.model_name ?? '',
     group: selectedKey?.group ?? '',
+    autoMode: autoActive,
     introModel: selectedModel,
   }
 

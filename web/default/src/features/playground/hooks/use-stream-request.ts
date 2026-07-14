@@ -39,13 +39,17 @@ export function useStreamRequest() {
   const sseSourceRef = useRef<SSE | null>(null)
   const isStreamCompleteRef = useRef(false)
   const [isStreaming, setIsStreaming] = useState(false)
-  const { apiKey } = usePlaygroundCredential()
-  // 用 ref 持有最新凭据：sendStreamRequest 不把 apiKey 列入依赖（避免重建函数
-  // 导致下游引用失效），却始终读到切换密钥后的最新值，杜绝 stale-closure。
+  const { apiKey, authMode, sendGroup } = usePlaygroundCredential()
+  // 用 ref 持有最新凭据：sendStreamRequest 不把凭据列入依赖（避免重建函数
+  // 导致下游引用失效），却始终读到切换密钥/模式后的最新值，杜绝 stale-closure。
   const apiKeyRef = useRef(apiKey)
+  const authModeRef = useRef(authMode)
+  const sendGroupRef = useRef(sendGroup)
   useEffect(() => {
     apiKeyRef.current = apiKey
-  }, [apiKey])
+    authModeRef.current = authMode
+    sendGroupRef.current = sendGroup
+  }, [apiKey, authMode, sendGroup])
 
   const closeActiveStream = useCallback((source?: SSE) => {
     const streamSource = source ?? sseSourceRef.current
@@ -66,15 +70,28 @@ export function useStreamRequest() {
     ) => {
       sseSourceRef.current?.close()
 
-      const source = new SSE(API_ENDPOINTS.CHAT_COMPLETIONS, {
+      // session 模式（auto 分组）：走 /pg 登录态端点，不带 Bearer，靠 New-Api-User +
+      // cookie 鉴权；请求体 group 覆写为 sendGroup（'auto'）交后端校验后自动路由。
+      // token 模式：走 /v1，带 Bearer；后端忽略请求体 group（分组由密钥决定）。
+      const isSession = authModeRef.current === 'session'
+      const endpoint = isSession
+        ? API_ENDPOINTS.PG_CHAT_COMPLETIONS
+        : API_ENDPOINTS.CHAT_COMPLETIONS
+      const finalPayload = sendGroupRef.current
+        ? { ...payload, group: sendGroupRef.current }
+        : payload
+
+      const source = new SSE(endpoint, {
         headers: {
           ...getCommonHeaders(),
-          ...(apiKeyRef.current
+          ...(!isSession && apiKeyRef.current
             ? { Authorization: `Bearer ${apiKeyRef.current}` }
             : {}),
         },
+        // 登录态跨域（多租户代理域）需携带 cookie；同源亦无害。
+        withCredentials: isSession,
         method: 'POST',
-        payload: JSON.stringify(payload),
+        payload: JSON.stringify(finalPayload),
       })
 
       sseSourceRef.current = source

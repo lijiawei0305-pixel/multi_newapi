@@ -27,15 +27,29 @@ import type {
 } from './types'
 
 /**
- * Send chat completion request (non-streaming)
+ * Send chat completion request (non-streaming).
+ *
+ * 与流式路径对齐的鉴权/分组策略：
+ * - session（auto 分组）→ POST /pg（登录态 New-Api-User + cookie，globals 已带
+ *   withCredentials），不带 Bearer；分组由已覆写进 payload.group 的 'auto' 决定。
+ * - token（选中密钥）→ POST /v1，带 `Authorization: Bearer sk-`。
  */
 export async function sendChatCompletion(
   payload: ChatCompletionRequest,
+  opts: { authMode: 'token' | 'session' | 'none'; apiKey: string | null },
   signal?: AbortSignal
 ): Promise<ChatCompletionResponse> {
-  const res = await api.post(API_ENDPOINTS.CHAT_COMPLETIONS, payload, {
+  const isSession = opts.authMode === 'session'
+  const endpoint = isSession
+    ? API_ENDPOINTS.PG_CHAT_COMPLETIONS
+    : API_ENDPOINTS.CHAT_COMPLETIONS
+  const res = await api.post(endpoint, payload, {
     signal,
     skipErrorHandler: true,
+    headers:
+      !isSession && opts.apiKey
+        ? { Authorization: `Bearer ${opts.apiKey}` }
+        : undefined,
   } as Record<string, unknown>)
   return res.data
 }

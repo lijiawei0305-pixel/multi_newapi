@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { sendChatCompletion } from '../api'
+import { usePlaygroundCredential } from '../context/credential-context'
 import { ERROR_MESSAGES } from '../constants'
 import {
   applyStreamingChunk,
@@ -72,6 +73,7 @@ export function useChatHandler({
 }: UseChatHandlerOptions) {
   const { t } = useTranslation()
   const { sendStreamRequest, stopStream, isStreaming } = useStreamRequest()
+  const { apiKey, authMode, sendGroup } = usePlaygroundCredential()
   const [isRequesting, setIsRequesting] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const requestIdRef = useRef(0)
@@ -230,11 +232,13 @@ export function useChatHandler({
   // Send non-streaming chat request
   const sendNonStreamingChat = useCallback(
     async (messages: Message[]) => {
-      const payload = buildChatCompletionPayload(
+      const built = buildChatCompletionPayload(
         messages,
         config,
         parameterEnabled
       )
+      // 与流式一致：session（auto）模式把请求体分组覆写为 'auto'，由 /pg 端点校验后自动路由。
+      const payload = sendGroup ? { ...built, group: sendGroup } : built
       const requestId = requestIdRef.current + 1
       const abortController = new AbortController()
 
@@ -245,6 +249,7 @@ export function useChatHandler({
         setIsRequesting(true)
         const response = await sendChatCompletion(
           payload,
+          { authMode, apiKey },
           abortController.signal
         )
         if (abortController.signal.aborted) return
@@ -276,7 +281,15 @@ export function useChatHandler({
         }
       }
     },
-    [config, parameterEnabled, onMessageUpdate, handleStreamError]
+    [
+      config,
+      parameterEnabled,
+      onMessageUpdate,
+      handleStreamError,
+      authMode,
+      apiKey,
+      sendGroup,
+    ]
   )
 
   // Send chat request (stream or non-stream based on config)
