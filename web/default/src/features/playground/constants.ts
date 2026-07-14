@@ -35,12 +35,18 @@ export const MESSAGE_STATUS = {
 // API endpoints
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/v1/chat/completions',
+  // 「auto」会话鉴权聊天端点：走登录态（New-Api-User + cookie），
+  // 请求体的 group 由后端 Distribute 校验后生效（支持 auto 组自动路由）。
+  PG_CHAT_COMPLETIONS: '/pg/chat/completions',
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
   IMAGES_GENERATIONS: '/v1/images/generations',
   VIDEO_GENERATIONS: '/v1/video/generations',
   VIDEO_TASK: (id: string) => `/v1/video/generations/${id}`,
 } as const
+
+// 「auto」分组：不指定具体密钥时用后端 auto 组自动路由到最优真实分组。
+export const AUTO_GROUP = 'auto' as const
 
 // Video polling configuration
 export const VIDEO_POLL = {

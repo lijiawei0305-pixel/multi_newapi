@@ -17,20 +17,47 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useContext, useState } from 'react'
+import React, { createContext, useContext, useMemo, useState } from 'react'
 
-interface PlaygroundCredentialContextValue {
+/**
+ * 发送鉴权模式：
+ * - token：选中了某个密钥 → 走 /v1 + `Authorization: Bearer sk-`，分组由密钥决定。
+ * - session：auto 分组 → 走 /pg（登录态 New-Api-User + cookie），请求体 group='auto'
+ *   由后端校验后自动路由；无需 sk- 密钥。
+ * - none：未登录 / 密钥未揭示 → 不可发送（仅浏览）。
+ */
+export type PlaygroundAuthMode = 'token' | 'session' | 'none'
+
+export interface PlaygroundCredential {
+  /** token 模式下的 `sk-` 明文；session/none 模式为 null */
   apiKey: string | null
-  setApiKey: (k: string | null) => void
+  authMode: PlaygroundAuthMode
+  /** 发送时写入请求体的分组：session→'auto'，token→密钥分组，none→null */
+  sendGroup: string | null
+}
+
+interface PlaygroundCredentialContextValue extends PlaygroundCredential {
+  setCredential: (c: PlaygroundCredential) => void
+}
+
+const NONE_CREDENTIAL: PlaygroundCredential = {
+  apiKey: null,
+  authMode: 'none',
+  sendGroup: null,
 }
 
 const PlaygroundCredentialContext = createContext<PlaygroundCredentialContextValue | null>(null)
 
 export function PlaygroundCredentialProvider({ children }: { children: React.ReactNode }) {
-  const [apiKey, setApiKey] = useState<string | null>(null)
+  const [credential, setCredential] = useState<PlaygroundCredential>(NONE_CREDENTIAL)
+
+  const value = useMemo<PlaygroundCredentialContextValue>(
+    () => ({ ...credential, setCredential }),
+    [credential],
+  )
 
   return (
-    <PlaygroundCredentialContext.Provider value={{ apiKey, setApiKey }}>
+    <PlaygroundCredentialContext.Provider value={value}>
       {children}
     </PlaygroundCredentialContext.Provider>
   )

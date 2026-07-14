@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -29,7 +29,7 @@ import {
   usePlaygroundState,
 } from '../../hooks'
 import { useConversationHistory } from '../../hooks/use-conversation-history'
-import type { WorkspaceProps } from '../../types'
+import type { GroupOption, ModelOption, WorkspaceProps } from '../../types'
 import { ConversationHistoryBar } from './conversation-history-bar'
 
 /**
@@ -43,6 +43,7 @@ export function ChatWorkspace({
   apiKey,
   model,
   group,
+  autoMode = false,
   introModel,
 }: WorkspaceProps) {
   const {
@@ -71,9 +72,14 @@ export function ChatWorkspace({
     }
   }, [model, config.model, updateConfig])
 
-  // 同步选中 key 所属分组到 config.group：/v1 的分组由 key 决定，这里对齐是为了让
-  // usePlaygroundOptions 的 getUserModels 拉取正确分组的模型列表，令 catalog 选中的
-  // 模型始终在列表内、不被 getModelFallback/shouldClearModelForGroup 回退覆盖。
+  // 同步选中 key 所属分组到 config.group（token 模式）：/v1 的分组由 key 决定，这里对齐
+  // 是为了让 usePlaygroundOptions 的 getUserModels 拉取正确分组的模型列表，令 catalog
+  // 选中的模型始终在列表内、不被 getModelFallback/shouldClearModelForGroup 回退覆盖。
+  //
+  // auto 分组模式：group 为空、且下方 usePlaygroundOptions 被禁用（不拉取模型/分组、
+  // 不回退清空），config.group 维持原值即可——catalog 选中的模型经 model prop 同步进
+  // config.model 后不会被清空；真正的发送分组（'auto'）由 use-stream-request /
+  // use-chat-handler 从凭据上下文覆写，故 config.group 的值在 auto 模式下不参与发送。
   const lastSyncedGroupRef = useRef<string | null>(null)
   useEffect(() => {
     if (!group) return
@@ -111,8 +117,9 @@ export function ChatWorkspace({
     sendChat,
   })
 
-  // apiKey 为空时禁用发送（外层也有门控）。
-  const canSend = Boolean(apiKey)
+  // token 模式需 apiKey；auto 分组走登录态 session（无 sk-），此时 autoMode 即可发送。
+  // 外层门控亦会拦截未登录 / 未揭示等场景。
+  const canSend = Boolean(apiKey) || autoMode
 
   const handleSend = useCallback(
     (text: string) => {
@@ -155,14 +162,37 @@ export function ChatWorkspace({
   // 未登录访客也会默认渲染聊天工作区；此时禁止拉取需鉴权的 groups/models，
   // 否则会对私有端点发 401 并弹错误 toast（违反公开页「可浏览」承诺）。
   const isAuthed = !!useAuthStore((state) => state.auth.user)
+  // auto 分组模式禁用分组/模型联动拉取：目录展示「全部模型」，若按单一分组拉取会把
+  // catalog 选中的跨组模型判为「不在列表」而清空，且 group 空值又会触发分组回退形成抖动。
+  // 禁用后 config.model 恒由 catalog 决定，发送分组由凭据上下文覆写为 'auto'。
   const { isLoadingModels } = usePlaygroundOptions({
     currentGroup: config.group,
     currentModel: config.model,
     setGroups,
     setModels,
     updateConfig,
-    enabled: isAuthed,
+    enabled: isAuthed && !autoMode,
   })
+
+  // auto 模式下 usePlaygroundOptions 被禁用 → state 的 models/groups 恒为空，会连带把
+  // 底部「发送」键（canSubmit 依赖 models.length>0）永久禁用、模型/分组选择器空置不可点。
+  // 这里用「左侧目录已选中的模型」+「auto」合成单条列表喂给底部输入：发送键恢复可用、
+  // 选择器如实回显当前模型与 auto。真正的发送分组仍由凭据上下文覆写为 'auto'，config.group
+  // 在 auto 模式不参与发送（见上），此处仅作展示用途。非 auto 模式沿用拉取到的真实列表。
+  const footerModels = useMemo<ModelOption[]>(
+    () =>
+      autoMode
+        ? config.model
+          ? [{ label: config.model, value: config.model }]
+          : []
+        : models,
+    [autoMode, config.model, models]
+  )
+  const footerGroups = useMemo<GroupOption[]>(
+    () =>
+      autoMode ? [{ label: 'auto', value: config.group, ratio: 1 }] : groups,
+    [autoMode, config.group, groups]
+  )
 
   return (
     <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>
@@ -199,12 +229,12 @@ export function ChatWorkspace({
       <div className='mx-auto w-full max-w-4xl'>
         <PlaygroundInput
           disabled={isGenerating || !canSend}
-          groups={groups}
+          groups={footerGroups}
           groupValue={config.group}
           isGenerating={isGenerating}
           isModelLoading={isLoadingModels}
           modelValue={config.model}
-          models={models}
+          models={footerModels}
           onGroupChange={(value) => updateConfig('group', value)}
           onClearMessages={handleClearMessages}
           onModelChange={(value) => updateConfig('model', value)}

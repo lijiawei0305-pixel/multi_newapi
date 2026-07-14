@@ -162,6 +162,11 @@ export interface WorkspaceProps {
   model: string
   /** 选中 key 所属分组；聊天用于同步 config.group，使模型列表拉取正确的组 */
   group?: string
+  /**
+   * auto 分组（不指定密钥）模式：聊天走登录态 /pg 端点、后端 auto 组自动路由；
+   * 此时不按单一分组同步 config.group（避免模型列表被清空），发送分组由凭据上下文决定。
+   */
+  autoMode?: boolean
   /** 当前选中模型的完整对象；用于在工作区空态渲染「模型介绍」英雄区 */
   introModel?: PricingModel | null
 }

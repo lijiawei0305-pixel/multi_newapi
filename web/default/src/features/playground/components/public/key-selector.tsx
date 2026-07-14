@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { KeyRound, Layers, Loader2 } from 'lucide-react'
+import { KeyRound, Loader2, Sparkles } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -31,8 +31,9 @@ import { cn } from '@/lib/utils'
 import { API_KEY_STATUS } from '@/features/keys/constants'
 import type { ApiKey } from '@/features/keys/types'
 
-// 「不指定密钥·浏览全部模型」哨兵值（Select 需要一个非空 value 才能高亮该项）
-const NO_KEY_VALUE = '__no_key__'
+// 「auto 分组·不指定密钥」哨兵值（Select 需要一个非空 value 才能高亮该项）。
+// 选中 auto 时对外表现为「未选具体密钥」：目录展示全部模型，聊天走后端 auto 组自动路由。
+const AUTO_VALUE = '__auto__'
 
 // ============================================================================
 // 状态标签映射（中文）
@@ -79,7 +80,7 @@ export function KeySelector({
   const disabledKeys = keys.filter((k) => k.status !== API_KEY_STATUS.ENABLED)
 
   function handleValueChange(value: string | null) {
-    if (value == null || value === NO_KEY_VALUE) {
+    if (value == null || value === AUTO_VALUE) {
       onSelect(null)
       return
     }
@@ -91,7 +92,7 @@ export function KeySelector({
 
   return (
     <Select
-      value={selectedId != null ? String(selectedId) : NO_KEY_VALUE}
+      value={selectedId != null ? String(selectedId) : AUTO_VALUE}
       onValueChange={handleValueChange}
       disabled={rootDisabled}
     >
@@ -107,7 +108,7 @@ export function KeySelector({
         ) : selectedKey != null ? (
           <KeyRound className='text-muted-foreground size-3.5 shrink-0' />
         ) : (
-          <Layers className='text-muted-foreground size-3.5 shrink-0' />
+          <Sparkles className='text-muted-foreground size-3.5 shrink-0' />
         )}
         {selectedKey != null ? (
           <span className='flex-1 truncate text-left text-sm'>
@@ -115,18 +116,19 @@ export function KeySelector({
           </span>
         ) : (
           <span className='flex-1 truncate text-left text-sm text-muted-foreground'>
-            {!isAuthed ? '请先登录后选择 API 密钥' : '浏览全部模型（未选密钥）'}
+            {!isAuthed ? '请先登录后选择 API 密钥' : 'auto'}
           </span>
         )}
       </SelectTrigger>
 
       <SelectContent align='start' className='min-w-[240px]'>
-        {/* 不指定密钥：浏览全部模型（发送仍需选密钥） */}
+        {/* auto 分组：不指定密钥，默认展示全部模型；聊天走后端 auto 组自动路由 */}
         <SelectGroup>
-          <SelectItem value={NO_KEY_VALUE}>
+          <SelectLabel>auto</SelectLabel>
+          <SelectItem value={AUTO_VALUE}>
             <span className='flex flex-1 items-center gap-2 truncate'>
-              <Layers className='size-3.5 shrink-0' />
-              <span className='truncate'>浏览全部模型（不指定密钥）</span>
+              <Sparkles className='size-3.5 shrink-0' />
+              <span className='truncate'>auto · 自动路由（全部模型）</span>
             </span>
           </SelectItem>
         </SelectGroup>
