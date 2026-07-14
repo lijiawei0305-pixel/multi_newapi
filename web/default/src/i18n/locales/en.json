@@ -5732,6 +5732,8 @@
     "WeChat QR": "WeChat QR",
     "placeholder · to be replaced": "placeholder · to be replaced",
     "(Scan the QR code with WeChat)": "(Scan the QR code with WeChat)",
-    "Contact support now": "Contact support now"
+    "Contact support now": "Contact support now",
+    "e.g. © 2026 Your Brand. All rights reserved.": "e.g. © 2026 Your Brand. All rights reserved.",
+    "Shown at the bottom of your site. Supports HTML. Leave empty to use \"© year + your site name\".": "Shown at the bottom of your site. Supports HTML. Leave empty to use \"© year + your site name\"."
   }
 }

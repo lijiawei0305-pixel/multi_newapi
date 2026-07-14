@@ -154,10 +154,13 @@ func (a *App) HandleTenantCurrent(c *gin.Context) {
 	}
 	cfg := a.effectiveSiteConfig(c.Request.Context(), t)
 	respondOK(c, gin.H{
-		"id":                t.ID,
-		"slug":              t.Slug,
-		"site_name":         cfg.SiteName,
-		"logo_url":          cfg.LogoURL,
+		"id":        t.ID,
+		"slug":      t.Slug,
+		"site_name": cfg.SiteName,
+		"logo_url":  cfg.LogoURL,
+		// footer：代理自定义页脚。前端 useTenantBrand 用它覆盖平台的 footer_html，
+		// 否则 brand_hidden 的代理站页脚会显示主站品牌（品牌泄漏）。
+		"footer":            cfg.Footer,
 		"theme_preset":      cfg.ThemePreset,
 		"theme_color":       cfg.ThemeColor,
 		"brand_hidden":      cfg.BrandHidden,

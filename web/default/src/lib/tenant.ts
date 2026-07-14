@@ -26,6 +26,8 @@ export interface TenantCurrent {
   slug: string
   site_name: string
   logo_url: string
+  /** Agent's own footer HTML (Console → Site Branding). Empty = not configured. */
+  footer: string
   /** Default theme preset key the agent set for this site (empty = default). */
   theme_preset: string
   theme_color: string

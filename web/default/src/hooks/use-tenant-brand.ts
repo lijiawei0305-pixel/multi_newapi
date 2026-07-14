@@ -62,10 +62,23 @@ export function useTenantBrand() {
   useEffect(() => {
     if (statusLoading) return
     if (!data?.brand_hidden) return
-    const override: { systemName?: string; logo?: string } = {}
+    const override: {
+      systemName?: string
+      logo?: string
+      footerHtml?: string
+    } = {}
     if (data.site_name) override.systemName = data.site_name
     if (data.logo_url) override.logo = data.logo_url
-    if (Object.keys(override).length > 0) setConfig(override)
+
+    // 页脚：代理配了就用他自己的；**没配也绝不能留空** —— <Footer /> 在 footerHtml 为空时
+    // 会回落到 New API 的默认文档链接大列，那是比显示主站页脚更严重的品牌泄漏。
+    // 故未配置时自动生成「© 年份 站名」。
+    const ownFooter = data.footer?.trim()
+    override.footerHtml =
+      ownFooter ||
+      `© ${new Date().getFullYear()} ${data.site_name || ''}`.trim()
+
+    setConfig(override)
 
     // 同步覆写 document.title / favicon —— 它们由 main.tsx 的启动脚本按**平台** /api/status
     // 设置（React 之前），store 的覆盖管不到 DOM。不改这里，代理站的标签页会一直显示主站

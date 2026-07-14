@@ -42,6 +42,8 @@ export interface SiteConfig {
 export interface SiteConfigPatch {
   site_name?: string
   logo_url?: string
+  /** 自定义页脚 HTML。留空则前端自动用「© 年份 站名」兜底（见 use-tenant-brand.ts）。 */
+  footer?: string
   brand_hidden?: boolean
   theme_preset?: string
 }

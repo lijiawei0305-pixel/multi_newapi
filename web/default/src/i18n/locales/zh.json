@@ -5822,6 +5822,8 @@
     "WeChat QR": "微信二维码",
     "placeholder · to be replaced": "占位 · 待替换",
     "(Scan the QR code with WeChat)": "（微信扫码咨询）",
-    "Contact support now": "一键联系在线客服"
+    "Contact support now": "一键联系在线客服",
+    "e.g. © 2026 Your Brand. All rights reserved.": "例如：© 2026 你的品牌。保留所有权利。",
+    "Shown at the bottom of your site. Supports HTML. Leave empty to use \"© year + your site name\".": "显示在你站点的底部，支持 HTML。留空则自动使用「© 年份 + 你的站名」。"
   }
 }

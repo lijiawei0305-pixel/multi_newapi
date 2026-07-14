@@ -51,6 +51,7 @@ export function SiteBranding() {
   const { setPreset } = useThemeCustomization()
 
   const [siteName, setSiteName] = useState('')
+  const [footer, setFooter] = useState('')
   const [brandHidden, setBrandHidden] = useState(false)
   const [themePreset, setThemePreset] = useState<ThemePreset>('default')
   const [logoUrl, setLogoUrl] = useState('')
@@ -69,6 +70,7 @@ export function SiteBranding() {
   useEffect(() => {
     if (!data) return
     setSiteName(data.site_name || '')
+    setFooter(data.footer || '')
     setBrandHidden(!!data.brand_hidden)
     setThemePreset((data.theme_preset as ThemePreset) || 'default')
     setLogoUrl(data.logo_url || '')
@@ -88,6 +90,7 @@ export function SiteBranding() {
     try {
       const res = await updateSiteConfig({
         site_name: siteName.trim(),
+        footer: footer.trim(),
         brand_hidden: brandHidden,
         theme_preset: themePreset,
       })
@@ -160,6 +163,23 @@ export function SiteBranding() {
                     onChange={(e) => setSiteName(e.target.value)}
                     placeholder={t('Your site name')}
                   />
+                </div>
+
+                {/* Footer —— 留空则前端自动用「© 年份 站名」兜底（见 use-tenant-brand.ts）；
+                    绝不能让它落到 <Footer /> 的默认分支，那会显示 New API 的文档链接大列。 */}
+                <div className='flex flex-col gap-2'>
+                  <Label htmlFor='site-footer'>{t('Footer')}</Label>
+                  <Input
+                    id='site-footer'
+                    value={footer}
+                    onChange={(e) => setFooter(e.target.value)}
+                    placeholder={t('e.g. © 2026 Your Brand. All rights reserved.')}
+                  />
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Shown at the bottom of your site. Supports HTML. Leave empty to use "© year + your site name".'
+                    )}
+                  </p>
                 </div>
 
                 {/* Logo */}
