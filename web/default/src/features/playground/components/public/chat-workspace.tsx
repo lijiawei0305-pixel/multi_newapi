@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -29,7 +29,7 @@ import {
   usePlaygroundState,
 } from '../../hooks'
 import { useConversationHistory } from '../../hooks/use-conversation-history'
-import type { WorkspaceProps } from '../../types'
+import type { GroupOption, ModelOption, WorkspaceProps } from '../../types'
 import { ConversationHistoryBar } from './conversation-history-bar'
 
 /**
@@ -174,6 +174,26 @@ export function ChatWorkspace({
     enabled: isAuthed && !autoMode,
   })
 
+  // auto 模式下 usePlaygroundOptions 被禁用 → state 的 models/groups 恒为空，会连带把
+  // 底部「发送」键（canSubmit 依赖 models.length>0）永久禁用、模型/分组选择器空置不可点。
+  // 这里用「左侧目录已选中的模型」+「auto」合成单条列表喂给底部输入：发送键恢复可用、
+  // 选择器如实回显当前模型与 auto。真正的发送分组仍由凭据上下文覆写为 'auto'，config.group
+  // 在 auto 模式不参与发送（见上），此处仅作展示用途。非 auto 模式沿用拉取到的真实列表。
+  const footerModels = useMemo<ModelOption[]>(
+    () =>
+      autoMode
+        ? config.model
+          ? [{ label: config.model, value: config.model }]
+          : []
+        : models,
+    [autoMode, config.model, models]
+  )
+  const footerGroups = useMemo<GroupOption[]>(
+    () =>
+      autoMode ? [{ label: 'auto', value: config.group, ratio: 1 }] : groups,
+    [autoMode, config.group, groups]
+  )
+
   return (
     <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>
       {/* 顶部：新建对话 / 历史 */}
@@ -209,12 +229,12 @@ export function ChatWorkspace({
       <div className='mx-auto w-full max-w-4xl'>
         <PlaygroundInput
           disabled={isGenerating || !canSend}
-          groups={groups}
+          groups={footerGroups}
           groupValue={config.group}
           isGenerating={isGenerating}
           isModelLoading={isLoadingModels}
           modelValue={config.model}
-          models={models}
+          models={footerModels}
           onGroupChange={(value) => updateConfig('group', value)}
           onClearMessages={handleClearMessages}
           onModelChange={(value) => updateConfig('model', value)}
