@@ -163,6 +163,11 @@ func (a *wxpayAdapter) queryOrder(ctx context.Context, orderNo string) (bool, er
 		Mchid:      core.String(a.mchID),
 	})
 	if err != nil {
+		// 「订单不存在」(ORDER_NOT_EXIST)：该单在微信侧从未创建/已被清除，永不会被支付——返回终态哨兵
+		// payment.ErrOrderNotExist，供对账超时后安全过期（区别于可重试的瞬时错误）。core.IsAPIError 精确判 Code。
+		if core.IsAPIError(err, "ORDER_NOT_EXIST") {
+			return false, fmt.Errorf("wxpay query order not exist: %w", payment.ErrOrderNotExist)
+		}
 		return false, fmt.Errorf("wxpay query: %w", err)
 	}
 	if resp == nil || resp.TradeState == nil {

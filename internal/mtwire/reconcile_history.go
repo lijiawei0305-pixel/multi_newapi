@@ -52,10 +52,10 @@ func reconcileHasFacts(paid, created payment.ReconcileResult, sub ReconcileSubRe
 
 // recordReconcileRun 落一条对账历史（best-effort：写库失败仅放弃记录，绝不影响对账本身）。
 func (a *App) recordReconcileRun(ctx context.Context, trigger string, paid, created payment.ReconcileResult, sub ReconcileSubResult) {
-	summary := fmt.Sprintf("RCG-paid 扫%d/补%d/败%d · RCG-created 扫%d/补%d/过期%d/败%d · SUB 扫%d/激活%d/未付%d/败%d",
+	summary := fmt.Sprintf("RCG-paid 扫%d/补%d/败%d · RCG-created 扫%d/补%d/过期%d/败%d · SUB 扫%d/激活%d/未付%d/过期%d/败%d",
 		paid.Scanned, len(paid.Reconciled), len(paid.Failed),
 		created.Scanned, len(created.Reconciled), len(created.Expired), len(created.Failed),
-		sub.Scanned, len(sub.Activated), len(sub.Unpaid), len(sub.Failed))
+		sub.Scanned, len(sub.Activated), len(sub.Unpaid), len(sub.Expired), len(sub.Failed))
 	detail, _ := json.Marshal(map[string]any{"paid": paid, "created": created, "sub": sub})
 	row := &reconcileRunRow{RanAt: time.Now(), Trigger: trigger, Summary: summary, Detail: string(detail)}
 	_ = a.DB.WithContext(ctx).Create(row).Error

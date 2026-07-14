@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/smartwalle/alipay/v3"
 
@@ -101,6 +102,11 @@ func (a *alipayAdapter) queryOrder(ctx context.Context, orderNo string) (bool, e
 	// v3.2.29 verified: TradeQuery(ctx, param) (*TradeQueryRsp, error)，交易状态为扁平 rsp.TradeStatus。
 	rsp, err := a.client.TradeQuery(ctx, alipay.TradeQuery{OutTradeNo: orderNo})
 	if err != nil {
+		// 「交易不存在」(sub_code ACQ.TRADE_NOT_EXIST)：该单支付宝侧从未创建，永不会被支付——返回终态哨兵，
+		// 供对账超时后安全过期。TradeQueryRsp 内嵌 Error，报错时 rsp 仍回填了 sub_code。
+		if rsp != nil && strings.Contains(rsp.SubCode, "TRADE_NOT_EXIST") {
+			return false, fmt.Errorf("alipay query trade not exist: %w", payment.ErrOrderNotExist)
+		}
 		return false, fmt.Errorf("alipay query: %w", err)
 	}
 	return rsp.TradeStatus == alipay.TradeStatusSuccess || rsp.TradeStatus == alipay.TradeStatusFinished, nil

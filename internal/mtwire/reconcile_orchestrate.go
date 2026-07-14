@@ -58,9 +58,9 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 	if serr != nil {
 		logger.LogWarn(ctx, "reconcile SUB failed: "+serr.Error())
 		sub.Failed = map[string]string{"_error": serr.Error()}
-	} else if len(sub.Activated) > 0 || len(sub.Failed) > 0 {
-		logger.LogInfo(ctx, fmt.Sprintf("reconcile SUB: scanned=%d activated=%d unpaid=%d failed=%d",
-			sub.Scanned, len(sub.Activated), len(sub.Unpaid), len(sub.Failed)))
+	} else if len(sub.Activated) > 0 || len(sub.Expired) > 0 || len(sub.Failed) > 0 {
+		logger.LogInfo(ctx, fmt.Sprintf("reconcile SUB: scanned=%d activated=%d unpaid=%d expired=%d failed=%d",
+			sub.Scanned, len(sub.Activated), len(sub.Unpaid), len(sub.Expired), len(sub.Failed)))
 	}
 
 	stuck := paid.Scanned + created.Scanned + sub.Scanned

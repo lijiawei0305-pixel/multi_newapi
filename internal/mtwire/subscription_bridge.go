@@ -43,6 +43,9 @@ const SubscriptionOrderPrefix = "SUB"
 const (
 	subOrderPending   = "pending"
 	subOrderActivated = "activated"
+	// subOrderExpired 终态：pending 单下单超时仍未付 / 网关查无此单（永不会被支付），由对账过期兜底置此。
+	// 非 pending/activated → 不再被对账扫描（见 ReconcileStuckSubscriptions 的 WHERE）。
+	subOrderExpired = "expired"
 )
 
 // nativeSubSource 写入原生 UserSubscription.Source，标记该订阅由 tokenplan 桥接而来（审计/排障用）。
@@ -63,8 +66,8 @@ type subscriptionOrderRow struct {
 	AmountCNY    float64   `gorm:"column:amount_cny;type:decimal(20,2);not null;default:0"`
 	Provider     string    `gorm:"column:provider;type:varchar(16);not null;default:''"` // wxpay|alipay：下单时回填，供真实回调路由 + 主动查单识别渠道
 	Status       string    `gorm:"column:status;type:varchar(16);not null;default:pending;index"`
-	NativePlanID int64     `gorm:"column:native_plan_id;not null;default:0"` // 激活时回填：原生 SubscriptionPlan.id
-	NativeSubID  int64     `gorm:"column:native_sub_id;not null;default:0"`  // 激活时回填：原生 UserSubscription.id
+	NativePlanID int64     `gorm:"column:native_plan_id;not null;default:0"`    // 激活时回填：原生 SubscriptionPlan.id
+	NativeSubID  int64     `gorm:"column:native_sub_id;not null;default:0"`     // 激活时回填：原生 UserSubscription.id
 	Settled      bool      `gorm:"column:settled;not null;default:false;index"` // 步骤③（订阅记录+代理分润）已落；对账据此补驱动「已激活未结算」卡单（M1）
 	CreatedAt    time.Time `gorm:"column:created_at"`
 	UpdatedAt    time.Time `gorm:"column:updated_at"`

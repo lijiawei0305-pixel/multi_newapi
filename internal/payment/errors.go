@@ -1,10 +1,16 @@
 package payment
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
+
+// ErrOrderNotExist 网关主动查单返回「订单不存在」（微信 ORDER_NOT_EXIST / 支付宝 TRADE_NOT_EXIST）：
+// 该订单在网关侧从未创建或已被清除——终态，永不会被支付。对账据此（配合超时兜底）安全过期，区别于
+// 可重试的瞬时查单错误（网络/超时/限流）。realpay 适配器以 %w 包裹返回，调用方用 errors.Is 判定。
+var ErrOrderNotExist = errors.New("payment: order not exist at gateway")
 
 // 本模块错误码命名空间（detailed-design §2.8 / §6.4）。
 //
