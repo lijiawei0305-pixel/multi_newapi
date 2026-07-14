@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
+import { LandingReact } from '@/features/landing-react'
 import { isLikelyHtml } from '@/lib/content-format'
 import { resolveTenant } from '@/lib/tenant'
 import { useAuthStore } from '@/stores/auth-store'
@@ -52,19 +53,15 @@ export function Home() {
     )
   }
 
-  // 主站默认首页 = WeDream 落地页（nginx 静态供于 /landing/）；管理员显式配置的自定义首页(HomePageContent)仍优先。
-  // 代理站(kind==='tenant')跳过此块，走下方原生 React 段落，保留其原有首页。
+  // 主站默认首页 = WeDream 落地页（React 组件，见 features/landing-react）。
+  // 曾是 iframe 内嵌 nginx 静态的 /landing/index.html（2MB 单文件），2026-07-13 换成 React：
+  // 文案接官方 i18n、与平台同一套构建、可走路由跳转。nginx 的 /landing/ 暂留作回滚兜底。
+  // 管理员显式配置的自定义首页(HomePageContent)仍优先；代理站(kind==='tenant')跳过此块，
+  // 走下方原生 React 段落，保留其原有首页。
   const isMainSite = resolution?.kind !== 'tenant'
   if (isMainSite && !content) {
-    // 主站落地页：全屏 iframe，不套 PublicLayout（首页不显示平台原生顶栏；顶栏/客服/语言在落地页内自带）。
-    return (
-      <iframe
-        src='/landing/index.html'
-        className='fixed inset-0 h-screen w-screen border-none'
-        title='WeDream AI'
-        sandbox='allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation'
-      />
-    )
+    // 不套 PublicLayout：落地页自带顶栏/客服/语言，且需要整屏深空背景。
+    return <LandingReact />
   }
 
   if (content) {
