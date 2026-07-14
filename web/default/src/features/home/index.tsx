@@ -61,7 +61,22 @@ export function Home() {
   const isMainSite = resolution?.kind !== 'tenant'
   if (isMainSite && !content) {
     // 不套 PublicLayout：落地页自带顶栏/客服/语言，且需要整屏深空背景。
-    return <LandingReact />
+    // 但仍挂原生 <Footer />，以保留后台「系统设置 → 站点与品牌」配的页脚 HTML、
+    // 隐私政策 / 用户协议链接（Footer 自己读 useSystemConfig()/useStatus()）。
+    // 两个约束：
+    //  1) Footer 必须放在 .wd-landing-root **外面** —— 落地页的 <style> 是无 layer 注入的，
+    //     其中 `.wd-landing-root * { margin:0; padding:0 }` 会盖过 Tailwind 的 @layer utilities，
+    //     放进去会把 Footer 的 px-6/py-5 全清零。
+    //  2) 强制 .dark —— 落地页恒为深空黑底，而 Footer 用平台主题色；浅色主题下
+    //     text-muted-foreground 是深灰，在黑底上看不见。z-20 是为了压过落地页的 #vignette(z:12)。
+    return (
+      <>
+        <LandingReact />
+        <div className='dark relative z-20'>
+          <Footer />
+        </div>
+      </>
+    )
   }
 
   if (content) {

@@ -3,9 +3,18 @@
    顶栏 + Hero（灯泡/轨道/HUD）+ 三屏（见 sections.tsx）+ 客服弹窗。
    要点：DOM 用 JSX；灯泡/轨道逻辑以命令式模块在 useEffect 里挂到 DOM（three 用 npm 包）；
    StrictMode 双调用用「模块级单例 + 引用计数 + 延迟卸载」化解（第二次 boot 只 refs++）。
-   文案见下方 T（一律中文，W5）；多语言待接官方 i18n，勿在组件里手写译文。 */
+   文案走 New API 官方 i18n（key = 英文原句，译文在 src/i18n/locales/*.json），勿在组件里手写译文。
+
+   站点信息：**站名**读后台「系统设置 → 站点与品牌」的 systemName（读不到才回落 'WeDream AI'）；
+   **logo 保持落地页专用的方形版**（用户明确要求，后台那张是圆形、与此处的圆角方块视觉不符）。
+   页脚（自定义 HTML + 隐私政策/用户协议）由原生 <Footer /> 渲染，挂在 features/home 里、
+   本组件之外（见那边注释：落地页的无 layer reset 会清掉 Footer 的 Tailwind 内边距）。
+   注意：文案里句子内嵌的 "WeDream AI"（如「在 WeDream AI 里成为作品」）属营销文案、在 locale
+   文件中，不随 systemName 变。 */
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+
+import { useSystemConfig } from '@/hooks/use-system-config'
 
 import { initBulb3d } from './bulb3d'
 import { KefuModal } from './kefu-modal'
@@ -43,6 +52,8 @@ export function LandingReact() {
   const zh = (i18n.language || 'zh').startsWith('zh')
   const [kefuOpen, setKefuOpen] = useState(false)
   const closeKefu = useCallback(() => setKefuOpen(false), [])
+  const { systemName } = useSystemConfig()
+  const siteName = systemName || 'WeDream AI'
 
   /* 文案全部走 New API 官方 i18n（key = 英文原句，译文在 src/i18n/locales/*.json）。
      zh/en 已填；ja/ru/fr/vi 未填的 key 由 i18next 的 fallbackLng:'en' 回落到英文。 */
@@ -81,8 +92,8 @@ export function LandingReact() {
       <main className='landing-scene'>
         <header className='lp-topbar'>
           <div className='lp-logo'>
-            <img className='lp-mark-img' src='/lp-assets/wedream-logo.png' alt='WeDream AI' />
-            <span>WeDream AI</span>
+            <img className='lp-mark-img' src='/lp-assets/wedream-logo.png' alt={siteName} />
+            <span>{siteName}</span>
           </div>
           <div className='lp-actions'>
             <button className='lp-kefu-btn' type='button' onClick={() => setKefuOpen(true)}>
@@ -108,7 +119,7 @@ export function LandingReact() {
                 <span>{T.badge}</span>
               </span>
               <h1>
-                <span className='hl1 rise' style={{ '--rd': '.3s' } as any}>WeDream AI</span>
+                <span className='hl1 rise' style={{ '--rd': '.3s' } as any}>{siteName}</span>
                 <span className='hl2 rise' style={{ '--rd': '.45s' } as any}>{T.hl2}</span>
               </h1>
               <p id='sub' className='rise' style={{ '--rd': '.62s' } as any}>{T.sub}</p>
