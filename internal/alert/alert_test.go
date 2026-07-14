@@ -173,6 +173,48 @@ func TestSink_Enabled_DispatchesAllChannels(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Sink：禁用时 Critical 绝不静默——留兜底日志（运维盲区根因修复）
+// ---------------------------------------------------------------------------
+
+// 总开关关闭时，Critical 仍不触达通道，但必须留一行兜底日志（否则支付/对账严重告警无声消失）。
+func TestSink_Disabled_CriticalStillLogs(t *testing.T) {
+	ch := &fakeChannel{name: "fake"}
+	var logged int
+	s := NewSink(staticProvider(Config{Enabled: false}), WithChannels(ch),
+		WithLogger(func(string, ...any) { logged++ }))
+
+	err := s.Dispatch(context.Background(), Alert{Level: LevelCritical, Subject: "支付卡单", Body: "3 笔未入账"})
+	require.NoError(t, err)
+	require.Equal(t, 0, ch.count(), "禁用时仍不得触达任何通道")
+	require.Equal(t, 1, logged, "Critical 在总开关关闭时必须留一行兜底日志，绝不静默")
+}
+
+// 非 Critical（Warning/Info）在禁用时保持完全静默，不制造日志噪声。
+func TestSink_Disabled_NonCriticalStaysSilent(t *testing.T) {
+	ch := &fakeChannel{name: "fake"}
+	var logged int
+	s := NewSink(staticProvider(Config{Enabled: false}), WithChannels(ch),
+		WithLogger(func(string, ...any) { logged++ }))
+
+	require.NoError(t, s.Dispatch(context.Background(), Alert{Level: LevelWarning, Subject: "满额"}))
+	require.Equal(t, 0, ch.count())
+	require.Equal(t, 0, logged, "非 Critical 在禁用时保持静默，不制造日志噪声")
+}
+
+// 禁用时的 Critical 兜底日志同受 DedupKey 窗口节流（失败每 5min 复发不刷爆日志）。
+func TestSink_Disabled_CriticalLogDeduped(t *testing.T) {
+	var logged int
+	s := NewSink(staticProvider(Config{Enabled: false}), WithChannels(&fakeChannel{name: "fake"}),
+		WithDedupTTL(time.Hour), WithLogger(func(string, ...any) { logged++ }))
+
+	a := Alert{Level: LevelCritical, Subject: "对账失败", DedupKey: "reconcile_failed"}
+	require.NoError(t, s.Dispatch(context.Background(), a))
+	require.NoError(t, s.Dispatch(context.Background(), a))
+	require.NoError(t, s.Dispatch(context.Background(), a))
+	require.Equal(t, 1, logged, "同 DedupKey 窗口内兜底日志只记一次，不每轮轰炸")
+}
+
+// ---------------------------------------------------------------------------
 // Sink：去重（同 key 窗口内只发一次）
 // ---------------------------------------------------------------------------
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/QuantumNous/new-api/internal/alert"
 	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/logger"
 )
@@ -64,10 +65,45 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 
 	stuck := paid.Scanned + created.Scanned + sub.Scanned
 	failed := len(paid.Failed) + len(created.Failed) + len(sub.Failed)
-	a.updateReconcileHeartbeat(ctx, trigger, stuck, failed)
+	prevRun := a.updateReconcileHeartbeat(ctx, trigger, stuck, failed)
+	a.alertReconcileHealth(ctx, trigger, prevRun, failed, paid, created, sub)
 
 	if trigger == "manual" || reconcileHasFacts(paid, created, sub) {
 		a.recordReconcileRun(ctx, trigger, paid, created, sub)
 	}
 	return paid, created, sub
+}
+
+// alertReconcileHealth 对账健康告警（best-effort，经 AlertSink；未装配 sink 则跳过，不影响对账）：
+//   - 陈旧（仅 cron）：本轮开跑说明循环仍活着，但若距上一轮心跳 > reconcileStaleAfter，说明期间漏跑了
+//     ≥2 轮（上游查单挂起被整轮超时切断 / gopool 延迟 / 进程卡顿），现已恢复——补上「循环停摆无人知」缺口。
+//     手动触发不判陈旧（ad-hoc，间隔不代表停滞）。
+//   - 失败：本轮任一路径有失败（线上实证每 5min 3 笔 SUB 对账失败此前零通知）。
+//
+// 两类均用 Critical + DedupKey：AlertSink 未启用/未配收件人时由 Sink 的 Critical 兜底日志留痕（见
+// internal/alert/sink.go，绝不静默），启用后走邮件/webhook；DedupKey 令去重窗口内只发一次，防每 5min 轰炸。
+func (a *App) alertReconcileHealth(ctx context.Context, trigger string, prevRun time.Time, failed int, paid, created payment.ReconcileResult, sub ReconcileSubResult) {
+	if a.AlertSink == nil {
+		return
+	}
+	if trigger == "cron" && !prevRun.IsZero() {
+		if gap := time.Since(prevRun); gap > reconcileStaleAfter {
+			_ = a.AlertSink.Dispatch(ctx, alert.Alert{
+				Level:   alert.LevelCritical,
+				Subject: "对账循环曾停滞",
+				Body: fmt.Sprintf("对账循环距上一轮已 %s（正常每 %s 一轮，约漏跑 %d 轮），现已恢复。请排查该时段上游查单是否挂起或进程卡顿。",
+					gap.Round(time.Second), reconcileTickInterval, int(gap/reconcileTickInterval)),
+				DedupKey: "reconcile_stalled",
+			})
+		}
+	}
+	if failed > 0 {
+		_ = a.AlertSink.Dispatch(ctx, alert.Alert{
+			Level:   alert.LevelCritical,
+			Subject: "对账失败告警",
+			Body: fmt.Sprintf("本轮对账 %d 笔失败：RCG-paid %d / RCG-created %d / SUB %d。已付未入账订单将于下轮重试，持续失败需人工核查对账记录。",
+				failed, len(paid.Failed), len(created.Failed), len(sub.Failed)),
+			DedupKey: "reconcile_failed",
+		})
+	}
 }

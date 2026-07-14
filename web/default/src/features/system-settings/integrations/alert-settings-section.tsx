@@ -186,7 +186,7 @@ export function AlertSettingsSection({
 
   return (
     <SettingsSection
-      title={t('Breakage Alerts', { defaultValue: '额度沉淀告警' })}
+      title={t('Breakage Alerts', { defaultValue: '系统告警' })}
     >
       <Form {...form}>
         <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
@@ -198,7 +198,7 @@ export function AlertSettingsSection({
           <p className='text-muted-foreground text-sm'>
             {t('Breakage Alerts Description', {
               defaultValue:
-                '当订阅额度沉淀（用户用不满）触及阈值或检测到异常时，向下列渠道推送告警。未配置视为关闭，不发送任何告警。',
+                '系统运维与财务告警的统一开关。触发条件包括：额度沉淀（用户用不满）触及阈值、支付异常卡单（已支付未入账）、以及对账失败或循环停滞。未配置视为关闭，不发送任何告警。',
             })}
           </p>
 
@@ -214,7 +214,7 @@ export function AlertSettingsSection({
                   <FormDescription>
                     {t('Enable Breakage Alerts Desc', {
                       defaultValue:
-                        '开启后才会通过邮件 / Webhook 推送额度沉淀告警',
+                        '开启后才会通过邮件 / Webhook 推送系统告警（额度沉淀 / 支付卡单 / 对账）；关闭则以上全部静默。',
                     })}
                   </FormDescription>
                 </SettingsSwitchContent>

@@ -130,13 +130,20 @@ func (s *Sink) Dispatch(ctx context.Context, a Alert) error {
 		return nil
 	}
 	cfg := s.provider()
-	if !cfg.Enabled {
-		// 总开关关闭：不发任何通道。
+
+	// 去重前置（挪到总开关判断之前）：同 DedupKey 在窗口内只处理一次（空 key 不去重）。前置的用意是让
+	// 下方「总开关关时 Critical 兜底留痕」的日志也同受此窗口节流——否则失败每 5min 复发会把日志刷爆。
+	if a.DedupKey != "" && !s.markAndAllow(a.DedupKey) {
 		return nil
 	}
 
-	// 去重：同 DedupKey 窗口内只发一次（空 key 不去重）。
-	if a.DedupKey != "" && !s.markAndAllow(a.DedupKey) {
+	if !cfg.Enabled {
+		// 总开关关闭：不触达任何通道。但 Critical 绝不静默吞掉——否则支付卡单/对账失败等严重告警在
+		// 「生产未开告警开关」时无声消失（本项目审计坐实的运维盲区根因）。此处至少留一行错误日志兜底；
+		// 管理员在「系统设置 → 告警」开启并配好收件人后，才经邮件/webhook 真正外发。
+		if a.Level == LevelCritical {
+			s.logFn("[alert] 严重告警未投递（告警总开关未开启），仅记录: %s | %s", a.Subject, a.Body)
+		}
 		return nil
 	}
 

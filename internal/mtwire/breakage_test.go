@@ -156,8 +156,8 @@ func TestHandleAdminBreakageOverview_TenantIsolation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	app := newBreakageTestApp(t)
 	now := time.Now().UTC()
-	past := now.Add(-24 * time.Hour)   // 已到期
-	future := now.Add(24 * time.Hour)  // 未到期
+	past := now.Add(-24 * time.Hour)  // 已到期
+	future := now.Add(24 * time.Hour) // 未到期
 
 	// 租户 4：活跃剩余 (100-30)=70；到期未用 (50-5)=45；钱包 20。
 	brk_seedSub(t, app, 4, 40, 1, 100, 30, "active", future)
@@ -173,11 +173,13 @@ func TestHandleAdminBreakageOverview_TenantIsolation(t *testing.T) {
 	brk_seedSub(t, app, 0, 90, 1, 999, 0, "expired", past)
 	brk_seedBalance(t, app, 90, 0, 999)
 
-	// 卡单：租户 4 一笔 created（超 5min），租户 7 一笔 paid（超 5min），tenant_id=0 一笔（跨租户须排除）。
+	// 卡单：只计 paid（已支付未入账）。租户 4 一笔 paid（计入）+ 一笔 created 废单（排除）；租户 7 一笔
+	// paid（计入）；tenant_id=0 一笔 paid（真异常但跨租户须排除）。
 	old := now.Add(-10 * time.Minute)
-	brk_seedPaymentOrder(t, app, 4, "created", old)
-	brk_seedPaymentOrder(t, app, 7, "paid", old)
-	brk_seedPaymentOrder(t, app, 0, "created", old)
+	brk_seedPaymentOrder(t, app, 4, "paid", old)    // 计入
+	brk_seedPaymentOrder(t, app, 4, "created", old) // 废单：排除（即便超 5min）
+	brk_seedPaymentOrder(t, app, 7, "paid", old)    // 计入
+	brk_seedPaymentOrder(t, app, 0, "paid", old)    // 真异常但 tenant_id=0，跨租户排除
 
 	// ---- 代理作用域（租户 4）：只见本租户 ----
 	ov4 := getBreakageOverview(t, app, func(c *gin.Context) { setAgentScope(c, 4) })
@@ -191,7 +193,7 @@ func TestHandleAdminBreakageOverview_TenantIsolation(t *testing.T) {
 		t.Fatalf("agent(4) wallet_unused_usd = %v, want 20 (must not see tenant 7 or 0)", ov4.WalletUnusedUSD)
 	}
 	if ov4.AnomalyCount != 1 {
-		t.Fatalf("agent(4) anomaly_count = %d, want 1", ov4.AnomalyCount)
+		t.Fatalf("agent(4) anomaly_count = %d, want 1（仅 paid 计入，created 废单排除）", ov4.AnomalyCount)
 	}
 
 	// ---- 主站作用域（未命中租户）：看全平台，排除 tenant_id=0 ----
@@ -206,7 +208,7 @@ func TestHandleAdminBreakageOverview_TenantIsolation(t *testing.T) {
 		t.Fatalf("mainsite wallet_unused_usd = %v, want 53 (20+33, exclude tenant_id=0's 999)", ovAll.WalletUnusedUSD)
 	}
 	if ovAll.AnomalyCount != 2 {
-		t.Fatalf("mainsite anomaly_count = %d, want 2 (exclude tenant_id=0)", ovAll.AnomalyCount)
+		t.Fatalf("mainsite anomaly_count = %d, want 2（租户4+7 各一笔 paid；exclude tenant_id=0 与 created 废单）", ovAll.AnomalyCount)
 	}
 }
 
@@ -235,7 +237,7 @@ func TestHandleAdminBreakageDetail_TenantIsolationAndFilter(t *testing.T) {
 	brk_seedUsername(t, app, 40, "alice")
 	brk_seedUsername(t, app, 70, "bob")
 
-	brk_seedSub(t, app, 4, 40, 1, 50, 0.5, "expired", past)  // 租户4 starter
+	brk_seedSub(t, app, 4, 40, 1, 50, 0.5, "expired", past)    // 租户4 starter
 	brk_seedSub(t, app, 7, 70, 2, 100, 100, "exhausted", past) // 租户7 pro，满额
 
 	// ---- 代理作用域（租户 4）：只见本租户 1 行，且省略 tenant_id/tenant_name ----

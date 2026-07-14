@@ -69,7 +69,9 @@ func (a *App) listReconcileRuns(ctx context.Context, limit int) ([]reconcileRunR
 }
 
 // updateReconcileHeartbeat 每轮对账 upsert 单行心跳（best-effort）；today_runs 跨天自动重置。
-func (a *App) updateReconcileHeartbeat(ctx context.Context, trigger string, stuckCount, failedCount int) {
+// 返回**上一轮**的 last_run_at（本次覆盖前的值），供调用方判「距上轮过久＝曾停滞」的陈旧告警；
+// 首轮（无记录）或读库失败返回零值 time.Time（无从判定陈旧，调用方据此跳过陈旧告警）。
+func (a *App) updateReconcileHeartbeat(ctx context.Context, trigger string, stuckCount, failedCount int) time.Time {
 	now := time.Now()
 	today := now.Format("2006-01-02")
 	var hb reconcileHeartbeatRow
@@ -80,11 +82,12 @@ func (a *App) updateReconcileHeartbeat(ctx context.Context, trigger string, stuc
 			LastStuckCount: stuckCount, LastFailedCount: failedCount,
 		}
 		_ = a.DB.WithContext(ctx).Create(&hb).Error
-		return
+		return time.Time{} // 首轮无「上一轮」
 	}
 	if err != nil {
-		return // best-effort：读失败即放弃本轮心跳，不影响对账
+		return time.Time{} // best-effort：读失败即放弃本轮心跳，不影响对账；也无从判定陈旧
 	}
+	prev := hb.LastRunAt // 捕获上一轮时间（覆盖前）
 	if hb.TodayDate != today {
 		hb.TodayDate = today
 		hb.TodayRuns = 0
@@ -95,6 +98,7 @@ func (a *App) updateReconcileHeartbeat(ctx context.Context, trigger string, stuc
 	hb.LastStuckCount = stuckCount
 	hb.LastFailedCount = failedCount
 	_ = a.DB.WithContext(ctx).Save(&hb).Error
+	return prev
 }
 
 // getReconcileHeartbeat 读单行心跳；无记录（从未跑过）返回 (zero, false)。

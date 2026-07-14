@@ -124,7 +124,7 @@ func (a *App) dispatchBreakageAlerts(ctx context.Context, now int64) {
 		_ = a.AlertSink.Dispatch(ctx, alert.Alert{
 			Level:    alert.LevelCritical,
 			Subject:  "支付异常卡单告警",
-			Body:     fmt.Sprintf("检测到 %d 笔已下单/已支付但未入账的异常卡单（超过 5 分钟），请核对对账记录。", ov.AnomalyCount),
+			Body:     fmt.Sprintf("检测到 %d 笔已支付但未入账的异常卡单（超过 5 分钟），请核对对账记录。", ov.AnomalyCount),
 			DedupKey: fmt.Sprintf("breakage_payment_anomaly:%d", day),
 		})
 	}

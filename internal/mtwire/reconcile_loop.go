@@ -20,6 +20,13 @@ const (
 	// 清出「待支付」。贴微信 Native 二维码默认有效期 2h（超时二维码作废、无人能再付）。
 	reconcileCreatedExpireAge = 2 * time.Hour
 	reconcileCreatedLimit     = 200 // created 卡单单轮主动查单上限
+	// reconcileRunTimeout：单轮对账整轮超时上限。上游 QueryOrder 挂起时，防 reconcileRunning 永久为真、
+	// 心跳冻结、循环"看着活着却什么都不对账"。须 < reconcileTickInterval（下一轮能重新起跑）且远长于
+	// 健康轮（正常几秒~几十秒）；超时即取消本轮，幂等，未完成项下一轮重试。下游 QueryOrder(ctx) 认取消。
+	reconcileRunTimeout = 3 * time.Minute
+	// reconcileStaleAfter：对账循环「陈旧」阈值。cron 轮开跑时若距上一轮心跳 > 此值，说明期间漏跑了
+	// ≥2 轮（正常每 reconcileTickInterval 一轮），判定曾停滞并告警（现已恢复）。取 3× tick，容一轮抖动。
+	reconcileStaleAfter = 3 * reconcileTickInterval
 )
 
 var (
@@ -58,7 +65,8 @@ func (a *App) runReconcileOnce() {
 	}
 	defer reconcileRunning.Store(false)
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), reconcileRunTimeout)
+	defer cancel()
 	before := time.Now().Add(-reconcileMinAge)
 	a.runReconcileAll(ctx, before, "cron")
 }

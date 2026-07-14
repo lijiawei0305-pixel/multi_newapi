@@ -177,11 +177,12 @@ func TestOverview_AggregatesFourMetrics(t *testing.T) {
 	seedBalance(t, db, 5, 1, 5)
 	seedBalance(t, db, 5, 2, 7)
 
-	// 异常卡单：一条 created 且落单超 5min（计入），一条 paid 且落单超 5min（计入），一条 created 但刚落单（不计）。
-	seedOrder(t, db, 5, "created", nowSec-anomalyMinAgeSec-1)
-	seedOrder(t, db, 5, "paid", nowSec-anomalyMinAgeSec-10)
-	seedOrder(t, db, 5, "created", nowSec-10) // 未超 5min，不计
-	seedOrder(t, db, 5, "credited", nowSec-3600) // 终态，不计
+	// 异常卡单：只计 paid（已支付未入账）。一条 paid 超 5min（计入，唯一真异常）；两条 created（已下单
+	// 未支付＝废单，一条超 5min 一条刚落单，均不计）；一条 credited（终态，不计）。
+	seedOrder(t, db, 5, "paid", nowSec-anomalyMinAgeSec-10)   // 计入
+	seedOrder(t, db, 5, "created", nowSec-anomalyMinAgeSec-1) // 废单：不计（即便超 5min）
+	seedOrder(t, db, 5, "created", nowSec-10)                 // 废单且未超 5min：不计
+	seedOrder(t, db, 5, "credited", nowSec-3600)              // 终态：不计
 
 	tid := int64(5)
 	ov, err := repo.Overview(ctx, &tid, nowSec)
@@ -197,8 +198,8 @@ func TestOverview_AggregatesFourMetrics(t *testing.T) {
 	if !approxEq(ov.WalletUnusedUSD, 12) {
 		t.Fatalf("WalletUnusedUSD = %v, want 12", ov.WalletUnusedUSD)
 	}
-	if ov.AnomalyCount != 2 {
-		t.Fatalf("AnomalyCount = %d, want 2", ov.AnomalyCount)
+	if ov.AnomalyCount != 1 {
+		t.Fatalf("AnomalyCount = %d, want 1（仅 paid-stuck 计入；created 废单排除）", ov.AnomalyCount)
 	}
 }
 

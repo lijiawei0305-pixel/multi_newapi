@@ -63,11 +63,10 @@ import (
 const (
 	subStatusActive = "active" // tokenplan_subscriptions.status 活跃
 
-	orderStatusCreated = "created" // payment_orders.status 已下单未支付
-	orderStatusPaid    = "paid"    // payment_orders.status 已支付未入账
+	orderStatusPaid = "paid" // payment_orders.status 已支付未入账（AnomalyCount 只计此态；created 废单不计）
 )
 
-// anomalyMinAgeSec 是「异常卡单」的最小时长（秒）：只把落单超过此时长仍停在 created/paid 的订单
+// anomalyMinAgeSec 是「异常卡单」的最小时长（秒）：只把超过此时长仍停在 paid（已支付未入账）的订单
 // 计为系统异常，过滤仍在途的正常订单。与 internal/mtwire/reconcile_loop.go reconcileMinAge=5min 同口径。
 const anomalyMinAgeSec int64 = 5 * 60
 
@@ -184,7 +183,7 @@ func (r *Repo) Overview(ctx context.Context, tenantID *int64, now int64) (breaka
 			Remaining float64
 		}
 		q := joinNativeUsage(r.db.WithContext(ctx).Table("tokenplan_subscriptions AS s")).
-			Select("COALESCE(SUM(s.month_limit_usd - " + nativeUsedUSD + "),0) AS remaining").
+			Select("COALESCE(SUM(s.month_limit_usd - "+nativeUsedUSD+"),0) AS remaining").
 			Where("s.status = ?", subStatusActive).
 			Where("s.expire_at > ?", nowT)
 		q = applyTenantScope(q, "s.tenant_id", tenantID)
@@ -201,7 +200,7 @@ func (r *Repo) Overview(ctx context.Context, tenantID *int64, now int64) (breaka
 			Unused float64
 		}
 		q := joinNativeUsage(r.db.WithContext(ctx).Table("tokenplan_subscriptions AS s")).
-			Select("COALESCE(SUM(s.month_limit_usd - " + nativeUsedUSD + "),0) AS unused").
+			Select("COALESCE(SUM(s.month_limit_usd - "+nativeUsedUSD+"),0) AS unused").
 			Where("s.expire_at < ?", nowT).
 			Where("s.month_limit_usd - " + nativeUsedUSD + " > 0")
 		q = applyTenantScope(q, "s.tenant_id", tenantID)
@@ -225,13 +224,15 @@ func (r *Repo) Overview(ctx context.Context, tenantID *int64, now int64) (breaka
 		out.WalletUnusedUSD = row.Balance
 	}
 
-	// (4) 系统异常卡单数 = COUNT payment_orders WHERE status IN('created','paid') AND updated_at<now-5min AND scope。
-	//     用 updated_at（而非 created_at）对齐对账（reconcile）的「超 minAge 未变动即卡单」口径：paid 后正在入账
-	//     （updated_at 新）的在途订单不误计，使本数与「支付对账」页/reconcile_runs 交叉核对一致。
+	// (4) 系统异常卡单数 = COUNT payment_orders WHERE status='paid' AND updated_at<now-5min AND scope。
+	//     只计 paid（已支付未入账＝钱到了没入账，真异常）；created（已下单未支付）绝大多数是废弃购物车
+	//     （用户下单没付），由对账 loop 主动查单/超时过期处理，不计为异常——否则废单会把本数刷高、告警狼来了。
+	//     用 updated_at（而非 created_at）对齐对账（reconcile）的「超 minAge 未变动即卡单」口径：paid 后
+	//     正在入账（updated_at 新）的在途订单不误计。
 	{
 		var count int64
 		q := r.db.WithContext(ctx).Table("payment_orders").
-			Where("status IN ?", []string{orderStatusCreated, orderStatusPaid}).
+			Where("status = ?", orderStatusPaid).
 			Where("updated_at < ?", unixT(now-anomalyMinAgeSec))
 		q = applyTenantScope(q, "tenant_id", tenantID)
 		if err := q.Count(&count).Error; err != nil {
@@ -482,9 +483,9 @@ func (r *Repo) CollectSnapshots(ctx context.Context, tenantID *int64, now int64)
 		q := joinNativeUsage(r.db.WithContext(ctx).
 			Table("tokenplan_subscriptions AS s").
 			Joins("LEFT JOIN token_plans AS tp ON tp.id = s.plan_id")).
-			Select("s.id AS id, s.tenant_id AS tenant_id, s.user_id AS user_id, " +
-				"COALESCE(tp.code,'') AS plan_code, s.month_limit_usd AS month_limit_usd, " +
-				nativeUsedUSD + " AS used_usd, s.status AS status, s.expire_at AS expire_at").
+			Select("s.id AS id, s.tenant_id AS tenant_id, s.user_id AS user_id, "+
+				"COALESCE(tp.code,'') AS plan_code, s.month_limit_usd AS month_limit_usd, "+
+				nativeUsedUSD+" AS used_usd, s.status AS status, s.expire_at AS expire_at").
 			Where("s.id > ?", lastID)
 		q = applyTenantScope(q, "s.tenant_id", tenantID)
 		if err := q.Order("s.id ASC").Limit(snapshotBackfillBatch).Scan(&batch).Error; err != nil {
