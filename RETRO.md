@@ -284,6 +284,12 @@
 - **解决**：删除灯丝与金属灯座两个网格（点云自带灯泡+底座形状，核心喷发改由辉光+点光承担）；顺带给辉光 Sprite 补 `depthWrite:false`，防自旋时透明排序翻转打出同类方洞。
 - **升级**：在「加法混合粒子 + 透明画布 + 亮度转 alpha」的场景里：装配用的辅助网格一律显式 `depthWrite:false`；暗色实体网格慎用（暗色=透明，只会以"剔除别人"的方式留下负空间）；从别的项目移植视觉装配时，逐件在**目标构图与目标屏占**下过目，不能只信来源项目的观感。
 
+### [已解决] auto 统一分组对用户被 2D 计费"故意"禁用；vip/svip 折扣走层级轴而非 GroupGroupRatio
+- **现象**：想让用户走 "auto" 一个统一入口自动路由 gpt-pro/gemini/kiro，但建 Key 下拉根本没有 auto；且一度以为 vip/svip 折扣要配「分组的分组倍率」(GroupGroupRatio)。
+- **根因**：本 fork 装了 2D 计费旁路 `resolveModelGroup2D` 后，`relay/helper/price.go:HandleGroupRatio` 命中即 return、**绕过原生 GroupGroupRatio(对 /v1 计费是死代码)**；`controller/group.go:GetUserGroups` 又**故意把 auto 排除出下拉**(源码注释"2D 装配时也排除")。折扣其实挂在层级轴 `GroupRatio[vip]/[svip]`(线上 0.9/0.8)，用户选任意模型分组都生效、与 auto 无关。auto 另需 `options.UserUsableGroups` 含 "auto" 才过 `middleware/auth.go:413` 鉴权(否则 403「无权访问 auto 分组」)。
+- **解决/规避**：移除 group.go 的 auto 排除守卫 + DB `UserUsableGroups` 加 `"auto":"自动(auto)"`(写库**必须 `mysql --default-character-set=utf8mb4`**，否则 latin1 连接把中文双重编码成乱码)。commit 722361c / deploy-20260714-020004；实测 group=auto 令牌 → /v1 gpt-5.5 → 200 命中 gpt-pro、计费正常。计费数学零改动。
+- **升级**：记入 memory `billing-2d-and-auto-group`；DB 变更非 git，整库重建需重跑该 UPDATE。
+
 ---
 
 ## 四、工具链与协作
