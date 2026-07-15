@@ -34,6 +34,8 @@ export type OrbitCfg = {
   ring: 'inner' | 'outer'
   color: string
   radius: number
+  tubeRadius: number
+  opacity: number
   tilt: [number, number, number]
   wobbleDeg: number
   wobblePeriod: number
@@ -46,12 +48,12 @@ export type OrbitCfg = {
 
 export const ORBITS: OrbitCfg[] = [
   {
-    ring: 'inner', color: '#8fd8ff', radius: 1.0, tilt: [0.5, 0, 0.12],
+    ring: 'inner', color: '#8fd8ff', radius: 1.0, tubeRadius: 0.0028, opacity: 0.55, tilt: [0.5, 0, 0.12],
     wobbleDeg: 4, wobblePeriod: 18, wobblePhase: 0, speed: 0.1,
     wakeStrength: 0.9, wakeFalloff: 5.0, keys: ['openai', 'anthropic', 'gemini', 'xai'],
   },
   {
-    ring: 'outer', color: '#5f7cff', radius: 1.32, tilt: [0.72, 0, -0.38],
+    ring: 'outer', color: '#5f7cff', radius: 1.32, tubeRadius: 0.0018, opacity: 0.3, tilt: [0.72, 0, -0.38],
     wobbleDeg: 6, wobblePeriod: 18, wobblePhase: Math.PI, speed: -0.075,
     wakeStrength: 0.6, wakeFalloff: 6.0, keys: ['deepseek', 'qwen', 'minimax', 'doubao', 'kimi', 'glm_chatglm'],
   },

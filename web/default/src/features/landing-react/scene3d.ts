@@ -9,9 +9,9 @@
      宽随盒子宽高比,ResizeObserver 适配。透明叠加(AlphaFromLuma)保留,让黑底/极光透出。 */
 import {
   ACESFilmicToneMapping, AdditiveBlending, AmbientLight, BufferAttribute, BufferGeometry,
-  CylinderGeometry, DoubleSide, Group, Mesh, MeshPhongMaterial, PerspectiveCamera,
-  PointLight, Points, Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, Vector2,
-  Vector3, WebGLRenderer,
+  Color, Curve, CylinderGeometry, DoubleSide, Group, Mesh, MeshPhongMaterial, PerspectiveCamera,
+  PointLight, Points, Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, TubeGeometry,
+  Vector2, Vector3, WebGLRenderer,
 } from 'three'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
@@ -20,6 +20,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
 import { makeGlowTexture } from './scene3d-assets'
+import { ORBITS } from './scene3d-config'
 
 const DATA_URL = '/lp-assets/dengpao_points.bin'
 const RENDER_H = 940 // 渲染缓冲高度固定(bloom 归一化一致);宽 = 高 × 盒子宽高比
@@ -75,6 +76,44 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
       void main() { vec4 c = texture2D(tDiffuse, vUv); gl_FragColor = vec4(c.rgb, clamp(max(c.r, max(c.g, c.b)), 0.0, 1.0)); }`,
   }
+
+  // ---- 轨道着色器(移植 yun main.js:97-156)----
+  // 深度淡化(近亮远暗)+ 灯泡剪影遮罩(绕到灯泡背后的弧被淡出)+ 彗尾光迹(卫星身后拖尾)+ 能量流。
+  const orbitVertexShader = `
+    varying vec3 vViewPos; varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vViewPos = mvPosition.xyz;
+      gl_Position = projectionMatrix * mvPosition;
+    }`
+  const orbitFragmentShader = `
+    uniform vec3 uColor; uniform float uOpacity; uniform float uTime; uniform float uDir;
+    uniform float uSatCount; uniform float uSatAngles[8];
+    uniform float uWakeStrength; uniform float uWakeFalloff;
+    uniform vec3 uBulbView; uniform vec2 uMaskRadius;
+    varying vec3 vViewPos; varying vec2 vUv;
+    const float TWO_PI = 6.28318530718;
+    void main() {
+      float depthFactor = smoothstep(-5.9, -3.4, vViewPos.z);
+      float alpha = uOpacity * mix(0.3, 1.0, depthFactor);
+      vec2 atBulbDepth = vViewPos.xy * (uBulbView.z / vViewPos.z);
+      float m = length((atBulbDepth - uBulbView.xy) / uMaskRadius);
+      float behind = smoothstep(0.3, -0.3, vViewPos.z - uBulbView.z);
+      alpha *= mix(1.0, smoothstep(0.7, 1.12, m), behind);
+      float theta = vUv.x * TWO_PI;
+      float wake = 0.0;
+      for (int i = 0; i < 8; i++) {
+        if (float(i) >= uSatCount) break;
+        float d = (uSatAngles[i] - theta) * uDir;
+        d -= TWO_PI * floor(d / TWO_PI);
+        wake += exp(-d * uWakeFalloff);
+      }
+      wake *= uWakeStrength;
+      float flow = 1.0 + 0.15 * sin(vUv.x * 18.849556 - uTime * 0.7 * uDir);
+      vec3 color = uColor * (0.85 + 0.45 * depthFactor) * flow * (1.0 + wake * 1.2);
+      gl_FragColor = vec4(color, min(alpha * (1.0 + wake * 1.5), 1.0));
+    }`
 
   // ---- 点云数据 ----
   const buf = await fetch(DATA_URL).then((r) => r.arrayBuffer())
@@ -143,6 +182,46 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   // 灯泡垂直居中(其视觉中线 ≈ y0,轨道将绕此展开)。相机用 yun 取景(fov 45)给轨道留空间。
   const top = Math.max(maxY, 0.5), bottom = Math.min(minY, -0.5)
   root.position.y = -(top + bottom) / 2
+
+  // ---- 两条 3D 管环轨道(灯泡居中于世界原点,轨道绕原点展开)----
+  const orbitMaterials: any[] = []
+  const orbitGroups: any[] = []
+  class OrbitCurve extends Curve<Vector3> {
+    radius: number
+    constructor(radius: number) { super(); this.radius = radius }
+    getPoint(t: number, target = new Vector3()) {
+      const theta = t * Math.PI * 2
+      return target.set(this.radius * Math.cos(theta), 0, this.radius * Math.sin(theta))
+    }
+  }
+  function createOrbit(cfg: any) {
+    const group = new Group()
+    group.rotation.set(cfg.tilt[0], cfg.tilt[1], cfg.tilt[2])
+    scene.add(group)
+    const makeLayer = (radiusScale: number, opacity: number) => {
+      const geometry = new TubeGeometry(new OrbitCurve(cfg.radius), 256, cfg.tubeRadius * radiusScale, 6, true)
+      const material = new ShaderMaterial({
+        vertexShader: orbitVertexShader, fragmentShader: orbitFragmentShader,
+        uniforms: {
+          uColor: { value: new Color(cfg.color) }, uOpacity: { value: opacity },
+          uTime: { value: 0 }, uDir: { value: Math.sign(cfg.speed) || 1 },
+          uSatCount: { value: cfg.keys.length }, uSatAngles: { value: new Array(8).fill(0) },
+          uWakeStrength: { value: cfg.wakeStrength }, uWakeFalloff: { value: cfg.wakeFalloff },
+          uBulbView: { value: new Vector3() }, uMaskRadius: { value: new Vector2(0.48, 0.7) },
+        },
+        transparent: true, depthWrite: false, blending: AdditiveBlending,
+      })
+      orbitMaterials.push({ material, cfg })
+      const tube = new Mesh(geometry, material)
+      tube.raycast = () => {} // 布景,永不作为命中目标
+      group.add(tube)
+    }
+    makeLayer(1.0, cfg.opacity) // 细锐核心线
+    makeLayer(4.0, cfg.opacity * 0.22) // 宽而暗的光晕
+    return group
+  }
+  for (const cfg of ORBITS) orbitGroups.push({ group: createOrbit(cfg), cfg })
+  const _bulbView = new Vector3()
 
   // ---- 后处理 ----
   const composer = new EffectComposer(renderer)
@@ -240,6 +319,13 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     const env = (k >= 0 && k <= 1) ? Math.sin(Math.PI * k) : 0
     glowSprite.material.opacity = 0.36 + 0.27 * env
     pointLight.intensity = 1.5 + 1.3 * env
+    // 轨道着色器:能量流时间 + 灯泡视空间中心(驱动剪影遮罩)。uSatAngles 待 T5 卫星就位填充。
+    camera.updateMatrixWorld()
+    _bulbView.set(0, 0, 0).applyMatrix4(camera.matrixWorldInverse)
+    for (const { material } of orbitMaterials) {
+      material.uniforms.uTime.value = t
+      material.uniforms.uBulbView.value.copy(_bulbView)
+    }
     composer.render()
   }
   function loop(nowMs: number) {
