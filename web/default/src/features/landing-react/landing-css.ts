@@ -204,8 +204,9 @@ export const LANDING_CSS = `
     color:#fff;
     text-shadow:0 0 26px rgba(90,170,255,.3);
   }
+  /* 字号收一档:让 7 字标语「让灵感不再受限」在主流笔电(≥1024,含 MacBook Air 13" 各缩放档)单行不换行 */
   .hl2 {
-    font-size:clamp(38px, 6vw, 72px); font-weight:800;
+    font-size:clamp(32px, 4vw, 56px); font-weight:800;
     letter-spacing:.05em; padding-left:.05em; line-height:1.15;
     background:linear-gradient(96deg, var(--wd-g1), var(--wd-g2));
     -webkit-background-clip:text; background-clip:text;

@@ -52,13 +52,13 @@ export const ORBITS: OrbitCfg[] = [
   {
     // 内圈:逆时针(前方左→右);倾角略小。图标 11.4s/圈、光点 26s/圈。
     ring: 'inner', color: '#8fd8ff', radius: 0.85, tubeRadius: 0.0022, opacity: 0.5, tilt: [0.5, 0, 0.12],
-    wobbleDeg: 4, wobblePeriod: 18, wobblePhase: 0, speed: -0.55, flowSpeed: -0.24, ringSpin: 0.24,
+    wobbleDeg: 4, wobblePeriod: 18, wobblePhase: 0, speed: -0.33, flowSpeed: -0.14, ringSpin: 0.14,
     wakeStrength: 0.9, wakeFalloff: 5.0, keys: ['openai', 'anthropic', 'gemini', 'xai'],
   },
   {
     // 外圈:顺时针(前方右→左);倾角较大。图标 16.1s/圈、光点 34s/圈。
     ring: 'outer', color: '#5f7cff', radius: 1.05, tubeRadius: 0.0016, opacity: 0.34, tilt: [0.72, 0, -0.38],
-    wobbleDeg: 6, wobblePeriod: 18, wobblePhase: Math.PI, speed: 0.39, flowSpeed: 0.185, ringSpin: -0.185,
+    wobbleDeg: 6, wobblePeriod: 18, wobblePhase: Math.PI, speed: 0.23, flowSpeed: 0.11, ringSpin: -0.11,
     wakeStrength: 0.6, wakeFalloff: 6.0, keys: ['deepseek', 'qwen', 'minimax', 'doubao', 'kimi', 'glm_chatglm'],
   },
 ]
