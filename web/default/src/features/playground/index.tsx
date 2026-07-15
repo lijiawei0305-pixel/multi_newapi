@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from '@tanstack/react-router'
 import { toast } from 'sonner'
 
@@ -25,6 +26,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { API_KEY_STATUS } from '@/features/keys/constants'
 import type { PricingModel } from '@/features/pricing/types'
 
+import './playground-i18n' // AI 工坊多语言补丁：启动即注入 ja/ru/fr/vi 缺失译文(自安装,幂等)
 import {
   PlaygroundCredentialProvider,
   usePlaygroundCredential,
@@ -47,6 +49,7 @@ import type { CatalogFilter } from './types'
 // 内层内容（位于 PlaygroundCredentialProvider 内部，可消费 credential context）
 // ============================================================================
 function PlaygroundPublicContent() {
+  const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
   const isAuthed = !!user
 
@@ -139,7 +142,7 @@ function PlaygroundPublicContent() {
         if (cancelled) return
         setRevealedKey(null)
         setCredential({ apiKey: null, authMode: 'none', sendGroup: null })
-        toast.error('获取 API 密钥失败，请重试或重新选择')
+        toast.error(t('Failed to fetch the API key; please retry or reselect'))
       })
 
     return () => {
@@ -164,24 +167,24 @@ function PlaygroundPublicContent() {
   let gatingMessage: string | null = null
   let gatingAction: { label: string; onClick: () => void } | undefined
   if (!isAuthed) {
-    gatingMessage = '请先登录后开始创作'
+    gatingMessage = t('Please sign in to start creating')
     gatingAction = {
-      label: '去登录',
+      label: t('Go to sign in'),
       onClick: () => void navigate({ to: '/sign-in' }),
     }
   } else if (selectedKeyId != null && !tokenReady) {
     // 选中了具体密钥但不可用 / 尚未就绪
-    gatingMessage = '所选密钥不可用，请重新选择，或切换到 auto'
+    gatingMessage = t('The selected key is unavailable; please reselect, or switch to auto')
   } else if (capability !== 'chat' && !tokenReady) {
     // 图片 / 视频：auto 分组无对应后端端点，必须选一个可用密钥
     if (hasNoKeys) {
-      gatingMessage = '图片 / 视频生成需要 API 密钥，请先创建'
+      gatingMessage = t('Image / video generation requires an API key; please create one first')
       gatingAction = {
-        label: '创建 API 密钥',
+        label: t('Create API key'),
         onClick: () => void navigate({ to: '/keys' }),
       }
     } else {
-      gatingMessage = 'auto 分组暂不支持图片 / 视频生成，请在顶部选择一个 API 密钥'
+      gatingMessage = t('The auto group does not support image / video generation yet; please select an API key at the top')
     }
   }
   // 其余：聊天 + auto(session) 或 token 就绪 → 无门控，可发送
@@ -211,9 +214,9 @@ function PlaygroundPublicContent() {
         // 不给可发送的工作区，改渲染禁用占位，避免对错误能力的模型发请求。
         return (
           <div className='flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground'>
-            <p className='text-sm'>该模型暂不支持在创作台使用</p>
+            <p className='text-sm'>{t('This model is not yet supported in the studio')}</p>
             <p className='text-xs'>
-              仅支持 embedding / rerank 等非创作接口，请从左侧选择聊天 / 图片 / 视频模型
+              {t('Only non-creative endpoints like embedding / rerank are supported; please choose a chat / image / video model on the left')}
             </p>
           </div>
         )
@@ -226,10 +229,10 @@ function PlaygroundPublicContent() {
       <div className='flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-3'>
         <div className='mr-auto flex min-w-0 flex-col gap-0.5'>
           <h1 className='truncate text-lg font-semibold text-foreground'>
-            AI 大模型聚合平台
+            {t('AI Model Aggregation Platform')}
           </h1>
           <p className='truncate text-[0.8rem] leading-tight text-muted-foreground'>
-            选择密钥与模型，开始聊天 / 图片 / 视频创作
+            {t('Select a key and model to start chat / image / video creation')}
           </p>
         </div>
 

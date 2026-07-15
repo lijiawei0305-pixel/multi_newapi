@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { MousePointerClick } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/ui/badge'
 import { getLobeIcon } from '@/lib/lobe-icon'
@@ -46,6 +47,7 @@ export interface ModelIntroHeroProps {
 // lobe-icon key 当图片 URL 直接塞进 <img> 导致永远回退占位图标的问题。
 // ---------------------------------------------------------------------------
 export function ModelIntroHero({ model, className }: ModelIntroHeroProps) {
+  const { t } = useTranslation()
   // ── 空态：未选择模型 ────────────────────────────────────────────────────────
   if (!model) {
     return (
@@ -59,9 +61,9 @@ export function ModelIntroHero({ model, className }: ModelIntroHeroProps) {
           <MousePointerClick className='size-6 text-muted-foreground' />
         </div>
         <div className='flex flex-col gap-1'>
-          <p className='text-sm font-medium text-foreground'>选择一个模型</p>
+          <p className='text-sm font-medium text-foreground'>{t('Select a model')}</p>
           <p className='text-xs text-muted-foreground'>
-            从左侧目录挑选，查看能力、计费与介绍，即可开始创作
+            {t('Pick from the catalog on the left to view capabilities, pricing and details, then start creating')}
           </p>
         </div>
       </div>
@@ -104,7 +106,7 @@ export function ModelIntroHero({ model, className }: ModelIntroHeroProps) {
         <div className='flex flex-wrap items-center justify-center gap-1.5'>
           {capabilities.map((cap) => (
             <Badge key={cap} variant='secondary'>
-              {CAPABILITY_LABELS[cap]}
+              {t(CAPABILITY_LABELS[cap])}
             </Badge>
           ))}
           <Badge variant='outline' className='tabular-nums'>

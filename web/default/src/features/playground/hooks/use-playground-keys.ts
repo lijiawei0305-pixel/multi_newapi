@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import i18n from '@/i18n/config'
 import { useAuthStore } from '@/stores/auth-store'
 import { getApiKeys, fetchTokenKey } from '@/features/keys/api'
 import type { ApiKey } from '@/features/keys/types'
@@ -42,7 +43,7 @@ export function usePlaygroundKeys(enabled: boolean): {
     queryFn: async () => {
       const res = await getApiKeys({ p: 1, size: 100 })
       if (!res.success) {
-        throw new Error(res.message || '获取 API 密钥失败')
+        throw new Error(res.message || i18n.t('Failed to fetch API keys'))
       }
       return res.data?.items ?? []
     },
@@ -98,7 +99,7 @@ export function useKeyReveal(): {
       try {
         const res = await fetchTokenKey(id)
         if (!res.success || !res.data?.key) {
-          throw new Error(res.message || '获取密钥失败')
+          throw new Error(res.message || i18n.t('Failed to fetch the key'))
         }
         const fullKey = `sk-${res.data.key}`
         cacheRef.current.set(id, fullKey)

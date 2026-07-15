@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { cn } from '@/lib/utils'
+import { useTranslation } from 'react-i18next'
 
 // gpt-image 系列支持的三种尺寸。ratio/orientation 用于形状与标签展示，
 // w/h 用于按真实宽高比绘制缩略矩形（避免各处硬编码，改上游支持时只动这里）。
@@ -29,9 +30,9 @@ export interface ImageSizeOption {
 }
 
 export const IMAGE_SIZE_OPTIONS: ImageSizeOption[] = [
-  { value: '1024x1024', ratio: '1:1', orientation: '方形', w: 1024, h: 1024 },
-  { value: '1536x1024', ratio: '3:2', orientation: '横版', w: 1536, h: 1024 },
-  { value: '1024x1536', ratio: '2:3', orientation: '竖版', w: 1024, h: 1536 },
+  { value: '1024x1024', ratio: '1:1', orientation: 'Square', w: 1024, h: 1024 },
+  { value: '1536x1024', ratio: '3:2', orientation: 'Landscape', w: 1536, h: 1024 },
+  { value: '1024x1536', ratio: '2:3', orientation: 'Portrait', w: 1024, h: 1536 },
 ]
 
 export const DEFAULT_IMAGE_SIZE = '1024x1024'
@@ -91,10 +92,11 @@ export function ImageSizeSelector({
   disabled,
   className,
 }: ImageSizeSelectorProps) {
+  const { t } = useTranslation()
   return (
     <div
       role='radiogroup'
-      aria-label='图片尺寸'
+      aria-label={t('Image size')}
       className={cn(
         'flex items-center gap-0.5 rounded-lg border border-border/70 bg-background/60 p-0.5',
         className
@@ -108,8 +110,8 @@ export function ImageSizeSelector({
             type='button'
             role='radio'
             aria-checked={active}
-            aria-label={`${opt.orientation} ${opt.ratio}`}
-            title={`${opt.w}×${opt.h} · ${opt.orientation}`}
+            aria-label={`${t(opt.orientation)} ${opt.ratio}`}
+            title={`${opt.w}×${opt.h} · ${t(opt.orientation)}`}
             disabled={disabled}
             onClick={() => onChange(opt.value)}
             className={cn(

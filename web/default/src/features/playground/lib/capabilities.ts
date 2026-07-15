@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import i18n from '@/i18n/config'
 import { ENDPOINT_TYPES } from '@/features/pricing/constants'
 import type { PricingModel } from '@/features/pricing/types'
 
@@ -112,18 +113,20 @@ export function filterByCapability(
  * Filter chip definitions for the model catalog.
  * Order: 全部 / 聊天 / 图片 / 视频
  */
+// label 存 i18n 英文 key（模块级常量不能直接 i18n.t，否则冻结在载入语言）；
+// 消费方在 render 用 t(label) 翻译，随原生 LanguageSwitcher 切换。
 export const CATALOG_FILTERS: { value: CatalogFilter; label: string }[] = [
-  { value: 'all', label: '全部' },
-  { value: 'chat', label: '聊天' },
-  { value: 'image', label: '图片' },
-  { value: 'video', label: '视频' },
+  { value: 'all', label: 'All' },
+  { value: 'chat', label: 'Chat' },
+  { value: 'image', label: 'Image' },
+  { value: 'video', label: 'Video' },
 ]
 
-/** 能力中文标签（目录卡 / 介绍卡共用），键为 PlaygroundCapability */
+/** 能力标签 i18n key（目录卡 / 介绍卡共用），键为 PlaygroundCapability；消费方 t() 翻译 */
 export const CAPABILITY_LABELS: Record<PlaygroundCapability, string> = {
-  chat: '聊天',
-  image: '图片',
-  video: '视频',
+  chat: 'Chat',
+  image: 'Image',
+  video: 'Video',
 }
 
 /**
@@ -134,9 +137,10 @@ export const CAPABILITY_LABELS: Record<PlaygroundCapability, string> = {
  * 倍率——group_ratio 是该分组用户实际计费的倍率。group_ratio 缺失时回退 model_ratio。
  */
 export function formatModelRate(m: PricingModel): string {
-  if (m.quota_type === 1) return '按次计费'
+  // i18n.t 在此 render 期调用即可随语言切换（消费组件用 useTranslation → 语言变即重渲染重算）
+  if (m.quota_type === 1) return i18n.t('Per-use billing')
   const group = m.enable_groups?.[0]
   const groupRatio = group ? m.group_ratio?.[group] : undefined
   const ratio = groupRatio ?? m.model_ratio
-  return ratio && ratio > 0 ? `倍率 ${ratio}×` : '—'
+  return ratio && ratio > 0 ? i18n.t('Ratio {{ratio}}×', { ratio }) : '—'
 }

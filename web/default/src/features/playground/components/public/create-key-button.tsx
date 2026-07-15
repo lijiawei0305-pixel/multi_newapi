@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { PlusIcon } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/auth-store'
@@ -27,6 +28,7 @@ interface CreateKeyButtonProps {
 }
 
 export function CreateKeyButton({ className }: CreateKeyButtonProps) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { auth } = useAuthStore()
   const isAuthed = !!auth.user
@@ -47,7 +49,7 @@ export function CreateKeyButton({ className }: CreateKeyButtonProps) {
       onClick={handleClick}
     >
       <PlusIcon />
-      创建 API 密钥
+      {t('Create API key')}
     </Button>
   )
 }

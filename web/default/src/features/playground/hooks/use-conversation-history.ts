@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
 
+import i18n from '@/i18n/config'
+
 import type { Message } from '../types'
 
 // ============================================================================
@@ -105,7 +107,7 @@ function deriveTitle(messages: Message[]): string {
   const versions = firstUser?.versions ?? []
   const text = versions[versions.length - 1]?.content ?? ''
   const trimmed = text.trim().replace(/\s+/g, ' ')
-  if (!trimmed) return '新对话'
+  if (!trimmed) return i18n.t('New conversation')
   return trimmed.length > TITLE_MAX ? `${trimmed.slice(0, TITLE_MAX)}…` : trimmed
 }
 

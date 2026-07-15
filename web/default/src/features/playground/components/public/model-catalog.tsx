@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { PackageOpen } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,6 +60,7 @@ interface ModelCardProps {
 }
 
 function ModelCard({ model, selected, onSelect }: ModelCardProps) {
+  const { t } = useTranslation()
   const capabilities = getModelCapabilities(model)
   // icon / vendor_icon 是 lobe-icon 的「key」（如 "Gemini.Color"），不是图片 URL；
   // 必须经 getLobeIcon 解析为真实厂商 logo 组件（与「模型广场」一致）。
@@ -120,7 +122,7 @@ function ModelCard({ model, selected, onSelect }: ModelCardProps) {
         <div className='mt-2 flex flex-wrap gap-1'>
           {capabilities.map((cap) => (
             <Badge key={cap} variant='secondary' className='text-[0.7rem]'>
-              {CAPABILITY_LABELS[cap] ?? cap}
+              {t(CAPABILITY_LABELS[cap] ?? cap)}
             </Badge>
           ))}
         </div>
@@ -152,21 +154,22 @@ export function ModelCatalog({
   error,
   onRetry,
 }: ModelCatalogProps) {
+  const { t } = useTranslation()
   return (
     <div className='flex h-full flex-col gap-3'>
       {/* Header */}
       <div className='flex shrink-0 items-baseline justify-between px-1'>
-        <h2 className='text-sm font-semibold text-foreground'>模型目录</h2>
+        <h2 className='text-sm font-semibold text-foreground'>{t('Model catalog')}</h2>
         <span className='text-xs tabular-nums text-muted-foreground'>
-          {counts.all} 个模型
+          {t('{{count}} models', { count: counts.all })}
         </span>
       </div>
 
       {/* Search */}
       <div className='shrink-0 px-1'>
         <Input
-          placeholder='搜索模型'
-          aria-label='搜索模型'
+          placeholder={t('Search models')}
+          aria-label={t('Search models')}
           value={search}
           onChange={(e) => onSearch(e.target.value)}
           className='h-8 rounded-lg'
@@ -183,7 +186,7 @@ export function ModelCatalog({
             onClick={() => onFilter(value)}
             className='h-7 rounded-full px-3 text-xs'
           >
-            {label}
+            {t(label)}
             {counts[value] !== undefined && (
               <span
                 className={cn(
@@ -220,11 +223,11 @@ export function ModelCatalog({
         ) : error ? (
           <div className='flex h-40 flex-col items-center justify-center gap-3 px-4 text-center'>
             <p className='text-sm text-muted-foreground'>
-              模型加载失败，请稍后重试
+              {t('Failed to load models, please try again later')}
             </p>
             {onRetry && (
               <Button size='sm' variant='outline' onClick={onRetry}>
-                重试
+                {t('Retry')}
               </Button>
             )}
           </div>
@@ -233,7 +236,7 @@ export function ModelCatalog({
             <div className='flex size-12 items-center justify-center rounded-full bg-muted'>
               <PackageOpen className='size-6' />
             </div>
-            <p className='text-sm'>没有匹配的模型，试试其他关键词或筛选</p>
+            <p className='text-sm'>{t('No matching models; try other keywords or filters')}</p>
           </div>
         ) : (
           <div className='space-y-2 pb-2 pt-1'>

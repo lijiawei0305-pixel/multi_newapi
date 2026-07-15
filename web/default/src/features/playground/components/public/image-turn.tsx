@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   ChevronDownIcon,
   DownloadIcon,
@@ -63,6 +64,7 @@ export function ImageTurnView({
   onRetry,
   retryDisabled,
 }: ImageTurnViewProps) {
+  const { t } = useTranslation()
   const [showParams, setShowParams] = useState(false)
   // 每回合各自记录加载失败的图片下标，互不影响。
   const [failedIndices, setFailedIndices] = useState<Set<number>>(new Set())
@@ -92,7 +94,7 @@ export function ImageTurnView({
             className='mt-1.5 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground'
           >
             <SlidersHorizontalIcon className='size-3' />
-            <span>请求参数</span>
+            <span>{t('Request parameters')}</span>
             <ChevronDownIcon
               className={cn(
                 'size-3 transition-transform',
@@ -104,16 +106,16 @@ export function ImageTurnView({
           {showParams && (
             <div className='mt-1.5 space-y-1.5 border-t border-primary/15 pt-1.5 text-xs text-muted-foreground'>
               <dl className='grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5'>
-                <dt className='text-muted-foreground/70'>接口</dt>
+                <dt className='text-muted-foreground/70'>{t('Endpoint')}</dt>
                 <dd className='font-mono break-all'>
                   POST /v1/images/generations
                 </dd>
-                <dt className='text-muted-foreground/70'>模型</dt>
+                <dt className='text-muted-foreground/70'>{t('Model')}</dt>
                 <dd className='break-all'>{turn.model}</dd>
-                <dt className='text-muted-foreground/70'>尺寸</dt>
+                <dt className='text-muted-foreground/70'>{t('Size')}</dt>
                 <dd>{describeSize(turn.size)}</dd>
-                <dt className='text-muted-foreground/70'>数量</dt>
-                <dd>{turn.n} 张</dd>
+                <dt className='text-muted-foreground/70'>{t('Quantity')}</dt>
+                <dd>{t('{{n}} images', { n: turn.n })}</dd>
               </dl>
               <pre className='overflow-x-auto rounded-md bg-background/70 p-2 font-mono text-[11px] leading-relaxed text-foreground/80'>
                 {JSON.stringify(requestBody, null, 2)}
@@ -127,14 +129,14 @@ export function ImageTurnView({
       {turn.status === 'loading' && (
         <div className='flex items-center gap-2 text-sm text-muted-foreground'>
           <Loader2Icon className='size-4 animate-spin' />
-          <span>生成中…</span>
+          <span>{t('Generating…')}</span>
         </div>
       )}
 
       {turn.status === 'error' && (
         <div className='flex flex-col items-start gap-2'>
           <p className='text-sm text-destructive'>
-            {turn.error ?? '图片生成失败，请稍后重试'}
+            {turn.error ?? t('Image generation failed, please try again later')}
           </p>
           <Button
             size='sm'
@@ -143,7 +145,7 @@ export function ImageTurnView({
             disabled={retryDisabled}
           >
             <RotateCcw className='mr-1.5 size-3.5' />
-            重试
+            {t('Retry')}
           </Button>
         </div>
       )}
@@ -157,8 +159,8 @@ export function ImageTurnView({
         >
           {turn.images.map((item, index) => {
             const src = resolveSrc(item)
-            const alt = item.revised_prompt || turn.prompt || `生成图片 ${index + 1}`
-            const filename = `生成图片-${index + 1}.png`
+            const alt = item.revised_prompt || turn.prompt || t('Generated image {{n}}', { n: index + 1 })
+            const filename = t('generated-image-{{n}}.png', { n: index + 1 })
 
             if (failedIndices.has(index)) {
               return (
@@ -167,14 +169,14 @@ export function ImageTurnView({
                   className='flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-border bg-muted p-4 text-center text-muted-foreground'
                 >
                   <ImageIcon className='size-8 opacity-40' />
-                  <p className='text-xs'>图片加载失败</p>
+                  <p className='text-xs'>{t('Failed to load image')}</p>
                   {src && (
                     <Button
                       size='sm'
                       variant='outline'
                       onClick={() => window.open(src, '_blank', 'noopener')}
                     >
-                      在新标签打开
+                      {t('Open in new tab')}
                     </Button>
                   )}
                 </div>
@@ -189,7 +191,7 @@ export function ImageTurnView({
                 {/* 点击图片放大预览 */}
                 <button
                   type='button'
-                  aria-label='放大查看'
+                  aria-label={t('Zoom in')}
                   className='block w-full cursor-zoom-in'
                   onClick={() => onZoom(src, alt)}
                 >
@@ -210,7 +212,7 @@ export function ImageTurnView({
                 {/* 下载按钮，悬停显示 */}
                 <button
                   type='button'
-                  aria-label='下载图片'
+                  aria-label={t('Download image')}
                   className={cn(
                     'absolute right-2 top-2 flex size-8 items-center justify-center rounded-md',
                     'bg-card/80 text-foreground opacity-0 backdrop-blur-sm transition-opacity',
@@ -218,10 +220,10 @@ export function ImageTurnView({
                     'focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
                   )}
                   onClick={() => onDownload(src, filename)}
-                  title='下载图片'
+                  title={t('Download image')}
                 >
                   <DownloadIcon className='size-4' />
-                  <span className='sr-only'>下载图片</span>
+                  <span className='sr-only'>{t('Download image')}</span>
                 </button>
               </div>
             )

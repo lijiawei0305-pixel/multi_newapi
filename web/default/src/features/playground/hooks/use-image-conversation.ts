@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
+import i18n from '@/i18n/config'
 import { api } from '@/lib/api'
 
 import { API_ENDPOINTS } from '../constants'
@@ -50,7 +51,7 @@ export interface UseImageConversationReturn {
 
 // 从 axios 风格错误里尽力提取后端可读信息，回退到通用中文提示。
 function extractImageError(err: unknown): string {
-  let msg = '图片生成失败，请稍后重试'
+  let msg = i18n.t('Image generation failed, please try again later')
   if (err && typeof err === 'object') {
     const axiosErr = err as {
       response?: {
@@ -64,7 +65,7 @@ function extractImageError(err: unknown): string {
     if (backendMsg && typeof backendMsg === 'string') {
       msg = backendMsg
     } else if (axiosErr.response?.status === 401) {
-      msg = 'API 密钥无效或已过期，请重新选择'
+      msg = i18n.t('The API key is invalid or expired, please reselect')
     } else if (axiosErr.message && typeof axiosErr.message === 'string') {
       msg = axiosErr.message
     }
@@ -126,7 +127,7 @@ export function useImageConversation(): UseImageConversationReturn {
           : []
 
         if (validItems.length === 0) {
-          const msg = '图片生成未返回有效结果，请重试'
+          const msg = i18n.t('Image generation returned no valid result, please try again')
           setTurns((prev) =>
             prev.map((t) =>
               t.id === id ? { ...t, status: 'error', error: msg } : t

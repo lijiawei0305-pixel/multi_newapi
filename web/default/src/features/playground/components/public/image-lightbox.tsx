@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { DownloadIcon } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -39,21 +40,22 @@ export function ImageLightbox({
   onOpenChange,
   onDownload,
 }: ImageLightboxProps) {
+  const { t } = useTranslation()
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className='max-w-[92vw] border-0 bg-transparent p-0 shadow-none ring-0 sm:max-w-[86vw]'>
-        <DialogTitle className='sr-only'>图片预览</DialogTitle>
+        <DialogTitle className='sr-only'>{t('Image preview')}</DialogTitle>
         {src && (
           <div className='flex flex-col items-center gap-3'>
             <img
               src={src}
-              alt={alt || '预览图片'}
+              alt={alt || t('Preview image')}
               className='max-h-[82vh] w-auto max-w-full rounded-lg object-contain shadow-2xl'
             />
             {onDownload && (
               <Button size='sm' variant='secondary' onClick={onDownload}>
                 <DownloadIcon className='mr-1.5 size-4' />
-                下载原图
+                {t('Download original')}
               </Button>
             )}
           </div>

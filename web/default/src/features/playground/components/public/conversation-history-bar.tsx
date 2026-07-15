@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { History, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -44,6 +45,7 @@ export function ConversationHistoryBar({
   onSwitch,
   onDelete,
 }: ConversationHistoryBarProps) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
 
   return (
@@ -55,7 +57,7 @@ export function ConversationHistoryBar({
         onClick={onNew}
       >
         <Plus className='size-3.5' />
-        新建对话
+        {t('New chat')}
       </Button>
 
       <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -65,7 +67,7 @@ export function ConversationHistoryBar({
           }
         >
           <History className='size-3.5' />
-          历史
+          {t('History')}
           {conversations.length > 0 && (
             <span className='tabular-nums text-muted-foreground'>
               {conversations.length}
@@ -75,7 +77,7 @@ export function ConversationHistoryBar({
         <DropdownMenuContent align='start' className='w-72 p-1'>
           {conversations.length === 0 ? (
             <div className='px-2 py-6 text-center text-sm text-muted-foreground'>
-              暂无历史对话
+              {t('No conversation history yet')}
             </div>
           ) : (
             <div className='max-h-80 overflow-y-auto'>
@@ -104,8 +106,8 @@ export function ConversationHistoryBar({
                   </span>
                   <button
                     type='button'
-                    aria-label='删除对话'
-                    title='删除对话'
+                    aria-label={t('Delete conversation')}
+                    title={t('Delete conversation')}
                     className={cn(
                       'shrink-0 rounded p-1 text-muted-foreground transition-colors',
                       'hover:bg-destructive/10 hover:text-destructive',

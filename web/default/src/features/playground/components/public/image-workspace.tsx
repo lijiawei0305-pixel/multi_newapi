@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Loader2Icon, Trash2Icon } from 'lucide-react'
 
 import {
@@ -64,10 +65,10 @@ function triggerDownload(href: string, filename: string) {
 
 // 可选张数（上游 gpt-image 系列原生支持 n，一次请求返回对应数量的图）
 const N_OPTIONS = [
-  { value: '1', label: '1 张' },
-  { value: '2', label: '2 张' },
-  { value: '3', label: '3 张' },
-  { value: '4', label: '4 张' },
+  { value: '1', label: '1 image' },
+  { value: '2', label: '2 images' },
+  { value: '3', label: '3 images' },
+  { value: '4', label: '4 images' },
 ]
 
 interface ZoomState {
@@ -76,6 +77,7 @@ interface ZoomState {
 }
 
 export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
+  const { t } = useTranslation()
   const [prompt, setPrompt] = useState('')
   const [n, setN] = useState<string>('1')
   const [size, setSize] = useState<string>(DEFAULT_IMAGE_SIZE)
@@ -147,7 +149,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
     } catch {
       // blob 抓取失败：此处已脱离原始点击手势，window.open 常被弹窗拦截而静默失败，
       // 故显式 toast 反馈，再尽力打开新标签（成功则用户可另存）。
-      toast.error('下载失败，请右键图片另存或稍后重试')
+      toast.error(t('Download failed; right-click the image to save, or try again later'))
       window.open(src, '_blank', 'noopener')
     }
   }
@@ -174,7 +176,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
             ) : (
               <div className='flex min-h-[52vh] flex-col items-center justify-center gap-4 text-muted-foreground'>
                 <ModelIntroHero model={introModel ?? null} />
-                <p className='text-xs'>输入提示词，点击「生成」开始创作</p>
+                <p className='text-xs'>{t('Enter a prompt and click "Generate" to start creating')}</p>
               </div>
             )}
           </div>
@@ -192,7 +194,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
         >
           <PromptInputTextarea
             disabled={isGenerating}
-            placeholder='输入提示词…'
+            placeholder={t('Enter a prompt…')}
             value={prompt}
             onChange={(e) => setPrompt(e.currentTarget.value)}
           />
@@ -201,12 +203,12 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
               {/* 数量选择 */}
               <Select value={n} onValueChange={(val) => val && setN(val)}>
                 <SelectTrigger size='sm' className='h-7 min-w-[72px] text-xs'>
-                  <SelectValue placeholder='张数' />
+                  <SelectValue placeholder={t('Count')} />
                 </SelectTrigger>
                 <SelectContent>
                   {N_OPTIONS.map((opt) => (
                     <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
+                      {t(opt.label)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -230,7 +232,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
                   disabled={isGenerating}
                 >
                   <Trash2Icon className='mr-1 size-3.5' />
-                  清空
+                  {t('Clear')}
                 </Button>
               )}
             </PromptInputTools>
@@ -239,7 +241,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
               {isGenerating ? (
                 <Loader2Icon className='size-4 animate-spin' />
               ) : (
-                <span className='px-1 text-xs font-medium'>生成</span>
+                <span className='px-1 text-xs font-medium'>{t('Generate')}</span>
               )}
             </PromptInputSubmit>
           </PromptInputFooter>
@@ -255,7 +257,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
           if (!open) setZoom(null)
         }}
         onDownload={
-          zoom ? () => handleDownload(zoom.src, '生成图片.png') : undefined
+          zoom ? () => handleDownload(zoom.src, t('generated-image.png')) : undefined
         }
       />
     </div>

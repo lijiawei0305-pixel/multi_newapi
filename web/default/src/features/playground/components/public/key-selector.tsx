@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { KeyRound, Loader2, Sparkles } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import {
   Select,
   SelectContent,
@@ -40,9 +41,9 @@ const AUTO_VALUE = '__auto__'
 // ============================================================================
 
 const STATUS_LABEL: Record<number, string> = {
-  [API_KEY_STATUS.DISABLED]: '已禁用',
-  [API_KEY_STATUS.EXPIRED]: '已过期',
-  [API_KEY_STATUS.EXHAUSTED]: '额度耗尽',
+  [API_KEY_STATUS.DISABLED]: 'Disabled',
+  [API_KEY_STATUS.EXPIRED]: 'Expired',
+  [API_KEY_STATUS.EXHAUSTED]: 'Quota exhausted',
 }
 
 // ============================================================================
@@ -69,6 +70,7 @@ export function KeySelector({
   isAuthed,
   loading = false,
 }: KeySelectorProps) {
+  const { t } = useTranslation()
   const selectedKey = selectedId != null
     ? keys.find((k) => k.id === selectedId) ?? null
     : null
@@ -101,7 +103,7 @@ export function KeySelector({
           'min-w-[200px] max-w-[280px]',
           rootDisabled && 'cursor-not-allowed opacity-60',
         )}
-        aria-label='选择 API 密钥'
+        aria-label={t('Select an API key')}
       >
         {loading ? (
           <Loader2 className='text-muted-foreground size-3.5 shrink-0 animate-spin' />
@@ -116,7 +118,7 @@ export function KeySelector({
           </span>
         ) : (
           <span className='flex-1 truncate text-left text-sm text-muted-foreground'>
-            {!isAuthed ? '请先登录后选择 API 密钥' : 'auto'}
+            {!isAuthed ? t('Please sign in to select an API key') : 'auto'}
           </span>
         )}
       </SelectTrigger>
@@ -128,7 +130,7 @@ export function KeySelector({
           <SelectItem value={AUTO_VALUE}>
             <span className='flex flex-1 items-center gap-2 truncate'>
               <Sparkles className='size-3.5 shrink-0' />
-              <span className='truncate'>auto · 自动路由（全部模型）</span>
+              <span className='truncate'>{t('auto · Auto-routing (all models)')}</span>
             </span>
           </SelectItem>
         </SelectGroup>
@@ -138,7 +140,7 @@ export function KeySelector({
         {/* 可用密钥分组 */}
         {enabledKeys.length > 0 && (
           <SelectGroup>
-            <SelectLabel>可用密钥</SelectLabel>
+            <SelectLabel>{t('Available keys')}</SelectLabel>
             {enabledKeys.map((key) => (
               <SelectItem key={key.id} value={String(key.id)}>
                 <span className='flex flex-1 items-center gap-2 truncate'>
@@ -155,7 +157,7 @@ export function KeySelector({
           <>
             {enabledKeys.length > 0 && <SelectSeparator />}
             <SelectGroup>
-              <SelectLabel>不可用密钥</SelectLabel>
+              <SelectLabel>{t('Unavailable keys')}</SelectLabel>
               {disabledKeys.map((key) => (
                 <SelectItem
                   key={key.id}
@@ -169,7 +171,7 @@ export function KeySelector({
                   </span>
                   {STATUS_LABEL[key.status] != null && (
                     <Badge variant='outline' className='ml-auto shrink-0 text-xs'>
-                      {STATUS_LABEL[key.status]}
+                      {t(STATUS_LABEL[key.status])}
                     </Badge>
                   )}
                 </SelectItem>
@@ -181,14 +183,14 @@ export function KeySelector({
         {/* 空态：已登录但无密钥 */}
         {keys.length === 0 && !loading && (
           <div className='text-muted-foreground px-2 py-3 text-center text-sm'>
-            暂无 API 密钥
+            {t('No API keys yet')}
           </div>
         )}
 
         {/* 加载中 */}
         {loading && (
           <div className='text-muted-foreground px-2 py-3 text-center text-sm'>
-            加载中…
+            {t('Loading…')}
           </div>
         )}
       </SelectContent>
