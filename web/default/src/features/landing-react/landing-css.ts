@@ -121,13 +121,11 @@ export const LANDING_CSS = `
     user-select:none; -webkit-user-drag:none;
     filter:drop-shadow(0 0 24px rgba(70,170,255,.35));
   }
-  #bulb3d {
-    position:absolute; left:var(--cx); top:var(--cy); z-index:6; pointer-events:none;
-    width:var(--b3d); height:var(--b3d);
-    margin:calc(var(--b3d) / -2) 0 0 calc(var(--b3d) / -2);
+  #scene3d {
+    position:absolute; inset:0; width:100%; height:100%; z-index:6; pointer-events:none;
     display:none;
   }
-  body.webgl3d #bulb3d { display:block; }
+  body.webgl3d #scene3d { display:block; }
   body.webgl3d #halo, body.webgl3d #bulb { display:none; }
 
   .wd-landing-root { --chip:52px; --cy:42%; --cx:50%; --b3d:400px; }

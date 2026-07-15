@@ -16,10 +16,9 @@ import { useTranslation } from 'react-i18next'
 
 import { useSystemConfig } from '@/hooks/use-system-config'
 
-import { initBulb3d } from './bulb3d'
 import { KefuModal } from './kefu-modal'
 import { LANDING_CSS } from './landing-css'
-import { initOrbit } from './orbit'
+import { initScene3d } from './scene3d'
 import { JoinSection, ServicesSection, StudioSection } from './sections'
 import { SECTIONS_CSS } from './sections-css'
 
@@ -30,16 +29,15 @@ function boot() {
   const inst = { cleanup: () => {}, refs: 1 }
   instance = inst
   document.body.classList.add('lit')
-  const cleanupOrbit = initOrbit()
-  let cleanupBulb = () => {}
+  let cleanup = () => {}
   let cancelled = false
-  const canvas = document.getElementById('bulb3d') as HTMLCanvasElement | null
+  const canvas = document.getElementById('scene3d') as HTMLCanvasElement | null
   if (canvas) {
-    initBulb3d(canvas)
-      .then((c) => { if (cancelled) c(); else cleanupBulb = c })
-      .catch((e) => { document.body.classList.remove('webgl3d'); console.warn('bulb3d 回退 PNG：', e?.message) })
+    initScene3d(canvas)
+      .then((c) => { if (cancelled) c(); else cleanup = c })
+      .catch((e) => { document.body.classList.remove('webgl3d'); console.warn('scene3d 回退 PNG：', e?.message) })
   }
-  inst.cleanup = () => { cancelled = true; cleanupOrbit(); cleanupBulb(); document.body.classList.remove('lit') }
+  inst.cleanup = () => { cancelled = true; cleanup(); document.body.classList.remove('lit') }
 }
 function unboot() {
   if (!instance) return
@@ -142,13 +140,11 @@ export function LandingReact() {
 
           <div className='hero-right'>
             <div className='hero-visual'>
-              <svg id='orbits'>
-                <g id='bandA' />
-                <g id='bandB' />
-              </svg>
+              {/* 非-WebGL 兜底(body 无 webgl3d 时显示);成功则被 scene3d 隐藏 */}
               <div id='halo' />
               <img id='bulb' src='/lp-assets/bulb.png' alt='' draggable='false' />
-              <canvas id='bulb3d' />
+              {/* 统一 3D 场景:灯泡 + 轨道 + 卫星,铺满可视区 */}
+              <canvas id='scene3d' />
             </div>
             {/* HUD 默认态；点击卫星后由 orbit.ts 用 i18n.t() 覆写为该模型的信息。 */}
             <aside id='hud'>
