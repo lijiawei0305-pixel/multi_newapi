@@ -2,6 +2,7 @@ package mtwire
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -37,6 +38,40 @@ func TestActualPaidCNY(t *testing.T) {
 	}
 	if got := actualPaidCNY(1, 7.3); got != 7.3 {
 		t.Fatalf("actualPaidCNY(1, 7.3) = %g, want 7.3", got)
+	}
+}
+
+// TestResolveRechargeAmount 锁定充值金额口径归一 + 「所见即所付」：
+// 人民币口径下实付精确到该¥（不由 usd×rate 反算引入浮点误差），usd=cny/rate；美元口径保持旧行为。
+func TestResolveRechargeAmount(t *testing.T) {
+	// 人民币口径：选 ¥100 → 实付正好 ¥100（所见即所付），usd = 100/7.3。
+	usd, paid, cny := resolveRechargeAmount(0, 100, 7.3)
+	if !cny {
+		t.Fatal("amount_cny>0 应判为人民币口径")
+	}
+	if paid != 100 {
+		t.Errorf("actualPaid = %v, want 100（实付精确到分，所见即所付）", paid)
+	}
+	if want := 100.0 / 7.3; math.Abs(usd-want) > 1e-9 {
+		t.Errorf("usd = %v, want %v（cny/rate）", usd, want)
+	}
+
+	// 美元口径（旧）：usd 原样，实付 = usd×rate。
+	usd2, paid2, cny2 := resolveRechargeAmount(10, 0, 7.3)
+	if cny2 {
+		t.Fatal("amount_cny=0 应判为美元口径")
+	}
+	if usd2 != 10 {
+		t.Errorf("usd = %v, want 10", usd2)
+	}
+	if paid2 != 73 {
+		t.Errorf("actualPaid = %v, want 73（10×7.3）", paid2)
+	}
+
+	// rate<=0 兜底为 1：人民币口径下 usd==cny==实付，不除零/不为负。
+	usd3, paid3, _ := resolveRechargeAmount(0, 50, 0)
+	if usd3 != 50 || paid3 != 50 {
+		t.Errorf("rate<=0 兜底: usd=%v paid=%v, want 50/50", usd3, paid3)
 	}
 }
 

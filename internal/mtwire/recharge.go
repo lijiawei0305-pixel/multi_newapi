@@ -181,6 +181,23 @@ func actualPaidCNY(amountUSD, rate float64) float64 {
 	return amountUSD * rate
 }
 
+// resolveRechargeAmount 归一充值金额口径（纯函数，供 handler 调用 + 单测锁定）。
+// 返回 (美元额, 实付¥, 是否人民币口径)：
+//   - amountCNY>0：人民币充值（所见即所付）——实付=该¥精确到分、usd=cny/rate；
+//   - 否则：美元充值（旧口径）——usd=amountUSD、实付=usd×rate。
+//
+// rate<=0 兜底为 1（防除零/负汇率）。入账始终以返回的 usd 折原生 quota（$1=QuotaPerUnit），
+// 无论走哪路，计费/入账数学都不变——本函数只决定「实付¥」与「入账美元额」的换算口径。
+func resolveRechargeAmount(amountUSD, amountCNY, rate float64) (usd, actualPaid float64, cnyMode bool) {
+	if rate <= 0 {
+		rate = 1
+	}
+	if amountCNY > 0 {
+		return amountCNY / rate, amountCNY, true
+	}
+	return amountUSD, actualPaidCNY(amountUSD, rate), false
+}
+
 // amountToleranceCNY 金额比对容差（元）：≤1 分视为相等，吸收浮点/汇率取整噪声。
 const amountToleranceCNY = 0.011
 
@@ -241,20 +258,8 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 		respondErr(c, payment.ErrOrderInvalid)
 		return
 	}
-	// 金额口径归一：amount_cny>0 走人民币充值（实付精确到分，usd=cny/汇率）；否则走美元充值（实付=usd×汇率）。
-	rate := operation_setting.USDExchangeRate
-	if rate <= 0 {
-		rate = 1
-	}
-	var amountUSD, actualPaid float64
-	cnyMode := body.AmountCNY > 0
-	if cnyMode {
-		amountUSD = body.AmountCNY / rate
-		actualPaid = body.AmountCNY // 用户实付即所选¥，精确到分，不再由 usd×rate 反算引入浮点噪声
-	} else {
-		amountUSD = body.AmountUSD
-		actualPaid = actualPaidCNY(amountUSD, rate)
-	}
+	// 金额口径归一（可测纯函数）：amount_cny>0 走人民币充值（实付精确到分，usd=cny/汇率）；否则走美元充值（实付=usd×汇率）。
+	amountUSD, actualPaid, cnyMode := resolveRechargeAmount(body.AmountUSD, body.AmountCNY, operation_setting.USDExchangeRate)
 	if amountUSD < minRechargeUSD {
 		respondErr(c, errRechargeAmountTooSmall)
 		return
