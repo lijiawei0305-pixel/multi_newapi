@@ -29,6 +29,7 @@ import { nextSelection } from './scene3d-interaction'
 const DATA_URL = '/lp-assets/dengpao_points.bin'
 const RENDER_H = 940 // 渲染缓冲高度固定(bloom 归一化一致);宽 = 高 × 盒子宽高比
 const BULB_SCALE = 1.5 // 灯泡整体放大(与轨道解耦:轨道半径在 config 里单独收小 → 大灯泡 + 小轨道)
+const SHIFT_X = -0.28 // 灯泡+轨道整体左移(用户觉得太靠右);同步用于灯泡剪影遮罩中心
 
 export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void> {
   const PRM = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -183,14 +184,14 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   const dome = new Mesh(new SphereGeometry(0.36, 40, 40), glassMat); dome.position.y = 0.14; root.add(dome)
   const neck = new Mesh(new CylinderGeometry(0.36, 0.2, 0.32, 32, 1, true), glassMat); neck.position.y = -0.16; root.add(neck)
   const glowSprite = new Sprite(new SpriteMaterial({
-    map: makeGlowTexture('#00f0ff'), transparent: true, opacity: 0.12, blending: AdditiveBlending, depthWrite: false,
+    map: makeGlowTexture('#00f0ff'), transparent: true, opacity: 0.4, blending: AdditiveBlending, depthWrite: false,
   }))
-  glowSprite.scale.set(0.5, 0.5, 1.0); glowSprite.position.y = 0.16; root.add(glowSprite)
+  glowSprite.scale.set(0.58, 0.58, 1.0); glowSprite.position.y = 0.14; root.add(glowSprite)
 
   // 灯泡垂直居中(其视觉中线 ≈ y0,轨道将绕此展开)。相机用 yun 取景(fov 45)给轨道留空间。
   const top = Math.max(maxY, 0.5), bottom = Math.min(minY, -0.5)
   root.scale.setScalar(BULB_SCALE)
-  root.position.y = (-(top + bottom) / 2) * BULB_SCALE
+  root.position.set(SHIFT_X, (-(top + bottom) / 2) * BULB_SCALE, 0)
 
   // ---- 两条 3D 管环轨道(灯泡居中于世界原点,轨道绕原点展开)----
   const orbitMaterials: any[] = []
@@ -206,6 +207,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   function createOrbit(cfg: any) {
     const group = new Group()
     group.rotation.set(cfg.tilt[0], cfg.tilt[1], cfg.tilt[2])
+    group.position.x = SHIFT_X // 与灯泡同步左移
     scene.add(group)
     const makeLayer = (radiusScale: number, opacity: number) => {
       const geometry = new TubeGeometry(new OrbitCurve(cfg.radius), 256, cfg.tubeRadius * radiusScale, 6, true)
@@ -384,7 +386,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     root.rotation.y = t * 0.02
     const k = (t - surgeT0) / 0.7
     const env = (k >= 0 && k <= 1) ? Math.sin(Math.PI * k) : 0
-    glowSprite.material.opacity = 0.12 + 0.12 * env
+    glowSprite.material.opacity = 0.4 + 0.18 * env
     pointLight.intensity = 1.5 + 1.3 * env
     // 轨道相位累积时钟:speedFactor 缓动 1↔0 → 悬停时整轨平滑冻结、移开平滑恢复,不跳帧。
     orbitPhase += dt * speedFactor
@@ -395,7 +397,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     }
     // 轨道着色器:能量流 + 灯泡视空间中心(剪影遮罩)+ 卫星角度(彗尾)。角度都用 orbitPhase,与卫星循环一致。
     camera.updateMatrixWorld()
-    _bulbView.set(0, 0, 0).applyMatrix4(camera.matrixWorldInverse)
+    _bulbView.set(SHIFT_X, 0, 0).applyMatrix4(camera.matrixWorldInverse)
     for (const { material, cfg } of orbitMaterials) {
       material.uniforms.uTime.value = orbitPhase
       material.uniforms.uBulbView.value.copy(_bulbView)
