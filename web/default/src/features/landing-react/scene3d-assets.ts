@@ -2,7 +2,7 @@
 /* WeDream 落地页统一 3D 场景 —— 资源/工具纯函数。
    纯函数 sampleAlphaToPoints / approach 由 scene3d-assets.test.ts 单测(bun test);
    svgToTexture / loadImageTexture / makeGlowTexture 依赖 DOM+three,靠 playwright 视觉验证。 */
-import { CanvasTexture, SRGBColorSpace } from 'three'
+import { CanvasTexture } from 'three'
 
 /** 指数逼近缓动:每帧把 current 朝 target 靠拢,帧率无关。 */
 export function approach(current: number, target: number, ease: number, dt: number): number {
@@ -33,46 +33,39 @@ export function sampleAlphaToPoints(
   return out
 }
 
-/** 内联 SVG 字符串 → size² CanvasTexture(billboard 用)。 */
-export function svgToTexture(svg: string, size: number): Promise<CanvasTexture> {
+/** logo(内联 `<svg…>` 或 `<img src="…">`)→ 画到 size² 离屏 canvas 并返回。
+    画一次,既做 billboard 纹理(CanvasTexture 包它)又采 alpha 生成光晕点云。 */
+export function drawLogoCanvas(logo: string, size: number): Promise<HTMLCanvasElement> {
   return new Promise((resolve, reject) => {
-    const blob = new Blob([svg], { type: 'image/svg+xml' })
-    const url = URL.createObjectURL(blob)
+    const c = document.createElement('canvas')
+    c.width = c.height = size
+    const ctx = c.getContext('2d')
     const image = new Image()
+    let url = ''
+    const trimmed = logo.trim()
+    if (trimmed.startsWith('<img')) {
+      const m = trimmed.match(/src="([^"]+)"/)
+      if (!m) { reject(new Error('img 缺 src')); return }
+      image.crossOrigin = 'anonymous'
+      image.src = m[1]
+    } else {
+      // 内联 SVG 作为独立图片必须带 xmlns 命名空间(DOM 里隐式,blob 里必需);补 width/height 保内在尺寸。
+      let svg = trimmed
+      if (!/\bxmlns=/.test(svg)) svg = svg.replace(/<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"')
+      if (!/<svg[^>]*\bwidth=/.test(svg)) svg = svg.replace(/<svg/i, `<svg width="${size}" height="${size}"`)
+      const blob = new Blob([svg], { type: 'image/svg+xml' })
+      url = URL.createObjectURL(blob)
+      image.src = url
+    }
     image.onload = () => {
-      const c = document.createElement('canvas')
-      c.width = c.height = size
-      const ctx = c.getContext('2d')
       ctx.drawImage(image, 0, 0, size, size)
-      URL.revokeObjectURL(url)
-      const tex = new CanvasTexture(c)
-      tex.colorSpace = SRGBColorSpace
-      resolve(tex)
+      if (url) URL.revokeObjectURL(url)
+      resolve(c)
     }
     image.onerror = (e) => {
-      URL.revokeObjectURL(url)
+      if (url) URL.revokeObjectURL(url)
       reject(e)
     }
-    image.src = url
-  })
-}
-
-/** PNG url → size² CanvasTexture(与 SVG 走同一 canvas 通道,便于统一采 alpha)。 */
-export function loadImageTexture(url: string, size: number): Promise<CanvasTexture> {
-  return new Promise((resolve, reject) => {
-    const image = new Image()
-    image.crossOrigin = 'anonymous'
-    image.onload = () => {
-      const c = document.createElement('canvas')
-      c.width = c.height = size
-      const ctx = c.getContext('2d')
-      ctx.drawImage(image, 0, 0, size, size)
-      const tex = new CanvasTexture(c)
-      tex.colorSpace = SRGBColorSpace
-      resolve(tex)
-    }
-    image.onerror = reject
-    image.src = url
   })
 }
 

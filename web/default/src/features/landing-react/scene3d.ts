@@ -9,9 +9,10 @@
      宽随盒子宽高比,ResizeObserver 适配。透明叠加(AlphaFromLuma)保留,让黑底/极光透出。 */
 import {
   ACESFilmicToneMapping, AdditiveBlending, AmbientLight, BufferAttribute, BufferGeometry,
-  Color, Curve, CylinderGeometry, DoubleSide, Group, Mesh, MeshPhongMaterial, PerspectiveCamera,
-  PointLight, Points, Scene, ShaderMaterial, SphereGeometry, Sprite, SpriteMaterial, TubeGeometry,
-  Vector2, Vector3, WebGLRenderer,
+  CanvasTexture, Color, Curve, CylinderGeometry, DoubleSide, Group, MathUtils, Mesh,
+  MeshBasicMaterial, MeshPhongMaterial, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry,
+  PointLight, Points, PointsMaterial, Quaternion, Scene, ShaderMaterial, SphereGeometry,
+  SRGBColorSpace, Sprite, SpriteMaterial, TorusGeometry, TubeGeometry, Vector2, Vector3, WebGLRenderer,
 } from 'three'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
@@ -19,8 +20,8 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
-import { makeGlowTexture } from './scene3d-assets'
-import { ORBITS } from './scene3d-config'
+import { drawLogoCanvas, makeGlowTexture, sampleAlphaToPoints } from './scene3d-assets'
+import { LOGOS, MODELS, ORBITS } from './scene3d-config'
 
 const DATA_URL = '/lp-assets/dengpao_points.bin'
 const RENDER_H = 940 // 渲染缓冲高度固定(bloom 归一化一致);宽 = 高 × 盒子宽高比
@@ -223,6 +224,56 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   for (const cfg of ORBITS) orbitGroups.push({ group: createOrbit(cfg), cfg })
   const _bulbView = new Vector3()
 
+  // ---- 卫星:三层全息(品牌色光晕点云 + 微光背/金属环 + 朝相机的 billboard logo)----
+  const satellites: any[] = []
+  function createSatellite3D(points: Float32Array, texture: any, brandColor: string, key: string, parentGroup: any, radius: number, baseAngle: number, speed: number) {
+    const g = new Group()
+    let pointsMaterial: any = null
+    if (points && points.length) {
+      const geom = new BufferGeometry()
+      geom.setAttribute('position', new BufferAttribute(points, 3))
+      pointsMaterial = new PointsMaterial({ color: new Color(brandColor), size: 0.007, transparent: true, opacity: 0.45, blending: AdditiveBlending, depthWrite: false })
+      const pc = new Points(geom, pointsMaterial); pc.position.z = -0.03; pc.raycast = () => {}
+      g.add(pc)
+    }
+    const glowMaterial = new SpriteMaterial({ map: makeGlowTexture(brandColor), transparent: true, opacity: 0.16, blending: AdditiveBlending, depthWrite: false })
+    const glow = new Sprite(glowMaterial); glow.scale.set(0.55, 0.55, 1.0); glow.position.z = -0.06; glow.raycast = () => {}; g.add(glow)
+    const rimMaterial = new MeshStandardMaterial({ color: new Color(brandColor), metalness: 0.9, roughness: 0.1, transparent: true, opacity: 0.4 })
+    g.add(new Mesh(new TorusGeometry(0.128, 0.006, 8, 32), rimMaterial))
+    const disc = new Mesh(new CylinderGeometry(0.128, 0.128, 0.012, 32), new MeshPhongMaterial({ color: 0x90d0ff, transparent: true, opacity: 0.06, shininess: 120, specular: 0xffffff, side: DoubleSide, depthWrite: false }))
+    disc.rotation.x = Math.PI / 2; g.add(disc)
+    let logoMaterial: any = null
+    if (texture) {
+      logoMaterial = new MeshBasicMaterial({ map: texture, transparent: true, toneMapped: false, depthWrite: false })
+      const logo = new Mesh(new PlaneGeometry(0.22, 0.22), logoMaterial); logo.position.z = 0.02; g.add(logo)
+    }
+    g.userData = { key, radius, baseAngle, speed, hoverScale: 1.0, clickPulse: 1.0, rimMaterial, glowMaterial, pointsMaterial, logoMaterial }
+    parentGroup.add(g); satellites.push(g)
+  }
+  {
+    const allKeys = ORBITS.flatMap((o) => o.keys)
+    const loaded = await Promise.all(allKeys.map(async (key) => {
+      try {
+        const c = await drawLogoCanvas(LOGOS[key].replaceAll('__id__', 'u' + key), 256)
+        const texture = new CanvasTexture(c); texture.colorSpace = SRGBColorSpace
+        const img = c.getContext('2d').getImageData(0, 0, 256, 256)
+        const pts = sampleAlphaToPoints({ data: img.data, width: 256, height: 256 }, 1600, 0.06)
+        return { key, texture, pts }
+      } catch (e) { console.warn('logo 加载失败', key, (e as any)?.message); return { key, texture: null, pts: new Float32Array(0) } }
+    }))
+    const byKey: any = {}
+    for (const l of loaded) byKey[l.key] = l
+    for (const { group, cfg } of orbitGroups) {
+      const step = (Math.PI * 2) / cfg.keys.length
+      cfg.keys.forEach((key: string, i: number) => {
+        const l = byKey[key]
+        createSatellite3D(l.pts, l.texture, MODELS[key].color, key, group, cfg.radius, i * step, cfg.speed)
+      })
+    }
+  }
+  const _parentQuat = new Quaternion()
+  const _worldPos = new Vector3()
+
   // ---- 后处理 ----
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
@@ -319,12 +370,36 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     const env = (k >= 0 && k <= 1) ? Math.sin(Math.PI * k) : 0
     glowSprite.material.opacity = 0.36 + 0.27 * env
     pointLight.intensity = 1.5 + 1.3 * env
-    // 轨道着色器:能量流时间 + 灯泡视空间中心(驱动剪影遮罩)。uSatAngles 待 T5 卫星就位填充。
+    // 轨道着色器:能量流时间 + 灯泡视空间中心(剪影遮罩)+ 卫星角度(彗尾)。角度公式与卫星循环一致。
     camera.updateMatrixWorld()
     _bulbView.set(0, 0, 0).applyMatrix4(camera.matrixWorldInverse)
-    for (const { material } of orbitMaterials) {
+    for (const { material, cfg } of orbitMaterials) {
       material.uniforms.uTime.value = t
       material.uniforms.uBulbView.value.copy(_bulbView)
+      const step = (Math.PI * 2) / cfg.keys.length
+      const arr = material.uniforms.uSatAngles.value
+      for (let i = 0; i < cfg.keys.length; i++) arr[i] = (i * step + cfg.speed * t) % (Math.PI * 2)
+    }
+    // 卫星:公转位置 + 朝相机 billboard + 远近淡化/缩放
+    for (const sat of satellites) {
+      const ud = sat.userData
+      const angle = ud.baseAngle + ud.speed * t
+      const r = ud.radius
+      sat.position.set(r * Math.cos(angle), Math.sin(t * 1.5 + ud.baseAngle) * 0.03, r * Math.sin(angle))
+      sat.parent.getWorldQuaternion(_parentQuat)
+      sat.quaternion.copy(_parentQuat.invert()).multiply(camera.quaternion)
+      sat.getWorldPosition(_worldPos)
+      const distFactor = MathUtils.clamp(MathUtils.mapLinear(camera.position.distanceTo(_worldPos), 3.2, 5.8, 1.0, 0.5), 0.5, 1.0)
+      const hoverBoost = (ud.hoverScale - 1.0) * 1.25
+      if (ud.pointsMaterial) {
+        ud.pointsMaterial.size = 0.006 + 0.002 * Math.sin(t * 2.5 + ud.baseAngle)
+        ud.pointsMaterial.opacity = Math.min(0.7, 0.15 + 0.4 * distFactor + hoverBoost)
+      }
+      if (ud.logoMaterial) ud.logoMaterial.opacity = 0.35 + 0.65 * distFactor
+      ud.glowMaterial.opacity = (0.16 + (ud.hoverScale - 1.0) * 0.9) * distFactor
+      const s = ud.hoverScale * ud.clickPulse * distFactor
+      sat.scale.set(s, s, s)
+      ud.rimMaterial.opacity = 0.4 * distFactor
     }
     composer.render()
   }
