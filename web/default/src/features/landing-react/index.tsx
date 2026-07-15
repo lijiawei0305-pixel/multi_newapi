@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { useSystemConfig } from '@/hooks/use-system-config'
 
+import './landing-i18n' // 落地页多语言补丁：启动即注入 ja/ru/fr/vi 缺失译文(自安装,幂等)
 import { KefuModal } from './kefu-modal'
 import { LANDING_CSS } from './landing-css'
 import { initScene3d } from './scene3d'
