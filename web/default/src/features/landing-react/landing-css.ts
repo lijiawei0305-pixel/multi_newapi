@@ -192,16 +192,16 @@ export const LANDING_CSS = `
   #badge svg { width:12px; height:12px; }
   #hero h1 { display:flex; flex-direction:column; gap:8px; margin:4px 0 0; font-weight:normal; }
   .hl1 {
-    color:#f2f7ff; font-size:clamp(28px, 4.4vw, 52px); font-weight:700;
+    color:var(--wd-brand, #f2f7ff); transition:color .4s ease;
+    font-size:clamp(28px, 4.4vw, 52px); font-weight:700;
     letter-spacing:.1em; padding-left:.1em;
     text-shadow:0 0 26px rgba(90,170,255,.35);
   }
+  /* 副标题「让灵感不再受限」纯白(黑底上干净,与会变色的 hl1 形成对比) */
   .hl2 {
     font-size:clamp(38px, 6vw, 72px); font-weight:800;
     letter-spacing:.05em; padding-left:.05em; line-height:1.15;
-    background:linear-gradient(94deg, #3ecfff 8%, #4d9bff 52%, #8f7bff 96%);
-    -webkit-background-clip:text; background-clip:text;
-    color:transparent; -webkit-text-fill-color:transparent;
+    color:#fff;
     filter:drop-shadow(0 0 22px rgba(60,150,255,.35));
   }
   #sub {
@@ -291,6 +291,7 @@ export const LANDING_CSS = `
   .lp-topbar { position:fixed; top:0; left:0; right:0; z-index:60; display:flex; align-items:center; justify-content:space-between; padding:16px clamp(20px,4vw,52px); pointer-events:none; }
   .lp-topbar > * { pointer-events:auto; }
   .lp-logo { display:flex; align-items:center; gap:10px; font-size:19px; font-weight:800; letter-spacing:.02em; color:#eaf3ff; }
+  .lp-logo span { color:var(--wd-brand, #eaf3ff); transition:color .4s ease; }
   .lp-logo .lp-mark-img { flex:none; width:40px; height:40px; border-radius:10px; object-fit:cover; box-shadow:0 0 16px -3px rgba(62,207,255,.4); }
   .lp-actions { display:flex; align-items:center; gap:12px; }
   .lp-kefu-btn, .lp-lang { display:inline-flex; align-items:center; gap:7px; height:40px; padding:0 15px; border-radius:10px; background:rgba(255,255,255,.06); border:1px solid rgba(140,180,240,.22); color:#cfe0f5; font-size:14px; font-family:inherit; cursor:pointer; transition:background .2s,border-color .2s; }
