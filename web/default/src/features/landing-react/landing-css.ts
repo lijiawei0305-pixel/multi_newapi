@@ -196,14 +196,14 @@ export const LANDING_CSS = `
      不支持 @property 的老浏览器降级为即时切换,渐变本身仍在。 */
   @property --wd-g1 { syntax: '<color>'; inherits: true; initial-value: #3ecfff; }
   @property --wd-g2 { syntax: '<color>'; inherits: true; initial-value: #8f7bff; }
+  /* 品牌名「WeDream AI」= 固定渐变,不随选中变色(用户要求所有 WeDream AI 名称不变色) */
   .hl1 {
     font-size:clamp(28px, 4.4vw, 52px); font-weight:700;
     letter-spacing:.1em; padding-left:.1em;
-    background:linear-gradient(96deg, var(--wd-g1), var(--wd-g2));
+    background:linear-gradient(96deg, #3ecfff, #8f7bff);
     -webkit-background-clip:text; background-clip:text;
     color:transparent; -webkit-text-fill-color:transparent;
     filter:drop-shadow(0 0 24px rgba(90,170,255,.3));
-    transition:--wd-g1 .55s ease, --wd-g2 .55s ease;
   }
   .hl2 {
     font-size:clamp(38px, 6vw, 72px); font-weight:800;
@@ -301,7 +301,7 @@ export const LANDING_CSS = `
   .lp-topbar { position:fixed; top:0; left:0; right:0; z-index:60; display:flex; align-items:center; justify-content:space-between; padding:16px clamp(20px,4vw,52px); pointer-events:none; }
   .lp-topbar > * { pointer-events:auto; }
   .lp-logo { display:flex; align-items:center; gap:10px; font-size:19px; font-weight:800; letter-spacing:.02em; color:#eaf3ff; }
-  .lp-logo span { color:var(--wd-brand, #eaf3ff); transition:color .4s ease; }
+  .lp-logo span { color:#eaf3ff; } /* 页眉品牌名固定色,不随选中变色 */
   .lp-logo .lp-mark-img { flex:none; width:40px; height:40px; border-radius:10px; object-fit:cover; box-shadow:0 0 16px -3px rgba(62,207,255,.4); }
   .lp-actions { display:flex; align-items:center; gap:12px; }
   .lp-kefu-btn, .lp-lang { display:inline-flex; align-items:center; gap:7px; height:40px; padding:0 15px; border-radius:10px; background:rgba(255,255,255,.06); border:1px solid rgba(140,180,240,.22); color:#cfe0f5; font-size:14px; font-family:inherit; cursor:pointer; transition:background .2s,border-color .2s; }
