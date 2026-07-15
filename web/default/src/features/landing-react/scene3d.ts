@@ -197,7 +197,6 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   const orbitMaterials: any[] = []
   const orbitGroups: any[] = []
   const flows: any[] = [] // 沿轨道飞驰的光点(第一版 .fp 的 3D 版)
-  const flowTex = makeGlowTexture('#dff1ff')
   class OrbitCurve extends Curve<Vector3> {
     radius: number
     constructor(radius: number) { super(); this.radius = radius }
@@ -232,6 +231,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     makeLayer(1.0, cfg.opacity) // 细核心线
     makeLayer(3.2, cfg.opacity * 0.22) // 细柔光
     // 沿轨道不断飞驰的光点(抄第一版:细线里运动的亮点),比图标快数倍;作为 group 子对象继承倾斜/进动/左移
+    // 颜色取该环颜色(而非白色,否则很突兀)
+    const flowTex = makeGlowTexture(cfg.color)
     const FLOW_N = cfg.ring === 'inner' ? 5 : 7
     for (let j = 0; j < FLOW_N; j++) {
       const s = new Sprite(new SpriteMaterial({ map: flowTex, transparent: true, opacity: 0.9, blending: AdditiveBlending, depthWrite: false }))
