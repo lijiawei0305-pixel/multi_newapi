@@ -196,6 +196,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   // ---- 两条 3D 管环轨道(灯泡居中于世界原点,轨道绕原点展开)----
   const orbitMaterials: any[] = []
   const orbitGroups: any[] = []
+  const flows: any[] = [] // 沿轨道飞驰的光点(第一版 .fp 的 3D 版)
+  const flowTex = makeGlowTexture('#dff1ff')
   class OrbitCurve extends Curve<Vector3> {
     radius: number
     constructor(radius: number) { super(); this.radius = radius }
@@ -227,9 +229,16 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       tube.raycast = () => {} // 布景,永不作为命中目标
       group.add(tube)
     }
-    makeLayer(1.0, cfg.opacity) // 亮核心线
-    makeLayer(2.8, cfg.opacity * 0.5) // 中层柔光(还原原版发光带的厚度)
-    makeLayer(6.5, cfg.opacity * 0.18) // 宽而暗的外 halo
+    makeLayer(1.0, cfg.opacity) // 细核心线
+    makeLayer(3.2, cfg.opacity * 0.22) // 细柔光
+    // 沿轨道不断飞驰的光点(抄第一版:细线里运动的亮点),比图标快数倍;作为 group 子对象继承倾斜/进动/左移
+    const FLOW_N = cfg.ring === 'inner' ? 5 : 7
+    for (let j = 0; j < FLOW_N; j++) {
+      const s = new Sprite(new SpriteMaterial({ map: flowTex, transparent: true, opacity: 0.85, blending: AdditiveBlending, depthWrite: false }))
+      s.scale.set(0.055, 0.055, 1); s.raycast = () => {}
+      group.add(s)
+      flows.push({ s, radius: cfg.radius, phase: (j / FLOW_N) * Math.PI * 2, speed: cfg.speed * 3.4 })
+    }
     return group
   }
   for (const cfg of ORBITS) orbitGroups.push({ group: createOrbit(cfg), cfg })
@@ -404,6 +413,16 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       const step = (Math.PI * 2) / cfg.keys.length
       const arr = material.uniforms.uSatAngles.value
       for (let i = 0; i < cfg.keys.length; i++) arr[i] = (i * step + cfg.speed * orbitPhase) % (Math.PI * 2)
+    }
+    // 光点沿轨道飞驰 + 远近淡化/缩放(随 orbitPhase,停轨时也停)
+    for (const fl of flows) {
+      const a = fl.phase + fl.speed * orbitPhase
+      fl.s.position.set(fl.radius * Math.cos(a), 0, fl.radius * Math.sin(a))
+      fl.s.getWorldPosition(_cw)
+      const d = Math.min(1, Math.max(0, (_cw.z + fl.radius) / (2 * fl.radius)))
+      fl.s.material.opacity = 0.2 + 0.8 * d
+      const sc = 0.03 + 0.035 * d
+      fl.s.scale.set(sc, sc, 1)
     }
     composer.render()
 
