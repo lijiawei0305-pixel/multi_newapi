@@ -234,8 +234,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     // 沿轨道不断飞驰的光点(抄第一版:细线里运动的亮点),比图标快数倍;作为 group 子对象继承倾斜/进动/左移
     const FLOW_N = cfg.ring === 'inner' ? 5 : 7
     for (let j = 0; j < FLOW_N; j++) {
-      const s = new Sprite(new SpriteMaterial({ map: flowTex, transparent: true, opacity: 0.85, blending: AdditiveBlending, depthWrite: false }))
-      s.scale.set(0.055, 0.055, 1); s.raycast = () => {}
+      const s = new Sprite(new SpriteMaterial({ map: flowTex, transparent: true, opacity: 0.9, blending: AdditiveBlending, depthWrite: false }))
+      s.scale.set(0.02, 0.02, 1); s.raycast = () => {}
       group.add(s)
       flows.push({ s, radius: cfg.radius, phase: (j / FLOW_N) * Math.PI * 2, speed: cfg.speed * 3.4 })
     }
@@ -420,8 +420,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       fl.s.position.set(fl.radius * Math.cos(a), 0, fl.radius * Math.sin(a))
       fl.s.getWorldPosition(_cw)
       const d = Math.min(1, Math.max(0, (_cw.z + fl.radius) / (2 * fl.radius)))
-      fl.s.material.opacity = 0.2 + 0.8 * d
-      const sc = 0.03 + 0.035 * d
+      fl.s.material.opacity = 0.25 + 0.75 * d
+      const sc = 0.011 + 0.013 * d // 小而清脆的光点(参考原版,别做成大光斑)
       fl.s.scale.set(sc, sc, 1)
     }
     composer.render()
