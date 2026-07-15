@@ -28,6 +28,7 @@ import { nextSelection } from './scene3d-interaction'
 
 const DATA_URL = '/lp-assets/dengpao_points.bin'
 const RENDER_H = 940 // 渲染缓冲高度固定(bloom 归一化一致);宽 = 高 × 盒子宽高比
+const BULB_SCALE = 1.5 // 灯泡整体放大(与轨道解耦:轨道半径在 config 里单独收小 → 大灯泡 + 小轨道)
 
 export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void> {
   const PRM = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -38,8 +39,10 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     uniform float uTime; uniform float uSize; uniform vec3 uEdgeColor;
     uniform vec3 uMouseOrigin; uniform vec3 uMouseDir;
     uniform float uRepelStrength; uniform float uRepelRadius; uniform float uRepelPower;
-    attribute vec3 aNormal; attribute float aRandom; varying vec3 vColor;
+    attribute vec3 aNormal; attribute float aRandom; varying vec3 vColor; varying float vBaseFade;
     void main() {
+      // 底座/下半致密粒子渐进调暗:越靠底越暗,灯泡主体(上半)不动。
+      vBaseFade = smoothstep(-0.55, 0.05, position.y);
       float breathingOffset = sin(uTime * 1.1 + aRandom * 6.28318) * 0.006;
       vec3 noiseOffset = vec3(
         sin(uTime * 0.5 + aRandom * 25.0), cos(uTime * 0.7 + aRandom * 30.0), sin(uTime * 0.9 + aRandom * 35.0)
@@ -63,14 +66,14 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       gl_PointSize = uSize * (300.0 / -mvPosition.z) * twinkle;
     }`
   const bulbFragmentShader = `
-    varying vec3 vColor;
+    varying vec3 vColor; varying float vBaseFade;
     void main() {
       float dist = length(gl_PointCoord - vec2(0.5));
       if (dist > 0.5) discard;
       float alpha = smoothstep(0.5, 0.06, dist);
       float core = smoothstep(0.12, 0.0, dist) * 0.6;
       vec3 finalColor = mix(vColor, vec3(1.0), core * 0.4);
-      gl_FragColor = vec4(finalColor, (alpha * 0.45 + core * 0.15) * 0.75);
+      gl_FragColor = vec4(finalColor, (alpha * 0.45 + core * 0.15) * 0.75 * mix(0.15, 1.0, vBaseFade));
     }`
   // luma→alpha:让透明画布正确叠加在页面(黑底/极光)之上
   const AlphaFromLumaShader = {
@@ -186,7 +189,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
 
   // 灯泡垂直居中(其视觉中线 ≈ y0,轨道将绕此展开)。相机用 yun 取景(fov 45)给轨道留空间。
   const top = Math.max(maxY, 0.5), bottom = Math.min(minY, -0.5)
-  root.position.y = -(top + bottom) / 2
+  root.scale.setScalar(BULB_SCALE)
+  root.position.y = (-(top + bottom) / 2) * BULB_SCALE
 
   // ---- 两条 3D 管环轨道(灯泡居中于世界原点,轨道绕原点展开)----
   const orbitMaterials: any[] = []
@@ -212,7 +216,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
           uTime: { value: 0 }, uDir: { value: Math.sign(cfg.speed) || 1 },
           uSatCount: { value: cfg.keys.length }, uSatAngles: { value: new Array(8).fill(0) },
           uWakeStrength: { value: cfg.wakeStrength }, uWakeFalloff: { value: cfg.wakeFalloff },
-          uBulbView: { value: new Vector3() }, uMaskRadius: { value: new Vector2(0.48, 0.7) },
+          uBulbView: { value: new Vector3() }, uMaskRadius: { value: new Vector2(0.48 * BULB_SCALE, 0.7 * BULB_SCALE) },
         },
         transparent: true, depthWrite: false, blending: AdditiveBlending,
       })
@@ -236,7 +240,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     if (points && points.length) {
       const geom = new BufferGeometry()
       geom.setAttribute('position', new BufferAttribute(points, 3))
-      pointsMaterial = new PointsMaterial({ color: new Color(brandColor), size: 0.006, transparent: true, opacity: 0.42, blending: AdditiveBlending, depthWrite: false })
+      pointsMaterial = new PointsMaterial({ color: new Color(brandColor), size: 0.004, transparent: true, opacity: 0.3, blending: AdditiveBlending, depthWrite: false })
       const pc = new Points(geom, pointsMaterial); pc.position.z = -0.03; pc.raycast = () => {}
       g.add(pc)
     }
@@ -261,8 +265,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
         const c = await drawLogoCanvas(LOGOS[key].replaceAll('__id__', 'u' + key), 256)
         const texture = new CanvasTexture(c); texture.colorSpace = SRGBColorSpace
         const img = c.getContext('2d').getImageData(0, 0, 256, 256)
-        const pts = sampleAlphaToPoints({ data: img.data, width: 256, height: 256 }, 1400, 0.05)
-        for (let i = 0; i < pts.length; i++) pts[i] *= 0.26 // 收束到 logo 尺度(billboard≈0.22),否则光晕点云过大很丑
+        const pts = sampleAlphaToPoints({ data: img.data, width: 256, height: 256 }, 2400, 0.04)
+        for (let i = 0; i < pts.length; i++) pts[i] *= 0.3 // 略大于 billboard(0.22)→ 作 logo 边缘的柔光晕;更密更小更淡(见下)以求不"脏"
         return { key, texture, pts }
       } catch (e) { console.warn('logo 加载失败', key, (e as any)?.message); return { key, texture: null, pts: new Float32Array(0) } }
     }))
@@ -282,7 +286,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   // ---- 后处理 ----
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
-  const bloom = new UnrealBloomPass(new Vector2(RENDER_H, RENDER_H), 0.45, 0.45, 0.9)
+  const bloom = new UnrealBloomPass(new Vector2(RENDER_H, RENDER_H), 0.32, 0.4, 0.92)
   composer.addPass(bloom)
   composer.addPass(new OutputPass())
   composer.addPass(new ShaderPass(AlphaFromLumaShader))

@@ -48,14 +48,14 @@ export type OrbitCfg = {
 
 export const ORBITS: OrbitCfg[] = [
   {
-    // speed 符号经截图校正:前方(底部)左→右。
-    ring: 'inner', color: '#8fd8ff', radius: 1.0, tubeRadius: 0.0028, opacity: 0.55, tilt: [0.5, 0, 0.12],
+    // speed 符号经截图校正:前方(底部)左→右。radius 收小:轨道更贴灯泡。
+    ring: 'inner', color: '#8fd8ff', radius: 0.85, tubeRadius: 0.0032, opacity: 0.55, tilt: [0.5, 0, 0.12],
     wobbleDeg: 4, wobblePeriod: 18, wobblePhase: 0, speed: -0.1,
     wakeStrength: 0.9, wakeFalloff: 5.0, keys: ['openai', 'anthropic', 'gemini', 'xai'],
   },
   {
     // 与内圈反向:前方(底部)右→左。
-    ring: 'outer', color: '#5f7cff', radius: 1.32, tubeRadius: 0.0018, opacity: 0.3, tilt: [0.72, 0, -0.38],
+    ring: 'outer', color: '#5f7cff', radius: 1.05, tubeRadius: 0.0022, opacity: 0.3, tilt: [0.72, 0, -0.38],
     wobbleDeg: 6, wobblePeriod: 18, wobblePhase: Math.PI, speed: 0.075,
     wakeStrength: 0.6, wakeFalloff: 6.0, keys: ['deepseek', 'qwen', 'minimax', 'doubao', 'kimi', 'glm_chatglm'],
   },
