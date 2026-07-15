@@ -238,7 +238,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       const s = new Sprite(new SpriteMaterial({ map: flowTex, transparent: true, opacity: 0.9, blending: AdditiveBlending, depthWrite: false }))
       s.scale.set(0.02, 0.02, 1); s.raycast = () => {}
       group.add(s)
-      flows.push({ s, radius: cfg.radius, phase: (j / FLOW_N) * Math.PI * 2, speed: cfg.speed * 3.4 })
+      flows.push({ s, radius: cfg.radius, phase: (j / FLOW_N) * Math.PI * 2, speed: cfg.flowSpeed })
     }
     return group
   }
