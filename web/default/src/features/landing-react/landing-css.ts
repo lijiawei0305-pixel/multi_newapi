@@ -3,21 +3,22 @@
    以「挂载时注入 <style>、卸载即移除」的方式使用（见 index.tsx），确保只在 /landing-react 路由存在，不永久污染全站。 */
 export const LANDING_CSS = `
   .wd-landing-root, .wd-landing-root * { margin:0; padding:0; box-sizing:border-box; }
-  .wd-landing-root { background:#020610; overflow-x:hidden; position:relative; min-height:100vh;
+  /* 黑色 Hero + 向下自然衔接:整页竖直渐变(顶部近纯黑 → 下方三屏渐融为深藏青,无硬边) */
+  .wd-landing-root { background:linear-gradient(180deg, #010207 0%, #01030b 18%, #03081a 58%, #061127 100%); overflow-x:hidden; position:relative; min-height:100vh;
     font-family:"PingFang SC","HarmonyOS Sans SC","MiSans","Microsoft YaHei",system-ui,sans-serif; }
   .wd-landing-root img, .wd-landing-root svg { display:block; }
 
   /* ---------- background: center glow + faint grid + vignette ---------- */
+  /* 底色由 .wd-landing-root 竖直渐变提供;#bg 只留灯泡背后一抹幽蓝辉光,且限定在 Hero(absolute+100vh),
+     滚到下面三屏时不残留辉光。 */
   #bg {
-    position:fixed; inset:0; z-index:0; pointer-events:none;
+    position:absolute; top:0; left:0; right:0; height:100vh; z-index:0; pointer-events:none;
     background:
-      radial-gradient(ellipse 40% 44% at 62% 46%, rgba(48,132,238,.18), transparent 66%),
-      radial-gradient(ellipse 52% 46% at 83% 18%, rgba(126,92,232,.13), transparent 70%),
-      radial-gradient(ellipse 48% 52% at 24% 84%, rgba(38,120,214,.10), transparent 72%),
-      radial-gradient(circle at 60% 46%, #0a1730 0%, #081226 44%, #040a1a 76%, #020610 100%);
+      radial-gradient(ellipse 34% 42% at 66% 44%, rgba(52,140,246,.16), transparent 66%),
+      radial-gradient(ellipse 38% 40% at 82% 16%, rgba(126,92,232,.07), transparent 72%);
   }
   #aurora {
-    position:fixed; inset:-25%; z-index:0; pointer-events:none; opacity:.7;
+    position:fixed; inset:-25%; z-index:0; pointer-events:none; opacity:.3;
     background:
       radial-gradient(ellipse 38% 40% at 34% 34%, rgba(96,124,255,.11), transparent 60%),
       radial-gradient(ellipse 42% 38% at 72% 66%, rgba(158,96,244,.09), transparent 62%),
