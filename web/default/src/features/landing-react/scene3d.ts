@@ -11,7 +11,7 @@ import {
   ACESFilmicToneMapping, AdditiveBlending, AmbientLight, BufferAttribute, BufferGeometry,
   CanvasTexture, Color, Curve, CylinderGeometry, DoubleSide, Group, MathUtils, Mesh,
   MeshBasicMaterial, MeshPhongMaterial, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry,
-  PointLight, Points, PointsMaterial, Quaternion, Scene, ShaderMaterial, SphereGeometry,
+  PointLight, Points, PointsMaterial, Quaternion, Raycaster, Scene, ShaderMaterial, SphereGeometry,
   SRGBColorSpace, Sprite, SpriteMaterial, TorusGeometry, TubeGeometry, Vector2, Vector3, WebGLRenderer,
 } from 'three'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
@@ -20,8 +20,11 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
-import { drawLogoCanvas, makeGlowTexture, sampleAlphaToPoints } from './scene3d-assets'
+import i18n from '@/i18n/config'
+
+import { approach, drawLogoCanvas, makeGlowTexture, sampleAlphaToPoints } from './scene3d-assets'
 import { LOGOS, MODELS, ORBITS } from './scene3d-config'
+import { nextSelection } from './scene3d-interaction'
 
 const DATA_URL = '/lp-assets/dengpao_points.bin'
 const RENDER_H = 940 // 渲染缓冲高度固定(bloom 归一化一致);宽 = 高 × 盒子宽高比
@@ -342,6 +345,38 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     surge()
   }
 
+  // ---- 悬停锁定 + 缓停 + HUD/染色/让位 ----
+  const varsEl = (canvas.closest('.wd-landing-root') as HTMLElement) || document.documentElement
+  const raycaster = new Raycaster()
+  raycaster.params.Points.threshold = 0.02
+  let orbitPhase = 0, speedFactor = 1
+  let selected: string | null = null
+
+  // HUD 文案走现有中文 i18n(key=英文原句;W5)。DOM 结构在 index.tsx 的 #hud。
+  function setHud(m: any) {
+    const set = (id: string, val: string) => { const el = document.getElementById(id); if (el) el.textContent = val }
+    set('hud-prov', i18n.t(m.provider)); set('hud-name', i18n.t(m.name)); set('hud-desc', i18n.t(m.desc))
+    set('hud-scene', m.scene ? i18n.t(m.scene) : ''); set('hud-tele', i18n.t(m.telemetry))
+    const box = document.getElementById('hud'); if (box) (box as HTMLElement).style.borderLeftColor = m.color
+    const dot = document.querySelector('#hud .hud-dot') as HTMLElement | null; if (dot) dot.style.background = m.color
+  }
+  function onSelectChange(key: string | null) {
+    const hudBox = document.getElementById('hud')
+    const heroRight = document.querySelector('.hero-right')
+    if (key) {
+      setHud(MODELS[key])
+      hudBox?.classList.add('show'); heroRight?.classList.add('card-open')
+      setCoreColor(MODELS[key].color)
+      varsEl.style.setProperty('--wd-brand', MODELS[key].color)
+      document.body.style.cursor = 'pointer'
+    } else {
+      hudBox?.classList.remove('show'); heroRight?.classList.remove('card-open')
+      setCoreColor(null)
+      varsEl.style.removeProperty('--wd-brand')
+      document.body.style.cursor = ''
+    }
+  }
+
   // ---- 动画 ----
   let last = 0, heroVisible = true, rafId = 0
   const stageEl = document.querySelector('.hero-stage')
@@ -372,22 +407,25 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     const env = (k >= 0 && k <= 1) ? Math.sin(Math.PI * k) : 0
     glowSprite.material.opacity = 0.12 + 0.12 * env
     pointLight.intensity = 1.5 + 1.3 * env
-    // 轨道着色器:能量流时间 + 灯泡视空间中心(剪影遮罩)+ 卫星角度(彗尾)。角度公式与卫星循环一致。
+    // 轨道相位累积时钟:speedFactor 缓动 1↔0 → 悬停时整轨平滑冻结、移开平滑恢复,不跳帧。
+    orbitPhase += dt * speedFactor
+    // 轨道着色器:能量流 + 灯泡视空间中心(剪影遮罩)+ 卫星角度(彗尾)。角度都用 orbitPhase,与卫星循环一致。
     camera.updateMatrixWorld()
     _bulbView.set(0, 0, 0).applyMatrix4(camera.matrixWorldInverse)
     for (const { material, cfg } of orbitMaterials) {
-      material.uniforms.uTime.value = t
+      material.uniforms.uTime.value = orbitPhase
       material.uniforms.uBulbView.value.copy(_bulbView)
       const step = (Math.PI * 2) / cfg.keys.length
       const arr = material.uniforms.uSatAngles.value
-      for (let i = 0; i < cfg.keys.length; i++) arr[i] = (i * step + cfg.speed * t) % (Math.PI * 2)
+      for (let i = 0; i < cfg.keys.length; i++) arr[i] = (i * step + cfg.speed * orbitPhase) % (Math.PI * 2)
     }
-    // 卫星:公转位置 + 朝相机 billboard + 远近淡化/缩放
+    // 卫星:公转(orbitPhase)+ 朝相机 billboard + 远近淡化/缩放 + 悬停放大变亮(缓动)
     for (const sat of satellites) {
       const ud = sat.userData
-      const angle = ud.baseAngle + ud.speed * t
+      ud.hoverScale = approach(ud.hoverScale, selected === ud.key ? 1.2 : 1.0, 8, dt)
+      const angle = ud.baseAngle + ud.speed * orbitPhase
       const r = ud.radius
-      sat.position.set(r * Math.cos(angle), Math.sin(t * 1.5 + ud.baseAngle) * 0.03, r * Math.sin(angle))
+      sat.position.set(r * Math.cos(angle), Math.sin(orbitPhase * 1.5 + ud.baseAngle) * 0.03, r * Math.sin(angle))
       sat.parent.getWorldQuaternion(_parentQuat)
       sat.quaternion.copy(_parentQuat.invert()).multiply(camera.quaternion)
       sat.getWorldPosition(_worldPos)
@@ -395,15 +433,27 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       const hoverBoost = (ud.hoverScale - 1.0) * 1.25
       if (ud.pointsMaterial) {
         ud.pointsMaterial.size = 0.006 + 0.002 * Math.sin(t * 2.5 + ud.baseAngle)
-        ud.pointsMaterial.opacity = Math.min(0.7, 0.15 + 0.4 * distFactor + hoverBoost)
+        ud.pointsMaterial.opacity = Math.min(0.85, 0.15 + 0.4 * distFactor + hoverBoost)
       }
-      if (ud.logoMaterial) ud.logoMaterial.opacity = 0.35 + 0.65 * distFactor
+      if (ud.logoMaterial) ud.logoMaterial.opacity = Math.min(1, 0.35 + 0.65 * distFactor + hoverBoost)
       ud.glowMaterial.opacity = (0.16 + (ud.hoverScale - 1.0) * 0.9) * distFactor
       const s = ud.hoverScale * ud.clickPulse * distFactor
       sat.scale.set(s, s, s)
       ud.rimMaterial.opacity = 0.4 * distFactor
     }
     composer.render()
+
+    // 悬停命中(渲染后世界矩阵最新)→ 吸附锁定(nextSelection)→ 缓停/恢复
+    let hitKey: string | null = null
+    if (pointerInCanvas) {
+      raycaster.setFromCamera(mouseNDC, camera)
+      const hits = raycaster.intersectObjects(satellites, true)
+      for (const h of hits) { let o: any = h.object; while (o && o.userData?.key === undefined) o = o.parent; if (o?.userData?.key) { hitKey = o.userData.key; break } }
+    }
+    const prevSel = selected
+    selected = nextSelection(selected, hitKey, pointerInCanvas)
+    if (selected !== prevSel) onSelectChange(selected)
+    speedFactor = approach(speedFactor, selected ? 0 : 1, 3, dt)
   }
   function loop(nowMs: number) {
     rafId = requestAnimationFrame(loop)
@@ -414,7 +464,19 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   }
 
   ;(window as any).__scene3dActive = true
-  ;(window as any).__scene3d = { surge, setCoreColor, get points() { return bulbPoints.geometry.attributes.position.count } }
+  ;(window as any).__scene3d = {
+    surge, setCoreColor,
+    get points() { return bulbPoints.geometry.attributes.position.count },
+    get selected() { return selected },
+    // 调试:返回各卫星当前屏幕坐标(供 playwright 精确悬停验证)
+    satScreens() {
+      const rect = canvas.getBoundingClientRect()
+      return satellites.map((s: any) => {
+        const p = new Vector3(); s.getWorldPosition(p); p.project(camera)
+        return { key: s.userData.key, x: rect.left + (p.x * 0.5 + 0.5) * rect.width, y: rect.top + (-p.y * 0.5 + 0.5) * rect.height, z: p.z }
+      })
+    },
+  }
 
   layoutSize()
   if (PRM) renderTick(FROZEN_T, 0.016)
