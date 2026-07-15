@@ -195,8 +195,8 @@ export const LANDING_CSS = `
   /* 标题两行 = 渐变文字;选中模型时渐变色平滑过渡到该模型色系。
      @property 让「渐变里的颜色」可 transition(普通 CSS 变量做不到平滑渐变过渡);
      不支持 @property 的老浏览器降级为即时切换,渐变本身仍在。 */
-  @property --wd-g1 { syntax: '<color>'; inherits: true; initial-value: #3ecfff; }
-  @property --wd-g2 { syntax: '<color>'; inherits: true; initial-value: #8f7bff; }
+  @property --wd-g1 { syntax: '<color>'; inherits: true; initial-value: #8A9EB7; }
+  @property --wd-g2 { syntax: '<color>'; inherits: true; initial-value: #F3F6FA; }
   /* 品牌名「WeDream AI」= 纯白,固定不变色(用户要求) */
   .hl1 {
     font-size:clamp(28px, 4.4vw, 52px); font-weight:700;
