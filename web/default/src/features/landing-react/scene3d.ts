@@ -409,6 +409,11 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     pointLight.intensity = 1.5 + 1.3 * env
     // 轨道相位累积时钟:speedFactor 缓动 1↔0 → 悬停时整轨平滑冻结、移开平滑恢复,不跳帧。
     orbitPhase += dt * speedFactor
+    // 进动摆:两环反相小幅左右摆(内 ±4° / 外 ±6°,周期 18s);随 orbitPhase 一起冻结(停轨时也停摆)。
+    for (const { group, cfg } of orbitGroups) {
+      const wob = (cfg.wobbleDeg * Math.PI / 180) * Math.sin((2 * Math.PI * orbitPhase) / cfg.wobblePeriod + cfg.wobblePhase)
+      group.rotation.set(cfg.tilt[0], cfg.tilt[1] + wob, cfg.tilt[2])
+    }
     // 轨道着色器:能量流 + 灯泡视空间中心(剪影遮罩)+ 卫星角度(彗尾)。角度都用 orbitPhase,与卫星循环一致。
     camera.updateMatrixWorld()
     _bulbView.set(0, 0, 0).applyMatrix4(camera.matrixWorldInverse)
