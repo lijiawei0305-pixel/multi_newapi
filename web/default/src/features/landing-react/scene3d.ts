@@ -206,10 +206,14 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     }
   }
   function createOrbit(cfg: any) {
-    const group = new Group()
-    group.rotation.set(cfg.tilt[0], cfg.tilt[1], cfg.tilt[2])
-    group.position.x = SHIFT_X // 与灯泡同步左移
-    scene.add(group)
+    // 嵌套:spinGroup 绕竖直轴进动(= 轨道本体旋转)→ tiltGroup 固定倾角(挂管环+光点)。
+    // 这样倾斜环整体绕灯泡缓慢转动,而不是原地静止。
+    const spinGroup = new Group()
+    spinGroup.position.x = SHIFT_X // 与灯泡同步左移
+    scene.add(spinGroup)
+    const tiltGroup = new Group()
+    tiltGroup.rotation.set(cfg.tilt[0], cfg.tilt[1], cfg.tilt[2])
+    spinGroup.add(tiltGroup)
     const makeLayer = (radiusScale: number, opacity: number) => {
       const geometry = new TubeGeometry(new OrbitCurve(cfg.radius), 256, cfg.tubeRadius * radiusScale, 6, true)
       const material = new ShaderMaterial({
@@ -226,23 +230,25 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       orbitMaterials.push({ material, cfg })
       const tube = new Mesh(geometry, material)
       tube.raycast = () => {} // 布景,永不作为命中目标
-      group.add(tube)
+      tiltGroup.add(tube)
     }
     makeLayer(1.0, cfg.opacity) // 细核心线
     makeLayer(3.2, cfg.opacity * 0.22) // 细柔光
-    // 沿轨道不断飞驰的光点(抄第一版:细线里运动的亮点),比图标快数倍;作为 group 子对象继承倾斜/进动/左移
-    // 颜色取该环颜色(而非白色,否则很突兀)
+    // 沿环流动的光点(细线里的亮点),颜色取该环颜色;随环一起进动。
     const flowTex = makeGlowTexture(cfg.color)
     const FLOW_N = cfg.ring === 'inner' ? 5 : 7
     for (let j = 0; j < FLOW_N; j++) {
       const s = new Sprite(new SpriteMaterial({ map: flowTex, transparent: true, opacity: 0.9, blending: AdditiveBlending, depthWrite: false }))
       s.scale.set(0.02, 0.02, 1); s.raycast = () => {}
-      group.add(s)
+      tiltGroup.add(s)
       flows.push({ s, radius: cfg.radius, phase: (j / FLOW_N) * Math.PI * 2, speed: cfg.flowSpeed })
     }
-    return group
+    return { spinGroup, tiltGroup }
   }
-  for (const cfg of ORBITS) orbitGroups.push({ group: createOrbit(cfg), cfg })
+  for (const cfg of ORBITS) {
+    const g = createOrbit(cfg)
+    orbitGroups.push({ spinGroup: g.spinGroup, tiltGroup: g.tiltGroup, cfg })
+  }
   const _bulbView = new Vector3()
 
   // ---- 卫星 = DOM 芯片(用户原版样式:深色圆盘 + 发光边框 + 慢速自转)。放弃全息点云(用户不满意)。
@@ -251,7 +257,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   const chips: any[] = []
   const addedChips: HTMLElement[] = []
   let hoverKey: string | null = null
-  orbitGroups.forEach(({ group, cfg }: any, b: number) => {
+  orbitGroups.forEach(({ tiltGroup, cfg }: any, b: number) => {
     const step = (Math.PI * 2) / cfg.keys.length
     cfg.keys.forEach((key: string, i: number) => {
       const el = document.createElement('div')
@@ -265,7 +271,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       el.addEventListener('mouseenter', () => { hoverKey = key })
       el.addEventListener('mouseleave', () => { hoverKey = null })
       stage.appendChild(el); addedChips.push(el)
-      chips.push({ el, group, baseAngle: i * step, speed: cfg.speed, radius: cfg.radius, zi: -1 })
+      chips.push({ el, group: tiltGroup, baseAngle: i * step, speed: cfg.speed, radius: cfg.radius, zi: -1 })
     })
   })
   const _cw = new Vector3()
@@ -412,10 +418,9 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     pointLight.intensity = 1.5 + 1.3 * env
     // 轨道相位累积时钟:speedFactor 缓动 1↔0 → 悬停时整轨平滑冻结、移开平滑恢复,不跳帧。
     orbitPhase += dt * speedFactor
-    // 进动摆:两环反相小幅左右摆(内 ±4° / 外 ±6°,周期 18s);随 orbitPhase 一起冻结(停轨时也停摆)。
-    for (const { group, cfg } of orbitGroups) {
-      const wob = (cfg.wobbleDeg * Math.PI / 180) * Math.sin((2 * Math.PI * orbitPhase) / cfg.wobblePeriod + cfg.wobblePhase)
-      group.rotation.set(cfg.tilt[0], cfg.tilt[1] + wob, cfg.tilt[2])
+    // 轨道本体旋转:整条倾斜环绕竖直轴缓慢进动(外顺时针 / 内逆时针);随 orbitPhase 冻结(停轨时也停)。
+    for (const { spinGroup, cfg } of orbitGroups) {
+      spinGroup.rotation.y = cfg.ringSpin * orbitPhase
     }
     // 轨道着色器:能量流 + 灯泡视空间中心(剪影遮罩)+ 卫星角度(彗尾)。角度都用 orbitPhase,与卫星循环一致。
     camera.updateMatrixWorld()

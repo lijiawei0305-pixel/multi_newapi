@@ -40,8 +40,9 @@ export type OrbitCfg = {
   wobbleDeg: number
   wobblePeriod: number
   wobblePhase: number
-  speed: number // 图标(logo/chip)公转角速度
-  flowSpeed: number // 轨道本体(光点)角速度,与 speed 同向、通常更慢
+  speed: number // 图标(logo/chip)沿环公转角速度(相对环)
+  flowSpeed: number // 光点沿环流动角速度
+  ringSpin: number // 轨道本体:整条倾斜环绕竖直轴的进动角速度(外顺时针/内逆时针,慢)
   wakeStrength: number
   wakeFalloff: number
   keys: string[]
@@ -51,13 +52,13 @@ export const ORBITS: OrbitCfg[] = [
   {
     // 内圈:逆时针(前方左→右);倾角略小。图标 11.4s/圈、光点 26s/圈。
     ring: 'inner', color: '#8fd8ff', radius: 0.85, tubeRadius: 0.0022, opacity: 0.5, tilt: [0.5, 0, 0.12],
-    wobbleDeg: 4, wobblePeriod: 18, wobblePhase: 0, speed: -0.55, flowSpeed: -0.24,
+    wobbleDeg: 4, wobblePeriod: 18, wobblePhase: 0, speed: -0.55, flowSpeed: -0.24, ringSpin: 0.24,
     wakeStrength: 0.9, wakeFalloff: 5.0, keys: ['openai', 'anthropic', 'gemini', 'xai'],
   },
   {
     // 外圈:顺时针(前方右→左);倾角较大。图标 16.1s/圈、光点 34s/圈。
     ring: 'outer', color: '#5f7cff', radius: 1.05, tubeRadius: 0.0016, opacity: 0.34, tilt: [0.72, 0, -0.38],
-    wobbleDeg: 6, wobblePeriod: 18, wobblePhase: Math.PI, speed: 0.39, flowSpeed: 0.185,
+    wobbleDeg: 6, wobblePeriod: 18, wobblePhase: Math.PI, speed: 0.39, flowSpeed: 0.185, ringSpin: -0.185,
     wakeStrength: 0.6, wakeFalloff: 6.0, keys: ['deepseek', 'qwen', 'minimax', 'doubao', 'kimi', 'glm_chatglm'],
   },
 ]
