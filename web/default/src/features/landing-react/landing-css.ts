@@ -196,14 +196,12 @@ export const LANDING_CSS = `
      不支持 @property 的老浏览器降级为即时切换,渐变本身仍在。 */
   @property --wd-g1 { syntax: '<color>'; inherits: true; initial-value: #3ecfff; }
   @property --wd-g2 { syntax: '<color>'; inherits: true; initial-value: #8f7bff; }
-  /* 品牌名「WeDream AI」= 固定渐变,不随选中变色(用户要求所有 WeDream AI 名称不变色) */
+  /* 品牌名「WeDream AI」= 纯白,固定不变色(用户要求) */
   .hl1 {
     font-size:clamp(28px, 4.4vw, 52px); font-weight:700;
     letter-spacing:.1em; padding-left:.1em;
-    background:linear-gradient(96deg, #3ecfff, #8f7bff);
-    -webkit-background-clip:text; background-clip:text;
-    color:transparent; -webkit-text-fill-color:transparent;
-    filter:drop-shadow(0 0 24px rgba(90,170,255,.3));
+    color:#fff;
+    text-shadow:0 0 26px rgba(90,170,255,.3);
   }
   .hl2 {
     font-size:clamp(38px, 6vw, 72px); font-weight:800;
