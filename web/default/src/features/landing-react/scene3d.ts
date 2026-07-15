@@ -129,7 +129,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   renderer.setClearColor(0x000000, 0)
 
   const scene = new Scene()
-  const camera = new PerspectiveCamera(45, 1, 0.1, 100)
+  // fov 越小 = 灯泡+轨道整体越大(向原项目的大灯泡靠拢);外环 radius 1.32 在 fov 33 半高 ~1.36 内仍不裁切。
+  const camera = new PerspectiveCamera(33, 1, 0.1, 100)
   camera.position.set(0, 0, 4.6)
 
   scene.add(new AmbientLight('#040d20', 1.5))
@@ -176,9 +177,9 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   const dome = new Mesh(new SphereGeometry(0.36, 40, 40), glassMat); dome.position.y = 0.14; root.add(dome)
   const neck = new Mesh(new CylinderGeometry(0.36, 0.2, 0.32, 32, 1, true), glassMat); neck.position.y = -0.16; root.add(neck)
   const glowSprite = new Sprite(new SpriteMaterial({
-    map: makeGlowTexture('#00f0ff'), transparent: true, opacity: 0.36, blending: AdditiveBlending, depthWrite: false,
+    map: makeGlowTexture('#00f0ff'), transparent: true, opacity: 0.12, blending: AdditiveBlending, depthWrite: false,
   }))
-  glowSprite.scale.set(0.65, 0.65, 1.0); glowSprite.position.y = 0.14; root.add(glowSprite)
+  glowSprite.scale.set(0.5, 0.5, 1.0); glowSprite.position.y = 0.16; root.add(glowSprite)
 
   // 灯泡垂直居中(其视觉中线 ≈ y0,轨道将绕此展开)。相机用 yun 取景(fov 45)给轨道留空间。
   const top = Math.max(maxY, 0.5), bottom = Math.min(minY, -0.5)
@@ -232,7 +233,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     if (points && points.length) {
       const geom = new BufferGeometry()
       geom.setAttribute('position', new BufferAttribute(points, 3))
-      pointsMaterial = new PointsMaterial({ color: new Color(brandColor), size: 0.007, transparent: true, opacity: 0.45, blending: AdditiveBlending, depthWrite: false })
+      pointsMaterial = new PointsMaterial({ color: new Color(brandColor), size: 0.006, transparent: true, opacity: 0.42, blending: AdditiveBlending, depthWrite: false })
       const pc = new Points(geom, pointsMaterial); pc.position.z = -0.03; pc.raycast = () => {}
       g.add(pc)
     }
@@ -257,7 +258,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
         const c = await drawLogoCanvas(LOGOS[key].replaceAll('__id__', 'u' + key), 256)
         const texture = new CanvasTexture(c); texture.colorSpace = SRGBColorSpace
         const img = c.getContext('2d').getImageData(0, 0, 256, 256)
-        const pts = sampleAlphaToPoints({ data: img.data, width: 256, height: 256 }, 1600, 0.06)
+        const pts = sampleAlphaToPoints({ data: img.data, width: 256, height: 256 }, 1400, 0.05)
+        for (let i = 0; i < pts.length; i++) pts[i] *= 0.26 // 收束到 logo 尺度(billboard≈0.22),否则光晕点云过大很丑
         return { key, texture, pts }
       } catch (e) { console.warn('logo 加载失败', key, (e as any)?.message); return { key, texture: null, pts: new Float32Array(0) } }
     }))
@@ -277,7 +279,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   // ---- 后处理 ----
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
-  const bloom = new UnrealBloomPass(new Vector2(RENDER_H, RENDER_H), 0.6, 0.45, 0.85)
+  const bloom = new UnrealBloomPass(new Vector2(RENDER_H, RENDER_H), 0.45, 0.45, 0.9)
   composer.addPass(bloom)
   composer.addPass(new OutputPass())
   composer.addPass(new ShaderPass(AlphaFromLumaShader))
@@ -368,7 +370,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     root.rotation.y = t * 0.02
     const k = (t - surgeT0) / 0.7
     const env = (k >= 0 && k <= 1) ? Math.sin(Math.PI * k) : 0
-    glowSprite.material.opacity = 0.36 + 0.27 * env
+    glowSprite.material.opacity = 0.12 + 0.12 * env
     pointLight.intensity = 1.5 + 1.3 * env
     // 轨道着色器:能量流时间 + 灯泡视空间中心(剪影遮罩)+ 卫星角度(彗尾)。角度公式与卫星循环一致。
     camera.updateMatrixWorld()
