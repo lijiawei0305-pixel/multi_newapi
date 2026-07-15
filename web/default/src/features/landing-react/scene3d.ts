@@ -225,8 +225,9 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       tube.raycast = () => {} // 布景,永不作为命中目标
       group.add(tube)
     }
-    makeLayer(1.0, cfg.opacity) // 细锐核心线
-    makeLayer(4.0, cfg.opacity * 0.22) // 宽而暗的光晕
+    makeLayer(1.0, cfg.opacity) // 亮核心线
+    makeLayer(2.8, cfg.opacity * 0.5) // 中层柔光(还原原版发光带的厚度)
+    makeLayer(6.5, cfg.opacity * 0.18) // 宽而暗的外 halo
     return group
   }
   for (const cfg of ORBITS) orbitGroups.push({ group: createOrbit(cfg), cfg })
@@ -260,7 +261,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   // ---- 后处理 ----
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
-  const bloom = new UnrealBloomPass(new Vector2(RENDER_H, RENDER_H), 0.32, 0.4, 0.92)
+  const bloom = new UnrealBloomPass(new Vector2(RENDER_H, RENDER_H), 0.45, 0.42, 0.9)
   composer.addPass(bloom)
   composer.addPass(new OutputPass())
   composer.addPass(new ShaderPass(AlphaFromLumaShader))

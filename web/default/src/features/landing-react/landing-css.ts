@@ -128,7 +128,7 @@ export const LANDING_CSS = `
   body.webgl3d #scene3d { display:block; }
   body.webgl3d #halo, body.webgl3d #bulb { display:none; }
 
-  .wd-landing-root { --chip:52px; --cy:42%; --cx:50%; --b3d:400px; }
+  .wd-landing-root { --chip:80px; --cy:42%; --cx:50%; --b3d:400px; }
   .chip {
     position:absolute; left:var(--cx); top:var(--cy);
     width:var(--chip); height:var(--chip);
