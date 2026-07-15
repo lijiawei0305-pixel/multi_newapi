@@ -232,56 +232,30 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   for (const cfg of ORBITS) orbitGroups.push({ group: createOrbit(cfg), cfg })
   const _bulbView = new Vector3()
 
-  // ---- 卫星:三层全息(品牌色光晕点云 + 微光背/金属环 + 朝相机的 billboard logo)----
-  const satellites: any[] = []
-  function createSatellite3D(points: Float32Array, texture: any, brandColor: string, key: string, parentGroup: any, radius: number, baseAngle: number, speed: number) {
-    const g = new Group()
-    let pointsMaterial: any = null
-    if (points && points.length) {
-      const geom = new BufferGeometry()
-      geom.setAttribute('position', new BufferAttribute(points, 3))
-      pointsMaterial = new PointsMaterial({ color: new Color(brandColor), size: 0.004, transparent: true, opacity: 0.3, blending: AdditiveBlending, depthWrite: false })
-      const pc = new Points(geom, pointsMaterial); pc.position.z = -0.03; pc.raycast = () => {}
-      g.add(pc)
-    }
-    const glowMaterial = new SpriteMaterial({ map: makeGlowTexture(brandColor), transparent: true, opacity: 0.16, blending: AdditiveBlending, depthWrite: false })
-    const glow = new Sprite(glowMaterial); glow.scale.set(0.55, 0.55, 1.0); glow.position.z = -0.06; glow.raycast = () => {}; g.add(glow)
-    const rimMaterial = new MeshStandardMaterial({ color: new Color(brandColor), metalness: 0.9, roughness: 0.1, transparent: true, opacity: 0.4 })
-    g.add(new Mesh(new TorusGeometry(0.128, 0.006, 8, 32), rimMaterial))
-    const disc = new Mesh(new CylinderGeometry(0.128, 0.128, 0.012, 32), new MeshPhongMaterial({ color: 0x90d0ff, transparent: true, opacity: 0.06, shininess: 120, specular: 0xffffff, side: DoubleSide, depthWrite: false }))
-    disc.rotation.x = Math.PI / 2; g.add(disc)
-    let logoMaterial: any = null
-    if (texture) {
-      logoMaterial = new MeshBasicMaterial({ map: texture, transparent: true, toneMapped: false, depthWrite: false })
-      const logo = new Mesh(new PlaneGeometry(0.22, 0.22), logoMaterial); logo.position.z = 0.02; g.add(logo)
-    }
-    g.userData = { key, radius, baseAngle, speed, hoverScale: 1.0, clickPulse: 1.0, rimMaterial, glowMaterial, pointsMaterial, logoMaterial }
-    parentGroup.add(g); satellites.push(g)
-  }
-  {
-    const allKeys = ORBITS.flatMap((o) => o.keys)
-    const loaded = await Promise.all(allKeys.map(async (key) => {
-      try {
-        const c = await drawLogoCanvas(LOGOS[key].replaceAll('__id__', 'u' + key), 256)
-        const texture = new CanvasTexture(c); texture.colorSpace = SRGBColorSpace
-        const img = c.getContext('2d').getImageData(0, 0, 256, 256)
-        const pts = sampleAlphaToPoints({ data: img.data, width: 256, height: 256 }, 2400, 0.04)
-        for (let i = 0; i < pts.length; i++) pts[i] *= 0.3 // 略大于 billboard(0.22)→ 作 logo 边缘的柔光晕;更密更小更淡(见下)以求不"脏"
-        return { key, texture, pts }
-      } catch (e) { console.warn('logo 加载失败', key, (e as any)?.message); return { key, texture: null, pts: new Float32Array(0) } }
-    }))
-    const byKey: any = {}
-    for (const l of loaded) byKey[l.key] = l
-    for (const { group, cfg } of orbitGroups) {
-      const step = (Math.PI * 2) / cfg.keys.length
-      cfg.keys.forEach((key: string, i: number) => {
-        const l = byKey[key]
-        createSatellite3D(l.pts, l.texture, MODELS[key].color, key, group, cfg.radius, i * step, cfg.speed)
-      })
-    }
-  }
-  const _parentQuat = new Quaternion()
-  const _worldPos = new Vector3()
+  // ---- 卫星 = DOM 芯片(用户原版样式:深色圆盘 + 发光边框 + 慢速自转)。放弃全息点云(用户不满意)。
+  //      位置由 3D 轨道投影驱动;前后遮挡靠 z-index 穿过透明画布(近=z7 压画布 / 远=z5 被灯泡挡)。----
+  const stage = canvas.parentElement as HTMLElement // .hero-visual
+  const chips: any[] = []
+  const addedChips: HTMLElement[] = []
+  let hoverKey: string | null = null
+  orbitGroups.forEach(({ group, cfg }: any, b: number) => {
+    const step = (Math.PI * 2) / cfg.keys.length
+    cfg.keys.forEach((key: string, i: number) => {
+      const el = document.createElement('div')
+      el.className = 'chip ' + (b === 0 ? 'main' : 'alt')
+      el.dataset.mid = key
+      const spin = 12 + ((b * 5 + i * 7) % 9)
+      const dir = (i + b) % 2 ? 'reverse' : 'normal'
+      el.innerHTML = `<span class="shell"><span class="disc" style="--spin:${spin}s;--dir:${dir}">`
+        + LOGOS[key].replaceAll('__id__', 'u' + b + '_' + i) + '</span></span>'
+      el.style.left = '0'; el.style.top = '0'; el.style.margin = '0'; el.style.pointerEvents = 'auto'
+      el.addEventListener('mouseenter', () => { hoverKey = key })
+      el.addEventListener('mouseleave', () => { hoverKey = null })
+      stage.appendChild(el); addedChips.push(el)
+      chips.push({ el, group, baseAngle: i * step, speed: cfg.speed, radius: cfg.radius, zi: -1 })
+    })
+  })
+  const _cw = new Vector3()
 
   // ---- 后处理 ----
   const composer = new EffectComposer(renderer)
@@ -428,39 +402,27 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       const arr = material.uniforms.uSatAngles.value
       for (let i = 0; i < cfg.keys.length; i++) arr[i] = (i * step + cfg.speed * orbitPhase) % (Math.PI * 2)
     }
-    // 卫星:公转(orbitPhase)+ 朝相机 billboard + 远近淡化/缩放 + 悬停放大变亮(缓动)
-    for (const sat of satellites) {
-      const ud = sat.userData
-      ud.hoverScale = approach(ud.hoverScale, selected === ud.key ? 1.2 : 1.0, 8, dt)
-      const angle = ud.baseAngle + ud.speed * orbitPhase
-      const r = ud.radius
-      sat.position.set(r * Math.cos(angle), Math.sin(orbitPhase * 1.5 + ud.baseAngle) * 0.03, r * Math.sin(angle))
-      sat.parent.getWorldQuaternion(_parentQuat)
-      sat.quaternion.copy(_parentQuat.invert()).multiply(camera.quaternion)
-      sat.getWorldPosition(_worldPos)
-      const distFactor = MathUtils.clamp(MathUtils.mapLinear(camera.position.distanceTo(_worldPos), 3.2, 5.8, 1.0, 0.5), 0.5, 1.0)
-      const hoverBoost = (ud.hoverScale - 1.0) * 1.25
-      if (ud.pointsMaterial) {
-        ud.pointsMaterial.size = 0.006 + 0.002 * Math.sin(t * 2.5 + ud.baseAngle)
-        ud.pointsMaterial.opacity = Math.min(0.85, 0.15 + 0.4 * distFactor + hoverBoost)
-      }
-      if (ud.logoMaterial) ud.logoMaterial.opacity = Math.min(1, 0.35 + 0.65 * distFactor + hoverBoost)
-      ud.glowMaterial.opacity = (0.16 + (ud.hoverScale - 1.0) * 0.9) * distFactor
-      const s = ud.hoverScale * ud.clickPulse * distFactor
-      sat.scale.set(s, s, s)
-      ud.rimMaterial.opacity = 0.4 * distFactor
-    }
     composer.render()
 
-    // 悬停命中(渲染后世界矩阵最新)→ 吸附锁定(nextSelection)→ 缓停/恢复
-    let hitKey: string | null = null
-    if (pointerInCanvas) {
-      raycaster.setFromCamera(mouseNDC, camera)
-      const hits = raycaster.intersectObjects(satellites, true)
-      for (const h of hits) { let o: any = h.object; while (o && o.userData?.key === undefined) o = o.parent; if (o?.userData?.key) { hitKey = o.userData.key; break } }
+    // 芯片定位:投影 3D 轨道位置到屏幕 + z-index 前后遮挡(渲染后 matrixWorld 含本帧进动摆)
+    const cw = canvas.clientWidth || 1, ch = canvas.clientHeight || 1
+    for (const c of chips) {
+      const angle = c.baseAngle + c.speed * orbitPhase
+      _cw.set(c.radius * Math.cos(angle), Math.sin(orbitPhase * 1.5 + c.baseAngle) * 0.03, c.radius * Math.sin(angle))
+      c.group.localToWorld(_cw)
+      const worldZ = _cw.z
+      _cw.project(camera)
+      const px = (_cw.x * 0.5 + 0.5) * cw, py = (-_cw.y * 0.5 + 0.5) * ch
+      const d = Math.min(1, Math.max(0, (worldZ + c.radius) / (2 * c.radius)))
+      c.el.style.transform = `translate(${px.toFixed(1)}px,${py.toFixed(1)}px) translate(-50%,-50%) scale(${(0.62 + 0.5 * d).toFixed(3)})`
+      c.el.style.opacity = (0.35 + 0.65 * d).toFixed(3)
+      const zi = worldZ > 0 ? 7 : 5
+      if (zi !== c.zi) { c.zi = zi; c.el.style.zIndex = String(zi) }
     }
+
+    // 悬停(DOM 芯片 mouseenter 设 hoverKey)→ 吸附锁定 → 缓停/恢复
     const prevSel = selected
-    selected = nextSelection(selected, hitKey, pointerInCanvas)
+    selected = nextSelection(selected, hoverKey, pointerInCanvas)
     if (selected !== prevSel) onSelectChange(selected)
     speedFactor = approach(speedFactor, selected ? 0 : 1, 3, dt)
   }
@@ -477,14 +439,6 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     surge, setCoreColor,
     get points() { return bulbPoints.geometry.attributes.position.count },
     get selected() { return selected },
-    // 调试:返回各卫星当前屏幕坐标(供 playwright 精确悬停验证)
-    satScreens() {
-      const rect = canvas.getBoundingClientRect()
-      return satellites.map((s: any) => {
-        const p = new Vector3(); s.getWorldPosition(p); p.project(camera)
-        return { key: s.userData.key, x: rect.left + (p.x * 0.5 + 0.5) * rect.width, y: rect.top + (-p.y * 0.5 + 0.5) * rect.height, z: p.z }
-      })
-    },
   }
 
   layoutSize()
@@ -498,6 +452,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     removeEventListener('pointerdown', onPointerDown, true)
     removeEventListener('resize', layoutSize)
     ro?.disconnect(); io?.disconnect()
+    addedChips.forEach((e) => e.remove())
     try { renderer.dispose() } catch { /* noop */ }
     document.body.classList.remove('webgl3d')
     delete (window as any).__scene3d
