@@ -191,18 +191,28 @@ export const LANDING_CSS = `
   }
   #badge svg { width:12px; height:12px; }
   #hero h1 { display:flex; flex-direction:column; gap:8px; margin:4px 0 0; font-weight:normal; }
+  /* 标题两行 = 渐变文字;选中模型时渐变色平滑过渡到该模型色系。
+     @property 让「渐变里的颜色」可 transition(普通 CSS 变量做不到平滑渐变过渡);
+     不支持 @property 的老浏览器降级为即时切换,渐变本身仍在。 */
+  @property --wd-g1 { syntax: '<color>'; inherits: true; initial-value: #3ecfff; }
+  @property --wd-g2 { syntax: '<color>'; inherits: true; initial-value: #8f7bff; }
   .hl1 {
-    color:var(--wd-brand, #f2f7ff); transition:color .4s ease;
     font-size:clamp(28px, 4.4vw, 52px); font-weight:700;
     letter-spacing:.1em; padding-left:.1em;
-    text-shadow:0 0 26px rgba(90,170,255,.35);
+    background:linear-gradient(96deg, var(--wd-g1), var(--wd-g2));
+    -webkit-background-clip:text; background-clip:text;
+    color:transparent; -webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 0 24px rgba(90,170,255,.3));
+    transition:--wd-g1 .55s ease, --wd-g2 .55s ease;
   }
-  /* 副标题「让灵感不再受限」:默认白,选中模型时与 hl1 一起染品牌色(用户偏好两行同变) */
   .hl2 {
     font-size:clamp(38px, 6vw, 72px); font-weight:800;
     letter-spacing:.05em; padding-left:.05em; line-height:1.15;
-    color:var(--wd-brand, #fff); transition:color .4s ease;
+    background:linear-gradient(96deg, var(--wd-g1), var(--wd-g2));
+    -webkit-background-clip:text; background-clip:text;
+    color:transparent; -webkit-text-fill-color:transparent;
     filter:drop-shadow(0 0 22px rgba(60,150,255,.35));
+    transition:--wd-g1 .55s ease, --wd-g2 .55s ease;
   }
   #sub {
     margin-top:2px; color:rgba(160,184,216,.88);

@@ -330,6 +330,12 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     const n = parseInt(hex.slice(1), 16)
     return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 }
   }
+  function lightenHex(hex: string, amt: number) {
+    const n = parseInt(hex.slice(1), 16)
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
+    const m = (c: number) => Math.round(c + (255 - c) * amt)
+    return `rgb(${m(r)},${m(g)},${m(b)})`
+  }
   function setCoreColor(hex: string | null) {
     const c = hex ? hexToRgb(hex) : { r: 0.0, g: 0.65, b: 1.0 }
     coreTarget.r = c.r; coreTarget.g = c.g; coreTarget.b = c.b
@@ -355,15 +361,21 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     const hudBox = document.getElementById('hud')
     const heroRight = document.querySelector('.hero-right')
     if (key) {
+      const col = MODELS[key].color
       setHud(MODELS[key])
       hudBox?.classList.add('show'); heroRight?.classList.add('card-open')
-      setCoreColor(MODELS[key].color)
-      varsEl.style.setProperty('--wd-brand', MODELS[key].color)
+      setCoreColor(col)
+      varsEl.style.setProperty('--wd-brand', col) // 页眉 logo(实心)
+      // 标题两行渐变:g1=品牌色、g2=其浅色 → @property 平滑过渡(见 landing-css)
+      varsEl.style.setProperty('--wd-g1', col)
+      varsEl.style.setProperty('--wd-g2', lightenHex(col, 0.5))
       document.body.style.cursor = 'pointer'
     } else {
       hudBox?.classList.remove('show'); heroRight?.classList.remove('card-open')
       setCoreColor(null)
       varsEl.style.removeProperty('--wd-brand')
+      varsEl.style.removeProperty('--wd-g1')
+      varsEl.style.removeProperty('--wd-g2')
       document.body.style.cursor = ''
     }
   }
