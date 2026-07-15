@@ -239,7 +239,10 @@ export async function completeOrder(
 // ============================================================================
 
 export interface TenantRechargeRequest {
-  amount_usd: number
+  /** 美元充值口径（旧）。人民币充值时传 amount_cny，此字段可省。 */
+  amount_usd?: number
+  /** 人民币充值口径（所见即所付）。>0 时后端优先按此下单，实付精确到分。 */
+  amount_cny?: number
   provider: 'wxpay' | 'alipay'
 }
 

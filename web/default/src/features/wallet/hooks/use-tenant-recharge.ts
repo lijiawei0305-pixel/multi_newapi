@@ -55,7 +55,7 @@ interface UseTenantRechargeOptions {
 
 /**
  * useTenantRecharge drives the multi-tenant recharge flow:
- *   - submit(provider): POST /api/tenant/wallet/recharge
+ *   - submit(amountCny, provider): POST /api/tenant/wallet/recharge（人民币充值，所见即所付）
  *   - WeChat -> opens a QR modal (qrState set) and polls order-status until
  *     paid or timeout (WeChat Native has no server redirect, so this is the
  *     only way the UI learns payment landed).
@@ -122,20 +122,20 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
   }, [qrState, stopPolling])
 
   const submit = useCallback(
-    async (amountUsd: number, provider: RechargeProvider) => {
-      if (!Number.isFinite(amountUsd) || amountUsd < MIN_RECHARGE_USD) {
+    async (amountCny: number, provider: RechargeProvider) => {
+      if (!Number.isFinite(amountCny) || amountCny <= 0) {
         toast.error(
-          i18next.t('Minimum recharge amount is ${{amount}}', {
-            amount: MIN_RECHARGE_USD,
-            defaultValue: '最低充值金额为 ${{amount}}',
+          i18next.t('Please enter a valid amount', {
+            defaultValue: '请输入有效的充值金额',
           })
         )
         return false
       }
       try {
         setSubmitting(provider)
+        // 人民币充值：发 amount_cny，后端实付即此值（精确到分）、按汇率折美元入账（$1=500k quota）。
         const res = await createTenantRecharge({
-          amount_usd: amountUsd,
+          amount_cny: amountCny,
           provider,
         })
         if (!isApiSuccess(res) || !res.data) {

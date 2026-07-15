@@ -47,7 +47,6 @@ export function RechargeQrDialog({
   onOpenChange,
   qr,
   orderNo,
-  amountUsd,
   amountCny,
 }: RechargeQrDialogProps) {
   const { t } = useTranslation()
@@ -59,11 +58,10 @@ export function RechargeQrDialog({
             {t('Scan to pay with WeChat', { defaultValue: '请扫码支付' })}
           </DialogTitle>
           <DialogDescription>
-            {amountUsd != null
-              ? t('Recharge ${{usd}} (pay ¥{{cny}})', {
-                  usd: amountUsd,
-                  cny: amountCny,
-                  defaultValue: '充值 ${{usd}}（支付 ¥{{cny}}）',
+            {amountCny != null
+              ? t('Pay ¥{{cny}}', {
+                  cny: Number(amountCny).toFixed(2),
+                  defaultValue: '支付 ¥{{cny}}',
                 })
               : t('Scan the QR code with WeChat to complete payment.', {
                   defaultValue: '请扫描二维码完成支付。',

@@ -1,0 +1,12 @@
+{
+  "id": "recharge-cny-native",
+  "title": "官方微信/支付宝充值卡改人民币整数档位（所见即所付，实付精确到分）",
+  "status": "in_progress",
+  "strategy": "guided-develop",
+  "currentPhase": "5-verify",
+  "nextAction": "代码已改完(5文件)：后端 recharge.go +amount_cny口径；前端 TenantRechargeCard ¥档位+输入、use-tenant-recharge submit(¥)、api +amount_cny、QR弹窗¥主显。待服务器 build+deploy → 沙箱小额验收(选¥10→微信扣¥10→到账≈¥10额度)",
+  "gate": "服务器构建部署 + 微信沙箱小额验收",
+  "branch": "500L",
+  "scope": "recharge-cny-native",
+  "createdAt": "2026-07-15T03:58:45-1000"
+}
