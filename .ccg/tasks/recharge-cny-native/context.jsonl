@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "internal/mtwire/recharge.go", "reason": "后端充值下单：实付¥=amount_usd×汇率；加可选 amount_cny 入参→amount_usd=cny/rate、actualPaid=cny 精确到分；入账数学不动"}
+{"file": "web/default/src/features/wallet/components/tenant-recharge-card.tsx", "reason": "官方微信/支付宝充值卡：输入改¥+加整数预设档位；按钮/标签改人民币；提交发 amount_cny"}
+{"file": "web/default/src/features/wallet/hooks/use-tenant-recharge.ts", "reason": "MIN_RECHARGE_USD→人民币下限；submit 参数改 amount_cny；QrState 以¥为主"}
+{"file": "web/default/src/features/wallet/api.ts", "reason": "TenantRechargeRequest 加 amount_cny 字段"}
+{"file": "web/default/src/features/wallet/components/dialogs/recharge-qr-dialog.tsx", "reason": "二维码弹窗以¥为主显（充值 ¥100）"}

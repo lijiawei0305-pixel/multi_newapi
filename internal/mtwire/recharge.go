@@ -181,6 +181,23 @@ func actualPaidCNY(amountUSD, rate float64) float64 {
 	return amountUSD * rate
 }
 
+// resolveRechargeAmount 归一充值金额口径（纯函数，供 handler 调用 + 单测锁定）。
+// 返回 (美元额, 实付¥, 是否人民币口径)：
+//   - amountCNY>0：人民币充值（所见即所付）——实付=该¥精确到分、usd=cny/rate；
+//   - 否则：美元充值（旧口径）——usd=amountUSD、实付=usd×rate。
+//
+// rate<=0 兜底为 1（防除零/负汇率）。入账始终以返回的 usd 折原生 quota（$1=QuotaPerUnit），
+// 无论走哪路，计费/入账数学都不变——本函数只决定「实付¥」与「入账美元额」的换算口径。
+func resolveRechargeAmount(amountUSD, amountCNY, rate float64) (usd, actualPaid float64, cnyMode bool) {
+	if rate <= 0 {
+		rate = 1
+	}
+	if amountCNY > 0 {
+		return amountCNY / rate, amountCNY, true
+	}
+	return amountUSD, actualPaidCNY(amountUSD, rate), false
+}
+
 // amountToleranceCNY 金额比对容差（元）：≤1 分视为相等，吸收浮点/汇率取整噪声。
 const amountToleranceCNY = 0.011
 
@@ -200,17 +217,26 @@ func amountMatchesCNY(paidCNY, orderCNY float64) bool {
 // ---- HTTP 处理器 ----
 
 // rechargeRequest 是 POST /api/tenant/wallet/recharge 入参。
+//
+// 两种金额口径（二选一）：
+//   - AmountCNY>0：按**人民币**充值（所见即所付）。实付即此值、精确到分；amount_usd = cny/汇率。
+//     微信/支付宝本就以 ¥ 结算，中国用户按元充值最自然，优先走这一路。
+//   - 否则回退 AmountUSD：按美元充值（旧口径），实付 = usd×汇率。
+//
+// 两路最终都归一到 (amountUSD, actualPaid¥)，入账仍以 amountUSD 折原生 quota（$1=QuotaPerUnit），计费数学不变。
 type rechargeRequest struct {
 	AmountUSD float64 `json:"amount_usd"`
-	Provider  string  `json:"provider"` // wxpay | alipay
+	AmountCNY float64 `json:"amount_cny"` // 可选：人民币充值，>0 时优先，实付精确到分
+	Provider  string  `json:"provider"`   // wxpay | alipay
 }
 
 // HandleWalletRecharge POST /api/tenant/wallet/recharge —— 钱包充值下单。需 UserAuth + Host 租户
 // （主站 Host 无租户但命中 tenant.IsMainSiteHost 时回退平台租户，见 http.go resolveBuyerTenant——
 // 产品侧已确认「主站自身也接受终端用户直充」，与买家套餐购买同一 main-site direct-sales 口径）。
 //
-// 流程：校验 amount_usd≥1 与渠道 → 实付¥=usd×汇率 → RechargeGateway.CreateOrder（落库 RCG 订单 +
-// 进程内向平台下单拿支付凭据）→ 返回 {order_no, amount_*, provider, pay:{wxpay_qr|alipay_url}}。
+// 流程：金额口径归一（amount_cny>0 走人民币充值、实付=该¥精确到分、usd=cny/汇率；否则美元充值、实付=usd×汇率）
+// → 校验 usd≥$1 与渠道 → RechargeGateway.CreateOrder（落库 RCG 订单 + 进程内向平台下单拿支付凭据）
+// → 返回 {order_no, amount_*, provider, pay:{wxpay_qr|alipay_url}}。
 func (a *App) HandleWalletRecharge(c *gin.Context) {
 	t, err := a.resolveBuyerTenant(c)
 	if err != nil {
@@ -232,7 +258,9 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 		respondErr(c, payment.ErrOrderInvalid)
 		return
 	}
-	if body.AmountUSD < minRechargeUSD {
+	// 金额口径归一（可测纯函数）：amount_cny>0 走人民币充值（实付精确到分，usd=cny/汇率）；否则走美元充值（实付=usd×汇率）。
+	amountUSD, actualPaid, cnyMode := resolveRechargeAmount(body.AmountUSD, body.AmountCNY, operation_setting.USDExchangeRate)
+	if amountUSD < minRechargeUSD {
 		respondErr(c, errRechargeAmountTooSmall)
 		return
 	}
@@ -246,15 +274,18 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 		return
 	}
 
-	actualPaid := actualPaidCNY(body.AmountUSD, operation_setting.USDExchangeRate)
+	subject := fmt.Sprintf("钱包充值 $%g", amountUSD)
+	if cnyMode {
+		subject = fmt.Sprintf("钱包充值 ¥%.2f", actualPaid)
+	}
 	order, err := a.RechargeGateway.CreateOrder(reqCtx(c), payment.OrderInput{
 		Type:       payment.OrderTypeRecharge,
 		TenantID:   t.ID,
 		UserID:     userID,
 		Provider:   provider,
-		AmountUSD:  body.AmountUSD,
+		AmountUSD:  amountUSD,
 		ActualPaid: actualPaid,
-		Subject:    fmt.Sprintf("钱包充值 $%g", body.AmountUSD),
+		Subject:    subject,
 	})
 	if err != nil {
 		respondErr(c, err)
@@ -270,7 +301,7 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 	}
 	respondOK(c, gin.H{
 		"order_no":   order.OrderNo,
-		"amount_usd": body.AmountUSD,
+		"amount_usd": amountUSD,
 		"amount_cny": actualPaid,
 		"provider":   string(provider),
 		"pay":        pay,

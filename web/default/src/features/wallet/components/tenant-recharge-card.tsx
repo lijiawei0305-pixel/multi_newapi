@@ -23,10 +23,10 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useSystemConfig } from '@/hooks/use-system-config'
 import { getPaymentIcon } from '../lib'
 import {
   useTenantRecharge,
-  MIN_RECHARGE_USD,
   type RechargeProvider,
 } from '../hooks/use-tenant-recharge'
 import { RechargeQrDialog } from './dialogs/recharge-qr-dialog'
@@ -40,6 +40,10 @@ import { RechargeQrDialog } from './dialogs/recharge-qr-dialog'
  * `index.tsx` listens for this event and re-fetches the current user.
  */
 export const TENANT_RECHARGE_PAID_EVENT = 'mt:tenant-recharge-paid'
+
+// 人民币整数预设档位（元）。官方微信/支付宝以 ¥ 结算，中国用户按整数元充值最直观——
+// 所见即所付：选 ¥100 → 微信扣 ¥100 → 后端按汇率折美元入原生额度（$1 = 500k quota）。
+const CNY_PRESETS = [10, 30, 50, 100, 300, 500]
 
 type TenantRechargeCardProps = {
   /**
@@ -68,7 +72,11 @@ export function TenantRechargeCard({
   onPaid,
 }: TenantRechargeCardProps) {
   const { t } = useTranslation()
-  const [amount, setAmount] = useState<string>(String(MIN_RECHARGE_USD))
+  const { currency } = useSystemConfig()
+  // 汇率取系统「货币显示」配置的 usd_exchange_rate（¥/USD）；仅用于推算 ¥ 下限，实付以后端为准。
+  const rate = Math.max(Number(currency?.usdExchangeRate) || 1, 0.0001)
+  const minCny = Math.max(1, Math.ceil(rate)) // 后端要求 usd≥$1 → ¥ 下限 = ⌈汇率⌉
+  const [amount, setAmount] = useState<string>('100')
   const [provider, setProvider] = useState<RechargeProvider>('wxpay')
 
   // Bridge payment confirmation up to the Wallet page: call the caller's
@@ -96,7 +104,7 @@ export function TenantRechargeCard({
   if (providers.length === 0) return null
 
   const amountNum = parseFloat(amount) || 0
-  const belowMin = amountNum < MIN_RECHARGE_USD
+  const belowMin = amountNum < minCny
   const busy = submitting !== null
 
   const providerButton = (value: RechargeProvider, label: string) => (
@@ -125,26 +133,49 @@ export function TenantRechargeCard({
         {t('Recharge (WeChat / Alipay)', { defaultValue: '充值（微信 / 支付宝）' })}
       </Label>
 
+      {/* 人民币整数预设档位（所见即所付） */}
+      <div className='grid grid-cols-3 gap-2'>
+        {CNY_PRESETS.map((v) => (
+          <Button
+            key={v}
+            type='button'
+            variant='outline'
+            data-testid={`recharge-preset-${v}`}
+            aria-pressed={amountNum === v}
+            onClick={() => setAmount(String(v))}
+            disabled={busy}
+            className={cn(
+              'min-h-11',
+              amountNum === v
+                ? 'border-foreground bg-foreground/5 dark:bg-foreground/10'
+                : 'border-muted'
+            )}
+          >
+            ¥{v}
+          </Button>
+        ))}
+      </div>
+
       <div className='space-y-2'>
         <Label
           htmlFor='tenant-recharge-amount'
           className='text-muted-foreground text-xs'
         >
-          {t('Amount (USD), minimum ${{amount}}', {
-            amount: MIN_RECHARGE_USD,
-            defaultValue: '金额（美元），最低 ${{amount}}',
+          {t('Amount (CNY), minimum ¥{{amount}}', {
+            amount: minCny,
+            defaultValue: '金额（元），最低 ¥{{amount}}',
           })}
         </Label>
         <Input
           id='tenant-recharge-amount'
           data-testid='recharge-amount'
           type='number'
-          min={MIN_RECHARGE_USD}
+          min={minCny}
           step='1'
           inputMode='decimal'
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder={`$${MIN_RECHARGE_USD}`}
+          placeholder={`¥${minCny}`}
           className='h-9 sm:h-10'
         />
       </div>
@@ -165,13 +196,13 @@ export function TenantRechargeCard({
       >
         {busy ? <Loader2 className='mr-2 h-4 w-4 animate-spin' /> : null}
         {belowMin
-          ? t('Minimum recharge amount is ${{amount}}', {
-              amount: MIN_RECHARGE_USD,
-              defaultValue: '最低充值金额为 ${{amount}}',
+          ? t('Minimum recharge amount is ¥{{amount}}', {
+              amount: minCny,
+              defaultValue: '最低充值金额为 ¥{{amount}}',
             })
-          : t('Recharge ${{amount}}', {
+          : t('Recharge ¥{{amount}}', {
               amount: amountNum,
-              defaultValue: '充值 ${{amount}}',
+              defaultValue: '充值 ¥{{amount}}',
             })}
       </Button>
 

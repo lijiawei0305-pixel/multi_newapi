@@ -1,0 +1,12 @@
+{
+  "id": "recharge-cny-native",
+  "title": "官方微信/支付宝充值卡改人民币整数档位（所见即所付，实付精确到分）",
+  "status": "in_progress",
+  "strategy": "guided-develop",
+  "currentPhase": "6-deployed-await-user-e2e",
+  "nextAction": "已部署上线(deploy-20260715-042118, 镜像ccec3f1b≠prev5aec1272, /api/status绿, endpoint 401已路由). 后端抽 resolveRechargeAmount 纯函数+单测(TestResolveRechargeAmount)过; 前端¥档位已构建. 剩: 用户登录态肉眼看钱包页¥档位 + 真实微信扫码E2E(选¥10→扣¥10)——后者仍被微信商户凭据这一既有外部阻塞卡住(与本改动无关). 代码5+1文件未commit(working tree, 已rsync部署).",
+  "gate": "微信商户凭据(用户提供)→真实沙箱E2E",
+  "branch": "500L",
+  "scope": "recharge-cny-native",
+  "createdAt": "2026-07-15T03:58:45-1000"
+}
