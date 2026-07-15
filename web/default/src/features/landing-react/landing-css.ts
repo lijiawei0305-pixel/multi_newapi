@@ -309,6 +309,9 @@ export const LANDING_CSS = `
   .lp-lang { padding:0 13px; gap:6px; }
   .lp-lang-txt { font-size:13px; font-weight:600; letter-spacing:.02em; }
   .lp-kefu-btn svg, .lp-lang svg { width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  /* New API 原生语言选择器触发键:深色页眉里改浅色可见 + 尺寸对齐其它页眉按钮 */
+  .lp-actions [aria-haspopup="menu"] { color:#cfe0f5; height:40px; width:40px; border-radius:10px; }
+  .lp-actions [aria-haspopup="menu"]:hover { color:#fff; background:rgba(255,255,255,.1); }
   .lp-start { display:inline-flex; align-items:center; gap:7px; height:40px; padding:0 20px; border-radius:10px; font-size:14.5px; font-weight:650; color:#04121a; background:linear-gradient(94deg,#3ecfff,#4d9bff 60%,#8f7bff); text-decoration:none; box-shadow:0 8px 24px -8px rgba(62,207,255,.7); transition:transform .2s,box-shadow .2s; }
   .lp-start:hover { transform:translateY(-2px); box-shadow:0 12px 32px -8px rgba(62,207,255,.9); }
   .lp-start svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; transition:transform .2s; }

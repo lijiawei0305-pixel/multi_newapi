@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { LanguageSwitcher } from '@/components/language-switcher'
 import { useSystemConfig } from '@/hooks/use-system-config'
 
 import { KefuModal } from './kefu-modal'
@@ -46,8 +47,7 @@ function unboot() {
 }
 
 export function LandingReact() {
-  const { t, i18n } = useTranslation()
-  const zh = (i18n.language || 'zh').startsWith('zh')
+  const { t } = useTranslation()
   const [kefuOpen, setKefuOpen] = useState(false)
   const closeKefu = useCallback(() => setKefuOpen(false), [])
   const { systemName } = useSystemConfig()
@@ -76,8 +76,6 @@ export function LandingReact() {
     return () => { setTimeout(unboot, 0) }
   }, [])
 
-  const toggleLang = () => i18n.changeLanguage(zh ? 'en' : 'zh')
-
   return (
     <div className='wd-landing-root'>
       {/* 挂载时注入样式、卸载即移除（不永久污染全站） */}
@@ -101,10 +99,8 @@ export function LandingReact() {
               <span>{T.support}</span>
             </button>
             <a className='lp-start' href='/playground'><span>{T.start}</span> <svg viewBox='0 0 24 24'><path d='M5 12h14M13 6l6 6-6 6' /></svg></a>
-            <button className='lp-lang' type='button' title={t('Switch language')} onClick={toggleLang}>
-              <svg viewBox='0 0 24 24'><path d='M4 5h11M9 3v2c0 4.5-2.2 8-6 9.5M6.5 10c0 3 2.5 5.5 7 6.5' /><path d='m12.5 20 4-9 4 9M14 17h5' /></svg>
-              <span className='lp-lang-txt'>{zh ? 'EN' : '中'}</span>
-            </button>
+            {/* New API 原生语言选择器(下拉,含全部界面语言;登录态会持久化到后端) */}
+            <LanguageSwitcher />
           </div>
         </header>
         <button className='lp-fab' type='button' aria-label={t('Live Support')} onClick={() => setKefuOpen(true)}>
