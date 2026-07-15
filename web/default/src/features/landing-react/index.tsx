@@ -51,7 +51,9 @@ export function LandingReact() {
   const [kefuOpen, setKefuOpen] = useState(false)
   const closeKefu = useCallback(() => setKefuOpen(false), [])
   const { systemName } = useSystemConfig()
-  const siteName = systemName || 'WeDream AI'
+  // 主站落地页品牌 = WeDream AI;New API 是底层软件默认名(未品牌化),视为空 → 用我们的品牌。
+  // 自定义品牌(代理/后台设了非默认 systemName)仍按其显示。
+  const siteName = systemName && systemName !== 'New API' ? systemName : 'WeDream AI'
 
   /* 文案全部走 New API 官方 i18n（key = 英文原句，译文在 src/i18n/locales/*.json）。
      zh/en 已填；ja/ru/fr/vi 未填的 key 由 i18next 的 fallbackLng:'en' 回落到英文。 */

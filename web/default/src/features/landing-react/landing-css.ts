@@ -197,11 +197,11 @@ export const LANDING_CSS = `
     letter-spacing:.1em; padding-left:.1em;
     text-shadow:0 0 26px rgba(90,170,255,.35);
   }
-  /* 副标题「让灵感不再受限」纯白(黑底上干净,与会变色的 hl1 形成对比) */
+  /* 副标题「让灵感不再受限」:默认白,选中模型时与 hl1 一起染品牌色(用户偏好两行同变) */
   .hl2 {
     font-size:clamp(38px, 6vw, 72px); font-weight:800;
     letter-spacing:.05em; padding-left:.05em; line-height:1.15;
-    color:#fff;
+    color:var(--wd-brand, #fff); transition:color .4s ease;
     filter:drop-shadow(0 0 22px rgba(60,150,255,.35));
   }
   #sub {
