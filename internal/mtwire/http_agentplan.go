@@ -304,6 +304,13 @@ func (a *App) HandlePurchaseAgentPlan(c *gin.Context) {
 		respondErr(c, payment.ErrOrderInvalid)
 		return
 	}
+	// 付款前 fail-closed 校验 slug（对齐 tokenplan HandlePurchase：先校验再出支付凭据）。非法/保留/占用
+	// 直接返回 SLUG_INVALID/SLUG_RESERVED/SLUG_DUPLICATE，绝不落 AGT 订单、绝不向平台下单收钱——否则
+	// 买家付款后回调激活才校验 slug，钱已离账却确定性永久激活失败、订单永停 pending（付款黑洞）。
+	if err := a.precheckAgentPurchaseSlug(ctx, userID, body.Slug); err != nil {
+		respondErr(c, err)
+		return
+	}
 
 	orderNo := AgentPlanOrderPrefix + strings.ToUpper(randToken(12))
 	now := time.Now()

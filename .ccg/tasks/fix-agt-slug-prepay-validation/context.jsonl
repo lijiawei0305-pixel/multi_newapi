@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "internal/mtwire/http_agentplan.go", "reason": "HandlePurchaseAgentPlan:271-329 落单前零校验 slug（:288 ShouldBindJSON、:321 Slug 原样落库），须在此加付款前 fail-closed 校验（对齐 tokenplan http.go:258）"}
+{"file": "internal/mtwire/agent_plan_bridge.go", "reason": "provisionAgentFromOrder:189 + normalizeAgentSlug:330 + agentTenantByOwner:314（status<>deleted 排除软删→软删代理重购撞唯一索引永久 ErrSlugDuplicate）"}
+{"file": "internal/tenant/slug.go", "reason": "slug 权威校验源：validSlugFormat + reserved（ErrSlugInvalid/ErrSlugReserved）；付款前校验须复用同一逻辑"}
+{"file": "internal/mtwire/http.go", "reason": "tokenplan HandlePurchase:258-275 = 先 Purchase 校验再出支付凭据的参照标准（同文件两条购买路径标准不一致）"}
+{"file": "web/default/src/features/agent-plans/index.tsx", "reason": "首次开通 slug 输入框:175-181 无 pattern/maxLength/onSubmit 校验，须加前端预校验兜底"}

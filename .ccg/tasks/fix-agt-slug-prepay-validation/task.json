@@ -1,0 +1,12 @@
+{
+  "id": "fix-agt-slug-prepay-validation",
+  "title": "AGT 代理套餐购买：slug 在付款前校验（消除付款后确定性激活失败 + 软删占位黑洞）",
+  "status": "in_progress",
+  "strategy": "guided-develop",
+  "currentPhase": "6-verify-passed",
+  "nextAction": "已实施+两轮多代理审查(0 Critical, compiles=true)+RETRO记录; 待用户 /ccg:commit → 服务器 go test/构建/部署(W4)",
+  "gate": null,
+  "branch": "500L",
+  "scope": "fix-agt-slug-prepay-validation",
+  "createdAt": "2026-07-16T02:37:00-1000"
+}
