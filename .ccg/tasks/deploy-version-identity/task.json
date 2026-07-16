@@ -1,0 +1,12 @@
+{
+  "id": "deploy-version-identity",
+  "title": "生产版本身份+回滚兜底根治（#12）：VERSION 盖戳 / deploy-manifest / 源码归档 / rollback 重写",
+  "status": "in_progress",
+  "strategy": "guided-develop",
+  "currentPhase": "3-implemented-local-verified",
+  "nextAction": "服务器下次部署端到端验证：/api/status version==盖入版本；docker exec cat /deploy-manifest.json；rollback.sh --list/--to",
+  "gate": "server-deploy-e2e",
+  "branch": "500L",
+  "scope": "deploy-version-identity",
+  "createdAt": "2026-07-16T15:08:16Z"
+}

@@ -1,0 +1,8 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "VERSION", "reason": "0字节→改v0.0.0-dev; Dockerfile $(cat VERSION) 注入源, 空则覆盖common.Version为空串"}
+{"file": "deploy-manifest.json", "reason": "新增仓库根占位; deploy.sh 部署时盖真值; Dockerfile COPY 烤进镜像 /deploy-manifest.json"}
+{"file": "Dockerfile", "reason": "3处 $(cat VERSION) 加空串兜底(回落v0.0.0-unknown) + 末段 COPY deploy-manifest.json /"}
+{"file": "deploy/ops/deploy.sh", "reason": "算版本串+盖服务器VERSION/manifest(解包后构建前)+源码tar归档留7份+部署尾/api/status版本自检"}
+{"file": "deploy/ops/rollback.sh", "reason": "删除必败的--git(服务器无.git)+新增--to <ts>归档重建+--list; 保留:prev秒级"}
+{"file": "CLAUDE.md", "reason": "C6 硬约束: 上线制品必须可溯源可重建版本身份 + 回滚兜底必须真实可达"}
+{"file": "RETRO.md", "reason": "§一 部署与环境 追加 #12 复盘条目, 标记已升级C6"}

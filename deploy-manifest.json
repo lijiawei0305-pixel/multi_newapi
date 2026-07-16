@@ -1,0 +1,10 @@
+{
+  "version": "v0.0.0-dev",
+  "git_sha": "unknown",
+  "dirty": true,
+  "branch": "unknown",
+  "deploy_tag": "none",
+  "deployed_at": "unbuilt",
+  "deployed_by": "unbuilt",
+  "note": "Placeholder — overwritten by deploy/ops/deploy.sh on the server (into $SERVER_REPO/deploy-manifest.json) before the image build, then baked into the image via `COPY deploy-manifest.json /deploy-manifest.json`. If you see THIS placeholder inside a running container (`docker exec <app> cat /deploy-manifest.json`), the image was NOT produced by deploy.sh and has no traceable provenance."
+}

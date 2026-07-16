@@ -132,6 +132,12 @@
   4. 轮换后旧值即成**死字符串**，故遗留在 git 历史（`fd17844`/`493b830`）无害；如需彻底洁净可后续 BFG 洗历史（非必须、非阻塞）。
 - **升级**：**已升级为规则 → CLAUDE.md C1**（禁止把任何密钥/凭据的字面量写进受 git 跟踪的文件；密钥只存服务器 `.env`(600)，仓库仅 `${VAR}` 引用且用 `:?` fail-closed）。相关既有纪律：[[deployment.md §.env]]、W4（密钥不入库）。
 
+### [已解决] 生产无版本身份：VERSION 0 字节 + 服务器无 .git → /api/status version="" 且 --git 回滚必败（#12，结构性缺口）
+- **现象**：三条溯源路径同时断掉，无法回答「生产现在跑的是哪份代码」，也无法重建/安全回退它。逐条实测：① `wc -c VERSION`→`0`（且 `git ls-files` 确认已跟踪）→ `Dockerfile:39` `-X '…common.Version=$(cat VERSION)'` 注入空串（连源码默认 `common/constants.go:16` 的 `v0.0.0` 都被覆盖）→ 线上 `curl /api/status | jq .data.version`→`''`；② `deploy.sh` 打包的是 Mac 脏工作树（`tar -C "$LOCAL_REPO" .`，非任何 git ref），而 `deploy.sh:60` `git tag -f "$TAG"` 打在 HEAD 上 → tag 指向的代码可能从未上线（工作树 dirty 时）；③ `deploy.sh:93 --exclude='./.git'` 保证服务器 `$SERVER_REPO` 下**永远没有 .git**，而 `rollback.sh:35-36 rollback_git` 正是 `git -C "$SERVER_REPO" fetch/checkout`，且 `:45` 在镜像回滚失败时**恰恰推荐** `--git <tag>` → 指向一条不可能成功的路；④ `deploy.sh:63-73` 每次把 `:latest` 覆盖成 `:prev` → 回滚深度恒为 1。
+- **根因**：制品从「脏工作树」构建、且不携带任何可溯源身份；服务器是「非 git 的 rsync 副本」，却把回滚兜底建在服务器不存在的 `.git` 上。真实失败场景：线上计费错账 → 想确认是否含某修复 → `/api/status` 给 `''` → 查 `deploy-*` tag → tag 指向 HEAD 但部署时工作树 dirty → 该 tag 代码从未在生产跑过 → 服务器也无 .git 可查 → 只能靠 `ls -la` 文件 mtime 猜 → 排障从 10 分钟变半天且结论不可信。另一场景：部署 A（潜伏 bug）→ 次日部署 B（`:prev` 被 A 覆盖）→ 发现 bug 来自 A → 只能退到 A（仍有 bug）→ 按脚本提示走 `--git` → 报错。
+- **解决/规避**（本机改代码/脚本，构建+部署+验证在服务器）：① 追踪的 `VERSION` 从 0 字节改 `v0.0.0-dev`（不再注入空串）；`Dockerfile` 三处 `$(cat VERSION)` 加空串兜底（回落 `v0.0.0-unknown`）。② `deploy.sh` 用「git 短 SHA + `-dirty` + 时间戳」算真实版本串，**解包后、构建前**盖进服务器 `VERSION` + `deploy-manifest.json`（Dockerfile 烤进 `common.Version`/前端 + `COPY deploy-manifest.json /`）；`git tag` 步骤在 dirty 时明确告警「tag≠实际部署树，权威版本见归档」。③ 实际部署的源码 tar 归档 `/root/deploy-archives/src-<ts>.tgz` + sidecar `.version`/`.manifest.json`（留 7 份），令无 `.git` 也可重建。④ `rollback.sh` 删除必败的 `--git`（改为显式报错并指向正确路径）、新增 `--to <ts>`（从归档重建、恢复真实版本身份）+ `--list`，保留 `:prev` 秒级。⑤ 部署尾端到端自检：`/api/status` 报告版本 == 本次盖入版本，不等即告警（防 ① 静默回归）。本机 `bash -n` + 关键逻辑（manifest JSON、版本抽取 sed、归档 prune、ssh 远端 re-parse）本地模拟全通过；**端到端待服务器下次部署验证**（W4）。
+- **升级**：**已升级为规则 → CLAUDE.md C6**（上线制品必须携带可溯源+可重建版本身份；回滚兜底路径必须真实可达）。同属「清单挑选式遗漏」家族（C2/C3/C5）。相关：[[deployment.md]]、[[server-build-deploy-topology]]、W4。
+
 ---
 
 ## 二、构建与依赖
