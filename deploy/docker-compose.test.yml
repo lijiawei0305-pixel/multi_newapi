@@ -79,9 +79,14 @@ services:
       MYSQL_DATABASE: "new-api-test"
     volumes:
       - mysql_test_data:/var/lib/mysql
+    # 数据服务同样需自愈：OOM/宿主重启后自动拉起（此前缺失，崩了需人工介入）。见 RETRO 2026-07-16。
+    restart: unless-stopped
 
   redis:
     image: redis:latest       # new-api 经 REDIS_CONN_STRING=redis://redis 使用（无密码，仅测试）
+    # OOM/镜像升级/宿主重启后自愈：无此策略则 redis 崩了不会自己起来，需人工介入。
+    # 配合 mtwire/risk.go 的 fail-open（Redis 不可用时 /v1 放行而非 500），缩短「限流暂失效」窗口。见 RETRO 2026-07-16。
+    restart: unless-stopped
 
 volumes:
   mysql_test_data:
