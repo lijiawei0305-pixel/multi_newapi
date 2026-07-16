@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 
 export interface StuckOrder {
-  kind: 'RCG' | 'SUB'
+  kind: 'RCG' | 'SUB' | 'AGT'
   order_no: string
   tenant_id: number
   user_id: number
@@ -54,6 +54,13 @@ export interface ReconcileRunResult {
     scanned: number
     activated: string[] | null
     unpaid: string[] | null
+    failed: Record<string, string>
+  }
+  agt?: {
+    scanned: number
+    activated: string[] | null
+    unpaid: string[] | null
+    expired?: string[] | null
     failed: Record<string, string>
   }
 }

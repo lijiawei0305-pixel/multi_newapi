@@ -203,9 +203,11 @@ export function PaymentReconcile() {
       const r = res.rcg
       const s = res.sub
       const c = res.rcg_created
+      const g = res.agt
       const rcgFailed = Object.keys(r?.failed ?? {}).length
       const rcgCreatedFailed = Object.keys(c?.failed ?? {}).length
       const subFailed = Object.keys(s?.failed ?? {}).length
+      const agtFailed = Object.keys(g?.failed ?? {}).length
       setLastResult(
         [
           t('RCG scanned {{scanned}}/credited {{credited}}/failed {{failed}}', {
@@ -227,6 +229,14 @@ export function PaymentReconcile() {
             unpaid: s?.unpaid?.length ?? 0,
             failed: subFailed,
             defaultValue: `SUB 扫${s?.scanned ?? 0}/激活${s?.activated?.length ?? 0}/未付${s?.unpaid?.length ?? 0}/失败${subFailed}`,
+          }),
+          t('AGT scanned {{scanned}}/activated {{activated}}/unpaid {{unpaid}}/expired {{expired}}/failed {{failed}}', {
+            scanned: g?.scanned ?? 0,
+            activated: g?.activated?.length ?? 0,
+            unpaid: g?.unpaid?.length ?? 0,
+            expired: g?.expired?.length ?? 0,
+            failed: agtFailed,
+            defaultValue: `AGT 扫${g?.scanned ?? 0}/激活${g?.activated?.length ?? 0}/未付${g?.unpaid?.length ?? 0}/过期${g?.expired?.length ?? 0}/失败${agtFailed}`,
           }),
         ].join(' · ')
       )
@@ -500,7 +510,7 @@ export function PaymentReconcile() {
                       stuck.map((o) => (
                         <TableRow key={o.order_no} data-testid={`stuck-row-${o.order_no}`}>
                           <TableCell>
-                            <Badge variant={o.kind === 'RCG' ? 'secondary' : 'outline'}>{o.kind}</Badge>
+                            <Badge variant={o.kind === 'RCG' ? 'secondary' : o.kind === 'AGT' ? 'destructive' : 'outline'}>{o.kind}</Badge>
                           </TableCell>
                           <TableCell className='font-mono text-xs'>{o.order_no}</TableCell>
                           <TableCell className='tabular-nums'>{o.tenant_id}</TableCell>

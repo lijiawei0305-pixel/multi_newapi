@@ -37,14 +37,20 @@ func seedOldHeartbeat(t *testing.T, app *App) {
 	}
 }
 
-// stubReconcileSeams 用桩替换三路径 seam，返回预设结果；t.Cleanup 自动还原（供本 track 各测复用）。
+// stubReconcileSeams 用桩替换四路径 seam，返回预设结果（AGT 恒返回空——本 track 聚合/告警测试不覆盖
+// AGT 具体查单路径，只验证其被接入编排）；t.Cleanup 自动还原（供本 track 各测复用）。
 func stubReconcileSeams(t *testing.T, paid, created payment.ReconcileResult, sub ReconcileSubResult) {
 	t.Helper()
-	op, oc, osub := reconcilePaidFn, reconcileCreatedFn, reconcileSubFn
-	t.Cleanup(func() { reconcilePaidFn, reconcileCreatedFn, reconcileSubFn = op, oc, osub })
+	op, oc, osub, oagt := reconcilePaidFn, reconcileCreatedFn, reconcileSubFn, reconcileAgtFn
+	t.Cleanup(func() {
+		reconcilePaidFn, reconcileCreatedFn, reconcileSubFn, reconcileAgtFn = op, oc, osub, oagt
+	})
 	reconcilePaidFn = func(_ *App, _ context.Context, _ time.Time) (payment.ReconcileResult, error) { return paid, nil }
 	reconcileCreatedFn = func(_ *App, _ context.Context, _ time.Time) (payment.ReconcileResult, error) { return created, nil }
 	reconcileSubFn = func(_ *App, _ context.Context, _ time.Time) (ReconcileSubResult, error) { return sub, nil }
+	reconcileAgtFn = func(_ *App, _ context.Context, _ time.Time) (ReconcileAgtResult, error) {
+		return ReconcileAgtResult{Failed: map[string]string{}}, nil
+	}
 }
 
 // TestRunReconcileAllAggregatesThreePaths 三路径结果原样聚合返回（含 RCG-created ②，防 drift）。
@@ -55,7 +61,7 @@ func TestRunReconcileAllAggregatesThreePaths(t *testing.T) {
 	sub := ReconcileSubResult{Scanned: 3, Activated: []string{"SUB-a"}, Failed: map[string]string{}}
 	stubReconcileSeams(t, paid, created, sub)
 
-	gotP, gotC, gotS := app.runReconcileAll(context.Background(), time.Now(), "cron")
+	gotP, gotC, gotS, _ := app.runReconcileAll(context.Background(), time.Now(), "cron")
 	if gotP.Scanned != 1 || gotC.Scanned != 2 || gotS.Scanned != 3 {
 		t.Fatalf("aggregate paid=%d created=%d sub=%d, want 1/2/3", gotP.Scanned, gotC.Scanned, gotS.Scanned)
 	}

@@ -30,10 +30,13 @@ import (
 // AgentPlanOrderPrefix 是代理套餐订单号前缀。支付回调据此分发到 ActivatePaidAgentPlanOrder。
 const AgentPlanOrderPrefix = "AGT"
 
-// 订单激活状态机（最简两态）。
+// 订单激活状态机。pending/activated 为主链；expired 为对账过期终态（见 agent_plan_reconcile.go）。
 const (
 	agtOrderPending   = "pending"
 	agtOrderActivated = "activated"
+	// agtOrderExpired 终态：pending 单下单超时仍未付 / 网关查无此单（永不会被支付），由对账过期兜底置此
+	// （对齐 SUB subOrderExpired，止住二维码失效后的无谓查单/告警重试）。
+	agtOrderExpired = "expired"
 )
 
 // 会员状态。
@@ -134,8 +137,9 @@ func (a *App) ActivatePaidAgentPlanOrder(ctx context.Context, orderNo string, pa
 	// 按 owner 串行化:支付平台常并发重推回调,若两个回调都读到 pending 都进 provision,新代理
 	// 会各自建同一 owner 派生的同一 slug 租户(唯一键兜底不产生孤儿,但会撞键报错 + 无谓重试)。
 	// 串行后同一 owner 至多一个激活在跑,其余在临界区内重读到 activated 即幂等短路,杜绝双 provision。
-	// 刻意保持 provision 先行、CAS 后置的既有顺序 → 维持「activated ⟹ 已 provision」不变量(AGT 无
-	// 对账兜底,绝不能留 activated-未provision 卡单)。锁细节见 activation_lock.go。
+	// 刻意保持 provision 先行、CAS 后置的既有顺序 → 维持「activated ⟹ 已 provision」不变量:对账兜底
+	// ReconcileStuckAgentPlans 会重驱动 pending 单再次走本函数(查到已付即补激活),故绝不能留 activated-
+	// 未provision 卡单。锁细节见 activation_lock.go;对账兜底见 agent_plan_reconcile.go。
 	unlock := lockAgentActivation(ord.OwnerUserID)
 	defer unlock()
 

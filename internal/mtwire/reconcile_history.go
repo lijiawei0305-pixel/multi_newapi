@@ -44,19 +44,20 @@ func migrateReconcileHeartbeat(db *gorm.DB) error { return db.AutoMigrate(&recon
 
 // reconcileHasFacts 报告一轮对账是否「有实事」（任一路径扫到单，或任一路径有失败）——决定定时轮是否落史。
 // （手动触发另行总记，不看此函数。）避免每 5min 空跑刷屏。
-func reconcileHasFacts(paid, created payment.ReconcileResult, sub ReconcileSubResult) bool {
-	return paid.Scanned > 0 || created.Scanned > 0 || sub.Scanned > 0 ||
-		len(paid.Failed) > 0 || len(created.Failed) > 0 || len(sub.Failed) > 0 ||
+func reconcileHasFacts(paid, created payment.ReconcileResult, sub ReconcileSubResult, agt ReconcileAgtResult) bool {
+	return paid.Scanned > 0 || created.Scanned > 0 || sub.Scanned > 0 || agt.Scanned > 0 ||
+		len(paid.Failed) > 0 || len(created.Failed) > 0 || len(sub.Failed) > 0 || len(agt.Failed) > 0 ||
 		len(created.Expired) > 0
 }
 
 // recordReconcileRun 落一条对账历史（best-effort：写库失败仅放弃记录，绝不影响对账本身）。
-func (a *App) recordReconcileRun(ctx context.Context, trigger string, paid, created payment.ReconcileResult, sub ReconcileSubResult) {
-	summary := fmt.Sprintf("RCG-paid 扫%d/补%d/败%d · RCG-created 扫%d/补%d/过期%d/败%d · SUB 扫%d/激活%d/未付%d/过期%d/败%d",
+func (a *App) recordReconcileRun(ctx context.Context, trigger string, paid, created payment.ReconcileResult, sub ReconcileSubResult, agt ReconcileAgtResult) {
+	summary := fmt.Sprintf("RCG-paid 扫%d/补%d/败%d · RCG-created 扫%d/补%d/过期%d/败%d · SUB 扫%d/激活%d/未付%d/过期%d/败%d · AGT 扫%d/激活%d/未付%d/过期%d/败%d",
 		paid.Scanned, len(paid.Reconciled), len(paid.Failed),
 		created.Scanned, len(created.Reconciled), len(created.Expired), len(created.Failed),
-		sub.Scanned, len(sub.Activated), len(sub.Unpaid), len(sub.Expired), len(sub.Failed))
-	detail, _ := json.Marshal(map[string]any{"paid": paid, "created": created, "sub": sub})
+		sub.Scanned, len(sub.Activated), len(sub.Unpaid), len(sub.Expired), len(sub.Failed),
+		agt.Scanned, len(agt.Activated), len(agt.Unpaid), len(agt.Expired), len(agt.Failed))
+	detail, _ := json.Marshal(map[string]any{"paid": paid, "created": created, "sub": sub, "agt": agt})
 	row := &reconcileRunRow{RanAt: time.Now(), Trigger: trigger, Summary: summary, Detail: string(detail)}
 	_ = a.DB.WithContext(ctx).Create(row).Error
 }

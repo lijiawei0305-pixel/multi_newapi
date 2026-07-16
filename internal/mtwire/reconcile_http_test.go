@@ -63,9 +63,10 @@ func TestHandleAdminListHistoryDescAndLimit(t *testing.T) {
 	ctx := context.Background()
 	r := payment.ReconcileResult{Failed: map[string]string{}}
 	s := ReconcileSubResult{Failed: map[string]string{}}
-	app.recordReconcileRun(ctx, "cron", payment.ReconcileResult{Scanned: 1, Failed: map[string]string{}}, r, s)
+	agt := ReconcileAgtResult{Failed: map[string]string{}}
+	app.recordReconcileRun(ctx, "cron", payment.ReconcileResult{Scanned: 1, Failed: map[string]string{}}, r, s, agt)
 	time.Sleep(2 * time.Millisecond)
-	app.recordReconcileRun(ctx, "manual", r, r, s)
+	app.recordReconcileRun(ctx, "manual", r, r, s, agt)
 
 	c, rec := newReconcileCtx("GET", "/api/admin/reconcile/history?limit=1", "")
 	app.HandleAdminListHistory(c)
