@@ -21,6 +21,8 @@ import type { StatusVariant } from '@/components/status-badge'
 import dayjs from '@/lib/dayjs'
 import type { AlertLevel } from '../types'
 
+export const usd = (v: number | undefined) => `$${Number(v || 0).toFixed(2)}`
+
 export function clampPct(v: number | undefined): number {
   const n = Number(v || 0)
   if (Number.isNaN(n)) return 0

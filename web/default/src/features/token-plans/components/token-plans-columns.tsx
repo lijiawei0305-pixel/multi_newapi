@@ -22,11 +22,11 @@ import { useTranslation } from 'react-i18next'
 import { BadgeCell } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import type { AdminTokenPlan } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 const cny = (v: number | undefined) => `¥${Number(v || 0).toFixed(2)}`
+const usd = (v: number | undefined) => `$${Number(v || 0).toFixed(2)}`
 
 export function useTokenPlansColumns(): ColumnDef<AdminTokenPlan>[] {
   const { t } = useTranslation()
@@ -106,7 +106,7 @@ export function useTokenPlansColumns(): ColumnDef<AdminTokenPlan>[] {
         header: t('Monthly Limit (USD)'),
         cell: ({ row }) => (
           <span className='text-muted-foreground'>
-            {formatBillingCurrencyFromUSD(row.original.month_limit_usd)}
+            {usd(row.original.month_limit_usd)}
           </span>
         ),
         size: 130,

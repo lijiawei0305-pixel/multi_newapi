@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import * as z from 'zod'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
-import { ratioToDisplayPrice } from '@/lib/model-pricing-currency'
 import { formatPricingNumber } from './pricing-format'
 
 export const createModelPricingSchema = (t: (key: string) => string) =>
@@ -155,10 +154,10 @@ export function toNumberOrNull(value: unknown): number | null {
   return Number.isFinite(num) ? num : null
 }
 
-function ratioToBasePrice(ratio: unknown, rate: number): string {
+function ratioToBasePrice(ratio: unknown): string {
   const num = toNumberOrNull(ratio)
   if (num === null) return ''
-  return formatPricingNumber(ratioToDisplayPrice(num, rate))
+  return formatPricingNumber(num * 2)
 }
 
 function deriveLanePrice(
@@ -172,7 +171,7 @@ function deriveLanePrice(
   return formatPricingNumber(ratioNumber * denominatorNumber)
 }
 
-export function createInitialLaneState(data?: ModelRatioData | null, rate = 1) {
+export function createInitialLaneState(data?: ModelRatioData | null) {
   if (!data) {
     return {
       promptPrice: '',
@@ -181,7 +180,7 @@ export function createInitialLaneState(data?: ModelRatioData | null, rate = 1) {
     }
   }
 
-  const promptPrice = ratioToBasePrice(data.ratio, rate)
+  const promptPrice = ratioToBasePrice(data.ratio)
   const audioInputPrice = deriveLanePrice(data.audioRatio, promptPrice)
   const prices: Record<LaneKey, string> = {
     completion: deriveLanePrice(data.completionRatio, promptPrice),
@@ -214,8 +213,7 @@ export function buildPreviewRows(
   promptPrice: string,
   lanePrices: Record<LaneKey, string>,
   laneEnabled: Record<LaneKey, boolean>,
-  t: (key: string) => string,
-  currencySymbol: string
+  t: (key: string) => string
 ): PreviewRow[] {
   if (mode === 'tiered_expr') {
     const effectiveExpr = combineBillingExpr(billingExpr, requestRuleExpr)
@@ -235,7 +233,7 @@ export function buildPreviewRows(
       {
         key: 'price',
         label: 'ModelPrice',
-        value: values.price ? `${currencySymbol}${values.price}` : t('Empty'),
+        value: values.price || t('Empty'),
       },
     ]
   }
@@ -244,14 +242,14 @@ export function buildPreviewRows(
     {
       key: 'inputPrice',
       label: t('Input price'),
-      value: promptPrice ? `${currencySymbol}${promptPrice}` : t('Empty'),
+      value: promptPrice ? `$${promptPrice}` : t('Empty'),
     },
     {
       key: 'completion',
       label: t('Completion price'),
       value:
         laneEnabled.completion && lanePrices.completion
-          ? `${currencySymbol}${lanePrices.completion}`
+          ? `$${lanePrices.completion}`
           : t('Empty'),
     },
     {
@@ -259,7 +257,7 @@ export function buildPreviewRows(
       label: t('Cache read price'),
       value:
         laneEnabled.cache && lanePrices.cache
-          ? `${currencySymbol}${lanePrices.cache}`
+          ? `$${lanePrices.cache}`
           : t('Empty'),
     },
     {
@@ -267,7 +265,7 @@ export function buildPreviewRows(
       label: t('Cache write price'),
       value:
         laneEnabled.createCache && lanePrices.createCache
-          ? `${currencySymbol}${lanePrices.createCache}`
+          ? `$${lanePrices.createCache}`
           : t('Empty'),
     },
     {
@@ -275,7 +273,7 @@ export function buildPreviewRows(
       label: t('Image input price'),
       value:
         laneEnabled.image && lanePrices.image
-          ? `${currencySymbol}${lanePrices.image}`
+          ? `$${lanePrices.image}`
           : t('Empty'),
     },
     {
@@ -283,7 +281,7 @@ export function buildPreviewRows(
       label: t('Audio input price'),
       value:
         laneEnabled.audioInput && lanePrices.audioInput
-          ? `${currencySymbol}${lanePrices.audioInput}`
+          ? `$${lanePrices.audioInput}`
           : t('Empty'),
     },
     {
@@ -291,7 +289,7 @@ export function buildPreviewRows(
       label: t('Audio output price'),
       value:
         laneEnabled.audioOutput && lanePrices.audioOutput
-          ? `${currencySymbol}${lanePrices.audioOutput}`
+          ? `$${lanePrices.audioOutput}`
           : t('Empty'),
     },
   ]

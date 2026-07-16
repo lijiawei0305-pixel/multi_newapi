@@ -20,9 +20,8 @@ import { useTranslation } from 'react-i18next'
 import { StatusBadge } from '@/components/status-badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { cn } from '@/lib/utils'
-import { clampPct, formatDate } from '../lib/format'
+import { clampPct, formatDate, usd } from '../lib/format'
 import type { TenantSubscription } from '../types'
 
 function statusVariant(status: string) {
@@ -64,7 +63,7 @@ function SubscriptionRow({ sub }: { sub: TenantSubscription }) {
 
         <div className='flex items-center justify-between text-sm'>
           <span className='text-muted-foreground'>
-            {formatBillingCurrencyFromUSD(sub.used_usd)} / {formatBillingCurrencyFromUSD(sub.limit_usd)}
+            {usd(sub.used_usd)} / {usd(sub.limit_usd)}
           </span>
           <span className='tabular-nums'>{pct.toFixed(0)}%</span>
         </div>

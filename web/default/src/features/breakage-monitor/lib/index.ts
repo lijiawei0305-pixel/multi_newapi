@@ -33,6 +33,16 @@ function toFinite(v: number | string | null | undefined): number {
   return Number.isFinite(n) ? (n as number) : 0
 }
 
+/** 格式化 USD 金额：`$` + 千分位 + 2 位小数。容忍负数与非法输入。 */
+export const usd = (v: number | string | null | undefined): string => {
+  const n = toFinite(v)
+  const sign = n < 0 ? '-' : ''
+  return `${sign}$${Math.abs(n).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
 /** 格式化整数计数（千分位、不保留小数）。 */
 export const count = (v: number | string | null | undefined): string =>
   toFinite(v).toLocaleString(undefined, { maximumFractionDigits: 0 })

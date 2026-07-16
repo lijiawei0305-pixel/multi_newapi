@@ -21,10 +21,9 @@ import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { cn } from '@/lib/utils'
 import type { MonitorSubscription } from '../types'
-import { alertLevelMeta, clampPct, formatDate, usageBarColor } from '../lib'
+import { alertLevelMeta, clampPct, formatDate, usageBarColor, usd } from '../lib'
 
 export function useSubscriptionMonitorColumns(): ColumnDef<MonitorSubscription>[] {
   const { t } = useTranslation()
@@ -95,7 +94,7 @@ export function useSubscriptionMonitorColumns(): ColumnDef<MonitorSubscription>[
             <div className='flex min-w-[140px] flex-col gap-1'>
               <div className='flex items-center justify-between text-xs'>
                 <span className='text-muted-foreground'>
-                  {formatBillingCurrencyFromUSD(sub.used_usd)} / {formatBillingCurrencyFromUSD(sub.limit_usd)}
+                  {usd(sub.used_usd)} / {usd(sub.limit_usd)}
                 </span>
                 <span className='tabular-nums'>{pct.toFixed(0)}%</span>
               </div>

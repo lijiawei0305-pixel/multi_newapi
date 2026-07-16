@@ -225,20 +225,6 @@ function getBillingDisplayMeta(config: CurrencyConfig): DisplayMeta {
   return meta
 }
 
-/**
- * The exchange rate actually applied by formatBillingCurrencyFromUSD:
- * CNY→usdExchangeRate, USD→1, CUSTOM→customCurrencyExchangeRate, TOKENS→1.
- * Single source of truth for "display ×rate / input ÷rate" so the two sides
- * can never drift (prevents the 7.3× mispricing bug in model-pricing UI).
- */
-export function getEffectiveBillingRate(): number {
-  const config = getConfig()
-  const meta = getBillingDisplayMeta(config)
-  return meta.kind === 'currency' || meta.kind === 'custom'
-    ? meta.exchangeRate
-    : 1
-}
-
 function mergeOptions(
   options?: CurrencyFormatOptions
 ): ResolvedCurrencyFormatOptions {

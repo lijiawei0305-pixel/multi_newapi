@@ -25,11 +25,30 @@ import {
   formatSnapshotTs,
   unusedBarColor,
   unusedPct,
+  usd,
 } from './index'
 
 // 假的 TFunction：直接返回 defaultValue（无 i18n 目录时也能测中文兜底）。
 const fakeT = ((_key: string, opts?: { defaultValue?: string }) =>
   opts?.defaultValue ?? _key) as unknown as TFunction
+
+describe('usd', () => {
+  it('正数带 $ 与两位小数', () => {
+    expect(usd(1234.5)).toBe('$1,234.50')
+  })
+  it('负数带前导负号', () => {
+    expect(usd(-49.5)).toBe('-$49.50')
+  })
+  it('字符串数字可解析', () => {
+    expect(usd('789.01')).toBe('$789.01')
+  })
+  it('非法/缺省 → $0.00', () => {
+    expect(usd(undefined)).toBe('$0.00')
+    expect(usd(null)).toBe('$0.00')
+    expect(usd('abc')).toBe('$0.00')
+    expect(usd(NaN)).toBe('$0.00')
+  })
+})
 
 describe('count', () => {
   it('整数千分位、无小数', () => {
