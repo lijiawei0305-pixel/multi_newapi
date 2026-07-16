@@ -193,6 +193,29 @@ func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 	return nil
 }
 
+// 编译期断言：*Engine 亦满足后台释放契约（限购键补偿释放，见 port.go PurchaseLimitAdmin）。
+var _ PurchaseLimitAdmin = (*Engine)(nil)
+
+// ReleaseTrialLimit 释放某用户的 Trial 三维去重键（用户维度 + 传入的实名/设备维度）。
+// 用途：后台补偿「点开收银台未付款即永久消耗 Trial 终身限购、无释放路径」的误占用——删掉对应维度键后，
+// 该用户即可重新购买 Trial（RETRO 2026-07-16 · Critical）。pi 的实名/设备为空则只释放用户维度
+// （与 checkTrialLimit 建键口径对称：空维度不建亦不删）。Del 幂等：键本就不存在也不报错。
+func (e *Engine) ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity) error {
+	keys := []string{trialKey("user", strconv.FormatInt(userID, 10))}
+	if pi.RealNameID != "" {
+		keys = append(keys, trialKey("realname", pi.RealNameID))
+	}
+	if pi.DeviceID != "" {
+		keys = append(keys, trialKey("device", pi.DeviceID))
+	}
+	return e.kv.Del(ctx, keys...)
+}
+
+// ReleasePurchaseLimit 释放某用户对某非 Trial 套餐的每用户限购计数键（purchaseKey）。
+func (e *Engine) ReleasePurchaseLimit(ctx context.Context, planID, userID int64) error {
+	return e.kv.Del(ctx, purchaseKey(planID, userID))
+}
+
 // NoteUsage used/limit 逼近阈值时打标告警；按 subID 去重（SetNX）确保只告警一次。
 func (e *Engine) NoteUsage(ctx context.Context, subID int64, used, limit float64) {
 	if limit <= 0 {

@@ -51,3 +51,11 @@ func (r *RedisKVCache) Expire(ctx context.Context, key string, ttl time.Duration
 	}
 	return r.rdb.Expire(ctx, key, ttl).Err()
 }
+
+// Del 删除给定 key（DEL 幂等：不存在的 key 计 0 不报错）。空列表 no-op（go-redis 空 keys 会 panic，故短路）。
+func (r *RedisKVCache) Del(ctx context.Context, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	return r.rdb.Del(ctx, keys...).Err()
+}

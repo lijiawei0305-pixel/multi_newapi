@@ -101,3 +101,13 @@ func (c *MemKVCache) Expire(_ context.Context, key string, ttl time.Duration) er
 	c.data[key] = e
 	return nil
 }
+
+// Del 删除给定 key（幂等：不存在的 key 忽略）。与 Redis DEL 契约一致。
+func (c *MemKVCache) Del(_ context.Context, keys ...string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, k := range keys {
+		delete(c.data, k)
+	}
+	return nil
+}

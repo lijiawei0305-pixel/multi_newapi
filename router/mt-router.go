@@ -212,6 +212,15 @@ func SetMtRouter(router *gin.Engine) {
 	// 支付渠道配置已移至系统设置（setting.*Enabled + 凭据，DB option）：渠道启用/凭据由设置页管理，
 	// 买家可用渠道经 GET /api/tenant/wallet/recharge/methods 暴露（configured 进程内判断），故此处无独立管理路由。
 
+	// 主站风控运维（全局，非租户维度）：后台释放某用户被误占用的 Trial 终身限购键（点开收银台犹豫关单即
+	// 永久消耗、无释放路径的补偿手段）。复用 new-api AdminAuth——替代客服直连无密码/无卷/无审计的 Redis
+	// 删键，带鉴权 + 审计日志（RETRO 2026-07-16 · Critical）。
+	adminRiskGroup := apiBase.Group("/admin/risk")
+	adminRiskGroup.Use(middleware.AdminAuth())
+	{
+		adminRiskGroup.POST("/trial-limit/release", app.HandleAdminReleaseTrialLimit)
+	}
+
 	// 支付卡单对账（兜底）管理：列当前卡单 + 手动立即对账。复用 new-api AdminAuth。
 	adminReconcileGroup := apiBase.Group("/admin/reconcile")
 	adminReconcileGroup.Use(middleware.AdminAuth())
