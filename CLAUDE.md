@@ -79,7 +79,7 @@
 
 | 编号 | 约束 | 为什么 | 正确做法 |
 | --- | --- | --- | --- |
-| **C1** | TODO | TODO | TODO |
+| **C1** | 任何密钥/凭据的**字面量**都不得写进受 git 跟踪的文件（含 compose 的 `${VAR:-默认}` 内联默认、生成物如 `repomix-output.xml`）；密钥只存服务器 `.env`(600)，仓库仅 `${VAR}` 引用且用 **`:?` fail-closed**（缺失即拒绝部署）。签名密钥与加密/HMAC 密钥须**分权**（`SESSION_SECRET`≠`CRYPTO_SECRET`）。 | `docker-compose.test.yml` 曾把 48 字符会话/加密根密钥内联成 git 字面量且从未轮换，服务器 `.env` 未覆盖 → 线上逐字节在用该公开密钥，任一仓库读者可离线伪造 `role:100` cookie 免密全站 root（RETRO 2026-07-16 · Critical）。 | 去内联默认改 `:?`；两把密钥分开；服务器 `.env` 用 `openssl rand -hex 32` 各生成随机值；新增/改 compose 或 `.env.example` 前 `git grep` 确认无真值明文。违反即回退重做。 |
 | **C2** | TODO | TODO | TODO |
 | **C3** | TODO | TODO | TODO |
 | **C4** | TODO | TODO | TODO |

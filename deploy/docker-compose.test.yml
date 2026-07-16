@@ -13,8 +13,18 @@ services:
       # —— new-api 期望的变量 ——
       SQL_DSN: "root:testpass123@tcp(mysql:3306)/new-api-test"
       REDIS_CONN_STRING: "redis://redis"
-      # 测试用会话密钥：随机串，可被外部同名 env 覆盖；仅供测试，勿用于生产。
-      SESSION_SECRET: "${SESSION_SECRET:-4329de40911e7a8bd58004757bfb8c976d72579113fdd7ba}"
+      # —— 会话/加密根密钥（Critical，2026-07-16 修复）——
+      #   过去内联了一个 48 字符默认值(fd17844 引入)：服务器 .env 未设同名键 → compose 插值回落到 git 字面量，
+      #   于是「签会话 cookie」与「派生 API token 缓存键的 HMAC」共用一把「进过 git、可被任何仓库读者读到」的根密钥。
+      #   风险：读到者可离线用 gorilla/securecookie 伪造 {"id":1,"role":100} 的 root cookie → 免密全站管理员。
+      #   修法（fail-closed + 分权）：
+      #     · 去掉内联默认，改 `:?`——未在服务器 .env 提供则 compose 直接报错拒绝部署（把「约定覆盖」升级为「强制」）。
+      #     · 拆两把：SESSION_SECRET 只签 cookie、CRYPTO_SECRET 只做 HMAC 缓存键派生，禁止同一把复用。
+      #   部署前置（务必先做，否则本文件会让 up 失败）：在 /root/newapi-test/.env 写入两把「互不相同」的随机值：
+      #     SESSION_SECRET=$(openssl rand -hex 32)   CRYPTO_SECRET=$(openssl rand -hex 32)
+      #   轮换会使旧 cookie 全失效（用户需重登）、缓存键重算（无数据损失）。详见 RETRO 2026-07-16 与 CLAUDE.md C1。
+      SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET 必须在服务器 .env 设为随机值，禁止内联默认（内联=把根密钥写进 git）}"
+      CRYPTO_SECRET: "${CRYPTO_SECRET:?CRYPTO_SECRET 必须在服务器 .env 设为随机值，且与 SESSION_SECRET 不同（分权，勿复用）}"
       TZ: "Asia/Shanghai"
       PORT: "3000"
       # —— 7c 多档风控：调用前 RPM 限流默认阈值（每分钟每用户，0=关闭）。压测后设 60=合理常用值（≈1 req/s/用户）。——

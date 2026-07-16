@@ -122,6 +122,16 @@
 - **坑点**：① 症状「CPU 空闲 + 吞吐卡 + 尾延迟」= 典型 **fsync-bound**（等盘），别往 app 算法上找。② 诊断用 **scratch 表 `SET PERSIST`+存储过程 loop 提交** 隔离 fsync 天花板，零上游成本/零真实数据变更/可精确复测，胜过在生产压测（费真实 token + 扰动用户）。③ MySQL 8 用 `SET PERSIST` 持久化动态变量（写 `mysqld-auto.cnf`，落在挂载卷）——比改 compose `command` 免 recreate mysql。
 - **升级**：暂不升级为硬约束（属调优而非红线）。记忆 [[billing-fsync-tuning-and-batch]]；相关 [[used-usd-dead-column-real-usage-native-bucket]]。
 
+### [已解决] 生产会话/加密根密钥被内联成 compose 里的 git 字面量（Critical，免密全站 root）
+- **现象**：`deploy/docker-compose.test.yml:17`（**这就是生产部署文件**）写了 `SESSION_SECRET: "${SESSION_SECRET:-4329de40…（48 hex）}"`，注释却自称「仅供测试，勿用于生产」。服务器 `/root/newapi-test/.env` 未设 `SESSION_SECRET` → compose 插值**回落到 git 里的字面量**；`CRYPTO_SECRET` 全程未设 → `common/init.go:59-62` 再回落 `CryptoSecret = SessionSecret`。线上只读比对坐实：git 内联默认值与容器 `newapi_test-app-1` 实际在用值 `sha256[0:16]` 均为 `eb1c24ec27668b88`，**逐字节相同**；`git log -S` 仅 2 条（`fd17844` 引入 / `493b830`）→ **从未轮换**。
+- **根因**：`${VAR:-默认}` 的「默认」写死在受 git 跟踪的文件里 = 把根密钥提交进代码库。同一把密钥既做 `main.go:191` `cookie.NewStore` 的会话签名、又做 `common/crypto.go:18` 的 HMAC。消费链：`controller/user.go:138-142` 把 `id/role/status` 明文塞进 session → `middleware/auth.go:39-42` 原样取回信任（`RoleRootUser=100`）。**真实失败场景**：任一有仓库读权限者（或流出的克隆 / 被翻出的 `repomix-output.xml`）读到该行 → 本地用 `gorilla/securecookie` 以此密钥签一个 `{"id":1,"role":100,"status":1}` cookie → 带 `New-Api-User:1` 请求 `https://www.wedreamhub.com/api/user/` → `auth.go:132` 的 `role<minRole` 通过 → **免密全站 root（改支付凭据、审批提现、读全租户财务），且日志与正常管理员登录无任何区别**（无登录事件、无异常 IP）。是私有仓库（匿名 404），故非「全网可读」，但「密钥进代码/产物」本身即 Critical。
+- **解决/规避**（纯静态修复，本机改代码、轮换+部署在服务器）：
+  1. `docker-compose.test.yml` 去掉内联默认，改 **fail-closed** `:?`——未在服务器 `.env` 提供则 compose **直接报错拒绝 `up`**，把「覆盖只是约定」升级为「强制」；同时**拆两把**：新增 `CRYPTO_SECRET: "${CRYPTO_SECRET:?…}"`，让签 cookie 与做 HMAC 用不同密钥（分权，`init.go` 的 `CryptoSecret=SessionSecret` 回落分支在本栈永不再触发）。
+  2. `git rm --cached repomix-output.xml`——19.8MB 生成物早在 `.gitignore:75` 却仍被跟踪（提交在先），是泄漏值的**第二份拷贝**；`git grep` 已确认真值现已从**全部 tracked 文件的索引**消失。（其余 `.env.example`/`deploy/.env.test.example`/`docker-compose.yml` 只是 `random_string` 占位，无真值。）
+  3. **服务器侧轮换（外部前置，务必先做，否则本次改动会让 `up` 直接失败）**：在 `/root/newapi-test/.env` 追加**两把互不相同**的**全新**随机值 `SESSION_SECRET=$(openssl rand -hex 32)`、`CRYPTO_SECRET=$(openssl rand -hex 32)`（禁止再用旧字面量），再 `docker compose -p newapi_test --env-file /root/newapi-test/.env -f deploy/docker-compose.test.yml up -d app` 重启激活。轮换代价：旧会话 cookie 全失效（用户需重登）、`token_cache`/`file_service` 缓存键重算（**仅缓存 miss，无持久化数据损失**——已核实 `CryptoSecret` 仅用于派生缓存 key，未参与任何入库/比对）。
+  4. 轮换后旧值即成**死字符串**，故遗留在 git 历史（`fd17844`/`493b830`）无害；如需彻底洁净可后续 BFG 洗历史（非必须、非阻塞）。
+- **升级**：**已升级为规则 → CLAUDE.md C1**（禁止把任何密钥/凭据的字面量写进受 git 跟踪的文件；密钥只存服务器 `.env`(600)，仓库仅 `${VAR}` 引用且用 `:?` fail-closed）。相关既有纪律：[[deployment.md §.env]]、W4（密钥不入库）。
+
 ---
 
 ## 二、构建与依赖
