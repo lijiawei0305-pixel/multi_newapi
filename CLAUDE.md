@@ -80,7 +80,7 @@
 | 编号 | 约束 | 为什么 | 正确做法 |
 | --- | --- | --- | --- |
 | **C1** | 任何密钥/凭据的**字面量**都不得写进受 git 跟踪的文件（含 compose 的 `${VAR:-默认}` 内联默认、生成物如 `repomix-output.xml`）；密钥只存服务器 `.env`(600)，仓库仅 `${VAR}` 引用且用 **`:?` fail-closed**（缺失即拒绝部署）。签名密钥与加密/HMAC 密钥须**分权**（`SESSION_SECRET`≠`CRYPTO_SECRET`）。 | `docker-compose.test.yml` 曾把 48 字符会话/加密根密钥内联成 git 字面量且从未轮换，服务器 `.env` 未覆盖 → 线上逐字节在用该公开密钥，任一仓库读者可离线伪造 `role:100` cookie 免密全站 root（RETRO 2026-07-16 · Critical）。 | 去内联默认改 `:?`；两把密钥分开；服务器 `.env` 用 `openssl rand -hex 32` 各生成随机值；新增/改 compose 或 `.env.example` 前 `git grep` 确认无真值明文。违反即回退重做。 |
-| **C2** | TODO | TODO | TODO |
+| **C2** | 任何拿到 `*gin.Engine` 的自研路由装配点（`SetMtRouter` 等）新增 `/api/**` 路由，**必须挂在与 `apiRouter` 同基础链的 `/api` 基组**（`apiBase := engine.Group("/api")` + `.Use(RouteTag/gzip/BodyStorageCleanup/GlobalAPIRateLimit)`），**严禁直接 `engine.Group("/api/…")`**；公开回调补 `AnonymousRequestBodyLimit`、money/兑换/提现端点补 `CriticalRateLimit()`（对齐上游同类端点）。 | gin 的 `Group()` 创建时快照父链、`.Use()` 不按路径前缀继承：自研组直接挂 engine 即 apiRouter 的**兄弟组**，全站默认全局限流(360/180s)+关键限流(20/20min)+体积门对自研 `/api/**` **一条都不生效** → 兑换码可爆破入账、支付回调可 1GB body OOM、pending 订单可无限造（RETRO 三·「mt-router 旁路 /api 分组中间件」· Critical）。 | 新增自研 `/api` 路由前先确认挂在 `apiBase` 下；改完 `git grep 'router.Group("/api'` 应只剩 `apiBase := router.Group("/api")` 一处；公开/money 端点逐个核对已挂上游对等中间件。违反即回退重做。 |
 | **C3** | TODO | TODO | TODO |
 | **C4** | TODO | TODO | TODO |
 | **C5** | TODO | TODO | TODO |

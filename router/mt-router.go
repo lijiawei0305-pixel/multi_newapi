@@ -1,6 +1,7 @@
 package router
 
 import (
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 
 	"github.com/QuantumNous/new-api/common"
@@ -61,15 +62,30 @@ func SetMtRouter(router *gin.Engine) {
 		app.StartBreakageSnapshotLoop()
 	}
 
+	// 【安全修复 2026-07-16】自研 /api/** 基础中间件对齐层（RETRO「mt-router 旁路 /api 分组中间件」）。
+	// 根因：本函数收到的是 *gin.Engine，此前各组直接 router.Group("/api/tenant"|"/api/pay"|"/api/admin/…") 挂在
+	// engine 上，是 SetApiRouter 里 apiRouter := router.Group("/api") 的「兄弟组」而非「子组」。gin 的 Group()
+	// 在创建时快照父链，apiRouter.Use(...) 只追加到 apiRouter 自身链、不按路径前缀继承 → 全部自研 /api/** 路由
+	// 旁路了 RouteTag/gzip/BodyStorageCleanup/GlobalAPIRateLimit（限流默认开着却对自研接口全部失效）。
+	// 修法：在此建一个与 apiRouter 同基础链的 /api 基组 apiBase，所有自研组改挂 apiBase（URL 路径逐字节不变，
+	// 仅补齐 handler 链）；money / 公开回调端点再单独补 CriticalRateLimit / AnonymousRequestBodyLimit 达成上游对等。
+	apiBase := router.Group("/api")
+	apiBase.Use(middleware.RouteTag("api"))
+	apiBase.Use(gzip.Gzip(gzip.DefaultCompression))
+	apiBase.Use(middleware.BodyStorageCleanup())
+	apiBase.Use(middleware.GlobalAPIRateLimit())
+	anonymousRequestBodyLimit := middleware.AnonymousRequestBodyLimit()
+
 	// 租户控制台（Host 维度）。GET /current 公开；其余复用 new-api UserAuth。
-	tenantGroup := router.Group("/api/tenant")
+	tenantGroup := apiBase.Group("/tenant")
 	tenantGroup.Use(app.TenantMiddleware())
 	{
 		tenantGroup.GET("/current", app.HandleTenantCurrent)
 		tenantGroup.GET("/token-plans", middleware.UserAuth(), app.HandleListTokenPlans)
-		tenantGroup.POST("/token-plans/:id/purchase", middleware.UserAuth(), app.HandlePurchase)
+		// CriticalRateLimit：下单即建 realpay 支付订单，与上游 /api/user/topup 同一「印钞类」端点对等限流（20/20min/IP）。
+		tenantGroup.POST("/token-plans/:id/purchase", middleware.UserAuth(), middleware.CriticalRateLimit(), app.HandlePurchase)
 		// 购买代理套餐（P3）：登录用户下单 → realpay 出凭据 → 回调激活开通/升级代理。
-		tenantGroup.POST("/agent-plans/:id/purchase", middleware.UserAuth(), app.HandlePurchaseAgentPlan)
+		tenantGroup.POST("/agent-plans/:id/purchase", middleware.UserAuth(), middleware.CriticalRateLimit(), app.HandlePurchaseAgentPlan)
 		tenantGroup.GET("/subscriptions", middleware.UserAuth(), app.HandleListSubscriptions)
 		// 支持工单（用户端）：UserAuth + Host 租户；仅按会话 user_id 隔离（不信任客户端 user_id）。
 		// tenant_id 于创建时由服务端从提交用户 users.tenant_id 派生固化，不接受请求体传入。
@@ -79,13 +95,15 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.POST("/tickets/:id/replies", middleware.UserAuth(), app.HandleUserReplyTicket)
 		tenantGroup.POST("/tickets/:id/close", middleware.UserAuth(), app.HandleUserCloseTicket)
 		// 充值下单（目标③）：UserAuth + Host 租户；下单 → 调 auth-service → 返支付凭据。
-		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), app.HandleWalletRecharge)
+		// CriticalRateLimit：防脚本无限造 pending 订单（DoS + 支付表膨胀），对齐上游 /api/user/topup。
+		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), middleware.CriticalRateLimit(), app.HandleWalletRecharge)
 		// 充值订单状态查询（目标③ 修复）：UserAuth + Host 租户；前端扫码支付后轮询探活，仅本人订单（越权 404）。
 		tenantGroup.GET("/wallet/recharge/status", middleware.UserAuth(), app.HandleWalletRechargeStatus)
 		// 买家可用充值渠道：UserAuth + Host 租户；返回 enabled && configured 的渠道（wxpay/alipay）。
 		tenantGroup.GET("/wallet/recharge/methods", middleware.UserAuth(), app.HandleTenantRechargeMethods)
 		// 用户兑换码（P1-UI-04）：UserAuth + Host 租户（不强制 owner）；单赢家 CAS → 原生 quota 入账。
-		tenantGroup.POST("/redeem", middleware.UserAuth(), app.HandleRedeem)
+		// CriticalRateLimit：兑换码即钱，防登录态爆破撞他人未用码（每秒数千次），对齐上游 /api/user/topup（20/20min/IP）。
+		tenantGroup.POST("/redeem", middleware.UserAuth(), middleware.CriticalRateLimit(), app.HandleRedeem)
 		// 代理身份门控信号：UserAuth + Host 租户（**不挂 AgentOwnerAuth**，任何登录用户可调）。
 		// 返回 {is_agent_owner}（权威判断 = Host 租户 owner == 当前用户），供前端隐藏代理自助菜单 +
 		// 路由 beforeLoad 拦截，避免普通用户/别站代理触发 AGENT_FORBIDDEN。
@@ -94,7 +112,7 @@ func SetMtRouter(router *gin.Engine) {
 		// 与 Host 无关 → L0 无子域名也能在主站访问自己的控制台；L1 在子域名同样解析到自己的租户）。
 		agentSelf := tenantGroup.Group("", middleware.UserAuth(), app.AgentOwnerAuthByUser())
 		{
-			agentSelf.POST("/withdrawals", app.HandleAgentRequestWithdrawal)
+			agentSelf.POST("/withdrawals", middleware.CriticalRateLimit(), app.HandleAgentRequestWithdrawal) // 出账类：限流防刷提现单
 			agentSelf.GET("/withdrawals", app.HandleAgentListWithdrawals)
 			// 收款账户（提现闭环补强 #1）：申请提现前必须先设置，管理员审核/打款据此转账。
 			agentSelf.GET("/payout-account", app.HandleAgentGetPayoutAccount)
@@ -152,7 +170,7 @@ func SetMtRouter(router *gin.Engine) {
 
 	// 内网回写（自定义域名证书签发，§6.5）：共享密钥 X-Internal-Secret 校验（deny-by-default）。
 	// Nginx 边界另以 `location ^~ /api/internal/ { return 404; }` 拒绝公网；签发脚本走 127.0.0.1:3100 直连本组。
-	internalDomainGroup := router.Group("/api/internal/domain")
+	internalDomainGroup := apiBase.Group("/internal/domain")
 	internalDomainGroup.Use(app.InternalSecretAuth())
 	{
 		internalDomainGroup.GET("/pending-cert", app.HandleInternalListPendingCert) // 列待发证（dns_verified）域名
@@ -162,14 +180,16 @@ func SetMtRouter(router *gin.Engine) {
 
 	// 支付平台异步回调（目标③，支付重构后）：微信/支付宝 POST 到此，handler 内验签（无 UserAuth/TenantMiddleware）。
 	// 签名校验在 providerManager.VerifyNotify；金额/幂等以库内订单为权威。公开路由（平台来源 IP 不固定）。
-	payGroup := router.Group("/api/pay")
+	payGroup := apiBase.Group("/pay")
 	{
-		payGroup.POST("/wechat/notify", app.HandleWechatNotify)
-		payGroup.POST("/alipay/notify", app.HandleAlipayNotify)
+		// anonymousRequestBodyLimit：公开未认证回调，任意人可 POST；限体积防 1GB body → VerifyNotify 读全量 OOM，
+		// 对齐上游 /api/stripe|creem|waffo/webhook。baseline GlobalAPIRateLimit 已由 apiBase 覆盖。
+		payGroup.POST("/wechat/notify", anonymousRequestBodyLimit, app.HandleWechatNotify)
+		payGroup.POST("/alipay/notify", anonymousRequestBodyLimit, app.HandleAlipayNotify)
 	}
 
 	// 主站套餐目录管理（全局，非租户维度），复用 new-api AdminAuth。
-	adminPlanGroup := router.Group("/api/admin/token-plans")
+	adminPlanGroup := apiBase.Group("/admin/token-plans")
 	adminPlanGroup.Use(middleware.AdminAuth())
 	{
 		adminPlanGroup.GET("", app.HandleAdminListPlans)
@@ -178,7 +198,7 @@ func SetMtRouter(router *gin.Engine) {
 	}
 
 	// 主站代理套餐目录管理（购买代理套餐；全局，非租户维度），复用 new-api AdminAuth。
-	adminAgentPlanGroup := router.Group("/api/admin/agent-plans")
+	adminAgentPlanGroup := apiBase.Group("/admin/agent-plans")
 	adminAgentPlanGroup.Use(middleware.AdminAuth())
 	{
 		adminAgentPlanGroup.GET("", app.HandleAdminListAgentPlans)
@@ -187,13 +207,13 @@ func SetMtRouter(router *gin.Engine) {
 	}
 
 	// 公开代理套餐价目（无需登录）：供公开落地页（代理加盟）动态展示。全局目录，无 TenantMiddleware。
-	router.GET("/api/agent-plans/public", app.HandleListPublicAgentPlans)
+	apiBase.GET("/agent-plans/public", app.HandleListPublicAgentPlans)
 
 	// 支付渠道配置已移至系统设置（setting.*Enabled + 凭据，DB option）：渠道启用/凭据由设置页管理，
 	// 买家可用渠道经 GET /api/tenant/wallet/recharge/methods 暴露（configured 进程内判断），故此处无独立管理路由。
 
 	// 支付卡单对账（兜底）管理：列当前卡单 + 手动立即对账。复用 new-api AdminAuth。
-	adminReconcileGroup := router.Group("/api/admin/reconcile")
+	adminReconcileGroup := apiBase.Group("/admin/reconcile")
 	adminReconcileGroup.Use(middleware.AdminAuth())
 	{
 		adminReconcileGroup.GET("/stuck", app.HandleAdminListStuck)
@@ -203,7 +223,7 @@ func SetMtRouter(router *gin.Engine) {
 	}
 
 	// 管理端订阅监控（当前租户维度，租户来自 Host）。前置 TenantMiddleware + new-api AdminAuth。
-	adminSubGroup := router.Group("/api/admin/subscriptions")
+	adminSubGroup := apiBase.Group("/admin/subscriptions")
 	adminSubGroup.Use(app.TenantMiddleware(), middleware.AdminAuth())
 	{
 		adminSubGroup.GET("", app.HandleAdminListSubscriptions)
@@ -212,7 +232,7 @@ func SetMtRouter(router *gin.Engine) {
 	// 管理端 breakage 监控（额度沉淀，P2-BRK-01）：当前租户维度，租户来自 Host。前置 TenantMiddleware +
 	// new-api AdminAuth（与 adminSubGroup 同语义：主站 Host 看全平台跨租户，代理子域/自定义域名隔离本租户）。
 	// overview（4 卡）/ detail（明细，筛选+分页+?format=csv 导出）/ snapshots（历史快照趋势，按期）。
-	adminBreakageGroup := router.Group("/api/admin/breakage")
+	adminBreakageGroup := apiBase.Group("/admin/breakage")
 	adminBreakageGroup.Use(app.TenantMiddleware(), middleware.AdminAuth())
 	{
 		adminBreakageGroup.GET("/overview", app.HandleAdminBreakageOverview)
@@ -221,7 +241,7 @@ func SetMtRouter(router *gin.Engine) {
 	}
 
 	// 主站代理管理（全局，非租户维度）：设代理 / 列表 / 改代理。复用 new-api AdminAuth。
-	adminAgentGroup := router.Group("/api/admin/agents")
+	adminAgentGroup := apiBase.Group("/admin/agents")
 	adminAgentGroup.Use(middleware.AdminAuth())
 	{
 		adminAgentGroup.GET("", app.HandleAdminListAgents)
@@ -234,7 +254,7 @@ func SetMtRouter(router *gin.Engine) {
 
 	// 主站财务报表（全局跨租户，非 Host 维度）：汇总 / 趋势 / 代理排行 / 明细（明细支持 ?format=csv|pdf 导出）。
 	// 仅 AdminAuth，不挂 TenantMiddleware（排行跨租户 GROUP BY tenant_id，消耗/汇总均排除 tenant_id=0）。
-	financeAdminGroup := router.Group("/api/admin/finance")
+	financeAdminGroup := apiBase.Group("/admin/finance")
 	financeAdminGroup.Use(middleware.AdminAuth())
 	{
 		financeAdminGroup.GET("/summary", app.HandleAdminFinanceSummary)
@@ -245,7 +265,7 @@ func SetMtRouter(router *gin.Engine) {
 	}
 
 	// 主站提现审核（全局，非租户维度）：列表 / 通过 / 拒绝。复用 new-api AdminAuth。
-	adminWithdrawGroup := router.Group("/api/admin/withdrawals")
+	adminWithdrawGroup := apiBase.Group("/admin/withdrawals")
 	adminWithdrawGroup.Use(middleware.AdminAuth())
 	{
 		adminWithdrawGroup.GET("", app.HandleAdminListWithdrawals)
@@ -257,7 +277,7 @@ func SetMtRouter(router *gin.Engine) {
 
 	// 主站模型分组管理（全局，非租户维度，§2.15）：增删改 + 设倍率/绑渠道。复用 new-api AdminAuth。
 	// 写操作同步真源 GroupRatio + UserUsableGroups（见 internal/mtwire/modelgroup.go）。
-	adminModelGroupGroup := router.Group("/api/admin/model-groups")
+	adminModelGroupGroup := apiBase.Group("/admin/model-groups")
 	adminModelGroupGroup.Use(middleware.AdminAuth())
 	{
 		adminModelGroupGroup.GET("", app.HandleAdminListModelGroups)
@@ -267,7 +287,7 @@ func SetMtRouter(router *gin.Engine) {
 	}
 
 	// 主站自定义域名管理（全局，非租户维度，§6）：跨租户查看所有代理站自定义域名 + 强制解绑。复用 new-api AdminAuth。
-	adminCustomDomainGroup := router.Group("/api/admin/custom-domains")
+	adminCustomDomainGroup := apiBase.Group("/admin/custom-domains")
 	adminCustomDomainGroup.Use(middleware.AdminAuth())
 	{
 		adminCustomDomainGroup.GET("", app.HandleAdminListCustomDomains)
@@ -277,7 +297,7 @@ func SetMtRouter(router *gin.Engine) {
 	// 主站违禁词审核（6e · §2.14）：全站基础库（tenant_id=0）词库 CRUD + 违规日志（主站统一管控，跨全租户）。
 	// 前置 TenantMiddleware（供词库 tenant 上下文）+ new-api AdminAuth。违规日志由 super-admin 跨租户查看
 	// （HandleAdminListViolations 恒传 -1=全租户），与财报/工单的跨租户 admin 视图一致，仅全局管理员可达。
-	adminModerationGroup := router.Group("/api/admin/moderation")
+	adminModerationGroup := apiBase.Group("/admin/moderation")
 	adminModerationGroup.Use(app.TenantMiddleware(), middleware.AdminAuth())
 	{
 		adminModerationGroup.GET("/words", app.HandleAdminListModerationWords)
@@ -288,7 +308,7 @@ func SetMtRouter(router *gin.Engine) {
 
 	// 主站支持工单（全局跨租户，非 Host 维度）：列表/详情/回复/状态。仅 AdminAuth，不挂 TenantMiddleware
 	// （跨租户查看所有工单，tenant_id 仅作可选筛选；镜像 financeAdminGroup）。
-	adminTicketGroup := router.Group("/api/admin/tickets")
+	adminTicketGroup := apiBase.Group("/admin/tickets")
 	adminTicketGroup.Use(middleware.AdminAuth())
 	{
 		adminTicketGroup.GET("", app.HandleAdminListTickets)
