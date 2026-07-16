@@ -186,7 +186,7 @@ export const ModelPricingEditorPanel = forwardRef<
       form.reset({
         name: editData.name,
         price: editData.price
-          ? usdPriceToDisplay(Number(editData.price), rate).toString()
+          ? formatPricingNumber(usdPriceToDisplay(Number(editData.price), rate))
           : '',
         ratio: editData.ratio || '',
         cacheRatio: editData.cacheRatio || '',
@@ -458,7 +458,7 @@ export const ModelPricingEditorPanel = forwardRef<
         name: values.name.trim(),
         billingMode: pricingMode,
         price: values.price
-          ? displayToUsdPrice(Number(values.price), getEffectiveBillingRate()).toString()
+          ? formatPricingNumber(displayToUsdPrice(Number(values.price), getEffectiveBillingRate()))
           : '',
         ratio: values.ratio || '',
         cacheRatio: values.cacheRatio || '',

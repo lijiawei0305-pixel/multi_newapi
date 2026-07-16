@@ -235,7 +235,7 @@ export function buildPreviewRows(
       {
         key: 'price',
         label: 'ModelPrice',
-        value: values.price || t('Empty'),
+        value: values.price ? `${currencySymbol}${values.price}` : t('Empty'),
       },
     ]
   }

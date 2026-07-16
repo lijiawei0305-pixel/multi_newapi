@@ -90,6 +90,7 @@ import {
   usdPriceToDisplay,
   displayToUsdPrice,
 } from '@/lib/model-pricing-currency'
+import { formatPricingNumber } from '@/features/system-settings/models/pricing-format'
 
 // Extended schema for ratio configuration (internal form state only)
 const extendedModelFormSchema = z.object({
@@ -261,7 +262,7 @@ export function ModelMutateDrawer({
     setPromptPrice(value)
     if (value && !Number.isNaN(Number.parseFloat(value))) {
       const ratio = displayPriceToRatio(Number.parseFloat(value), getEffectiveBillingRate())
-      form.setValue('ratio', ratio.toString())
+      form.setValue('ratio', formatPricingNumber(ratio))
     } else {
       form.setValue('ratio', '')
     }
@@ -356,14 +357,14 @@ export function ModelMutateDrawer({
           setPricingMode('per-request')
           form.reset({
             ...baseModelData,
-            price: usdPriceToDisplay(price, getEffectiveBillingRate()).toString(),
+            price: formatPricingNumber(usdPriceToDisplay(price, getEffectiveBillingRate())),
           })
         } else {
           setPricingMode('per-token')
           if (ratio !== undefined && ratio !== null) {
             const rate = getEffectiveBillingRate()
             const tokenPrice = ratioToDisplayPrice(ratio, rate)
-            setPromptPrice(tokenPrice.toString())
+            setPromptPrice(formatPricingNumber(tokenPrice))
             if (completionRatio !== undefined && completionRatio !== null) {
               const compPrice = tokenPrice * completionRatio
               setCompletionPrice(compPrice.toString())
@@ -522,7 +523,7 @@ export function ModelMutateDrawer({
                 values.price &&
                 values.price !== ''
               ) {
-                priceMap[finalModelName] = displayToUsdPrice(Number.parseFloat(values.price), getEffectiveBillingRate())
+                priceMap[finalModelName] = Number(formatPricingNumber(displayToUsdPrice(Number.parseFloat(values.price), getEffectiveBillingRate())))
               } else if (pricingMode === 'per-token') {
                 if (values.ratio && values.ratio !== '') {
                   ratioMap[finalModelName] = Number.parseFloat(values.ratio)
@@ -1024,7 +1025,7 @@ export function ModelMutateDrawer({
                                     field.onChange(value)
                                     if (value) {
                                       setPromptPrice(
-                                        ratioToDisplayPrice(Number.parseFloat(value), getEffectiveBillingRate()).toString()
+                                        formatPricingNumber(ratioToDisplayPrice(Number.parseFloat(value), getEffectiveBillingRate()))
                                       )
                                     } else {
                                       setPromptPrice('')
@@ -1119,8 +1120,8 @@ export function ModelMutateDrawer({
                             promptPrice &&
                             !Number.isNaN(Number.parseFloat(promptPrice)) &&
                             Number.parseFloat(promptPrice) > 0
-                              ? `Calculated ratio: ${(Number.parseFloat(completionPrice) / Number.parseFloat(promptPrice)).toFixed(4)}`
-                              : t('Enter Completion price to calculate ratio')}
+                              ? `${t('Calculated ratio', { defaultValue: '换算倍率' })}: ${(Number.parseFloat(completionPrice) / Number.parseFloat(promptPrice)).toFixed(4)}`
+                              : t('Enter Completion price to calculate ratio', { defaultValue: '输入补全价格以计算倍率' })}
                           </p>
                         </div>
                     </div>
