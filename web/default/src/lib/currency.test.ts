@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useSystemConfigStore } from '@/stores/system-config-store'
+import { useSystemConfigStore } from '../stores/system-config-store'
 import { getEffectiveBillingRate } from './currency'
 
 function setCurrency(partial: Record<string, unknown>) {

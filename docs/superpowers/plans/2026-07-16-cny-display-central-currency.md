@@ -15,7 +15,8 @@
 - **红线②(后端零改)**:计费/桥接/额度桶/汇率值/`token_plans` 数据/breakage 阈值不动;存库 `model_ratio`(无量纲)、`model_price`(USD 绝对价)**与币种无关**,实际扣费 quota 零变化。
 - **单一汇率源**:所有「显示 ×rate / 录入 ÷rate」只经 `getEffectiveBillingRate()`,禁止各处自算汇率。
 - **W5 全中文**:改到的面向用户文案一律中文;`zh.json` 被并行工作区锁定时用 `t('English Key', { defaultValue: '中文' })` 即时兜底。
-- **W4 服务器构建**:Mac 只编辑;纯逻辑 vitest 可本地 `npx vitest run <file>`(纯 `lib/*` 不依赖路由树),若 Mac 跑不了则在服务器跑;`tsgo -b` 全量 typecheck 与前端 build 一律以**服务器 Docker 构建**为准。
+- **W4 服务器构建**:Mac 只编辑;`tsgo -b` 全量 typecheck 与前端 build 一律以**服务器 Docker 构建**为准(Mac 因路由树会假报错)。
+- **测试导入约定 + 运行门 caveat**:测试文件一律**相对导入**(本仓无 vitest `@` 别名配置,`@/` 在 `npx vitest` 下解析失败)。被测模块若经 store 传递 `@/` 的 value 导入(如 Task 1 依赖 `system-config-store` → `@/lib/constants`),该测试需服务器测试环境方能运行——**本机不设运行门**,以「代码审静态核验 + Task 8 服务器闭环」为准。**Task 2 的纯换算测试无 store 依赖、可独立运行,是防 7.3 倍的主要自动化安全网。**
 - **部署 scope 隔离**:`deploy.sh` 打包整棵工作树,部署前 `git diff`/`git status` 核对只带本次改动文件,勿裹入无关 WIP。
 
 ---
@@ -54,7 +55,7 @@
 `web/default/src/lib/currency.test.ts`:
 ```ts
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useSystemConfigStore } from '@/stores/system-config-store'
+import { useSystemConfigStore } from '../stores/system-config-store'
 import { getEffectiveBillingRate } from './currency'
 
 function setCurrency(partial: Record<string, unknown>) {
@@ -588,7 +589,7 @@ git commit -m "feat(sweep): 损耗监控接回中枢 + 前台定价明细收敛(
 
 - [ ] **Step 2: 服务器构建 & 单测**
 
-服务器上 `npx vitest run src/lib/currency.test.ts src/lib/model-pricing-currency.test.ts`(2 文件全绿)+ Docker 前端构建成功、`/api/status` 绿。
+服务器上跑 vitest:`src/lib/model-pricing-currency.test.ts` **必须全绿**(纯函数、无 store 依赖,是防 7.3 倍主门);`src/lib/currency.test.ts` 若服务器测试环境已配 `@` 别名/jsdom 则应全绿,否则记录「因 store 传递 `@/` 依赖跳过、函数已由任务审静态核验」不作阻塞。Docker 前端构建成功、`/api/status` 绿为硬门。
 
 - [ ] **Step 3: 验收清单(CNY 模式)**
 
