@@ -23,6 +23,7 @@ For commercial licensing, please contact support@quantumnous.com
 // new-api quota uses 500000 quota = $1.
 // ============================================================================
 import dayjs from '@/lib/dayjs'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 
 /** Tokens-per-USD: 500000 raw quota = $1 (new-api default). */
 export const QUOTA_PER_USD = 500000
@@ -31,13 +32,13 @@ export const QUOTA_PER_USD = 500000
 export const cny = (v: number | undefined | null) =>
   `¥${Number(v ?? 0).toFixed(2)}`
 
-/** $ amount with 2 decimals. */
+/** $ / ¥ per display currency (was hard-coded $). */
 export const usd = (v: number | undefined | null) =>
-  `$${Number(v ?? 0).toFixed(2)}`
+  formatBillingCurrencyFromUSD(Number(v ?? 0))
 
-/** Raw quota → USD ($) display, per the page spec `quota / 500000`. */
+/** Raw quota → display currency (was hard-coded $). */
 export const quotaToUsd = (quota: number | undefined | null) =>
-  usd(Number(quota ?? 0) / QUOTA_PER_USD)
+  formatBillingCurrencyFromUSD(Number(quota ?? 0) / QUOTA_PER_USD)
 
 /** Tolerant timestamp formatter — accepts unix seconds, ms, or ISO string. */
 export function fmtDateTime(value: number | string | undefined | null): string {
