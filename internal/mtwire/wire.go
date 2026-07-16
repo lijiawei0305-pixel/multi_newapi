@@ -219,8 +219,11 @@ func New(db *gorm.DB) *App {
 	rechargeCfg := loadRechargeConfig()
 	orderRepo := paymentrepo.New(db)
 	providerMgr := newProviderManager()
+	// 告警分发口（下方 breakage 亦复用）：命中软删用户的充值入账经此发 Critical 告警知会风控。
+	// 在此提前构造（原在 breakage 段），使充值 Sink 能持有它；分发时按 DB option 重读开关/收件人。
+	alertSink := alert.NewSink(func() alert.Config { return alert.LoadConfig(optionGetterAdapter) })
 	rechargeSinks := map[payment.OrderType]payment.OrderSink{
-		payment.OrderTypeRecharge: rechargeQuotaSink{db: db},
+		payment.OrderTypeRecharge: rechargeQuotaSink{db: db, alerter: alertSink},
 	}
 	rechargeGateway := payment.NewGateway(
 		orderRepo, &inProcessPaySDK{mgr: providerMgr}, rechargeSinks,
@@ -238,7 +241,7 @@ func New(db *gorm.DB) *App {
 	// 门面服务。告警配置从 DB option（common.OptionMap）每次分发重读（optionGetterAdapter），管理员在
 	// 「系统设置 → 告警」的改动即时生效、无需重启。sink 默认装配邮件（复用仓库 SMTP）+ webhook 生产通道。
 	brkRepo := breakagerepo.New(db)
-	alertSink := alert.NewSink(func() alert.Config { return alert.LoadConfig(optionGetterAdapter) })
+	// alertSink 已在上方充值 Sink 装配处提前构造（供命中软删用户告警共用），此处直接复用同一实例。
 	// Service 落库后按阈值 best-effort 触发「到期未使用沉淀」告警，故构造时把 sink + 当前 cfg 注入；
 	// cfg 只用于 Service 侧的阈值/开关判定（sink 分发时另有 provider 重读，两者一致——同 LoadConfig 口径）。
 	brkSvc := breakage.NewService(brkRepo, alertSink, alert.LoadConfig(optionGetterAdapter))
