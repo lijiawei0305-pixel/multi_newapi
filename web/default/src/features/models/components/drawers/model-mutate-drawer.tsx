@@ -83,6 +83,13 @@ import { createModel, updateModel, getModel, getVendors } from '../../api'
 import { getNameRuleOptions, ENDPOINT_TEMPLATES } from '../../constants'
 import { modelsQueryKeys, vendorsQueryKeys, parseModelTags } from '../../lib'
 import type { Model } from '../../types'
+import { getEffectiveBillingRate, getCurrencyLabel } from '@/lib/currency'
+import {
+  ratioToDisplayPrice,
+  displayPriceToRatio,
+  usdPriceToDisplay,
+  displayToUsdPrice,
+} from '@/lib/model-pricing-currency'
 
 // Extended schema for ratio configuration (internal form state only)
 const extendedModelFormSchema = z.object({
@@ -253,7 +260,7 @@ export function ModelMutateDrawer({
   const handlePromptPriceChange = (value: string) => {
     setPromptPrice(value)
     if (value && !Number.isNaN(Number.parseFloat(value))) {
-      const ratio = Number.parseFloat(value) / 2
+      const ratio = displayPriceToRatio(Number.parseFloat(value), getEffectiveBillingRate())
       form.setValue('ratio', ratio.toString())
     } else {
       form.setValue('ratio', '')
@@ -349,12 +356,13 @@ export function ModelMutateDrawer({
           setPricingMode('per-request')
           form.reset({
             ...baseModelData,
-            price: price.toString(),
+            price: usdPriceToDisplay(price, getEffectiveBillingRate()).toString(),
           })
         } else {
           setPricingMode('per-token')
           if (ratio !== undefined && ratio !== null) {
-            const tokenPrice = ratio * 2
+            const rate = getEffectiveBillingRate()
+            const tokenPrice = ratioToDisplayPrice(ratio, rate)
             setPromptPrice(tokenPrice.toString())
             if (completionRatio !== undefined && completionRatio !== null) {
               const compPrice = tokenPrice * completionRatio
@@ -514,7 +522,7 @@ export function ModelMutateDrawer({
                 values.price &&
                 values.price !== ''
               ) {
-                priceMap[finalModelName] = Number.parseFloat(values.price)
+                priceMap[finalModelName] = displayToUsdPrice(Number.parseFloat(values.price), getEffectiveBillingRate())
               } else if (pricingMode === 'per-token') {
                 if (values.ratio && values.ratio !== '') {
                   ratioMap[finalModelName] = Number.parseFloat(values.ratio)
@@ -948,7 +956,7 @@ export function ModelMutateDrawer({
                   name='price'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Fixed price (USD)')}</FormLabel>
+                      <FormLabel>{t('Fixed price (USD)', { defaultValue: '固定价格(每次请求)' })}</FormLabel>
                       <FormControl>
                         <Input
                           type='text'
@@ -990,7 +998,7 @@ export function ModelMutateDrawer({
                       <div className='flex items-center space-x-2'>
                         <RadioGroupItem value='price' id='price' />
                         <Label htmlFor='price' className='font-normal'>
-                          {t('Price mode (USD per 1M tokens)')}
+                          {t('Price mode (USD per 1M tokens)', { defaultValue: '价格模式(每 1M tokens)' })}
                         </Label>
                       </div>
                     </RadioGroup>
@@ -1015,7 +1023,7 @@ export function ModelMutateDrawer({
                                     field.onChange(value)
                                     if (value) {
                                       setPromptPrice(
-                                        (Number.parseFloat(value) * 2).toString()
+                                        ratioToDisplayPrice(Number.parseFloat(value), getEffectiveBillingRate()).toString()
                                       )
                                     } else {
                                       setPromptPrice('')
@@ -1026,7 +1034,7 @@ export function ModelMutateDrawer({
                             </FormControl>
                             <FormDescription>
                               {field.value && !Number.isNaN(Number.parseFloat(field.value))
-                                ? `Calculated price: $${(Number.parseFloat(field.value) * 2).toFixed(4)} per 1M tokens`
+                                ? `${getCurrencyLabel() === 'USD' ? '$' : '¥'}${ratioToDisplayPrice(Number.parseFloat(field.value), getEffectiveBillingRate()).toFixed(4)} ${t('per 1M tokens', { defaultValue: '/ 1M tokens' })}`
                                 : t('Multiplier for prompt tokens.')}
                             </FormDescription>
                             <FormMessage />
@@ -1068,7 +1076,7 @@ export function ModelMutateDrawer({
                               !Number.isNaN(Number.parseFloat(field.value)) &&
                               promptPrice &&
                               !Number.isNaN(Number.parseFloat(promptPrice))
-                                ? `Calculated price: $${(Number.parseFloat(promptPrice) * Number.parseFloat(field.value)).toFixed(4)} per 1M tokens`
+                                ? `${getCurrencyLabel() === 'USD' ? '$' : '¥'}${(Number.parseFloat(promptPrice) * Number.parseFloat(field.value)).toFixed(4)} ${t('per 1M tokens', { defaultValue: '/ 1M tokens' })}`
                                 : t('Multiplier for completion tokens.')}
                             </FormDescription>
                             <FormMessage />
@@ -1079,7 +1087,7 @@ export function ModelMutateDrawer({
                   ) : (
                     <div className='space-y-4'>
                         <div className='space-y-2'>
-                          <Label>{t('Prompt price ($/1M tokens)')}</Label>
+                          <Label>{t('Prompt price ($/1M tokens)', { defaultValue: '输入价格(/ 1M tokens)' })}</Label>
                           <Input
                             type='text'
                             placeholder='2.0'
@@ -1090,13 +1098,13 @@ export function ModelMutateDrawer({
                           />
                           <p className='text-muted-foreground text-sm'>
                             {promptPrice && !Number.isNaN(Number.parseFloat(promptPrice))
-                              ? `Calculated ratio: ${(Number.parseFloat(promptPrice) / 2).toFixed(4)}`
-                              : t('Enter Input price to calculate ratio')}
+                              ? `${t('Calculated ratio', { defaultValue: '换算倍率' })}: ${displayPriceToRatio(Number.parseFloat(promptPrice), getEffectiveBillingRate()).toFixed(4)}`
+                              : t('Enter Input price to calculate ratio', { defaultValue: '输入价格以计算倍率' })}
                           </p>
                         </div>
 
                         <div className='space-y-2'>
-                          <Label>{t('Completion price ($/1M tokens)')}</Label>
+                          <Label>{t('Completion price ($/1M tokens)', { defaultValue: '补全价格(/ 1M tokens)' })}</Label>
                           <Input
                             type='text'
                             placeholder='4.0'
