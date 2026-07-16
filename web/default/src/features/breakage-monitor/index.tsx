@@ -42,6 +42,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { cn } from '@/lib/utils'
 import { useChartTheme } from '@/lib/use-chart-theme'
 import { VCHART_OPTION } from '@/lib/vchart'
@@ -59,7 +60,6 @@ import {
   formatDate,
   formatSnapshotTs,
   unusedBarColor,
-  usd,
 } from './lib'
 import type { AlertLevel, BreakageDetailParams } from './types'
 
@@ -195,7 +195,7 @@ export function BreakageMonitor() {
       key: 'active',
       label: '套餐剩余额度',
       hint: '活跃订阅未消耗的额度合计',
-      value: usd(overview?.active_remaining_usd),
+      value: formatBillingCurrencyFromUSD(overview?.active_remaining_usd),
       icon: PiggyBank,
       tone: 'text-foreground',
       testid: 'breakage-card-active',
@@ -204,7 +204,7 @@ export function BreakageMonitor() {
       key: 'expired',
       label: '到期未使用余额',
       hint: '已到期订阅里未消耗的额度（按到期时间判定）',
-      value: usd(overview?.expired_unused_usd),
+      value: formatBillingCurrencyFromUSD(overview?.expired_unused_usd),
       icon: TrendingUp,
       tone: 'text-amber-600',
       testid: 'breakage-card-expired',
@@ -213,7 +213,7 @@ export function BreakageMonitor() {
       key: 'wallet',
       label: '钱包未消耗余额',
       hint: '用户钱包里尚未消耗的余额合计',
-      value: usd(overview?.wallet_unused_usd),
+      value: formatBillingCurrencyFromUSD(overview?.wallet_unused_usd),
       icon: Wallet,
       tone: 'text-foreground',
       testid: 'breakage-card-wallet',
@@ -284,7 +284,7 @@ export function BreakageMonitor() {
           orient: 'left',
           type: 'linear',
           label: {
-            formatMethod: (value: number | string) => usd(Number(value)),
+            formatMethod: (value: number | string) => formatBillingCurrencyFromUSD(Number(value)),
             style: { fill: chartTextColor, fontSize: 10 },
           },
           grid: {
@@ -304,7 +304,7 @@ export function BreakageMonitor() {
               key: (datum: Record<string, unknown>) =>
                 String(datum?.series ?? ''),
               value: (datum: Record<string, unknown>) =>
-                usd(Number(datum?.value) || 0),
+                formatBillingCurrencyFromUSD(Number(datum?.value) || 0),
             },
           ],
         },
@@ -495,7 +495,7 @@ export function BreakageMonitor() {
                             <div className='flex min-w-[140px] flex-col gap-1'>
                               <div className='flex items-center justify-between text-xs'>
                                 <span className='text-muted-foreground'>
-                                  {usd(row.used_usd)} / {usd(row.limit_usd)}
+                                  {formatBillingCurrencyFromUSD(row.used_usd)} / {formatBillingCurrencyFromUSD(row.limit_usd)}
                                 </span>
                                 <span className='tabular-nums'>
                                   {pct.toFixed(0)}%
@@ -513,7 +513,7 @@ export function BreakageMonitor() {
                             </div>
                           </TableCell>
                           <TableCell className='tabular-nums'>
-                            {usd(row.unused_usd)}
+                            {formatBillingCurrencyFromUSD(row.unused_usd)}
                           </TableCell>
                           <TableCell>
                             <StatusBadge
