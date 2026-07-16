@@ -972,7 +972,8 @@ export function ModelMutateDrawer({
                       </FormControl>
                       <FormDescription>
                         {t(
-                          'Cost in USD per request, regardless of tokens used.'
+                          'Cost in USD per request, regardless of tokens used.',
+                          { defaultValue: '每次请求的固定价格,与 token 用量无关。' }
                         )}
                       </FormDescription>
                       <FormMessage />
@@ -1060,8 +1061,7 @@ export function ModelMutateDrawer({
                                     const ratio = form.getValues('ratio')
                                     if (value && ratio) {
                                       const compPrice =
-                                        Number.parseFloat(ratio) *
-                                        2 *
+                                        ratioToDisplayPrice(Number.parseFloat(ratio), getEffectiveBillingRate()) *
                                         Number.parseFloat(value)
                                       setCompletionPrice(compPrice.toString())
                                     } else {
