@@ -72,8 +72,11 @@ export function Home() {
     return (
       <>
         <LandingReact />
-        <div className='dark relative z-20'>
-          <Footer />
+        {/* 页脚接在落地页深空渐变之后：给 wrapper 填渐变的收尾色 #061127，与上方场景同色无缝衔接，
+            同时盖住浅色主题下透出的白色 body 背景（否则页面最底部会出现一条白带）。
+            Footer 自带的 border-t 是一道微弱白线，在纯色底上会成接缝，故传 border-transparent 消除。 */}
+        <div className='dark relative z-20 bg-[#061127]'>
+          <Footer className='border-transparent' />
         </div>
       </>
     )
