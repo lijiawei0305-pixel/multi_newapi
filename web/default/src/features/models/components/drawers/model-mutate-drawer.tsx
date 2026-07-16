@@ -262,7 +262,7 @@ export function ModelMutateDrawer({
     setPromptPrice(value)
     if (value && !Number.isNaN(Number.parseFloat(value))) {
       const ratio = displayPriceToRatio(Number.parseFloat(value), getEffectiveBillingRate())
-      form.setValue('ratio', formatPricingNumber(ratio))
+      form.setValue('ratio', ratio.toString())
     } else {
       form.setValue('ratio', '')
     }
@@ -523,7 +523,7 @@ export function ModelMutateDrawer({
                 values.price &&
                 values.price !== ''
               ) {
-                priceMap[finalModelName] = Number(formatPricingNumber(displayToUsdPrice(Number.parseFloat(values.price), getEffectiveBillingRate())))
+                priceMap[finalModelName] = displayToUsdPrice(Number.parseFloat(values.price), getEffectiveBillingRate())
               } else if (pricingMode === 'per-token') {
                 if (values.ratio && values.ratio !== '') {
                   ratioMap[finalModelName] = Number.parseFloat(values.ratio)

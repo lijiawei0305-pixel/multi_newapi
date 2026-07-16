@@ -458,7 +458,7 @@ export const ModelPricingEditorPanel = forwardRef<
         name: values.name.trim(),
         billingMode: pricingMode,
         price: values.price
-          ? formatPricingNumber(displayToUsdPrice(Number(values.price), getEffectiveBillingRate()))
+          ? displayToUsdPrice(Number(values.price), getEffectiveBillingRate()).toString()
           : '',
         ratio: values.ratio || '',
         cacheRatio: values.cacheRatio || '',
