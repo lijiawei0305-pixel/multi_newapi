@@ -29,6 +29,13 @@ import (
 // maxRedemptionBatch 单次建码张数上限（防刷 / 限制批量插入规模）。
 const maxRedemptionBatch = 1000
 
+// maxRedemptionAmountUSD 单张兑换码面额上限（美元）。防御性上界：兑换码面额从代理 owner 钱包
+// 实扣，正常业务远低于此值（平台历史最大用户余额约 $203）。缺此上界时——「面额只有下界」——天价
+// 面额 × 张数会让 total := perCode*Count 发生 int64 乘法回绕、缩成小正数，穿过仓储层
+// totalQuotaUnits<=0 这道唯一付费闸门，用 $0.001 铸出天价额度（安全审计 Critical）。
+// 安全性不依赖具体数值：任何 < ~$1.8e13 的上界都使乘积远离 int64 溢出边界；业务可按需下调（如 $10000）。
+const maxRedemptionAmountUSD = 1_000_000
+
 // usdToQuotaUnits 把美元额折算为 new-api 内部 quota 单位（$1 = common.QuotaPerUnit；截断）。
 // 建码预扣与兑换入账共用同一换算，保证额度严格守恒。换算走统一核心 usdToQuotaRound（见 money.go）。
 func usdToQuotaUnits(usd float64) int64 { return usdToQuotaRound(usd, roundDown) }
@@ -265,11 +272,20 @@ func (a *App) HandleAgentCreateRedemptions(c *gin.Context) {
 		return
 	}
 	perCode := usdToQuotaUnits(body.AmountUSD)
-	if body.AmountUSD <= 0 || perCode <= 0 || body.Count < 1 || body.Count > maxRedemptionBatch {
+	// 面额既有下界也有**上界**：上界封住天价面额，是防溢出绕过付费闸门的主闸（见 maxRedemptionAmountUSD）。
+	if body.AmountUSD <= 0 || body.AmountUSD > maxRedemptionAmountUSD ||
+		perCode <= 0 || body.Count < 1 || body.Count > maxRedemptionBatch {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
+	// int64 乘法溢出检测（数学兜底）：perCode>0、Count≥1 已由上面守卫保证，故 total 一旦回绕，
+	// 其「除回」必不还原 perCode → 拒。面额上界已使溢出在正常配置下结构性不可达，此为二重防线——
+	// 即便日后有人调大上界，回绕仍会被这里抓住，绝不让「扣的钱」与「铸的额度」脱钩。
 	total := perCode * int64(body.Count)
+	if total/int64(body.Count) != perCode {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
 
 	codes := make([]*wallet.RedemptionCode, 0, body.Count)
 	seen := make(map[string]struct{}, body.Count)

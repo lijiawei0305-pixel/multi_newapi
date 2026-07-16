@@ -18,6 +18,7 @@ package gormrepo
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"gorm.io/gorm"
@@ -292,6 +293,14 @@ func (r *Repo) RedeemCodeAndCredit(ctx context.Context, tenantID int64, code str
 		amt, e := redeemCAS(tx, tenantID, code, userID, now)
 		if e != nil {
 			return e // REDEEM_CODE_INVALID / REDEEM_CODE_USED —— 回滚（CAS 本就无副作用）
+		}
+		// 入账前的溢出兜底（前瞻性纵深防御，利用链最后一环）：拒绝会让 int64(amt×quotaPerUnit)
+		// 溢出/回绕的天价面额。当前 amount_usd 列为 decimal(20,8)（整数位≤12 → 面额≤~1e12，
+		// perCode≤~5e17 < int64 max），加上建码侧 maxRedemptionAmountUSD 上界，此路本不可达；保留它
+		// 是为「crediting 绝不搬运无法忠实表示的数额」这一不变量兜底——防日后放宽列宽/上界或出现
+		// 未受约束的旁路建码。amt≤0 交由下方 credit>0 短路（不入账、不报错）。
+		if amt > float64(math.MaxInt64)/quotaPerUnit {
+			return wallet.ErrRedeemCodeInvalid
 		}
 		credit := int64(amt * quotaPerUnit)
 		if credit > 0 {

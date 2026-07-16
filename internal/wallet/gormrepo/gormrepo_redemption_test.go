@@ -223,6 +223,35 @@ func TestRedeemCode_InvalidAndDisabled(t *testing.T) {
 	}
 }
 
+// TestRedeemCodeAndCredit_RejectsOverflowCredit 覆盖兑换入账的溢出兜底（安全审计纵深防御，利用链
+// 最后一环）：即便某条旁路塞进一张面额大到 int64(amt×perUnit) 会溢出的码（正常建码已被面额上界 +
+// decimal(20,8) 列宽挡死，此处用 EnsureRedemption 直接注入模拟），入账时必须拒（ErrRedeemCodeInvalid）
+// 且分文不入账、事务回滚使码保持 enabled，绝不把无法忠实表示的额度搬进用户钱包。
+func TestRedeemCodeAndCredit_RejectsOverflowCredit(t *testing.T) {
+	ctx := context.Background()
+	r := newRedemptionTestRepo(t)
+	const redeemer = int64(200)
+	const perUnit = 500000.0 // 生产口径 common.QuotaPerUnit
+	seedUserQuota(t, r, redeemer, 0)
+
+	// 面额 2e13 > 阈值 MaxInt64/perUnit ≈ 1.84e13 —— int64(amt×perUnit) 必溢出。
+	bogus := &wallet.RedemptionCode{TenantID: 1, Code: "OVERFLOW", AmountUSD: 2e13}
+	if err := r.EnsureRedemption(ctx, bogus); err != nil {
+		t.Fatalf("seed bogus code: %v", err)
+	}
+
+	if _, _, err := r.RedeemCodeAndCredit(ctx, 1, "OVERFLOW", redeemer, time.Now(), perUnit); err != wallet.ErrRedeemCodeInvalid {
+		t.Fatalf("overflow-credit redeem = %v, want ErrRedeemCodeInvalid", err)
+	}
+	// 分文不入账；事务回滚 → CAS 撤销，码保持 enabled（未作废，留待人工处置）。
+	if q := userQuota(t, r, redeemer); q != 0 {
+		t.Fatalf("redeemer credited on overflow = %d, want 0", q)
+	}
+	if list, _ := r.ListCodesByTenant(ctx, 1); len(list) != 1 || list[0].Status != wallet.RedemptionEnabled {
+		t.Fatalf("code status after rejected redeem = %+v, want 1 code still Enabled", list)
+	}
+}
+
 // TestRedeemCodeAndCredit_AtomicCreditAndRollback 锁定「翻 used 与入账额度同事务原子」：
 //   - 正常：CAS 翻 used + 原生 quota 入账在同一事务内落地，redeemer.quota 精确增加、码翻 used；
 //   - 回滚：入账 UPDATE 失败（此处删 users 表制造）→ 整个事务回滚，CAS 一并撤销，码保持 enabled

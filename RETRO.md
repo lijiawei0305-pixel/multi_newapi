@@ -290,6 +290,12 @@
 - **解决/规避**：移除 group.go 的 auto 排除守卫 + DB `UserUsableGroups` 加 `"auto":"自动(auto)"`(写库**必须 `mysql --default-character-set=utf8mb4`**，否则 latin1 连接把中文双重编码成乱码)。commit 722361c / deploy-20260714-020004；实测 group=auto 令牌 → /v1 gpt-5.5 → 200 命中 gpt-pro、计费正常。计费数学零改动。
 - **升级**：记入 memory `billing-2d-and-auto-group`；DB 变更非 git，整库重建需重跑该 UPDATE。
 
+### [已解决] 代理兑换码 int64 乘法溢出绕过唯一付费闸门（Critical，$0.001 铸天价额度）
+- **现象**：`POST /api/tenant/redemptions {"amount_usd":997121301281.5974,"count":37}` 可让代理 owner 钱包只实扣 506 quota（≈$0.001），却铸出 37 张 × $997 亿面额的兑换码，兑换进自己名下用户后无限调 /v1，上游账单由平台承担；报表/对账全程"正常"（钱确实扣了、码确实入账了，破的是"面额从哪来"这个前提）。
+- **根因**：`HandleAgentCreateRedemptions`（`internal/mtwire/distribution.go`）里 `amount_usd` **只有下界没有上界**，`perCode`（=usd×QuotaPerUnit）与 `Count`（≤1000）各自过校验，但二者乘积 `total := perCode * int64(Count)` **无 int64 溢出检查**——回绕成小正数（506）后穿过仓储层 `CreateCodesWithDeduction` 里 `totalQuotaUnits <= 0` 这道**代理唯一的付费闸门**。溢出发生在 **create 侧的 `perCode×count`**（不是 redeem 侧的 credit：单张面额受 `amount_usd decimal(20,8)` 列宽约束 ≤~$1e12 → perCode ≤~5e17 < int64 max，单码入账不溢出）。曾被三个子代理独立看漏：两个误信源码 `model/user.go` 的 `gorm:"type:int"` 判定 users.quota 是 INT32 会撞 MySQL 1264 回滚（**线上实为 bigint**，AutoMigrate 不收窄已存在列），一个把溢出位置错认在 redeem 侧 credit。**只有实测线上 schema + 亲自算穿整条链才定得了案**。
+- **解决/规避**：纵深防御三闸——① 建码侧加面额上界 `maxRedemptionAmountUSD = 1_000_000`（正常业务远低于此，平台历史最大用户额 ≈$203；任何 <~$1.8e13 的上界都使乘积远离溢出边界）；② `total` 计算后加 int64 乘法溢出检测 `total/int64(Count) != perCode`（数学兜底，防日后调大上界）；③ `RedeemCodeAndCredit`（`internal/wallet/gormrepo/gormrepo.go`）入账前加 `amt > MaxInt64/quotaPerUnit` 兜底拒（前瞻性，防列宽放宽/旁路建码）。回归测试 `TestHandleAgentCreateRedemptions_RejectsOverflowMint`（精确利用载荷被拒、owner quota 分文不动、零码落库、界内合法请求仍放行）+ `TestRedeemCodeAndCredit_RejectsOverflowCredit`。服务器 golang:1.25.1 容器 `go build`/`go vet`/`go test ./internal/mtwire/ ./internal/wallet/...` 全绿。**代码仅在本地 git 工作树（未提交/未部署，待用户决定）**。
+- **升级**：候选升级为硬约束——"一切'金额×数量/倍率'的 int64 乘法在校验后、落库前必须做溢出检测；面额/数量类入参一律双边界（下界+上界）"。待用户确认后填入 CLAUDE.md C 段；记入 memory `redemption-int64-overflow-mint`。
+
 ---
 
 ## 四、工具链与协作
