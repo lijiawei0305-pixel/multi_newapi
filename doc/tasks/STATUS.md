@@ -38,7 +38,7 @@
 
 **财务 & 统计**：财务报表 v3（管理员 6 卡 + 净收入趋势 / 代理自助，双报表）；钱包 vs 套餐消耗台账区分；订阅监控（跨租户 + 满额分级**显示** warn/critical/exhausted）。
 
-**风控**：租户状态校验；**原生速率限制已启用 live**（1000 成功/分/用户）；IP allowlist 原生（`token.AllowIps` 经 `auth.go` 强制 + keys 页 UI）；Trial 限购 live。（`internal/risk` 的 RPM/IP/并发为 fork 前 superseded 死代码，勿重造 —— 见 [[risk-hardening-native-supersedes]]。）
+**风控**：租户状态校验；**原生速率限制已启用 live**（1000 成功/分/用户）；IP allowlist 原生（`token.AllowIps` 经 `auth.go` 强制 + keys 页 UI）；Trial 限购 live。（**更正 2026-07-16 · 死活反转**：`internal/risk` 的 RPM 引擎**是活的**——经 `SetMtRouter → internal/mtwire/wire.go:198` 注入 live 引擎，阈值取 env `RISK_DEFAULT_RPM`（0=不限；服务器实测设 60 生效），`risk.go` / `risk_admin_http.go` / `risk_purchase.go` 均落在 `go list -deps ./router/` 的活装配图内。此前本行称其为「superseded 死代码勿重造」系**误判**，已纠正。真正 0 装配点可达的死码是 `internal/relay` / `internal/identity` / `internal/billing` 三整包 + `wallet` / `stats` 的服务层，已于同日**整体移除**，见 RETRO『死码伪装正主』条与 CLAUDE.md **C7**。）
 
 **违禁词屏蔽（6e — ✅ 已建成，非待办）**：`/v1` 转发前扫描用户输入（`agenthook.ScanUserInput`）；违规日志；管理员词库 CRUD + 全站基础库；代理自建词库；违规审阅；表 `moderation_banned_words` / `moderation_content_violations`；前端 4 页（moderation-words / moderation-violations / my-moderation / my-violations）。
 
