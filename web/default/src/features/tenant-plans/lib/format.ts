@@ -21,9 +21,6 @@ import dayjs from '@/lib/dayjs'
 /** Format a CNY amount: `¥12.00`. */
 export const cny = (v: number | undefined) => `¥${Number(v || 0).toFixed(2)}`
 
-/** Format a USD amount: `$12.00`. */
-export const usd = (v: number | undefined) => `$${Number(v || 0).toFixed(2)}`
-
 /** Clamp a usage percentage into the displayable [0, 100] range. */
 export function clampPct(v: number | undefined): number {
   const n = Number(v || 0)

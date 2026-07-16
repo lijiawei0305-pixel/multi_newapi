@@ -32,7 +32,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { cny, usd } from '@/lib/agent-format'
+import { cny } from '@/lib/agent-format'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { getAgentListings, updateAgentListing } from './api'
 import type { AgentListing } from './types'
 
@@ -74,7 +75,7 @@ function ListingRow({ row, onSaved }: { row: AgentListing; onSaved: () => void }
       <TableCell>{row.name}</TableCell>
       <TableCell className='tabular-nums'>{cny(row.base_price_cny)}</TableCell>
       <TableCell className='tabular-nums'>{cny(row.min_price_cny)}</TableCell>
-      <TableCell className='tabular-nums'>{usd(row.month_limit_usd)}</TableCell>
+      <TableCell className='tabular-nums'>{formatBillingCurrencyFromUSD(row.month_limit_usd)}</TableCell>
       <TableCell>
         <Input
           type='number'

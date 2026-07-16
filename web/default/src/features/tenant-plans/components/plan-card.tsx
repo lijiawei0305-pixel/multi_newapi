@@ -21,8 +21,9 @@ import { useTranslation } from 'react-i18next'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { cn } from '@/lib/utils'
-import { cny, usd } from '../lib/format'
+import { cny } from '../lib/format'
 import type { TenantPlan } from '../types'
 
 interface PlanCardProps {
@@ -87,7 +88,7 @@ export function PlanCard({
         <div className='text-muted-foreground mt-1 flex flex-col gap-1.5 text-sm'>
           <span className='flex items-center gap-2'>
             <Wallet2 className='size-4 shrink-0' />
-            {t('Monthly limit')}: {usd(plan.month_limit_usd)}
+            {t('Monthly limit')}: {formatBillingCurrencyFromUSD(plan.month_limit_usd)}
           </span>
           <span className='flex items-center gap-2'>
             <CalendarClock className='size-4 shrink-0' />
