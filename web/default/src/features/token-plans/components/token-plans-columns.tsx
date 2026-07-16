@@ -26,7 +26,6 @@ import type { AdminTokenPlan } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 const cny = (v: number | undefined) => `¥${Number(v || 0).toFixed(2)}`
-const usd = (v: number | undefined) => `$${Number(v || 0).toFixed(2)}`
 
 export function useTokenPlansColumns(): ColumnDef<AdminTokenPlan>[] {
   const { t } = useTranslation()
@@ -106,7 +105,7 @@ export function useTokenPlansColumns(): ColumnDef<AdminTokenPlan>[] {
         header: t('Monthly Limit (USD)'),
         cell: ({ row }) => (
           <span className='text-muted-foreground'>
-            {usd(row.original.month_limit_usd)}
+            {cny(row.original.month_limit_usd)}
           </span>
         ),
         size: 130,
