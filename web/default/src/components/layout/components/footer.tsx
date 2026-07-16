@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Fragment, useMemo } from 'react'
+import DOMPurify from 'dompurify'
 import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -134,6 +135,15 @@ export function Footer(props: FooterProps) {
     status?.user_agreement_enabled || status?.privacy_policy_enabled
   )
 
+  // 代理自定义页脚经公开、无鉴权的 GET /api/tenant/current 下发，任何 level≥1 代理都能写。
+  // 渲染前**必须** DOMPurify 消毒——这是权威 XSS 防线：既拦住新注入的 <script>/onerror 等，
+  // 也在下次渲染时中和已持久化进 localStorage（system-config-store persist）的旧 payload，
+  // 无需依赖服务端删库即可应急止血。服务端 ValidatePatch 另有一道纵深校验（见 policy.go）。
+  const safeFooterHtml = useMemo(
+    () => (footerHtml ? DOMPurify.sanitize(footerHtml) : ''),
+    [footerHtml]
+  )
+
   const fallbackColumns = useMemo<FooterColumnProps[]>(
     () => [
       {
@@ -205,7 +215,8 @@ export function Footer(props: FooterProps) {
           <div className='bg-muted/20 border-border/50 flex flex-col items-center justify-between gap-4 rounded-2xl border px-4 py-4 backdrop-blur-sm sm:flex-row sm:px-5'>
             <div
               className='custom-footer text-muted-foreground min-w-0 text-center text-sm sm:text-left'
-              dangerouslySetInnerHTML={{ __html: footerHtml }}
+              // eslint-disable-next-line react/no-danger -- html is DOMPurify-sanitized above
+              dangerouslySetInnerHTML={{ __html: safeFooterHtml }}
             />
             {hasLegalLinks && (
               <div className='border-border/60 text-muted-foreground/45 flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t pt-4 text-xs sm:w-auto sm:justify-end sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5'>
