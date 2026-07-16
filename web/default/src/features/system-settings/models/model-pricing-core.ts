@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import * as z from 'zod'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
+import { ratioToDisplayPrice } from '@/lib/model-pricing-currency'
 import { formatPricingNumber } from './pricing-format'
 
 export const createModelPricingSchema = (t: (key: string) => string) =>
@@ -154,10 +155,10 @@ export function toNumberOrNull(value: unknown): number | null {
   return Number.isFinite(num) ? num : null
 }
 
-function ratioToBasePrice(ratio: unknown): string {
+function ratioToBasePrice(ratio: unknown, rate: number): string {
   const num = toNumberOrNull(ratio)
   if (num === null) return ''
-  return formatPricingNumber(num * 2)
+  return formatPricingNumber(ratioToDisplayPrice(num, rate))
 }
 
 function deriveLanePrice(
@@ -171,7 +172,7 @@ function deriveLanePrice(
   return formatPricingNumber(ratioNumber * denominatorNumber)
 }
 
-export function createInitialLaneState(data?: ModelRatioData | null) {
+export function createInitialLaneState(data?: ModelRatioData | null, rate = 1) {
   if (!data) {
     return {
       promptPrice: '',
@@ -180,7 +181,7 @@ export function createInitialLaneState(data?: ModelRatioData | null) {
     }
   }
 
-  const promptPrice = ratioToBasePrice(data.ratio)
+  const promptPrice = ratioToBasePrice(data.ratio, rate)
   const audioInputPrice = deriveLanePrice(data.audioRatio, promptPrice)
   const prices: Record<LaneKey, string> = {
     completion: deriveLanePrice(data.completionRatio, promptPrice),
@@ -213,7 +214,8 @@ export function buildPreviewRows(
   promptPrice: string,
   lanePrices: Record<LaneKey, string>,
   laneEnabled: Record<LaneKey, boolean>,
-  t: (key: string) => string
+  t: (key: string) => string,
+  currencySymbol: string
 ): PreviewRow[] {
   if (mode === 'tiered_expr') {
     const effectiveExpr = combineBillingExpr(billingExpr, requestRuleExpr)
@@ -242,14 +244,14 @@ export function buildPreviewRows(
     {
       key: 'inputPrice',
       label: t('Input price'),
-      value: promptPrice ? `$${promptPrice}` : t('Empty'),
+      value: promptPrice ? `${currencySymbol}${promptPrice}` : t('Empty'),
     },
     {
       key: 'completion',
       label: t('Completion price'),
       value:
         laneEnabled.completion && lanePrices.completion
-          ? `$${lanePrices.completion}`
+          ? `${currencySymbol}${lanePrices.completion}`
           : t('Empty'),
     },
     {
@@ -257,7 +259,7 @@ export function buildPreviewRows(
       label: t('Cache read price'),
       value:
         laneEnabled.cache && lanePrices.cache
-          ? `$${lanePrices.cache}`
+          ? `${currencySymbol}${lanePrices.cache}`
           : t('Empty'),
     },
     {
@@ -265,7 +267,7 @@ export function buildPreviewRows(
       label: t('Cache write price'),
       value:
         laneEnabled.createCache && lanePrices.createCache
-          ? `$${lanePrices.createCache}`
+          ? `${currencySymbol}${lanePrices.createCache}`
           : t('Empty'),
     },
     {
@@ -273,7 +275,7 @@ export function buildPreviewRows(
       label: t('Image input price'),
       value:
         laneEnabled.image && lanePrices.image
-          ? `$${lanePrices.image}`
+          ? `${currencySymbol}${lanePrices.image}`
           : t('Empty'),
     },
     {
@@ -281,7 +283,7 @@ export function buildPreviewRows(
       label: t('Audio input price'),
       value:
         laneEnabled.audioInput && lanePrices.audioInput
-          ? `$${lanePrices.audioInput}`
+          ? `${currencySymbol}${lanePrices.audioInput}`
           : t('Empty'),
     },
     {
@@ -289,7 +291,7 @@ export function buildPreviewRows(
       label: t('Audio output price'),
       value:
         laneEnabled.audioOutput && lanePrices.audioOutput
-          ? `$${lanePrices.audioOutput}`
+          ? `${currencySymbol}${lanePrices.audioOutput}`
           : t('Empty'),
     },
   ]

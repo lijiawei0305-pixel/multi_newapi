@@ -29,6 +29,12 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { AlertTriangle, Save } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
+import { getEffectiveBillingRate, getCurrencyLabel } from '@/lib/currency'
+import {
+  displayPriceToRatio,
+  usdPriceToDisplay,
+  displayToUsdPrice,
+} from '@/lib/model-pricing-currency'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -143,6 +149,7 @@ export const ModelPricingEditorPanel = forwardRef<
   ref
 ) {
   const { t } = useTranslation()
+  const currencySymbol = getCurrencyLabel() === 'USD' ? '$' : '¥'
   const [pricingMode, setPricingMode] = useState<PricingMode>('per-token')
   const [promptPrice, setPromptPrice] = useState('')
   const [lanePrices, setLanePrices] = useState<Record<LaneKey, string>>({
@@ -172,12 +179,15 @@ export const ModelPricingEditorPanel = forwardRef<
   })
 
   useEffect(() => {
-    const nextLaneState = createInitialLaneState(editData)
+    const rate = getEffectiveBillingRate()
+    const nextLaneState = createInitialLaneState(editData, rate)
 
     if (editData) {
       form.reset({
         name: editData.name,
-        price: editData.price || '',
+        price: editData.price
+          ? usdPriceToDisplay(Number(editData.price), rate).toString()
+          : '',
         ratio: editData.ratio || '',
         cacheRatio: editData.cacheRatio || '',
         createCacheRatio: editData.createCacheRatio || '',
@@ -253,7 +263,11 @@ export const ModelPricingEditorPanel = forwardRef<
     const inputPrice = toNumberOrNull(nextPromptPrice)
     setFormValue(
       'ratio',
-      inputPrice !== null ? formatPricingNumber(inputPrice / 2) : ''
+      inputPrice !== null
+        ? formatPricingNumber(
+            displayPriceToRatio(inputPrice, getEffectiveBillingRate())
+          )
+        : ''
     )
 
     laneConfigs.forEach(({ key }) => {
@@ -349,10 +363,12 @@ export const ModelPricingEditorPanel = forwardRef<
         promptPrice,
         lanePrices,
         laneEnabled,
-        t
+        t,
+        currencySymbol
       ),
     [
       billingExpr,
+      currencySymbol,
       laneEnabled,
       lanePrices,
       pricingMode,
@@ -441,7 +457,9 @@ export const ModelPricingEditorPanel = forwardRef<
       const data: ModelRatioData = {
         name: values.name.trim(),
         billingMode: pricingMode,
-        price: values.price || '',
+        price: values.price
+          ? displayToUsdPrice(Number(values.price), getEffectiveBillingRate()).toString()
+          : '',
         ratio: values.ratio || '',
         cacheRatio: values.cacheRatio || '',
         createCacheRatio: values.createCacheRatio || '',
@@ -564,7 +582,9 @@ export const ModelPricingEditorPanel = forwardRef<
                           onChange={handlePromptPriceChange}
                         />
                         <FieldDescription>
-                          {t('USD price per 1M input tokens.')}
+                          {t('USD price per 1M input tokens.', {
+                            defaultValue: '每 1M 输入 tokens 的价格。',
+                          })}
                         </FieldDescription>
                       </Field>
 
@@ -607,7 +627,7 @@ export const ModelPricingEditorPanel = forwardRef<
                               <FieldLabel>{t('Fixed price')}</FieldLabel>
                               <FormControl>
                                 <InputGroup>
-                                  <InputGroupAddon>$</InputGroupAddon>
+                                  <InputGroupAddon>{currencySymbol}</InputGroupAddon>
                                   <InputGroupInput
                                     inputMode='decimal'
                                     placeholder='0.01'
@@ -626,7 +646,11 @@ export const ModelPricingEditorPanel = forwardRef<
                               </FormControl>
                               <FieldDescription>
                                 {t(
-                                  'Cost in USD per request, regardless of tokens used.'
+                                  'Cost in USD per request, regardless of tokens used.',
+                                  {
+                                    defaultValue:
+                                      '每次请求的固定价格,与 token 用量无关。',
+                                  }
                                 )}
                               </FieldDescription>
                               <FormMessage />
