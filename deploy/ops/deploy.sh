@@ -7,7 +7,8 @@
 #               COPYFILE_DISABLE=1 tar-over-ssh、--env-file、后台 up -d --build。
 #
 #   运行位置：Mac 本仓库（W4：Mac 只编辑/调试，构建/部署在服务器；本脚本负责编排）。
-#   红线：只动隔离栈 newapi_test；绝不触碰现网 newapi_YFNf（api.wedreamhub.com）。
+#   护栏：确认部署目标确为期望栈 newapi_test（2026-07-03 单栈收敛后它是唯一现网/生产；
+#         原 stock 栈 newapi_YFNf 已删除）。正向白名单挡拼写/误配，非旧的"拒绝 prod"。
 #
 # 用法：
 #   ./deploy/ops/deploy.sh                 # 全流程部署
@@ -24,7 +25,7 @@ SSH_HOST="${SSH_HOST:-newapi628}"
 LOCAL_REPO="${LOCAL_REPO:-$(cd "$(dirname "$0")/../.." && pwd)}"   # Mac 仓库根
 SERVER_REPO="${SERVER_REPO:-/root/newapi-test}"
 STACK="${STACK:-newapi_test}"
-PROD_STACK="${PROD_STACK:-newapi_YFNf}"
+EXPECTED_STACK="${EXPECTED_STACK:-newapi_test}"   # 正向白名单：部署目标须确为它（原 PROD_STACK 守着已删除的 YFNf，恒放行，已弃）
 COMPOSE_FILE="${COMPOSE_FILE:-$SERVER_REPO/deploy/docker-compose.test.yml}"
 ENV_FILE="${ENV_FILE:-$SERVER_REPO/.env}"
 APP_SVC="${APP_SVC:-app}"; AUTH_SVC="${AUTH_SVC:-auth-service}"
@@ -40,9 +41,8 @@ remote() { ssh "$SSH_HOST" "$@"; }
 # 服务器侧 compose 串（与 lib.sh dc() 等价）。
 DC="docker compose -p $STACK --env-file $ENV_FILE -f $COMPOSE_FILE"
 
-# 红线校验。
-[ "$STACK" != "${PROD_STACK}" ] || die "拒绝部署现网栈 ${PROD_STACK}。"
-case "$COMPOSE_FILE$ENV_FILE$SERVER_REPO" in *"${PROD_STACK}"*) die "路径指向现网 ${PROD_STACK}。";; esac
+# 护栏：正向白名单——确认部署目标确为期望栈（挡拼写/误配）。
+[ "$STACK" = "${EXPECTED_STACK}" ] || die "目标栈 '$STACK' ≠ 期望栈 '${EXPECTED_STACK}'（防误配/拼写），拒绝部署。"
 
 TS="$(date +%Y%m%d-%H%M%S)"
 TAG="deploy-$TS"

@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "deploy/ops/lib.sh", "reason": "guard_not_prod 语义反转根因：STACK 默认 newapi_test，PROD_STACK 守已删除的 newapi_YFNf→恒放行；改 guard_target 正向白名单 + confirm_typed 强确认助手"}
+{"file": "deploy/ops/restore.sh", "reason": "整库覆盖生产的破坏性脚本：键入栈名强确认(ASSUME_YES不可跳过) + pre-backup 失败从 warn→die"}
+{"file": "deploy/ops/deploy.sh", "reason": "自包含(不 source lib)，独立内联护栏 PROD_STACK/[STACK!=YFNf] 同样反转，改正向白名单"}

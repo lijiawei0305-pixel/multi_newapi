@@ -1,7 +1,7 @@
 # deploy/ops — 运维脚本
 
 > 测试栈 `newapi_test`（即将正式化）的运维脚本集：备份 / 恢复 / 部署 / 回滚 / 健康巡检 + 迁移说明。
-> **红线**：全部脚本只操作隔离栈 `newapi_test`，**绝不触碰现网 `newapi_YFNf`（api.wedreamhub.com → :3000）**；每个入口 `guard_not_prod` 强制校验。
+> **护栏**（2026-07-03 单栈收敛后已重定义）：`newapi_test` 是【唯一现网 / 生产栈】——原 stock 栈 `newapi_YFNf`（:3000）已删除。每个入口 `guard_target`（旧名 `guard_not_prod` 保留为兼容别名）做**正向白名单**校验：确认目标确为 `newapi_test`，挡拼写/误配。破坏性操作（`restore` 整库覆盖）另需【键入栈名】强确认。
 > 上线手册见 [`go-live.md`](go-live.md)；迁移机制见 [`migrate-note.md`](migrate-note.md)。
 
 ## 运行位置
@@ -33,7 +33,7 @@
 
 - **`deploy.sh`**（Mac）— 一键部署：①本地 `scripts/preflight.sh` 预检 → ②打 git tag `deploy-<ts>` → ③服务器存当前镜像为 `:prev`（回滚用）→ ④部署前 `backup.sh` → ⑤`COPYFILE_DISABLE=1` tar-over-ssh 上传 → ⑥后台 `up -d --build`（nohup，避免长构建 ssh 断流误判）→ ⑦轮询 `/api/status` 健康 → ⑧失败自动 `rollback.sh`。
 - **`backup.sh`**（服务器）— `mysqldump --single-transaction` 一致快照(gzip) + redis `SAVE` 拷 `dump.rdb` + `.env`/compose/nginx vhost 打包；带时间戳落 `/root/backups`，各类保留最近 `KEEP` 份。
-- **`restore.sh <db-*.sql.gz>`**（服务器，危险）— 从备份覆盖恢复 `new-api-test`；默认二次确认 + 恢复前自动留一份当前态。
+- **`restore.sh <db-*.sql.gz>`**（服务器，**危险·整库覆盖生产**）— 覆盖恢复【生产】库 `new-api-test`；**键入栈名**强确认（`ASSUME_YES` 不可跳过）+ 恢复前**强制** pre-backup（失败即中止，绝不无保险覆盖）。
 - **`rollback.sh`**（服务器，危险）— 默认把 `:prev` 镜像打回 `:latest` 并 `force-recreate`（**不重建**，秒级）；`--git <tag>` 走源码回退后重建。
 - **`healthcheck.sh`**（服务器）— app `/api/status`(带 Host) + auth `/auth/healthz` + 四容器 running + 磁盘/内存阈值；失败退出码=失败数（cron 友好），可选 `ALERT_WEBHOOK` 告警。
 
@@ -70,7 +70,7 @@ cd /root/newapi-test/deploy/ops
 
 ## 约定与注意
 
-- 所有脚本 `set -euo pipefail`，危险操作（restore/rollback）二次确认；自动化场景用 `ASSUME_YES=1`。
+- 所有脚本 `set -euo pipefail`。`rollback` 二次确认可 `ASSUME_YES=1` 跳过（供 `deploy.sh` 健康失败时自动回滚）；**`restore`（整库覆盖生产）例外——必须【键入栈名】强确认，`ASSUME_YES` 无法跳过，且强制恢复前 pre-backup（失败即中止）。**
 - compose 调用固化 `-p $STACK --env-file $ENV_FILE -f $COMPOSE_FILE`（绝对 `-f`，cwd 无关；对齐 RETRO「未加载 .env」教训）。
 - `rollback.sh` 镜像模式前提：部署前存过 `:prev`（`deploy.sh` 自动做）；`--git` 模式要求 `$SERVER_REPO` 是 git 工作副本。
 - 上传默认排除 `.git`/`node_modules`/`web/*/dist`/`.DS_Store`/`._*`（dist 由服务器 Dockerfile 内 bun 构建）。

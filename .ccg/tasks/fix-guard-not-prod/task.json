@@ -1,0 +1,12 @@
+{
+  "id": "fix-guard-not-prod",
+  "title": "修复 guard_not_prod 语义反转：护栏改正向白名单 + restore 强确认/强制 pre-backup + 纠正误导红线文案",
+  "status": "in_progress",
+  "strategy": "direct-fix",
+  "currentPhase": "4-verify",
+  "nextAction": "代码已改+bash -n 7脚本全绿+残留引用核对通过；RETRO 已记、记忆已写。GATE：用户在服务器 W4 部署后实跑验证 restore（键入栈名生效 / ASSUME_YES 不再跳过 / pre-backup 失败即 die）；并确认是否把候选规则棘轮升级进 CLAUDE.md C7/C8（含 C6 编号厘清）",
+  "gate": "服务器 restore 实跑验证 + 用户确认 C7/C8 棘轮",
+  "branch": "500L",
+  "scope": "fix-guard-not-prod",
+  "createdAt": "2026-07-16T05:29:19-1000"
+}
