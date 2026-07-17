@@ -172,6 +172,9 @@ func main() {
 
 	// Initialize HTTP server
 	server := gin.New()
+	// 客户端 IP 信任模型：源站前是 Cloudflare，取 CF-Connecting-IP 权威头解析真实客户端，
+	// 否则 gin 默认信任 0.0.0.0/0 → ClientIP() 取攻击者自填的 XFF，限流/风控可被换头绕过。
+	router.ConfigureTrustedClientIP(server)
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
 		common.SysLog(fmt.Sprintf("panic detected: %v", err))
 		c.JSON(http.StatusInternalServerError, gin.H{
