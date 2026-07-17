@@ -677,7 +677,7 @@ func TestReleaseTrialLimit_CrossUserOwnershipGuard(t *testing.T) {
 	e := NewEngine(NewMemKVCache(nil))
 	// A(7) 从设备 dev-D 合法消耗 Trial。
 	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-D"), 7, trialPlan()), "")
-	// B(8) 同设备被拒（userK:8 因键序留痕，devK 归属仍是 A）。
+	// B(8) 同设备被拒（败者补偿删除后 userK:8 不留痕；devK 归属仍是 A）。
 	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-D"), 8, trialPlan()), CodePurchaseLimitExceeded)
 
 	// 客服按 B 自报的 device_id 释放 B → device 维度归属校验不符，必须拒删。
@@ -694,7 +694,8 @@ func TestReleaseTrialLimit_CrossUserOwnershipGuard(t *testing.T) {
 
 	// 探针谓词①：A 占用的 devK 仍在——无关新账号 C(9) 从设备 dev-D 领取仍被拒。
 	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-D"), 9, trialPlan()), CodePurchaseLimitExceeded)
-	// B 自身 user 维度已释放（合法诉求：误占的 userK 留痕），换设备可再试。
+	// B 换设备可再试（判负时 userK 已被补偿删除，本无残留；release 对 user 维恒报
+	// Released 且 Del 幂等，键不存在也不报错）。
 	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-B2"), 8, trialPlan()), "")
 }
 
