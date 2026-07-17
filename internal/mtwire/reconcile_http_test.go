@@ -105,6 +105,10 @@ func TestHandleAdminListStuckIncludesHeartbeat(t *testing.T) {
 	if err := migrateSubscriptionBridge(app.DB); err != nil {
 		t.Fatalf("migrate sub bridge: %v", err)
 	}
+	// HandleAdminListStuck 亦无条件列卡单代理套餐（C5：AGT 须在 /stuck 可见），需建 mt_agent_plan_orders。
+	if err := migrateAgentPlanBridge(app.DB); err != nil {
+		t.Fatalf("migrate agent-plan bridge: %v", err)
+	}
 	app.updateReconcileHeartbeat(context.Background(), "cron", 2, 1)
 
 	c, rec := newReconcileCtx("GET", "/api/admin/reconcile/stuck", "")

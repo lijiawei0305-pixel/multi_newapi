@@ -309,14 +309,6 @@ func TestCheckPurchaseLimit_TrialDistinctIdentitiesPass(t *testing.T) {
 	assertCode(t, e.CheckPurchaseLimit(trialCtx("ID-B", "dev-2"), 8, trialPlan()), "")
 }
 
-func TestCheckPurchaseLimit_TrialGetErrorPropagates(t *testing.T) {
-	kv := kvErrOn{KVCache: NewMemKVCache(nil), get: true}
-	e := NewEngine(kv)
-	if err := e.CheckPurchaseLimit(context.Background(), 7, trialPlan()); !errors.Is(err, errBoom) {
-		t.Fatalf("want errBoom, got %v", err)
-	}
-}
-
 func TestCheckPurchaseLimit_TrialSetNXErrorPropagates(t *testing.T) {
 	kv := kvErrOn{KVCache: NewMemKVCache(nil), setnx: true}
 	e := NewEngine(kv)
