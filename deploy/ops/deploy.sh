@@ -114,9 +114,12 @@ remote "mkdir -p $SERVER_REPO $ARCHIVE_DIR"
 # delete-sync 前端源码树（防孤儿）：tar 只覆盖不删除，路由/组件被移动或删除后
 # 服务器会留旧文件孤儿 → 前端构建挂（旧文件 import 已重命名/删除的符号）或 false-success。
 # web/default/src、web/classic/src 全为仓库文件（.env/node_modules/dist 均在其外），
-# 部署前清空可保证上传后与本机完全一致、零孤儿。（Go 侧孤儿由步骤 8 镜像 ID 校验兜底。）
-log "    delete-sync：清理前端源码树（防移动/删除文件残留孤儿）"
-remote "rm -rf $SERVER_REPO/web/default/src $SERVER_REPO/web/classic/src"
+# 部署前清空可保证上传后与本机完全一致、零孤儿。Go 侧同理：internal/ 是自研模块主目录，
+# 死码清理（如 C7 删 relay/identity/billing + wallet/stats 服务层）后本地删了、tar 只覆盖不删 →
+# 服务器留孤儿 .go 引用已删符号 → go build 失败（步骤 8 镜像 ID 校验只能发现假成功、防不了构建失败）。
+# 故 internal/ 一并 delete-sync（全为仓库文件，无 .env/生成物在其内，清空后由本次 tar 完整解包）。
+log "    delete-sync：清理前端 + internal/ Go 源码树（防移动/删除文件残留孤儿）"
+remote "rm -rf $SERVER_REPO/web/default/src $SERVER_REPO/web/classic/src $SERVER_REPO/internal"
 COPYFILE_DISABLE=1 tar czf - \
   --exclude='./.git' \
   --exclude='node_modules' \
