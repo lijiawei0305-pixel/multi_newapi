@@ -80,6 +80,34 @@ func (k kvErrOn) SetNX(ctx context.Context, key, val string, ttl time.Duration) 
 	return k.KVCache.SetNX(ctx, key, val, ttl)
 }
 
+// kvSetNXErrOnKey 包装真实 KVCache，仅对指定 key 的 SetNX 注入错误（模拟多维决胜循环中途某一维报错）。
+type kvSetNXErrOnKey struct {
+	KVCache
+	failKey string
+}
+
+func (k kvSetNXErrOnKey) SetNX(ctx context.Context, key, val string, ttl time.Duration) (bool, error) {
+	if key == k.failKey {
+		return false, errBoom
+	}
+	return k.KVCache.SetNX(ctx, key, val, ttl)
+}
+
+// kvSetNXErrOnce 包装真实 KVCache，仅第 at 次 SetNX 调用报错一次（模拟 Redis 瞬时抖动后恢复）。
+type kvSetNXErrOnce struct {
+	KVCache
+	calls int
+	at    int
+}
+
+func (k *kvSetNXErrOnce) SetNX(ctx context.Context, key, val string, ttl time.Duration) (bool, error) {
+	k.calls++
+	if k.calls == k.at {
+		return false, errBoom
+	}
+	return k.KVCache.SetNX(ctx, key, val, ttl)
+}
+
 type errStatus struct{}
 
 func (errStatus) Active(context.Context, *appctx.Principal) (bool, error) { return false, errBoom }
@@ -315,6 +343,73 @@ func TestCheckPurchaseLimit_TrialSetNXErrorPropagates(t *testing.T) {
 	if err := e.CheckPurchaseLimit(context.Background(), 7, trialPlan()); !errors.Is(err, errBoom) {
 		t.Fatalf("want errBoom, got %v", err)
 	}
+}
+
+// 败者残留回归（audit 2026-07-17 发现#3）：B 在共享设备维度判负时，此前已占的 userK 必须回滚——
+// 否则 Trial TTL=0 下 B 换干净设备也被永久拒（从未买到过却报「超过限购次数」）。
+func TestCheckPurchaseLimit_TrialLoserLeavesNoResidue(t *testing.T) {
+	kv := NewMemKVCache(nil)
+	e := NewEngine(kv)
+	// A（user 7）占用 dev-1。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-1"), 7, trialPlan()), "")
+	// B（user 8）同设备判负。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-1"), 8, trialPlan()), CodePurchaseLimitExceeded)
+	// 败者不留痕：B 的用户维度键必须已回滚。
+	if _, found, _ := kv.Get(context.Background(), trialKey("user", "8")); found {
+		t.Fatal("loser's user-dim key must be rolled back")
+	}
+	// 回滚只删自己占到的键：赢家 A 的设备维度键必须仍在。
+	if _, found, _ := kv.Get(context.Background(), trialKey("device", "dev-1")); !found {
+		t.Fatal("winner's device-dim key must survive loser rollback")
+	}
+	// B 换干净设备 dev-2 → 放行。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-2"), 8, trialPlan()), "")
+}
+
+// 共享实名维度不被败者污染（audit 2026-07-17 发现#3 PROBE-P1b）：自然人 R 在被占设备上判负后，
+// 其实名键必须回滚——否则 R 换新账号+新设备也被永久拒（实名键按自然人计，株连其全部账号）。
+func TestCheckPurchaseLimit_TrialLoserDoesNotPoisonRealName(t *testing.T) {
+	kv := NewMemKVCache(nil)
+	e := NewEngine(kv)
+	// A（user 7）占用 dev-1。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-1"), 7, trialPlan()), "")
+	// R（user 8，实名 ID-R）在 dev-1 判负。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("ID-R", "dev-1"), 8, trialPlan()), CodePurchaseLimitExceeded)
+	// 实名维度未被污染。
+	if _, found, _ := kv.Get(context.Background(), trialKey("realname", "ID-R")); found {
+		t.Fatal("loser's realname-dim key must be rolled back")
+	}
+	// 同一自然人换新账号（user 9）+ 新设备 → 放行。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("ID-R", "dev-2"), 9, trialPlan()), "")
+}
+
+// 中途维度 SetNX 报错同样回滚已占维度（错误路径不留痕）。
+func TestCheckPurchaseLimit_TrialErrorMidLoopRollsBack(t *testing.T) {
+	inner := NewMemKVCache(nil)
+	e := NewEngine(kvSetNXErrOnKey{KVCache: inner, failKey: trialKey("device", "dev-1")})
+	if err := e.CheckPurchaseLimit(trialCtx("ID-A", "dev-1"), 7, trialPlan()); !errors.Is(err, errBoom) {
+		t.Fatalf("want errBoom, got %v", err)
+	}
+	if _, found, _ := inner.Get(context.Background(), trialKey("user", "7")); found {
+		t.Fatal("user-dim key must be rolled back on mid-loop error")
+	}
+	if _, found, _ := inner.Get(context.Background(), trialKey("realname", "ID-A")); found {
+		t.Fatal("realname-dim key must be rolled back on mid-loop error")
+	}
+}
+
+// PROBE-P6（audit 2026-07-17 发现#4）：Redis 瞬时抖动（第 2 次 SetNX 报错一次）不得永久吃掉终身 Trial——
+// 错误如实传播（保留新码相对旧码「不丢错误」的改进），已占维度回滚，抖动恢复后同身份重试成功。
+// 无回滚时该场景为：SetNX(userK) 成功→realK 抖动报错→HTTP 500→订单从未创建→重试永久 PURCHASE_LIMIT_EXCEEDED。
+func TestCheckPurchaseLimit_TrialMidLoopErrorHealthyRetrySucceeds(t *testing.T) {
+	kv := &kvSetNXErrOnce{KVCache: NewMemKVCache(nil), at: 2}
+	e := NewEngine(kv)
+	// 第 1 次购买：userK 写入成功，realK 遇抖动报错 → 错误透传。
+	if err := e.CheckPurchaseLimit(trialCtx("ID-A", "dev-1"), 7, trialPlan()); !errors.Is(err, errBoom) {
+		t.Fatalf("want errBoom, got %v", err)
+	}
+	// 抖动恢复后同身份重试 → 放行（零订单零付款的用户不得被烧毁资格）。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("ID-A", "dev-1"), 7, trialPlan()), "")
 }
 
 // 并发同用户购买 Trial：恰好 1 个成功（SetNX 决胜锁，-race 通过）。

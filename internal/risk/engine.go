@@ -157,10 +157,12 @@ func (e *Engine) CheckPurchaseLimit(ctx context.Context, userID int64, plan Plan
 // 都参与决胜，堵死该窗口。
 //
 // 键顺序 [用户, 实名, 设备] 有意为之：同一用户的并发重复请求在第一步 userK 即判负、
-// 不留任何痕迹；只有"跨账号共享实名/设备"的败者才会在自身用户维度留下占用——而这正是
-// 反刷要收紧的对象。KVCache 无删除原语，无法对败者已占的维度做补偿删除，但留痕方向
-// 是 fail-closed（趋向拒绝更多 Trial），与 Trial 终身限购（PurchaseDedupTTL=0）一致，
-// 且单一身份的正常用户永不被误封（只有已与既得 Trial 撞库/撞设备的账号会被连带收紧）。
+// 不留任何痕迹。判负/报错时把本次调用已占到的前序维度键补偿删除（Del 幂等）——只删自己
+// 真正 SetNX 成功的键、绝不碰既得赢家的键，故单赢家性质不变（最后一个非空维度的持有者
+// 恒胜出）。若不回滚，Trial 终身键（PurchaseDedupTTL=0）会把败者的 userK 与跨账号共享的
+// realK 永久写死：家用共享设备/同实名多账号下，从未买到过 Trial 的无辜用户换干净设备、
+// 换新账号都被永久拒（audit 2026-07-17 发现#3）。回滚后最坏情况只是并发同侪的一次瞬时
+// 且自愈的误拒，严格优于永久误封；回滚 Del 本身失败的残留仍可经 ReleaseTrialLimit 后台释放。
 //
 // 实名/设备从 context 读取（请求级，经 WithPurchaseIdentity 注入），缺省维度跳过。
 func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
@@ -178,17 +180,23 @@ func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 
 	// 逐维 SetNX 决胜：任一维度 SetNX 返回 false（已被占用）即拒。
 	// userK 置首：同用户并发重复请求在此即判负，不会在实名/设备维度留痕。
+	// 判负/报错即回滚 acquired（仅本次真正占到的键），败者不留任何永久残留。
+	var acquired []string
 	for _, k := range []string{userK, realK, devK} {
 		if k == "" {
 			continue
 		}
 		ok, err := e.kv.SetNX(ctx, k, "1", ttl)
-		if err != nil {
-			return err
-		}
-		if !ok {
+		if err != nil || !ok {
+			if len(acquired) > 0 {
+				_ = e.kv.Del(ctx, acquired...)
+			}
+			if err != nil {
+				return err
+			}
 			return ErrPurchaseLimitExceeded
 		}
+		acquired = append(acquired, k)
 	}
 	return nil
 }
