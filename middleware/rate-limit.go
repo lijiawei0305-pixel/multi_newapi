@@ -108,6 +108,19 @@ func CriticalRateLimit() func(c *gin.Context) {
 	return defNext
 }
 
+// CriticalUserRateLimit 是 CriticalRateLimit 的**按认证用户计桶**版本，用于**已过 UserAuth**的
+// money 端点（购买/充值/兑换/提现）。CriticalRateLimit 按 c.ClientIP() 计桶，而 gin 默认信任
+// 0.0.0.0/0（全仓未 SetTrustedProxies）→ ClientIP() 取攻击者自填的最左 X-Forwarded-For → 登录态
+// 攻击者每请求换一个 XFF 即落进全新桶，闸门失效（audit 2026-07-17 · High）。改按 user_id 计桶后
+// 与伪造 XFF 完全无关。**必须挂在 UserAuth 之后**（无 user id 时 fail-closed 返回 401）。
+// 复用 CriticalRateLimit 的开关与额度（CRITICAL_RATE_LIMIT*），语义与上游同类「印钞端点」对齐。
+func CriticalUserRateLimit() func(c *gin.Context) {
+	if common.CriticalRateLimitEnable {
+		return userRateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, "CT")
+	}
+	return defNext
+}
+
 func DownloadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.DownloadRateLimitNum, common.DownloadRateLimitDuration, "DW")
 }

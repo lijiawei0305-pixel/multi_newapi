@@ -82,10 +82,11 @@ func SetMtRouter(router *gin.Engine) {
 	{
 		tenantGroup.GET("/current", app.HandleTenantCurrent)
 		tenantGroup.GET("/token-plans", middleware.UserAuth(), app.HandleListTokenPlans)
-		// CriticalRateLimit：下单即建 realpay 支付订单，与上游 /api/user/topup 同一「印钞类」端点对等限流（20/20min/IP）。
-		tenantGroup.POST("/token-plans/:id/purchase", middleware.UserAuth(), middleware.CriticalRateLimit(), app.HandlePurchase)
+		// CriticalUserRateLimit：下单即建 realpay 支付订单，「印钞类」端点限流。按**认证用户**计桶而非 IP——
+		// gin 默认信任 0.0.0.0/0（未 SetTrustedProxies），ClientIP() 取攻击者自填的 XFF，IP 桶可被换头绕过。
+		tenantGroup.POST("/token-plans/:id/purchase", middleware.UserAuth(), middleware.CriticalUserRateLimit(), app.HandlePurchase)
 		// 购买代理套餐（P3）：登录用户下单 → realpay 出凭据 → 回调激活开通/升级代理。
-		tenantGroup.POST("/agent-plans/:id/purchase", middleware.UserAuth(), middleware.CriticalRateLimit(), app.HandlePurchaseAgentPlan)
+		tenantGroup.POST("/agent-plans/:id/purchase", middleware.UserAuth(), middleware.CriticalUserRateLimit(), app.HandlePurchaseAgentPlan)
 		tenantGroup.GET("/subscriptions", middleware.UserAuth(), app.HandleListSubscriptions)
 		// 支持工单（用户端）：UserAuth + Host 租户；仅按会话 user_id 隔离（不信任客户端 user_id）。
 		// tenant_id 于创建时由服务端从提交用户 users.tenant_id 派生固化，不接受请求体传入。
@@ -95,15 +96,16 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.POST("/tickets/:id/replies", middleware.UserAuth(), app.HandleUserReplyTicket)
 		tenantGroup.POST("/tickets/:id/close", middleware.UserAuth(), app.HandleUserCloseTicket)
 		// 充值下单（目标③）：UserAuth + Host 租户；下单 → 调 auth-service → 返支付凭据。
-		// CriticalRateLimit：防脚本无限造 pending 订单（DoS + 支付表膨胀），对齐上游 /api/user/topup。
-		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), middleware.CriticalRateLimit(), app.HandleWalletRecharge)
+		// CriticalUserRateLimit：防脚本无限造 pending 订单（DoS + 支付表膨胀）。按认证用户计桶（IP 桶可被伪造 XFF 绕过）。
+		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), middleware.CriticalUserRateLimit(), app.HandleWalletRecharge)
 		// 充值订单状态查询（目标③ 修复）：UserAuth + Host 租户；前端扫码支付后轮询探活，仅本人订单（越权 404）。
 		tenantGroup.GET("/wallet/recharge/status", middleware.UserAuth(), app.HandleWalletRechargeStatus)
 		// 买家可用充值渠道：UserAuth + Host 租户；返回 enabled && configured 的渠道（wxpay/alipay）。
 		tenantGroup.GET("/wallet/recharge/methods", middleware.UserAuth(), app.HandleTenantRechargeMethods)
 		// 用户兑换码（P1-UI-04）：UserAuth + Host 租户（不强制 owner）；单赢家 CAS → 原生 quota 入账。
-		// CriticalRateLimit：兑换码即钱，防登录态爆破撞他人未用码（每秒数千次），对齐上游 /api/user/topup（20/20min/IP）。
-		tenantGroup.POST("/redeem", middleware.UserAuth(), middleware.CriticalRateLimit(), app.HandleRedeem)
+		// CriticalUserRateLimit：兑换码即钱，防登录态爆破撞他人未用码（每秒数千次）。**必须按认证用户计桶**——
+		// 若按 IP，攻击者每请求换一个伪造 X-Forwarded-For 即落进全新桶，20/20min 闸门形同虚设（audit 2026-07-17）。
+		tenantGroup.POST("/redeem", middleware.UserAuth(), middleware.CriticalUserRateLimit(), app.HandleRedeem)
 		// 代理身份门控信号：UserAuth + Host 租户（**不挂 AgentOwnerAuth**，任何登录用户可调）。
 		// 返回 {is_agent_owner}（权威判断 = Host 租户 owner == 当前用户），供前端隐藏代理自助菜单 +
 		// 路由 beforeLoad 拦截，避免普通用户/别站代理触发 AGENT_FORBIDDEN。
@@ -112,7 +114,7 @@ func SetMtRouter(router *gin.Engine) {
 		// 与 Host 无关 → L0 无子域名也能在主站访问自己的控制台；L1 在子域名同样解析到自己的租户）。
 		agentSelf := tenantGroup.Group("", middleware.UserAuth(), app.AgentOwnerAuthByUser())
 		{
-			agentSelf.POST("/withdrawals", middleware.CriticalRateLimit(), app.HandleAgentRequestWithdrawal) // 出账类：限流防刷提现单
+			agentSelf.POST("/withdrawals", middleware.CriticalUserRateLimit(), app.HandleAgentRequestWithdrawal) // 出账类：按认证用户计桶防刷提现单（IP 桶可被伪造 XFF 绕过）
 			agentSelf.GET("/withdrawals", app.HandleAgentListWithdrawals)
 			// 收款账户（提现闭环补强 #1）：申请提现前必须先设置，管理员审核/打款据此转账。
 			agentSelf.GET("/payout-account", app.HandleAgentGetPayoutAccount)
