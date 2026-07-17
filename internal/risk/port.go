@@ -117,9 +117,23 @@ type KVCache interface {
 type PurchaseLimitAdmin interface {
 	// ReleaseTrialLimit 释放某用户的 Trial 三维去重键（用户维度 + 传入的实名/设备维度），
 	// 使其可重新购买 Trial。实名/设备为空则只释放用户维度（与 checkTrialLimit 建键口径对称）。
-	ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity) error
+	//
+	// 共享维度（realname/device）带**归属校验**：键值记录占用者 userID，值不符（含遗留
+	// 无归属值）默认拒删、计入 Skipped——防止按调用方自报的 realname/device 误删他人
+	// 合法占用的反刷键。force=true 绕过归属校验（仅限客服人工核实的遗留键，须审计留痕）。
+	ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity, force bool) (TrialReleaseResult, error)
 	// ReleasePurchaseLimit 释放某用户对某非 Trial 套餐的每用户限购计数键。
 	ReleasePurchaseLimit(ctx context.Context, planID, userID int64) error
+}
+
+// TrialReleaseResult 是 ReleaseTrialLimit 的逐维度结果：让后台端点能如实回报
+// 「哪些维度真的释放了、哪些因归属不符被拒」，而非笼统的 released=true。
+type TrialReleaseResult struct {
+	// Released 实际删除的维度名（"user"/"realname"/"device"）。user 恒在列
+	//（该维度键按 userID 建键、无跨用户共享，恒删且 Del 幂等）。
+	Released []string
+	// Skipped 因键值归属 != userID 而拒删的共享维度名（含遗留无归属键；force 可绕过）。
+	Skipped []string
 }
 
 // Clock 是可注入时钟，便于限流窗口与去重 TTL 的确定性单测（detailed-design §2.13 单测策略）。

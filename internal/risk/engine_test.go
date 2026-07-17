@@ -657,3 +657,125 @@ func TestErrorCodesHTTP(t *testing.T) {
 		}
 	}
 }
+
+// ---- ReleaseTrialLimit：共享维度归属校验（PROBE-P3）----
+
+func containsDim(list []string, dim string) bool {
+	for _, d := range list {
+		if d == dim {
+			return true
+		}
+	}
+	return false
+}
+
+// 守卫 PROBE-P3 修复的核心性质：realname/device 维度跨用户共享，释放请求里的维度值系
+// 调用方自报、与 userID 零绑定——若释放不校验键值归属（占用者 userID），客服「给 B 释放」
+// 会误删 A 合法占用的设备键，无关新账号 C 即可从已消耗设备再领 Trial（反刷维度被客服
+// 通道洗掉）。探针谓词：释放 B 后 A 合法占用的 devK 仍在；C 从同设备领取仍被拒。
+func TestReleaseTrialLimit_CrossUserOwnershipGuard(t *testing.T) {
+	e := NewEngine(NewMemKVCache(nil))
+	// A(7) 从设备 dev-D 合法消耗 Trial。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-D"), 7, trialPlan()), "")
+	// B(8) 同设备被拒（userK:8 因键序留痕，devK 归属仍是 A）。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-D"), 8, trialPlan()), CodePurchaseLimitExceeded)
+
+	// 客服按 B 自报的 device_id 释放 B → device 维度归属校验不符，必须拒删。
+	res, err := e.ReleaseTrialLimit(context.Background(), 8, PurchaseIdentity{DeviceID: "dev-D"}, false)
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if !containsDim(res.Skipped, "device") || containsDim(res.Released, "device") {
+		t.Fatalf("device dim must be skipped (owned by A), got %+v", res)
+	}
+	if !containsDim(res.Released, "user") {
+		t.Fatalf("user dim must always release, got %+v", res)
+	}
+
+	// 探针谓词①：A 占用的 devK 仍在——无关新账号 C(9) 从设备 dev-D 领取仍被拒。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-D"), 9, trialPlan()), CodePurchaseLimitExceeded)
+	// B 自身 user 维度已释放（合法诉求：误占的 userK 留痕），换设备可再试。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-B2"), 8, trialPlan()), "")
+}
+
+// 真正的占用者释放自己的三维键 → 全部删除，可重新购买同一身份的 Trial
+// （文档化的合法场景：点开收银台未付款、键已被自己消耗）。
+func TestReleaseTrialLimit_OwnerFullRelease(t *testing.T) {
+	e := NewEngine(NewMemKVCache(nil))
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("ID-A", "dev-D"), 7, trialPlan()), "")
+
+	res, err := e.ReleaseTrialLimit(context.Background(), 7, PurchaseIdentity{RealNameID: "ID-A", DeviceID: "dev-D"}, false)
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	for _, dim := range []string{"user", "realname", "device"} {
+		if !containsDim(res.Released, dim) {
+			t.Fatalf("dim %s must release for owner, got %+v", dim, res)
+		}
+	}
+	if len(res.Skipped) != 0 {
+		t.Fatalf("owner release must skip nothing, got %+v", res)
+	}
+	// 三维全释放 → 同身份可重新购买。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("ID-A", "dev-D"), 7, trialPlan()), "")
+}
+
+// 旧版遗留键（值为 "1"、无归属信息）：默认拒删（归属不可考 = fail-closed），
+// force=true（客服人工核实后）才删除。
+func TestReleaseTrialLimit_LegacyValueRequiresForce(t *testing.T) {
+	kv := NewMemKVCache(nil)
+	if ok, _ := kv.SetNX(context.Background(), trialKey("device", "dev-L"), "1", 0); !ok {
+		t.Fatal("seed legacy key failed")
+	}
+	e := NewEngine(kv)
+
+	res, err := e.ReleaseTrialLimit(context.Background(), 7, PurchaseIdentity{DeviceID: "dev-L"}, false)
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if !containsDim(res.Skipped, "device") {
+		t.Fatalf("legacy key must be skipped without force, got %+v", res)
+	}
+	if _, found, _ := kv.Get(context.Background(), trialKey("device", "dev-L")); !found {
+		t.Fatal("legacy key must survive non-force release")
+	}
+
+	res, err = e.ReleaseTrialLimit(context.Background(), 7, PurchaseIdentity{DeviceID: "dev-L"}, true)
+	if err != nil {
+		t.Fatalf("force release: %v", err)
+	}
+	if !containsDim(res.Released, "device") {
+		t.Fatalf("force must release legacy key, got %+v", res)
+	}
+	if _, found, _ := kv.Get(context.Background(), trialKey("device", "dev-L")); found {
+		t.Fatal("legacy key must be gone after force release")
+	}
+}
+
+// 共享维度键不存在：幂等成功，不计入 Released/Skipped（与 checkTrialLimit 空维度口径对称）。
+func TestReleaseTrialLimit_AbsentSharedKeysIdempotent(t *testing.T) {
+	e := NewEngine(NewMemKVCache(nil))
+	res, err := e.ReleaseTrialLimit(context.Background(), 7, PurchaseIdentity{RealNameID: "ID-X", DeviceID: "dev-X"}, false)
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if len(res.Skipped) != 0 || containsDim(res.Released, "realname") || containsDim(res.Released, "device") {
+		t.Fatalf("absent keys must not appear in result, got %+v", res)
+	}
+	if !containsDim(res.Released, "user") {
+		t.Fatalf("user dim must always release, got %+v", res)
+	}
+}
+
+type getErrKV struct{ KVCache }
+
+func (getErrKV) Get(ctx context.Context, key string) (string, bool, error) {
+	return "", false, errBoom
+}
+
+func TestReleaseTrialLimit_GetErrorPropagates(t *testing.T) {
+	e := NewEngine(getErrKV{NewMemKVCache(nil)})
+	if _, err := e.ReleaseTrialLimit(context.Background(), 7, PurchaseIdentity{DeviceID: "dev-D"}, false); !errors.Is(err, errBoom) {
+		t.Fatalf("want errBoom, got %v", err)
+	}
+}

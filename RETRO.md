@@ -362,6 +362,12 @@
 - **权衡（据实）**：① **支付概览（payment_overview）本次不补**——它只查 `payment_orders`，AGT/SUB **同为 ❌**（各自独立表），是两者共有的独立架构问题、非 AGT 专属；补它要跨表 union 重构，超出「镜像 SUB」范围。本次让 AGT 追平 SUB（对账/终态/卡单/告警四层），卡单可见性由 `/stuck` 页覆盖（真正的「看不到」缺口）。② 26h maxAge 强制过期对最贵 SKU 风险略高于低价单，但 `case paid` 恒先于 `case expired`（查到已付无论多旧都先激活），且强制过期仅在网关 26h 持续不可达且从未返回已付时触发、又是 CAS-on-pending（迟到真实激活仍能赢），风险与 SUB 同级——为一致性、可推理性维持统一策略而非为 AGT 发明分叉。
 - **升级**：**建议升级为规则 → CLAUDE.md C5**（本轮已拟）。红线：**任何承载金额的订单类型（RCG/SUB/AGT/未来新增），新增时必须同时接入全部对账保护层——主动查单对账、超时置终态、卡单可见（`/stuck`）、失败告警——不得只接「支付回调」主链**。新增付费订单前先问：它进 `runReconcileAll` 了吗？卡单页看得到吗？失败会告警吗？三缺一即回退补齐。与 #303/#309/#315/#327/#333/#339 同属「白名单/清单挑选式遗漏」家族（某一维护点漏登记一类对象 → 该类对象在该维度完全裸奔）。同步 memory `agt-order-no-reconcile-fallback`。
 
+### [已解决] Trial 限购后台释放（ReleaseTrialLimit）删跨用户共享键无归属校验：给 B 释放会放掉 A 合法占用的实名/设备键 → 反刷维度可被客服通道洗掉（PROBE-P3）
+- **现象**：`engine.go` 的 `ReleaseTrialLimit` 纯按调用方传入的 `pi` 拼 `realK`/`devK` 直接 `Del`；键值是字面量 `"1"`（`checkTrialLimit` 写入）——**不记录占用者**，无从校验调用方是否真持有它们。`risk_admin_http.go` 又把 `realname_id`/`device_id` 直接取自请求体，与 `user_id` 零绑定。失败链：A 从设备 D 合法消耗 Trial（userK:A + devK:D）→ B 在设备 D 被拒 → B 找客服诉「点开收银台没付款 Trial 被吃」（这正是该端点被文档化的合法用途，客服会信）→ 客服按 B 自报的 device_id 释放 B → `Del(userK:B, devK:D)`，但 devK:D 是 A 的 → 无关新账号 C 从设备 D 白拿一份 Trial。审计日志虽记了动作，但值与用户无绑定，事后无法复核正确性。
+- **根因**：C4 补释放通道时只考虑了「谁来删、有没有痕」（鉴权+审计），没考虑「删的键归不归他」——realname/device 维度**跨用户共享**，而键值 `"1"` 把归属信息丢在了写入侧。与 #345（SetNX 返回值被丢弃）同为「共享维度被按单用户语义处理」家族。
+- **解决/规避**：**写入侧记归属 + 释放侧验归属**。① `checkTrialLimit` 的 SetNX 值从 `"1"` 改为占用者 userID；② `ReleaseTrialLimit` 改签名 `(…, force bool) (TrialReleaseResult, error)`：userK（按 userID 建键、无共享问题）恒删；realname/device 逐键 `Get` 比对值==userID，不符（含遗留 `"1"` 键=归属不可考）**默认拒删**计入 `Skipped`，`force=true`（仅限客服人工核实的遗留键）绕过；③ 端点加 `force` 入参，响应回报 `released`/`skipped` 逐维结果，审计日志带 `force`/`released`/`skipped`。已知权衡：`Get→Del` 非原子，仅「两管理员并发释放同一键+恰有购买挤进微秒窗口」可误删——人工低频客服操作，接受；热路径决胜仍全建立在 SetNX 原子返回值上（不动 #345 的修复）。**服务器容器验证全绿**（`go build ./internal/... ./router/` + vet + `go test -race ./internal/risk/ ./internal/mtwire/`）；变异验证 2/2 杀死：禁用归属比对 → `CrossUserOwnershipGuard`+`LegacyValueRequiresForce` 红；写入侧改回 `"1"` → `OwnerFullRelease` 红。
+- **升级**：候选规则——「**跨主体共享的风控键必须在值里记录归属，任何释放/重置通道必须先验归属、不符默认拒**：删除入参凡来自调用方/用户自报（device_id/realname_id 等），不得直接当作删除目标；归属不可考的遗留键按 fail-closed 拒删，绕过须显式 force + 审计」。是 C4（释放通道）的补丁条款。同步 memory `trial-release-no-ownership-check`。
+
 > Git / CI / 文档维护 / 与 AI 协作（vibe coding）过程中反复出现的困难与规避方式。
 
 ### [已解决] 错误码前缀不统一 + 详设错误码列表不全

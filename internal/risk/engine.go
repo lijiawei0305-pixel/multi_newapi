@@ -157,12 +157,15 @@ func (e *Engine) CheckPurchaseLimit(ctx context.Context, userID int64, plan Plan
 // 都参与决胜，堵死该窗口。
 //
 // 键顺序 [用户, 实名, 设备] 有意为之：同一用户的并发重复请求在第一步 userK 即判负、
-// 不留任何痕迹。判负/报错时把本次调用已占到的前序维度键补偿删除（Del 幂等）——只删自己
-// 真正 SetNX 成功的键、绝不碰既得赢家的键，故单赢家性质不变（最后一个非空维度的持有者
-// 恒胜出）。若不回滚，Trial 终身键（PurchaseDedupTTL=0）会把败者的 userK 与跨账号共享的
-// realK 永久写死：家用共享设备/同实名多账号下，从未买到过 Trial 的无辜用户换干净设备、
-// 换新账号都被永久拒（audit 2026-07-17 发现#3）。回滚后最坏情况只是并发同侪的一次瞬时
-// 且自愈的误拒，严格优于永久误封；回滚 Del 本身失败的残留仍可经 ReleaseTrialLimit 后台释放。
+// 一个键都未占、连补偿都无需触发；跨账号撞实名/撞设备的败者则对**本次已抢占成功**的
+// 维度做补偿删除（claimed 回滚）——被删键值都是本人 userID（刚由本次 SetNX 写入），
+// 不会误删赢家或他人的占用。不补偿的历史版本会把败者的 userK 永久烧掉：设备指纹按
+// ClientIP+UA 派生（粗粒度），共享出口 IP 的无辜用户一次碰撞即终身买不了 Trial、只能
+// 走客服释放。曾以「KVCache 无删除原语」论证补偿不可能（3dd6b4f），该前提在同批 Del
+// 落地（714aa6d，port.go）后即不成立，勿再引用。补偿是尽力而为：Del 失败仅多留痕
+// （fail-closed 方向，可经 ReleaseTrialLimit 后台解）；SetNX 成功→Del 之间键被管理员
+// 释放又被他人重占的误删窗口，与 ReleaseTrialLimit 的 Get→Del 竞态同理接受（须管理员
+// 操作恰挤进微秒级间隙）。
 //
 // 实名/设备从 context 读取（请求级，经 WithPurchaseIdentity 注入），缺省维度跳过。
 func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
@@ -180,23 +183,26 @@ func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 
 	// 逐维 SetNX 决胜：任一维度 SetNX 返回 false（已被占用）即拒。
 	// userK 置首：同用户并发重复请求在此即判负，不会在实名/设备维度留痕。
-	// 判负/报错即回滚 acquired（仅本次真正占到的键），败者不留任何永久残留。
-	var acquired []string
+	// 键值写占用者 userID（非无意义的 "1"）：realname/device 维度跨用户共享，
+	// 后台释放（ReleaseTrialLimit）必须能校验「这把键真是该用户占的」，否则
+	// 客服按 B 自报的 device_id 释放会误删 A 合法占用的键 → 新账号可从已消耗
+	// 设备再领 Trial，反刷维度被客服通道洗掉。
+	owner := strconv.FormatInt(userID, 10)
+	var claimed []string // 本次已抢占成功的键：判负/出错时补偿删除（Del 空列表为 no-op）
 	for _, k := range []string{userK, realK, devK} {
 		if k == "" {
 			continue
 		}
-		ok, err := e.kv.SetNX(ctx, k, "1", ttl)
-		if err != nil || !ok {
-			if len(acquired) > 0 {
-				_ = e.kv.Del(ctx, acquired...)
-			}
-			if err != nil {
-				return err
-			}
+		ok, err := e.kv.SetNX(ctx, k, owner, ttl)
+		if err != nil {
+			_ = e.kv.Del(ctx, claimed...)
+			return err
+		}
+		if !ok {
+			_ = e.kv.Del(ctx, claimed...)
 			return ErrPurchaseLimitExceeded
 		}
-		acquired = append(acquired, k)
+		claimed = append(claimed, k)
 	}
 	return nil
 }
@@ -208,15 +214,50 @@ var _ PurchaseLimitAdmin = (*Engine)(nil)
 // 用途：后台补偿「点开收银台未付款即永久消耗 Trial 终身限购、无释放路径」的误占用——删掉对应维度键后，
 // 该用户即可重新购买 Trial（RETRO 2026-07-16 · Critical）。pi 的实名/设备为空则只释放用户维度
 // （与 checkTrialLimit 建键口径对称：空维度不建亦不删）。Del 幂等：键本就不存在也不报错。
-func (e *Engine) ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity) error {
-	keys := []string{trialKey("user", strconv.FormatInt(userID, 10))}
-	if pi.RealNameID != "" {
-		keys = append(keys, trialKey("realname", pi.RealNameID))
+//
+// 归属校验（默认拒删，force 显式绕过）：realname/device 维度**跨用户共享**，键值即占用者
+// userID（checkTrialLimit 写入）。释放前逐键 Get 校验值==userID——不符（含旧版无归属的
+// 遗留值 "1"）即跳过并计入 Skipped，防止「客服按 B 自报的 device_id 释放 B」误删 A 合法
+// 占用的键、令新账号可从已消耗设备再领 Trial。force=true 跳过归属校验（唯一合法用途：
+// 释放遗留 "1" 键——归属不可考但客服已人工核实；调用方必须审计留痕）。用户维度键
+// （trialKey("user", userID)）本身按 userID 建键、无跨用户共享问题，恒删。
+//
+// Get→Del 非原子：窗口内键被并发释放又被他人 SetNX 重占时会误删新占用。该窗口仅在
+// 「两个管理员并发释放同一键 + 恰有购买挤进微秒级间隙」时存在，且本端点为人工低频
+// 客服操作，接受此竞态；热路径决胜（checkTrialLimit）仍完全建立在 SetNX 原子返回值上。
+func (e *Engine) ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity, force bool) (TrialReleaseResult, error) {
+	owner := strconv.FormatInt(userID, 10)
+	res := TrialReleaseResult{}
+	keys := []string{trialKey("user", owner)}
+	res.Released = append(res.Released, "user")
+
+	shared := []struct{ dim, id string }{
+		{"realname", pi.RealNameID},
+		{"device", pi.DeviceID},
 	}
-	if pi.DeviceID != "" {
-		keys = append(keys, trialKey("device", pi.DeviceID))
+	for _, s := range shared {
+		if s.id == "" {
+			continue
+		}
+		k := trialKey(s.dim, s.id)
+		val, found, err := e.kv.Get(ctx, k)
+		if err != nil {
+			return TrialReleaseResult{}, err
+		}
+		if !found {
+			continue // 键不存在：无需释放（幂等），不计入任何列表
+		}
+		if val != owner && !force {
+			res.Skipped = append(res.Skipped, s.dim)
+			continue
+		}
+		keys = append(keys, k)
+		res.Released = append(res.Released, s.dim)
 	}
-	return e.kv.Del(ctx, keys...)
+	if err := e.kv.Del(ctx, keys...); err != nil {
+		return TrialReleaseResult{}, err
+	}
+	return res, nil
 }
 
 // ReleasePurchaseLimit 释放某用户对某非 Trial 套餐的每用户限购计数键（purchaseKey）。

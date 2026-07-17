@@ -28,9 +28,14 @@ var (
 // 后台零手段，客服只能直连**无密码/无卷/无审计**的 Redis 删键。此端点补上带鉴权 + 审计日志的释放通道：
 // 删掉 user(∪realname∪device) 维度键，使其可重新购买 Trial。
 //
-// 入参（JSON）：{user_id(必填,>0), realname_id?, device_id?, plan_id?}。
+// 入参（JSON）：{user_id(必填,>0), realname_id?, device_id?, plan_id?, force?}。
 //   - plan_id<=0 或缺省 → 释放 Trial 三维键（用户 + 传入的实名/设备维度，空维度跳过）；
 //   - plan_id>0        → 释放该非 Trial 套餐的每用户限购计数键。
+//
+// 归属校验：realname/device 维度跨用户共享，请求体里的值系客服转述用户**自报**、与 user_id
+// 零绑定——引擎侧按键值（占用者 userID）校验归属，不符默认拒删并在响应 skipped 中回报，
+// 防止「给 B 释放」误删 A 合法占用的反刷键（新账号可借已消耗设备再领 Trial）。
+// force=true 绕过归属校验，仅用于释放旧版无归属的遗留键（客服须已人工核实），审计留痕。
 //
 // Del 幂等：目标键本就不存在（如误传/已释放）也返回成功，不报错。
 func (a *App) HandleAdminReleaseTrialLimit(c *gin.Context) {
@@ -39,6 +44,7 @@ func (a *App) HandleAdminReleaseTrialLimit(c *gin.Context) {
 		RealNameID string `json:"realname_id"`
 		DeviceID   string `json:"device_id"`
 		PlanID     int64  `json:"plan_id"`
+		Force      bool   `json:"force"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.UserID <= 0 {
 		respondErr(c, errRiskReleaseInput)
@@ -57,27 +63,35 @@ func (a *App) HandleAdminReleaseTrialLimit(c *gin.Context) {
 	var (
 		err   error
 		scope string
+		res   risk.TrialReleaseResult
 	)
 	if body.PlanID > 0 {
 		scope = "purchase:plan=" + strconv.FormatInt(body.PlanID, 10)
 		err = admin.ReleasePurchaseLimit(ctx, body.PlanID, body.UserID)
+		res.Released = []string{"purchase"}
 	} else {
 		scope = "trial"
-		err = admin.ReleaseTrialLimit(ctx, body.UserID, risk.PurchaseIdentity{
+		res, err = admin.ReleaseTrialLimit(ctx, body.UserID, risk.PurchaseIdentity{
 			RealNameID: body.RealNameID,
 			DeviceID:   body.DeviceID,
-		})
+		}, body.Force)
 	}
 	if err != nil {
 		respondErr(c, err)
 		return
 	}
 
-	// 审计：留痕「谁在何时释放了谁的限购、含哪些维度」——补上此前直连 Redis 删键的「无审计」缺口
-	// （RETRO 2026-07-16）。走 common.SysLog 进系统日志表，可追责。
+	// 审计：留痕「谁在何时释放了谁的限购、含哪些维度、是否 force 绕过归属校验、哪些维度被
+	// 归属校验拒删」——补上此前直连 Redis 删键的「无审计」缺口（RETRO 2026-07-16）。
+	// 走 common.SysLog 进系统日志表，可追责。
 	common.SysLog(fmt.Sprintf(
-		"admin release purchase-limit: operator=%d target_user=%d scope=%s realname=%q device=%q",
-		operator, body.UserID, scope, body.RealNameID, body.DeviceID))
+		"admin release purchase-limit: operator=%d target_user=%d scope=%s realname=%q device=%q force=%t released=%v skipped=%v",
+		operator, body.UserID, scope, body.RealNameID, body.DeviceID, body.Force, res.Released, res.Skipped))
 
-	respondOK(c, gin.H{"user_id": body.UserID, "scope": scope, "released": true})
+	respondOK(c, gin.H{
+		"user_id":  body.UserID,
+		"scope":    scope,
+		"released": res.Released,
+		"skipped":  res.Skipped,
+	})
 }
