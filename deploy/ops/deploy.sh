@@ -20,6 +20,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+# locale 硬化：macOS 自带 bash 3.2 在 UTF-8 locale 下会把「$VAR 后紧跟的中文多字节字符」
+# 首字节并入变量名 → set -u 误报 unbound（如 line 106 的 "$SERVER_REPO（并归档…"）。
+# 强制 C locale：bash 按单字节处理、高位字节非标识符字符 → 变量名正确终止；中文 log 为
+# 字节透传，显示不受影响。en_US.UTF-8 亦无法绕过（bash 3.2 多字节解析本身有 bug）。
+export LC_ALL=C LANG=C
+
 # ── 参数（可环境变量覆盖）────────────────────────────────────────────────────────
 SSH_HOST="${SSH_HOST:-newapi628}"
 LOCAL_REPO="${LOCAL_REPO:-$(cd "$(dirname "$0")/../.." && pwd)}"   # Mac 仓库根
