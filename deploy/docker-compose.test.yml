@@ -11,7 +11,14 @@ services:
       - "127.0.0.1:3100:3000" # 仅本机回环暴露，避免裸公网
     environment:
       # —— new-api 期望的变量 ——
-      SQL_DSN: "root:testpass123@tcp(mysql:3306)/new-api-test"
+      # DB root 密码同样不入 git（C1，2026-07-17 修复；与下方 SESSION_SECRET 同款问题）：
+      #   过去在本文件内联 root 密码字面量（本行 SQL_DSN + mysql 服务的 MYSQL_ROOT_PASSWORD + ops/lib.sh 默认值，
+      #   三处同值、低熵、已进 git）。MySQL 虽未发布 ports:（仅 compose 网络内可达），但任一容器沦陷/仓库读者
+      #   + 宿主立足点即可直升唯一生产库 root——与「仓库读者不可信」的 C1 假设矛盾。
+      #   修法同款 fail-closed：真值只存服务器 /root/newapi-test/.env(600) 的 MYSQL_ROOT_PASSWORD，缺失即拒绝部署。
+      #   注意：MYSQL_ROOT_PASSWORD 仅在 mysql 数据卷**首次初始化**时生效；对已有卷改密码须先在库内
+      #   ALTER USER，再同步 .env，二者不同步会导致 app 连不上库。
+      SQL_DSN: "root:${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 必须在服务器 .env 提供，禁止内联默认（内联=把 DB root 密码写进 git，见 C1）}@tcp(mysql:3306)/new-api-test"
       REDIS_CONN_STRING: "redis://redis"
       # —— 会话/加密根密钥（Critical，2026-07-16 修复）——
       #   过去内联了一个 48 字符默认值(fd17844 引入)：服务器 .env 未设同名键 → compose 插值回落到 git 字面量，
@@ -75,7 +82,8 @@ services:
       --innodb-flush-log-at-trx-commit=2
       --sync-binlog=0
     environment:
-      MYSQL_ROOT_PASSWORD: "testpass123"
+      # 真值只存服务器 .env（C1）；仅新数据卷首次初始化时被 mysqld 消费，存量卷改密码见 app.SQL_DSN 处注释。
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 必须在服务器 .env 提供，禁止内联默认（见 C1）}"
       MYSQL_DATABASE: "new-api-test"
     volumes:
       - mysql_test_data:/var/lib/mysql

@@ -31,10 +31,19 @@ APP_PORT="${APP_PORT:-3100}"        # app  127.0.0.1:3100 → 容器 3000
 AUTH_PORT="${AUTH_PORT:-8180}"      # auth 127.0.0.1:8180 → 容器 8080
 HOST_HEADER="${HOST_HEADER:-tokendream.wedreamhub.com}"  # 多租户 Host 识别用
 
-# ── 数据库（root/testpass123，库名含连字符需引用）────────────────────────────────
+# ── 数据库（库名含连字符需引用；root 密码不入 git——C1，2026-07-17 修复）────────────
+# DB_PASS 解析顺序：环境变量显式覆盖 > 服务器 .env 的 MYSQL_ROOT_PASSWORD > 缺失即中止（fail-closed）。
+#   过去此处内联低熵默认值（与 compose 两处同值、已进 git）——与 SESSION_SECRET 同款 C1 违例，已移除。
+#   .env 行形如 MYSQL_ROOT_PASSWORD=xxx（取最后一条生效行，容忍两侧单/双引号）。
 DB_NAME="${DB_NAME:-new-api-test}"
 DB_USER="${DB_USER:-root}"
-DB_PASS="${DB_PASS:-testpass123}"
+if [ -z "${DB_PASS:-}" ] && [ -f "$ENV_FILE" ]; then
+  DB_PASS="$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' "$ENV_FILE" | tail -n 1 | sed "s/^['\"]//;s/['\"]\$//")"
+fi
+if [ -z "${DB_PASS:-}" ]; then
+  printf '\033[1;31m[err]\033[0m %s\n' "DB_PASS 未设置且 $ENV_FILE 缺 MYSQL_ROOT_PASSWORD——DB 密码已按 C1 移出 git，禁止内联默认；请先在服务器 .env(600) 写入。" >&2
+  exit 1
+fi
 
 # ── 备份 / 保留 ─────────────────────────────────────────────────────────────────
 BACKUP_DIR="${BACKUP_DIR:-/root/backups}"

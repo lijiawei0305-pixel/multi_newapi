@@ -21,7 +21,7 @@
 | compose 文件 `COMPOSE_FILE` | `$SERVER_REPO/deploy/docker-compose.test.yml` |
 | env 文件 `ENV_FILE` | `$SERVER_REPO/.env`（含上游 Key，600，不入库） |
 | app / auth 回环端口 | `127.0.0.1:3100` / `127.0.0.1:8180` |
-| MySQL | 库 `new-api-test`，root / `testpass123` |
+| MySQL | 库 `new-api-test`，用户 root；密码不入库（C1）：只存服务器 `.env` 的 `MYSQL_ROOT_PASSWORD`，lib.sh 自动读取 |
 | Host 头 `HOST_HEADER` | `tokendream.wedreamhub.com` |
 | 备份目录 `BACKUP_DIR` / 保留 `KEEP` | `/root/backups` / `7` |
 | 镜像名 | `newapi_test-app` / `newapi_test-auth-service` |
