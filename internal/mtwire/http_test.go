@@ -319,6 +319,40 @@ func TestHandlePurchase_UnregisteredSubdomainStillTenantNotFound(t *testing.T) {
 	}
 }
 
+// deviceFingerprint —— Trial 设备维度必须由服务端从 ClientIP+User-Agent 派生（绝不读请求体）。
+// 契约：① 有信号 → 32 字符 hex；② 同 IP+UA 稳定一致、不同则不同；③ 无任何信号 → ""（跳过维度，
+// 不用空串哈希把所有无信号请求锁成同一设备）。锁死 RETRO 2026-07-17 的修复：反滥用维度不可自报。
+func TestDeviceFingerprint(t *testing.T) {
+	fp := func(remoteAddr, ua string) string {
+		req := httptest.NewRequest("POST", "/api/tenant/token-plans/1/purchase", nil)
+		req.RemoteAddr = remoteAddr
+		if ua != "" {
+			req.Header.Set("User-Agent", ua)
+		}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = req
+		return deviceFingerprint(c)
+	}
+
+	a := fp("203.0.113.7:5555", "codex-cli/1.0")
+	if len(a) != 32 {
+		t.Fatalf("fingerprint = %q, want 32-char hex", a)
+	}
+	if b := fp("203.0.113.7:9999", "codex-cli/1.0"); b != a {
+		t.Fatalf("same IP+UA must be stable: got %q vs %q", b, a)
+	}
+	if b := fp("203.0.113.7:5555", "cursor/2.0"); b == a {
+		t.Fatalf("different UA must yield different fingerprint, both = %q", a)
+	}
+	if b := fp("198.51.100.1:5555", "codex-cli/1.0"); b == a {
+		t.Fatalf("different IP must yield different fingerprint, both = %q", a)
+	}
+	// 无信号（空 RemoteAddr + 无 UA）→ "" → 引擎跳过设备维度，不建常量键。
+	if empty := fp("", ""); empty != "" {
+		t.Fatalf("no signal must yield empty fingerprint, got %q", empty)
+	}
+}
+
 // ============================================================================
 // HandleListSubscriptions
 // ============================================================================

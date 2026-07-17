@@ -2,10 +2,13 @@ package mtwire
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -205,11 +208,37 @@ func (a *App) HandleListTokenPlans(c *gin.Context) {
 }
 
 // purchaseRequest 是 POST /api/tenant/token-plans/:id/purchase 入参（全部可选）。
-// provider 缺省 wxpay；device_id/real_name_id 为 Trial 限购维度（本阶段风控放行）。
+// provider 缺省 wxpay。
+//
+// **不含 device_id/real_name_id**：Trial 限购的设备维度由服务端从 ClientIP+User-Agent
+// 派生（deviceFingerprint），实名维度暂无可信来源故不启用——二者都**绝不**从请求体读取。
+// 历史上这两字段是客户端自报且零校验：官方 UI 从不发送（三维去重对真实流量等价于只按
+// user_id、形同虚设），而直接调 API 者可发随机 device_id 免费绕过、或发受害者 real_name_id
+// 写一把终身键定向剥夺其 Trial（PurchaseDedupTTL=0 + 无自助释放）。反滥用维度绝不能由
+// 「被监管的一方」自报——信号只认服务端派生（RETRO 2026-07-17 · latent-High）。
 type purchaseRequest struct {
-	DeviceID   string `json:"device_id"`
-	RealNameID string `json:"real_name_id"`
-	Provider   string `json:"provider"` // wxpay | alipay（默认 wxpay）
+	Provider string `json:"provider"` // wxpay | alipay（默认 wxpay）
+}
+
+// deviceFingerprint 从请求元数据（ClientIP + User-Agent）服务端派生 Trial 限购的设备维度指纹。
+// 这正是 risk.PurchaseIdentity.DeviceID 注释所声称的「UA+IP 等归一」——此前只是空谈（真实来源
+// 是客户端自报的 body 字段），现在名副其实。
+//
+// 归一：ClientIP + "\x00" + 规整 UA，取 sha256 前 16 字节 hex（32 字符，够抗碰撞、不泄原始 IP/UA）。
+// 两者皆空（无任何信号，如内部构造/测试）→ 返回 ""：与 checkTrialLimit「空维度跳过」口径一致，
+// 绝不用空串哈希这个常量把所有无信号请求锁成同一设备（否则首个买家会连带封死其余）。
+//
+// 粒度权衡：同一 NAT/校园网出口 + 相同 UA 的不同真人会撞进同一指纹 → 连带收紧（第二人 Trial 被拒）。
+// 这与引擎既有 fail-closed 取向一致（趋向拒绝更多 Trial），误伤经带鉴权+审计的后台释放通道
+// （ReleaseTrialLimit）解；比「客户端自报」的可绕过+可武器化强得多。要更细可日后引入签名客户端令牌。
+func deviceFingerprint(c *gin.Context) string {
+	ip := strings.TrimSpace(c.ClientIP())
+	ua := strings.TrimSpace(c.GetHeader("User-Agent"))
+	if ip == "" && ua == "" {
+		return "" // 无任何信号 → 跳过设备维度，不建常量键
+	}
+	sum := sha256.Sum256([]byte(ip + "\x00" + ua))
+	return hex.EncodeToString(sum[:16])
 }
 
 // HandlePurchase POST /api/tenant/token-plans/:id/purchase —— 下单（返回支付凭据）。需 UserAuth。
@@ -256,11 +285,13 @@ func (a *App) HandlePurchase(c *gin.Context) {
 		discountRatio = p.DiscountRatio
 	}
 	ticket, err := a.Subscriptions.Purchase(ctx, tokenplan.PurchaseInput{
-		TenantID:      t.ID,
-		UserID:        int64(c.GetInt("id")),
-		PlanID:        planID,
-		DeviceID:      body.DeviceID,
-		RealNameID:    body.RealNameID,
+		TenantID: t.ID,
+		UserID:   int64(c.GetInt("id")),
+		PlanID:   planID,
+		// 设备维度：服务端从 ClientIP+User-Agent 派生（绝不读请求体）。
+		// 实名维度：暂无可信来源 → 留空（引擎按空维度跳过），绝不用客户端自报串。
+		DeviceID:      deviceFingerprint(c),
+		RealNameID:    "",
 		DiscountRatio: discountRatio,
 	})
 	if err != nil {

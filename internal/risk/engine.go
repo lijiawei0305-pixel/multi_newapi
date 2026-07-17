@@ -313,10 +313,15 @@ func alertKey(subID int64) string {
 
 // PurchaseIdentity 承载 Trial 限购去重所需的实名标识与设备指纹（CheckPurchaseLimit 签名仅含 userID，
 // 故实名/设备经请求级 context 传入，detailed-design §2.13 三维去重）。
+// 铁律：这两个字段必须由**服务端派生**，绝不承载客户端自报值——反滥用维度若由被监管方自报，
+// 即可被随机化绕过、或被填入受害者标识反向武器化（RETRO 2026-07-17）。注入点见
+// mtwire.HandlePurchase：DeviceID 由 deviceFingerprint(c) 从 ClientIP+User-Agent 派生。
 type PurchaseIdentity struct {
 	// RealNameID 实名标识（同一身份证/手机号归一）；空表示未实名，跳过该维度。
+	// **当前恒空**：暂无可信的服务端实名来源（无 KYC 装配），故实名维度未启用；
+	// 待接入可信身份系统后，须由 authenticated user 的服务端记录派生，绝不读客户端串。
 	RealNameID string
-	// DeviceID 设备指纹（UA+IP 等归一）；空表示无指纹，跳过该维度。
+	// DeviceID 设备指纹（UA+IP 等归一，服务端派生）；空表示无信号，跳过该维度。
 	DeviceID string
 }
 
