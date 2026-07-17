@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -413,6 +414,8 @@ func TestCheckPurchaseLimit_TrialMidLoopErrorHealthyRetrySucceeds(t *testing.T) 
 }
 
 // 并发同用户购买 Trial：恰好 1 个成功（SetNX 决胜锁，-race 通过）。
+// 注意：本测试所有 goroutine 同 userID，userK 本身即同一把锁，旧实现（仅 userK 决胜）
+// 也能过——跨账号性质由下方 CrossAccountSingleWinner 守卫。
 func TestCheckPurchaseLimit_TrialConcurrentSingleWinner(t *testing.T) {
 	e := NewEngine(NewMemKVCache(nil))
 	const n = 64
@@ -430,6 +433,82 @@ func TestCheckPurchaseLimit_TrialConcurrentSingleWinner(t *testing.T) {
 	wg.Wait()
 	if success != 1 {
 		t.Fatalf("want exactly 1 winner, got %d", success)
+	}
+}
+
+// barrierGetKV 在指定键的 Get 上设会合屏障：先执行内层 Get 把结果攥在手里，
+// **然后**等到 need 个调用方全部完成该键的读取（或超时兜底，防实现不调 Get 时
+// 死锁）才放行返回。用途：确定性地撑开「Get 预检读到结果 → SetNX 落痕」之间的
+// 竞态窗口——若实现的跨账号决胜依赖非原子的 Get 预检，屏障保证所有请求都基于
+// "未占用"的读取结果继续前进、各自胜出；原子 SetNX 决胜的实现根本不调 Get，
+// 屏障零干预。屏障必须放在内层 Get **之后**：若放在之前，放行后最快的 goroutine
+// 会先落痕、其余请求的内层 Get 仍能看到占用而被拒，窗口重新闭合（实测如此）。
+// 普通并发压测同样抓不住这个窗口（内存 KV 下窗口极窄，单轮几乎总是 1 个赢家）。
+type barrierGetKV struct {
+	KVCache
+	key     string
+	need    int
+	mu      sync.Mutex
+	arrived int
+	release chan struct{}
+}
+
+func (b *barrierGetKV) Get(ctx context.Context, key string) (string, bool, error) {
+	val, found, err := b.KVCache.Get(ctx, key)
+	if key == b.key {
+		b.mu.Lock()
+		b.arrived++
+		if b.arrived == b.need {
+			close(b.release)
+		}
+		b.mu.Unlock()
+		select {
+		case <-b.release:
+		case <-time.After(time.Second):
+		}
+	}
+	return val, found, err
+}
+
+// 并发跨账号共享单一维度购买 Trial：恰好 1 个成功（-race 通过）。
+// 守卫 3dd6b4f 修复的核心性质：旧实现仅以 userK 作决胜锁、丢弃实名/设备维度的
+// SetNX 返回值——不同 userID 的多账号共享同一设备/实名时可各自拿到一份 Trial
+// （多账号 Trial 农场）。上方 SingleWinner 测试全员同 userID，userK 本身即同一把
+// 锁，旧实现也能过、守不住此性质。本测试每个 goroutine 用不同 userID（userK 互不
+// 竞争）、仅共享实名或设备一个维度，并用 barrierGetKV 强制并发同时通过 Get 预检
+// （若有）；赢家数 >1 即该修复被还原/破坏。
+func TestCheckPurchaseLimit_TrialConcurrentCrossAccountSingleWinner(t *testing.T) {
+	cases := []struct {
+		name      string
+		sharedKey string
+		ctx       func(i int) context.Context
+	}{
+		{"shared-device", trialKey("device", "dev-shared"),
+			func(i int) context.Context { return trialCtx("ID-"+strconv.Itoa(i), "dev-shared") }},
+		{"shared-realname", trialKey("realname", "ID-shared"),
+			func(i int) context.Context { return trialCtx("ID-shared", "dev-"+strconv.Itoa(i)) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const n = 4
+			kv := &barrierGetKV{KVCache: NewMemKVCache(nil), key: tc.sharedKey, need: n, release: make(chan struct{})}
+			e := NewEngine(kv)
+			var success int64
+			var wg sync.WaitGroup
+			for i := 0; i < n; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					if e.CheckPurchaseLimit(tc.ctx(i), int64(100+i), trialPlan()) == nil {
+						atomic.AddInt64(&success, 1)
+					}
+				}(i)
+			}
+			wg.Wait()
+			if success != 1 {
+				t.Fatalf("want exactly 1 winner, got %d", success)
+			}
+		})
 	}
 }
 
