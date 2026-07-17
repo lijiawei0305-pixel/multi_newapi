@@ -2,7 +2,7 @@
 
 > **目标**：把已跑通的测试栈 `newapi_test`（app `127.0.0.1:3100`）正式化为对外服务，
 > 用 `*.wedreamhub.com` 通配域名承载主站 + 全部代理子域，CF Origin CA 升到 **Full (strict)**。
-> **红线**：现网 `newapi_YFNf`（`api.wedreamhub.com` → `:3000`）**保持不动**，作为即时回退保险。
+> **注**（2026-07-03 更新）：原 stock 栈 `newapi_YFNf`（`:3000`）**已删除**，`newapi_test`（`:3100`）已是**唯一现网**；本手册原述"保持 YFNf 作即时回退保险"已不再成立——回退改走 `rollback.sh`（:prev 镜像秒级 / 归档源码 `--to <ts>` 重建）。
 > 运维脚本见 [`README.md`](README.md)；迁移见 [`migrate-note.md`](migrate-note.md)。
 > 服务器 `64.90.4.114`（Debian 12 + 宝塔 nginx + Docker compose v2），登录 `ssh newapi628`。
 

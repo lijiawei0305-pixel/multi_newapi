@@ -23,6 +23,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/alert"
 	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 	"github.com/QuantumNous/new-api/model"
@@ -37,6 +38,10 @@ var (
 	errRechargeAmountTooSmall  = apperr.New("RECHARGE_AMOUNT_TOO_SMALL", fmt.Sprintf("充值金额最低 $%g", minRechargeUSD), http.StatusBadRequest)
 	errRechargeUnauthenticated = apperr.New("RECHARGE_UNAUTHENTICATED", "登录态缺失", http.StatusUnauthorized)
 	errRechargeOrderNoRequired = apperr.New("RECHARGE_ORDER_NO_REQUIRED", "缺少订单号", http.StatusBadRequest)
+	// errRechargeUserMissing 充值入账时目标用户行**根本不存在**（连 Unscoped 绕软删也 0 行匹配）。
+	// 返回它使整个入账事务回滚（台账 / quota / TopUp 一并撤销）、订单不推进 credited，回调 ack 非 SUCCESS
+	// → 平台重推 + 对账兜底重试 + 失败告警，绝不静默把这笔钱吞进「已入账」的假象。
+	errRechargeUserMissing = apperr.New("RECHARGE_USER_MISSING", "充值入账目标用户不存在", http.StatusInternalServerError)
 )
 
 // rechargeConfig 是主站侧充值装配参数。
@@ -77,7 +82,11 @@ func migrateRechargeLedger(db *gorm.DB) error {
 // rechargeQuotaSink 把充值订单入账到 new-api 原生 quota（$1 = QuotaPerUnit）。
 // **强幂等**：以 mt_recharge_credit_ledger(order_no UNIQUE) 为幂等键，台账写入与额度自增同事务，
 // 重复调用（回调重推 / 对账重跑 / 崩溃恢复）只入账一次，不双扣（审计 C1 修复）。
-type rechargeQuotaSink struct{ db *gorm.DB }
+type rechargeQuotaSink struct {
+	db *gorm.DB
+	// alerter 可选（nil 安全）：命中软删用户入账时经此发 Critical 告警知会风控（退款 / 恢复账号核查）。
+	alerter alert.AlertSink
+}
 
 func (s rechargeQuotaSink) OnPaid(ctx context.Context, o payment.PaidOrder) error {
 	q := rechargeQuota(o.AmountUSD)
@@ -90,6 +99,7 @@ func (s rechargeQuotaSink) OnPaid(ctx context.Context, o payment.PaidOrder) erro
 	// (o.ActualPaid − agentRechargeCostCNY) 经 AgentEarnings.AddEarning(source=recharge_spread,
 	// SourceID=o.OrderNo) 幂等落账（须先有 agent_profile）。详见报告「风险/未决」。
 	credited := false
+	softDeletedCredited := false // 命中软删用户行（钱已 Unscoped 落其行）→ 提交后 SysLog + Critical 告警知会风控
 	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 幂等台账：order_no 为主键。已存在（本单已入账）→ 唯一约束冲突 → 短路不加额度。
 		// 用「唯一约束错误」判定幂等，而非 RowsAffected 数值——后者依赖 driver 的 affected/found-rows
@@ -109,9 +119,28 @@ func (s rechargeQuotaSink) OnPaid(ctx context.Context, o payment.PaidOrder) erro
 		}
 		credited = true
 		// 与台账写入同事务落 users.quota，二者原子：要么都成、要么都回滚。
-		if err := tx.Model(&model.User{}).Where("id = ?", o.UserID).
-			Update("quota", gorm.Expr("quota + ?", q)).Error; err != nil {
-			return err
+		// **软删作用域陷阱**：model.User 是软删模型（user.go DeletedAt gorm.DeletedAt），tx.Model(&model.User{})
+		// 会被 GORM 自动注入 `AND deleted_at IS NULL`。若用户在回调落地前被管理员/风控软删，普通 Update 会
+		// 匹配 0 行、**不报 error**、事务照常提交 → 台账 + TopUp 落库但 quota 纹丝不动、订单推进 credited、
+		// 幂等台账(order_no 主键)令重跑短路、ReconcileStuckPaid 只扫 paid 不扫 credited ⇒ 永久静默丢账、零告警。
+		// 故：① 作用域内 Update，命中(RowsAffected==1)即正常；② 未命中→ Unscoped 绕作用域把额度**必落**到该
+		// 用户行（钱永不丢、可恢复，与兑换路径 Table("users") 同语义）；③ Unscoped 仍 0 行→用户行真不存在→
+		// 报错回滚（整事务撤销、订单留待重推/对账+告警）。命中软删行则置 softDeletedCredited，提交后告警风控。
+		res := tx.Model(&model.User{}).Where("id = ?", o.UserID).
+			Update("quota", gorm.Expr("quota + ?", q))
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			ures := tx.Unscoped().Model(&model.User{}).Where("id = ?", o.UserID).
+				Update("quota", gorm.Expr("quota + ?", q))
+			if ures.Error != nil {
+				return ures.Error
+			}
+			if ures.RowsAffected == 0 {
+				return errRechargeUserMissing // 用户行真不存在 → 回滚，绝不静默丢账
+			}
+			softDeletedCredited = true // 命中软删行：钱已落其行，事务提交后告警风控
 		}
 		// 账单历史可见性修复：同事务补写一条已完成的原生 model.TopUp，使这笔 MT 充值出现在
 		// GetUserTopUps（GET /api/user/topup/self，钱包「账单历史」数据源）——此前 OnPaid 只写
@@ -137,6 +166,22 @@ func (s rechargeQuotaSink) OnPaid(ctx context.Context, o payment.PaidOrder) erro
 		// DB 已提交。使额度缓存失效（下次读从 DB 重载，缓存永不与 DB 发散——顺带修审计 M5）。
 		if cErr := model.InvalidateUserCache(int(o.UserID)); cErr != nil {
 			common.SysLog("recharge credit: invalidate user cache failed (order " + o.OrderNo + "): " + cErr.Error())
+		}
+		if softDeletedCredited {
+			// 异常路径：用户在回调落地前被软删，额度已 Unscoped 落到其行（可恢复、不丢账）。留持久日志痕迹
+			// 并经 AlertSink 发 Critical 告警知会风控核查（退款 / 恢复账号）。best-effort：绝不影响入账结果，
+			// 幂等台账已保证同单只到此一次，故告警亦只发一次（DedupKey 再兜底防并发/重推重复分发）。
+			msg := fmt.Sprintf("充值入账命中软删用户：order=%s user=%d quota=%d ¥%.2f（额度已落其行、可恢复；请风控核查是否退款/恢复账号）",
+				o.OrderNo, o.UserID, q, o.ActualPaid)
+			common.SysLog(msg)
+			if s.alerter != nil {
+				_ = s.alerter.Dispatch(ctx, alert.Alert{
+					Level:    alert.LevelCritical,
+					Subject:  "充值入账命中软删用户",
+					Body:     msg,
+					DedupKey: "recharge_softdeleted_credit:" + o.OrderNo,
+				})
+			}
 		}
 	}
 	return nil

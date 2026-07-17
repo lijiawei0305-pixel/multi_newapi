@@ -21,7 +21,9 @@
 #   PLAN_ID=3 WITHDRAW_CNY=20 ./demo.sh        # 任意参数可用环境变量覆盖
 #
 # 幂等友好：每次跑都是「新订单 / 新充值」（金额累加，无害）；API Key 按名复用、不重复建。
-# 安全：guard_not_prod 拒绝指向现网 newapi_YFNf；演示口令仅供演示，部署后务必改（见 README）。
+# 安全：guard_target（旧名 guard_not_prod）确认目标确为期望栈 newapi_test（挡误配）。
+# ⚠ 注意：newapi_test 现为唯一现网/生产——demo.sh 会在生产上造演示订单/充值，仅限受控演示时运行。
+# 演示口令仅供演示，部署后务必改（见 README）。
 # ─────────────────────────────────────────────────────────────────────────────
 source "$(dirname "$0")/../ops/lib.sh"
 guard_not_prod

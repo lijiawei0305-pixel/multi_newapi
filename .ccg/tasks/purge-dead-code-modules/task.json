@@ -1,0 +1,12 @@
+{
+  "id": "purge-dead-code-modules",
+  "title": "清除伪装成正主的死码模块(relay/identity/billing整包 + wallet/stats死层) + 纠正 STATUS.md 死活反转 + 棘轮 C7",
+  "status": "in_progress",
+  "strategy": "refactor-safely",
+  "currentPhase": "本地删除+文档+棘轮完成，待服务器验证",
+  "nextAction": "服务器容器跑 go build ./... && go vet ./... && go test ./internal/... 全绿后再 commit（本机无 Go 工具链，此为唯一验证途径）",
+  "gate": "服务器编译+测试验证（不可本地）；绿后 commit",
+  "branch": "500L",
+  "scope": "purge-dead-code-modules",
+  "createdAt": "2026-07-16"
+}

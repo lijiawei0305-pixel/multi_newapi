@@ -32,10 +32,15 @@ var reconcileSubFn = func(a *App, ctx context.Context, before time.Time) (Reconc
 	return a.ReconcileStuckSubscriptions(ctx, before)
 }
 
-// runReconcileAll 是定时(cron)与手动(manual)统一入口：依次跑 RCG-paid ① / RCG-created ② / SUB ③
-// 三条路径，聚合结果 → 每轮 upsert 心跳 → 手动总记 or 有实事时落一条历史（均 best-effort，绝不影响对账）。
-// 手动经此入口自动补上过去漏跑的 ②（修 drift）。日志保留原 cron 逐路径格式，错误折进 Failed["_error"]。
-func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger string) (paid, created payment.ReconcileResult, sub ReconcileSubResult) {
+var reconcileAgtFn = func(a *App, ctx context.Context, before time.Time) (ReconcileAgtResult, error) {
+	return a.ReconcileStuckAgentPlans(ctx, before)
+}
+
+// runReconcileAll 是定时(cron)与手动(manual)统一入口：依次跑 RCG-paid ① / RCG-created ② / SUB ③ /
+// AGT ④ 四条路径，聚合结果 → 每轮 upsert 心跳 → 手动总记 or 有实事时落一条历史（均 best-effort，绝不
+// 影响对账）。手动经此入口自动补上过去漏跑的 ②（修 drift）。日志保留原 cron 逐路径格式，错误折进
+// Failed["_error"]。AGT ④ 为全站最贵 SKU 的对账兜底，此前唯一缺失，2026-07-16 补齐至与 SUB 对等。
+func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger string) (paid, created payment.ReconcileResult, sub ReconcileSubResult, agt ReconcileAgtResult) {
 	paid, perr := reconcilePaidFn(a, ctx, before)
 	if perr != nil {
 		logger.LogWarn(ctx, "reconcile RCG(paid) failed: "+perr.Error())
@@ -63,15 +68,24 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 			sub.Scanned, len(sub.Activated), len(sub.Unpaid), len(sub.Expired), len(sub.Failed)))
 	}
 
-	stuck := paid.Scanned + created.Scanned + sub.Scanned
-	failed := len(paid.Failed) + len(created.Failed) + len(sub.Failed)
-	prevRun := a.updateReconcileHeartbeat(ctx, trigger, stuck, failed)
-	a.alertReconcileHealth(ctx, trigger, prevRun, failed, paid, created, sub)
-
-	if trigger == "manual" || reconcileHasFacts(paid, created, sub) {
-		a.recordReconcileRun(ctx, trigger, paid, created, sub)
+	agt, aerr := reconcileAgtFn(a, ctx, before)
+	if aerr != nil {
+		logger.LogWarn(ctx, "reconcile AGT failed: "+aerr.Error())
+		agt.Failed = map[string]string{"_error": aerr.Error()}
+	} else if len(agt.Activated) > 0 || len(agt.Expired) > 0 || len(agt.Failed) > 0 {
+		logger.LogInfo(ctx, fmt.Sprintf("reconcile AGT: scanned=%d activated=%d unpaid=%d expired=%d failed=%d",
+			agt.Scanned, len(agt.Activated), len(agt.Unpaid), len(agt.Expired), len(agt.Failed)))
 	}
-	return paid, created, sub
+
+	stuck := paid.Scanned + created.Scanned + sub.Scanned + agt.Scanned
+	failed := len(paid.Failed) + len(created.Failed) + len(sub.Failed) + len(agt.Failed)
+	prevRun := a.updateReconcileHeartbeat(ctx, trigger, stuck, failed)
+	a.alertReconcileHealth(ctx, trigger, prevRun, failed, paid, created, sub, agt)
+
+	if trigger == "manual" || reconcileHasFacts(paid, created, sub, agt) {
+		a.recordReconcileRun(ctx, trigger, paid, created, sub, agt)
+	}
+	return paid, created, sub, agt
 }
 
 // alertReconcileHealth 对账健康告警（best-effort，经 AlertSink；未装配 sink 则跳过，不影响对账）：
@@ -82,7 +96,7 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 //
 // 两类均用 Critical + DedupKey：AlertSink 未启用/未配收件人时由 Sink 的 Critical 兜底日志留痕（见
 // internal/alert/sink.go，绝不静默），启用后走邮件/webhook；DedupKey 令去重窗口内只发一次，防每 5min 轰炸。
-func (a *App) alertReconcileHealth(ctx context.Context, trigger string, prevRun time.Time, failed int, paid, created payment.ReconcileResult, sub ReconcileSubResult) {
+func (a *App) alertReconcileHealth(ctx context.Context, trigger string, prevRun time.Time, failed int, paid, created payment.ReconcileResult, sub ReconcileSubResult, agt ReconcileAgtResult) {
 	if a.AlertSink == nil {
 		return
 	}
@@ -101,8 +115,8 @@ func (a *App) alertReconcileHealth(ctx context.Context, trigger string, prevRun 
 		_ = a.AlertSink.Dispatch(ctx, alert.Alert{
 			Level:   alert.LevelCritical,
 			Subject: "对账失败告警",
-			Body: fmt.Sprintf("本轮对账 %d 笔失败：RCG-paid %d / RCG-created %d / SUB %d。已付未入账订单将于下轮重试，持续失败需人工核查对账记录。",
-				failed, len(paid.Failed), len(created.Failed), len(sub.Failed)),
+			Body: fmt.Sprintf("本轮对账 %d 笔失败：RCG-paid %d / RCG-created %d / SUB %d / AGT %d。已付未入账订单将于下轮重试，持续失败需人工核查对账记录。",
+				failed, len(paid.Failed), len(created.Failed), len(sub.Failed), len(agt.Failed)),
 			DedupKey: "reconcile_failed",
 		})
 	}

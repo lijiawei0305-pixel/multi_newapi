@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "internal/relay/", "reason": "整包死: 0 非测试 importer, RETRO.md:271-275 记 Gateway 休眠; 整目录删"}
+{"file": "internal/identity/", "reason": "整包死: 0 importer; TestCrossTenantTokenRejected 越权测试跑在死包; 整目录删"}
+{"file": "internal/billing/", "reason": "整包死: 0 importer; 平行 Charge() 引擎+637行绿测试从未装配; 整目录删"}
+{"file": "internal/wallet/", "reason": "包活service层死: 删 service.go/quota_wallet.go+tests; 保 model.go(RedemptionCode活)/repo.go/errors.go; port.go 剪4死接口留 WalletRepo"}
+{"file": "internal/stats/", "reason": "包活service层死: 删 service/reader/port.go+test; 保 errors.go(ErrRangeInvalid→report.go:1031活)"}
+{"file": "doc/tasks/STATUS.md", "reason": "纠 risk 反转(risk 实为 live, 经 mtwire wire.go:198 装配) + 标注三死模块已清除"}
+{"file": "RETRO.md", "reason": "补 identity/billing 地雷记录(同款死码, 此前无 RETRO); 标注升级为 C7"}
+{"file": "CLAUDE.md", "reason": "填 C7: 死码伪装正主硬约束(可达性/doc.go语义); C6 已被 deploy-version 占用"}

@@ -63,9 +63,10 @@ func TestHandleAdminListHistoryDescAndLimit(t *testing.T) {
 	ctx := context.Background()
 	r := payment.ReconcileResult{Failed: map[string]string{}}
 	s := ReconcileSubResult{Failed: map[string]string{}}
-	app.recordReconcileRun(ctx, "cron", payment.ReconcileResult{Scanned: 1, Failed: map[string]string{}}, r, s)
+	agt := ReconcileAgtResult{Failed: map[string]string{}}
+	app.recordReconcileRun(ctx, "cron", payment.ReconcileResult{Scanned: 1, Failed: map[string]string{}}, r, s, agt)
 	time.Sleep(2 * time.Millisecond)
-	app.recordReconcileRun(ctx, "manual", r, r, s)
+	app.recordReconcileRun(ctx, "manual", r, r, s, agt)
 
 	c, rec := newReconcileCtx("GET", "/api/admin/reconcile/history?limit=1", "")
 	app.HandleAdminListHistory(c)
@@ -103,6 +104,10 @@ func TestHandleAdminListStuckIncludesHeartbeat(t *testing.T) {
 	// listStuckSubscriptions 查 mt_subscription_orders：需建表（无 RechargeGateway → 只查 SUB）。
 	if err := migrateSubscriptionBridge(app.DB); err != nil {
 		t.Fatalf("migrate sub bridge: %v", err)
+	}
+	// HandleAdminListStuck 亦无条件列卡单代理套餐（C5：AGT 须在 /stuck 可见），需建 mt_agent_plan_orders。
+	if err := migrateAgentPlanBridge(app.DB); err != nil {
+		t.Fatalf("migrate agent-plan bridge: %v", err)
 	}
 	app.updateReconcileHeartbeat(context.Background(), "cron", 2, 1)
 

@@ -49,6 +49,37 @@ interface QrState {
   amountCny?: number
 }
 
+// 与后端 internal/tenant/slug.go 同源的保留词表（命中即拒）。
+const RESERVED_SLUGS = new Set([
+  'www',
+  'api',
+  'admin',
+  'root',
+  'dashboard',
+  'static',
+  'cdn',
+  'status',
+  'support',
+])
+
+/**
+ * 客户端预校验子域名 slug，规则镜像后端 validSlugFormat + 保留词：小写字母/数字/连字符、3–63 位、
+ * 不以连字符首尾、非保留词。返回中文错误文案（供即时提示），合法或留空返回 null。
+ *
+ * 留空视为合法：后端 normalizeAgentSlug 会派生 `agent<uid>` 作为默认站点标识。这是防御纵深——后端已在
+ * 付款前 fail-closed 校验（precheckAgentPurchaseSlug），此处仅为提交前拦截，避免无谓下单往返与技术味报错。
+ */
+function validateSlugCn(raw: string): string | null {
+  const s = raw.trim()
+  if (s === '') return null // 留空 → 后端派生默认子域名
+  if (s.length < 3 || s.length > 63) return '子域名需 3–63 个字符'
+  if (!/^[a-z0-9-]+$/.test(s))
+    return '只能用小写字母、数字、连字符（不支持中文 / 大写 / 空格 / 下划线 / 点）'
+  if (s.startsWith('-') || s.endsWith('-')) return '不能以连字符开头或结尾'
+  if (RESERVED_SLUGS.has(s)) return '该子域名为系统保留词，请换一个'
+  return null
+}
+
 export function AgentPlansPurchase() {
   const { t } = useTranslation()
   const [provider, setProvider] = useState<RechargeProvider>('wxpay')
@@ -81,6 +112,12 @@ export function AgentPlansPurchase() {
   // 故隐藏首开输入、换成升级说明——否则买家填了没反应会误以为坏了(2026-07-08 用户反馈)。
   const { data: agentCtx } = useQuery(agentContextQueryOptions)
   const isExistingAgent = !!agentCtx?.is_agent_owner
+
+  // 首次开通才校验 slug（已是代理走升级/续期，后端忽略 slug）。有错则禁用购买、提交前拦截。
+  const slugError = useMemo(
+    () => (isExistingAgent ? null : validateSlugCn(slug)),
+    [isExistingAgent, slug]
+  )
 
   const purchase = useMutation({
     mutationFn: (plan: AgentPlan) =>
@@ -176,14 +213,20 @@ export function AgentPlansPurchase() {
                   id='agent-slug'
                   placeholder='myshop'
                   value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
+                  maxLength={63}
+                  aria-invalid={!!slugError}
+                  onChange={(e) => setSlug(e.target.value.toLowerCase())}
                   className='h-9'
                 />
-                <p className='text-muted-foreground/70 text-[11px]'>
-                  {t('Become Agent Slug Hint', {
-                    defaultValue: '将生成 <子域名>.wedreamhub.com(仅 OEM/API 档启用站点)',
-                  })}
-                </p>
+                {slugError ? (
+                  <p className='text-destructive text-[11px]'>{slugError}</p>
+                ) : (
+                  <p className='text-muted-foreground/70 text-[11px]'>
+                    {t('Become Agent Slug Hint', {
+                      defaultValue: '将生成 <子域名>.wedreamhub.com(仅 OEM/API 档启用站点)',
+                    })}
+                  </p>
+                )}
               </div>
               <div className='space-y-1.5'>
                 <label htmlFor='agent-name' className='text-xs font-medium'>
@@ -293,8 +336,13 @@ export function AgentPlansPurchase() {
                     </ul>
                     <Button
                       className='w-full'
-                      disabled={noPaymentConfigured || purchase.isPending}
-                      onClick={() => purchase.mutate(plan)}
+                      disabled={
+                        noPaymentConfigured || purchase.isPending || !!slugError
+                      }
+                      onClick={() => {
+                        if (slugError) return
+                        purchase.mutate(plan)
+                      }}
                     >
                       {buyingId === plan.id
                         ? t('Processing', { defaultValue: '处理中…' })

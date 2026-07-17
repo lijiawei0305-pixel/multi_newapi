@@ -59,8 +59,19 @@ func (a *App) checkCallHook(ctx context.Context, userID, tokenID int64, model, c
 		ClientIP:  clientIP,
 		RequestID: requestID,
 	}); err != nil {
-		// risk 错误自带 HTTP 码（RATE_LIMITED=429 / IP_NOT_ALLOWED·STATUS_FORBIDDEN=403），透传给 relay。
-		return types.NewErrorWithStatusCode(err, types.ErrorCodeAccessDenied, apperr.HTTPStatusOf(err))
+		// CheckCall 会混返两类 error，必须分流处理：
+		//  ① 确切策略拒绝——均为 *apperr.AppError，自带 4xx（RATE_LIMITED=429 / IP_NOT_ALLOWED·STATUS_FORBIDDEN=403）。
+		//  ② 基础设施抖动——Redis INCR / IP·RPM 后端 / 状态点查失败，是裸 Go error（非 AppError）。
+		// 契约（见上方 §38-39）：仅确切命中状态/限流才返回 4xx 拦截；基础设施错误一律放行（best-effort，绝不误杀正常流量）。
+		// 陷阱：apperr.HTTPStatusOf 对非 AppError 归一为 500 —— 若原样透传，Redis 一宕机每个 /v1 请求都变 500
+		// （fail-closed，恰与契约相反；客户端 codex/cursor 把 5xx 当临时错误狂重试，把故障放大成全站雪崩）。
+		// 故按 HTTP 码分流：仅 4xx（确切策略）拦截；其余（基础设施错误 → 归一 500）记日志后 fail-open 放行。
+		if status := apperr.HTTPStatusOf(err); status >= 400 && status < 500 {
+			return types.NewErrorWithStatusCode(err, types.ErrorCodeAccessDenied, status)
+		}
+		// 基础设施错误：留痕后放行。补上这行日志（此前排障会先误查上游渠道，因为没有任何一行说「风控因 Redis 不可用」）。
+		common.SysError("mtwire: checkCallHook 风控基础设施错误(如 Redis 不可用)，已 fail-open 放行以免误杀 /v1 流量: " + err.Error())
+		return nil
 	}
 	return nil
 }

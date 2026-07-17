@@ -1,0 +1,22 @@
+{
+  "id": "audit-native-subscription-billing",
+  "title": "审计并测真实的 native 订阅计费路径（gormrepo.Meter 实为未装配死代码）",
+  "status": "in_progress",
+  "strategy": "guided-develop",
+  "currentPhase": "5-verified-awaiting-commit",
+  "nextAction": "服务器已验(15例全绿+go vet净+全量model无回归)。待用户决定: (a)commit (b)补 service 层 BillingSession/NewBillingSession 真测 (c)部署",
+  "gate": "用户确认是否 commit / 是否扩 service 层测试",
+  "branch": "500L",
+  "scope": "audit-native-subscription-billing",
+  "createdAt": "2026-07-16",
+  "outcome": {
+    "premise_inverted": "gormrepo.Meter 及整条 internal/billing+wallet+tokenplan quota.Source 桶抽象=未装配死代码(零生产调用方); 生产 /v1 走原生 model/subscription.go",
+    "no_decimal_bug": "真路径纯 int64, 报告担心的 decimal/float 恰好用满舍入 bug 不存在于真路径",
+    "real_gap_fixed": "真 money 路径此前零测试; 补 model/subscription_metering_test.go 15 例",
+    "bug_found_fixed": "RefundSubscriptionPreConsume 外层事务内嵌套 PostConsumeUserSubscriptionDelta(自开全局DB事务)→单连接死锁+生产非原子双重退额; 已抽 postConsumeUserSubscriptionDeltaTx 复用外层 tx",
+    "verified": "golang:1.25.1 容器: 15/15 绿(含原死锁退款例), go vet 净, 全量 go test ./model/ ok 无回归",
+    "files": ["model/subscription.go (fix)", "model/subscription_metering_test.go (new 15 tests)"],
+    "recorded": "RETRO.md 三·业务逻辑 + memory native-subscription-billing-path-and-nested-tx-fix",
+    "committed": false
+  }
+}

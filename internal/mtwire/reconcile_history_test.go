@@ -34,10 +34,11 @@ func TestRecordAndListReconcileRuns(t *testing.T) {
 	paid := payment.ReconcileResult{Scanned: 1, Reconciled: []string{"RCG-1"}, Failed: map[string]string{}}
 	created := payment.ReconcileResult{Failed: map[string]string{}}
 	sub := ReconcileSubResult{Scanned: 2, Activated: []string{"SUB-1"}, Failed: map[string]string{}}
+	agt := ReconcileAgtResult{Failed: map[string]string{}}
 
-	app.recordReconcileRun(ctx, "cron", paid, created, sub)
+	app.recordReconcileRun(ctx, "cron", paid, created, sub, agt)
 	time.Sleep(2 * time.Millisecond) // 保证 ran_at 有先后
-	app.recordReconcileRun(ctx, "manual", paid, created, sub)
+	app.recordReconcileRun(ctx, "manual", paid, created, sub, agt)
 
 	rows, err := app.listReconcileRuns(ctx, 50)
 	if err != nil {
@@ -86,13 +87,17 @@ func TestReconcileHeartbeatUpsertAndDailyReset(t *testing.T) {
 func TestReconcileHasFacts(t *testing.T) {
 	empty := payment.ReconcileResult{Failed: map[string]string{}}
 	emptySub := ReconcileSubResult{Failed: map[string]string{}}
-	if reconcileHasFacts(empty, empty, emptySub) {
+	emptyAgt := ReconcileAgtResult{Failed: map[string]string{}}
+	if reconcileHasFacts(empty, empty, emptySub, emptyAgt) {
 		t.Fatal("empty run should have no facts")
 	}
-	if !reconcileHasFacts(payment.ReconcileResult{Scanned: 1, Failed: map[string]string{}}, empty, emptySub) {
+	if !reconcileHasFacts(payment.ReconcileResult{Scanned: 1, Failed: map[string]string{}}, empty, emptySub, emptyAgt) {
 		t.Fatal("scanned>0 should be a fact")
 	}
-	if !reconcileHasFacts(empty, payment.ReconcileResult{Failed: map[string]string{"_error": "db down"}}, emptySub) {
+	if !reconcileHasFacts(empty, payment.ReconcileResult{Failed: map[string]string{"_error": "db down"}}, emptySub, emptyAgt) {
 		t.Fatal("failed>0 should be a fact")
+	}
+	if !reconcileHasFacts(empty, empty, emptySub, ReconcileAgtResult{Scanned: 1, Failed: map[string]string{}}) {
+		t.Fatal("AGT scanned>0 should be a fact")
 	}
 }

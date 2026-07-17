@@ -52,31 +52,86 @@ func (a *App) scanUserInputHook(ctx context.Context, userID, tokenID int64, mode
 // 注：租户解析用 a.moderationTenantID（站长按拥有的代理租户算，否则 users.tenant_id；见 agent.go）。
 // TODO(perf): 热路径每请求查 tenant_id（站长再多查一次 owner_user_id）；后续按 userID 加短 TTL 缓存。
 
-// extractUserMessages 从原生请求抽取「用户角色」的纯文本消息（满足「仅用户输入」）。
-// 覆盖 chat completions(*dto.GeneralOpenAIRequest) 与 codex /responses(*dto.OpenAIResponsesRequest)；
-// 其它格式（claude/gemini/embedding 等）暂不扫描（MVP，按需补）。
+// extractUserMessages 从原生请求抽取「用户输入」纯文本，交违禁词扫描器。
+//
+// 安全原则（2026-07-16 修复越权绕过 · 见 RETRO「违禁词扫描格式/角色绕过」）：/v1 是无状态 HTTP，
+// 服务端无从判断多轮历史是否真经过本平台；请求体内**一切客户端提供的文本**都会原样送往上游，
+// 故一律视作「用户输入」全部抽出——不分端点格式、不分消息 role（system/assistant/tool 同为客户端
+// 可控字节）、不分位置（不再只取末条）。全部标记为 moderation.Message{Role:"user"}：扫描器
+// scannable() 仅放行 user/空 role，本层负责把入站文本统一归类为「可扫描的用户输入」（在抽取层重标，
+// 而非放宽扫描器 role 契约——后者由 service_test.go:TestScan_OnlyUserRole 固化，不动）。
+//
+// 覆盖**全部**会到达本 hook 的 dto.Request 具体类型（见 relay/helper/valid_request.go 的
+// GetAndValidateRequest：OpenAI/Responses/Compaction/Claude/Gemini(chat+embed+batchEmbed)/Image/
+// Audio/Embedding/Rerank）；未识别类型（如 realtime 的空 *dto.BaseRequest）无文本可扫，返 nil。
 func extractUserMessages(request dto.Request) []moderation.Message {
 	switch r := request.(type) {
 	case *dto.GeneralOpenAIRequest:
-		return userMessagesFromChat(r.Messages)
+		// 同一类型覆盖 chat/completions/edits/moderations/FIM：messages 之外，
+		// prompt/input/instruction/prefix/suffix 也都可能承载用户输入。
+		out := textsToUserMessages(anyTexts(r.Prompt)...)
+		out = append(out, textsToUserMessages(anyTexts(r.Input)...)...)
+		out = append(out, textsToUserMessages(anyTexts(r.Prefix)...)...)
+		out = append(out, textsToUserMessages(anyTexts(r.Suffix)...)...)
+		out = append(out, textsToUserMessages(r.Instruction)...)
+		out = append(out, openAIMessageTexts(r.Messages)...)
+		return out
 	case *dto.OpenAIResponsesRequest:
-		return userMessagesFromResponsesInput(r.Input)
+		return responsesInputTexts(r.Input)
+	case *dto.OpenAIResponsesCompactionRequest:
+		out := responsesInputTexts(r.Input)
+		out = append(out, rawTexts(r.Instructions)...)
+		return out
+	case *dto.ClaudeRequest:
+		return claudeTexts(r)
+	case *dto.GeminiChatRequest:
+		return geminiChatTexts(r)
+	case *dto.GeminiEmbeddingRequest:
+		return geminiContentTexts(&r.Content)
+	case *dto.GeminiBatchEmbeddingRequest:
+		var out []moderation.Message
+		for _, req := range r.Requests {
+			if req != nil {
+				out = append(out, geminiContentTexts(&req.Content)...)
+			}
+		}
+		return out
+	case *dto.ImageRequest:
+		return textsToUserMessages(r.Prompt)
+	case *dto.AudioRequest:
+		return textsToUserMessages(r.Input, r.Instructions)
+	case *dto.EmbeddingRequest:
+		return textsToUserMessages(r.ParseInput()...)
+	case *dto.RerankRequest:
+		return rerankTexts(r)
 	default:
 		return nil
 	}
 }
 
-func userMessagesFromChat(messages []dto.Message) []moderation.Message {
-	// 只扫「最后一条用户消息」（本轮新输入）：多轮对话每次重发全部历史，历史消息已在各自轮次
-	// 扫过；再整段扫会因旧消息里的违禁词反复误拦本轮无辜输入（如打"你好"却命中历史里的旧词）。
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role != "user" {
-			continue
+// textsToUserMessages 把若干纯文本片段包成「用户输入」消息（空白片段丢弃）。
+func textsToUserMessages(texts ...string) []moderation.Message {
+	out := make([]moderation.Message, 0, len(texts))
+	for _, t := range texts {
+		if strings.TrimSpace(t) != "" {
+			out = append(out, moderation.Message{Role: "user", Text: t})
 		}
-		var out []moderation.Message
-		for _, mc := range messages[i].ParseContent() {
-			if mc.Type == dto.ContentTypeText && strings.TrimSpace(mc.Text) != "" {
-				out = append(out, moderation.Message{Role: "user", Text: mc.Text})
+	}
+	return out
+}
+
+// anyTexts 抽取 OpenAI 请求里 any 型字段（prompt/input/prefix/suffix）的文本：支持 string 与字符串数组。
+func anyTexts(v any) []string {
+	switch t := v.(type) {
+	case string:
+		return []string{t}
+	case []string:
+		return t
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
 			}
 		}
 		return out
@@ -84,18 +139,45 @@ func userMessagesFromChat(messages []dto.Message) []moderation.Message {
 	return nil
 }
 
-// userMessagesFromResponsesInput 解析 /responses 的 input（json.RawMessage）：
-// 形态一为纯字符串（即用户输入）；形态二为输入项数组，取 role=="user" 项的文本。
-func userMessagesFromResponsesInput(input json.RawMessage) []moderation.Message {
+// rawTexts 抽取 json.RawMessage 里的文本：形态一为 JSON 字符串，形态二为字符串数组，其余忽略。
+func rawTexts(raw json.RawMessage) []moderation.Message {
+	if len(raw) == 0 {
+		return nil
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return textsToUserMessages(s)
+	}
+	var arr []string
+	if json.Unmarshal(raw, &arr) == nil {
+		return textsToUserMessages(arr...)
+	}
+	return nil
+}
+
+// openAIMessageTexts 抽取 OpenAI chat messages 全部文本：不分 role（system/user/assistant/tool 皆客户端
+// 可控）、不分位置（历史每轮重发，无状态服务端无从判断是否已扫过，故全扫），统一标记为 user 输入。
+func openAIMessageTexts(messages []dto.Message) []moderation.Message {
+	var out []moderation.Message
+	for i := range messages {
+		for _, mc := range messages[i].ParseContent() {
+			if mc.Type == dto.ContentTypeText && strings.TrimSpace(mc.Text) != "" {
+				out = append(out, moderation.Message{Role: "user", Text: mc.Text})
+			}
+		}
+	}
+	return out
+}
+
+// responsesInputTexts 解析 /responses 的 input（json.RawMessage）：形态一纯字符串；形态二输入项数组
+// ——不分 role、不分位置全部抽取（理由同 openAIMessageTexts）。
+func responsesInputTexts(input json.RawMessage) []moderation.Message {
 	if len(input) == 0 {
 		return nil
 	}
 	var s string
 	if json.Unmarshal(input, &s) == nil {
-		if strings.TrimSpace(s) != "" {
-			return []moderation.Message{{Role: "user", Text: s}}
-		}
-		return nil
+		return textsToUserMessages(s)
 	}
 	var items []struct {
 		Role    string          `json:"role"`
@@ -104,20 +186,74 @@ func userMessagesFromResponsesInput(input json.RawMessage) []moderation.Message 
 	if json.Unmarshal(input, &items) != nil {
 		return nil
 	}
-	// 只扫最后一条 role=="user" 项（本轮新输入），不重扫历史（理由同 userMessagesFromChat）。
-	for i := len(items) - 1; i >= 0; i-- {
-		if items[i].Role != "user" {
-			continue
-		}
-		var out []moderation.Message
-		for _, t := range responsesContentTexts(items[i].Content) {
-			if strings.TrimSpace(t) != "" {
-				out = append(out, moderation.Message{Role: "user", Text: t})
+	var out []moderation.Message
+	for _, it := range items {
+		out = append(out, textsToUserMessages(responsesContentTexts(it.Content)...)...)
+	}
+	return out
+}
+
+// claudeTexts 抽取 Claude 请求文本：system（字符串或分块）+ 遗留 prompt + 全部 messages（不分 role/位置）。
+func claudeTexts(r *dto.ClaudeRequest) []moderation.Message {
+	var out []moderation.Message
+	if r.System != nil {
+		if r.IsStringSystem() {
+			out = append(out, textsToUserMessages(r.GetStringSystem())...)
+		} else {
+			for _, media := range r.ParseSystem() {
+				if media.Type == "text" {
+					out = append(out, textsToUserMessages(media.GetText())...)
+				}
 			}
 		}
-		return out
 	}
-	return nil
+	out = append(out, textsToUserMessages(r.Prompt)...)
+	for i := range r.Messages {
+		// ClaudeMessage.GetStringContent 同时处理字符串内容与分块内容（拼接 text 块）。
+		out = append(out, textsToUserMessages(r.Messages[i].GetStringContent())...)
+	}
+	return out
+}
+
+// geminiChatTexts 抽取 Gemini 请求文本：systemInstruction + 全部 contents（不分 role/位置）+ 批量子请求。
+func geminiChatTexts(r *dto.GeminiChatRequest) []moderation.Message {
+	var out []moderation.Message
+	out = append(out, geminiContentTexts(r.SystemInstructions)...)
+	for i := range r.Contents {
+		out = append(out, geminiContentTexts(&r.Contents[i])...)
+	}
+	for i := range r.Requests {
+		out = append(out, geminiChatTexts(&r.Requests[i])...)
+	}
+	return out
+}
+
+// geminiContentTexts 抽取单个 Gemini content 的 parts 文本（nil content 返 nil）。
+func geminiContentTexts(c *dto.GeminiChatContent) []moderation.Message {
+	if c == nil {
+		return nil
+	}
+	var out []moderation.Message
+	for _, part := range c.Parts {
+		out = append(out, textsToUserMessages(part.Text)...)
+	}
+	return out
+}
+
+// rerankTexts 抽取 rerank 请求文本：query + documents（[]any，元素可能是字符串或 {text:...} 对象）。
+func rerankTexts(r *dto.RerankRequest) []moderation.Message {
+	out := textsToUserMessages(r.Query)
+	for _, doc := range r.Documents {
+		switch d := doc.(type) {
+		case string:
+			out = append(out, textsToUserMessages(d)...)
+		case map[string]any:
+			if s, ok := d["text"].(string); ok {
+				out = append(out, textsToUserMessages(s)...)
+			}
+		}
+	}
+	return out
 }
 
 func responsesContentTexts(raw json.RawMessage) []string {

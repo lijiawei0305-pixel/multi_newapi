@@ -6,9 +6,11 @@
 # 用法：在脚本顶部 `source "$(dirname "$0")/lib.sh"`。
 # 所有参数都可被环境变量覆盖（`STACK=xxx ./backup.sh`），默认值对齐测试栈事实。
 #
-# 安全红线：本套脚本只操作隔离的测试栈 `newapi_test`，
-#           **绝不触碰现网 `newapi_YFNf`（api.wedreamhub.com → :3000）**。
-#           guard_not_prod 会在每个入口强制校验。
+# 安全红线（2026-07-03 单栈收敛后已重定义，勿再按旧语义理解）：
+#   `newapi_test` 已是【唯一现网 / 生产栈】——原 stock 栈 `newapi_YFNf`（:3000）已删除。
+#   脚本的职责本就是操作它，故护栏不再是"拒绝 prod"(已无意义)，而是 guard_target：
+#   确认目标确为期望栈 `newapi_test`，挡拼写/误配。破坏性【不可逆】操作（restore 整库覆盖）
+#   另用 confirm_typed 强确认（须键入栈名、不受 ASSUME_YES 影响）+ 强制可恢复 pre-backup。
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -45,8 +47,10 @@ NGINX_CERT_DIR="${NGINX_CERT_DIR:-/www/server/panel/vhost/cert/wildcard.wedreamh
 # ── 告警 webhook（可选；非空则 healthcheck 失败时 POST，占位）──────────────────────
 ALERT_WEBHOOK="${ALERT_WEBHOOK:-}"
 
-# ── 现网项目名（红线：脚本绝不可操作它）──────────────────────────────────────────
-PROD_STACK="${PROD_STACK:-newapi_YFNf}"
+# ── 期望栈（正向白名单）：护栏确认操作目标确为它，挡拼写/误配 ──────────────────────
+# 注：2026-07-03 单栈收敛后 newapi_test 即唯一现网/生产；原 newapi_YFNf 已删除，
+#     不再作为"禁区"存在——旧的"拒绝 prod"护栏对现网恒放行，是纯粹的虚假安全感，已弃。
+EXPECTED_STACK="${EXPECTED_STACK:-newapi_test}"
 
 # ── 助手 ─────────────────────────────────────────────────────────────────────────
 log()  { printf '\033[1;34m[ops]\033[0m %s\n' "$*"; }
@@ -54,13 +58,18 @@ ok()   { printf '\033[1;32m[ ok]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[wrn]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[err]\033[0m %s\n' "$*" >&2; exit 1; }
 
-# guard_not_prod：拒绝任何指向现网 newapi_YFNf 的配置（违反即中止）。
-guard_not_prod() {
-  [ "$STACK" != "$PROD_STACK" ] || die "拒绝操作现网栈 ${PROD_STACK}（红线）。"
-  case "$COMPOSE_FILE$ENV_FILE$SERVER_REPO" in
-    *"$PROD_STACK"*) die "路径指向现网 ${PROD_STACK}，已中止。" ;;
-  esac
+# guard_target：正向白名单——确认操作目标确为期望栈 $EXPECTED_STACK（挡拼写/误配）。
+# 自 2026-07-03 单栈收敛：newapi_test 即唯一现网，脚本本就该操作它；旧"拒绝 prod"语义已失效
+#   （守着已删除的 YFNf → 对真生产恒放行）。此处不做路径 negative 检查：被守的栈已不存在，
+#   而 stack 名(下划线 newapi_test)与仓库路径(连字符 newapi-test)本就不同形，positive 路径
+#   匹配反而脆弱——栈名一致性足以挡住绝大多数误配。
+guard_target() {
+  [ "$STACK" = "$EXPECTED_STACK" ] \
+    || die "目标栈 '$STACK' ≠ 期望栈 '$EXPECTED_STACK'（防误配/拼写），已中止。"
 }
+# 向后兼容别名：保留旧名 guard_not_prod（语义已更新为 guard_target），backup/healthcheck/
+# reconcile/demo 等调用点无需改动。旧名字面意思已不准确，仅为兼容保留；新脚本请用 guard_target。
+guard_not_prod() { guard_target; }
 
 # dc：固化 compose 调用（-p 项目名 + --env-file + 绝对 -f，cwd 无关）。
 # 绝对 -f 时 build context（compose 里 `..`）解析为 compose 文件目录的上级 = ${SERVER_REPO}。
@@ -72,6 +81,17 @@ confirm() {
   printf '\033[1;33m%s\033[0m ' "$1 [键入 yes 继续]:" >&2
   local ans; read -r ans
   [ "$ans" = "yes" ] || die "已取消。"
+}
+
+# confirm_typed <token> <提示>：破坏性【不可逆】操作的强确认——必须原样键入 <token>
+#   （通常是栈名/库名）。**故意不理会 ASSUME_YES**：此类操作（如 restore 整库覆盖生产库）
+#   无自动化调用方，必须人在环——杜绝"读到旧注释‘只操作隔离测试栈’就 ASSUME_YES 一把梭、
+#   把生产库整库覆盖"的误伤路径。非交互（无输入）即中止（fail-closed）。
+confirm_typed() {
+  local token="$1" prompt="$2" ans
+  printf '\033[1;31m%s\033[0m ' "$prompt [键入 '$token' 以确认]:" >&2
+  read -r ans || die "无输入（非交互环境），已取消。"
+  [ "$ans" = "$token" ] || die "确认串不匹配（需键入 '$token'），已取消。"
 }
 
 # require：确认依赖命令存在。

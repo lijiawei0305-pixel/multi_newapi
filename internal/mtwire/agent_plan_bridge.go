@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/QuantumNous/new-api/internal/agent"
+	"github.com/QuantumNous/new-api/internal/agentplan"
 	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/internal/tenant"
 )
@@ -30,10 +31,13 @@ import (
 // AgentPlanOrderPrefix 是代理套餐订单号前缀。支付回调据此分发到 ActivatePaidAgentPlanOrder。
 const AgentPlanOrderPrefix = "AGT"
 
-// 订单激活状态机（最简两态）。
+// 订单激活状态机。pending/activated 为主链；expired 为对账过期终态（见 agent_plan_reconcile.go）。
 const (
 	agtOrderPending   = "pending"
 	agtOrderActivated = "activated"
+	// agtOrderExpired 终态：pending 单下单超时仍未付 / 网关查无此单（永不会被支付），由对账过期兜底置此
+	// （对齐 SUB subOrderExpired，止住二维码失效后的无谓查单/告警重试）。
+	agtOrderExpired = "expired"
 )
 
 // 会员状态。
@@ -134,8 +138,9 @@ func (a *App) ActivatePaidAgentPlanOrder(ctx context.Context, orderNo string, pa
 	// 按 owner 串行化:支付平台常并发重推回调,若两个回调都读到 pending 都进 provision,新代理
 	// 会各自建同一 owner 派生的同一 slug 租户(唯一键兜底不产生孤儿,但会撞键报错 + 无谓重试)。
 	// 串行后同一 owner 至多一个激活在跑,其余在临界区内重读到 activated 即幂等短路,杜绝双 provision。
-	// 刻意保持 provision 先行、CAS 后置的既有顺序 → 维持「activated ⟹ 已 provision」不变量(AGT 无
-	// 对账兜底,绝不能留 activated-未provision 卡单)。锁细节见 activation_lock.go。
+	// 刻意保持 provision 先行、CAS 后置的既有顺序 → 维持「activated ⟹ 已 provision」不变量:对账兜底
+	// ReconcileStuckAgentPlans 会重驱动 pending 单再次走本函数(查到已付即补激活),故绝不能留 activated-
+	// 未provision 卡单。锁细节见 activation_lock.go;对账兜底见 agent_plan_reconcile.go。
 	unlock := lockAgentActivation(ord.OwnerUserID)
 	defer unlock()
 
@@ -187,11 +192,35 @@ func (a *App) provisionAgentFromOrder(ctx context.Context, ord *agentPlanOrderRo
 	expireAt := now.AddDate(0, 0, maxInt(ord.ValidDays, 1))
 
 	// 已是代理？→ 升级既有租户。
-	tenantID, existing, err := a.agentTenantByOwner(ctx, ord.OwnerUserID)
+	tenantID, tstatus, existing, err := a.agentTenantByOwner(ctx, ord.OwnerUserID)
 	if err != nil {
 		return 0, err
 	}
+	// 复活自己的旧站：owner 曾被软删的代理租户仍占着 tenants.slug 唯一索引（软删只翻 status=deleted +
+	// 删域名记录，租户行/归属/下级/钱包均保留）。若落入下方「新建」分支，normalizeAgentSlug 派生的 slug
+	// 必撞该软删占位 → 永久 ErrSlugDuplicate（付款黑洞的「无需用户输入」触发点）。故先翻回 active，
+	// 复用「已是代理→升级」分支（自带 GrantLevel≥1 时 EnsureSubdomain 重建被删域名 + SetAgentType +
+	// upsertMembership，全幂等）。deleted 是终态、状态机禁 deleted→active；复活是回调激活的确定性重入而
+	// 非用户态迁移，故走 repo 级 SetTenantStatus 直写、刻意绕过状态机。
+	if !existing {
+		delID, hasDeleted, derr := a.agentDeletedTenantByOwner(ctx, ord.OwnerUserID)
+		if derr != nil {
+			return 0, derr
+		}
+		if hasDeleted {
+			if serr := a.TenantRepo.SetTenantStatus(ctx, delID, tenant.StatusActive); serr != nil {
+				return 0, serr
+			}
+			tenantID, tstatus, existing = delID, string(tenant.StatusActive), true
+		}
+	}
 	if existing {
+		// suspended 兜底：升级分支从不翻 status，若为停用态放行会造成「收钱+台账已激活+agent 鉴权仍拒
+		// （TenantByOwner 排除 suspended）」三态不一致（C5 软款版付款黑洞）。付款前 precheck 已同构拒单，
+		// 此处再兜底对账重驱动的 pending 单，绝不静默升级停用代理。解封须管理员显式执行。
+		if tstatus == string(tenant.StatusSuspended) {
+			return 0, agentplan.ErrAgentSuspended
+		}
 		params, found, gerr := a.AgentRepo.GetAgentType(ctx, tenantID)
 		if gerr != nil {
 			return 0, gerr
@@ -306,11 +335,31 @@ func (a *App) upsertMembership(ctx context.Context, tenantID int64, ord *agentPl
 	}).Create(&row).Error
 }
 
-// agentTenantByOwner 找买家名下未删除的代理租户（1:1）；无则 found=false。
-func (a *App) agentTenantByOwner(ctx context.Context, userID int64) (int64, bool, error) {
+// agentTenantByOwner 找买家名下未删除的代理租户（1:1）；无则 found=false。同时回其 status（active/suspended）——
+// 调用方据此区分「active 升级」与「suspended 拒单」（升级分支从不翻 status，若放行 suspended 会收钱却不可交付）。
+func (a *App) agentTenantByOwner(ctx context.Context, userID int64) (int64, string, bool, error) {
+	var row struct {
+		ID     int64
+		Status string
+	}
+	err := a.DB.WithContext(ctx).Table("tenants").Select("id, status").
+		Where("owner_user_id = ? AND status <> ?", userID, string(tenant.StatusDeleted)).
+		Order("id ASC").Limit(1).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, "", false, nil
+	}
+	if err != nil {
+		return 0, "", false, err
+	}
+	return row.ID, row.Status, true, nil
+}
+
+// agentDeletedTenantByOwner 查 owner 名下**软删**（status=deleted）的代理租户——与 agentTenantByOwner
+// 对称但只看 deleted。供付款前预检与激活复活分支识别「该 slug 占位其实是买家自己的旧站」。无则 (0,false,nil)。
+func (a *App) agentDeletedTenantByOwner(ctx context.Context, userID int64) (int64, bool, error) {
 	var row struct{ ID int64 }
 	err := a.DB.WithContext(ctx).Table("tenants").Select("id").
-		Where("owner_user_id = ? AND status <> ?", userID, string(tenant.StatusDeleted)).
+		Where("owner_user_id = ? AND status = ?", userID, string(tenant.StatusDeleted)).
 		Order("id ASC").Limit(1).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, false, nil
@@ -319,6 +368,49 @@ func (a *App) agentTenantByOwner(ctx context.Context, userID int64) (int64, bool
 		return 0, false, err
 	}
 	return row.ID, true, nil
+}
+
+// precheckAgentPurchaseSlug 在**下单收钱前**判定这笔购买激活时会不会因 slug 确定性失败——fail-closed，
+// 与 provisionAgentFromOrder 的分支决策**一一同构**，保证「预检通过 ⇒ 激活必成（就 slug 而言）」，对齐
+// tokenplan HandlePurchase「先校验再出支付凭据」。非法/保留/占用一律返回 tenant.ErrSlug*（apperr，respondErr
+// 直出前端 400/409），绝不落 AGT 订单、绝不向平台下单收钱——否则买家付款后回调激活才校验，钱已离账却
+// 确定性永久失败、订单永停 pending（付款黑洞）。
+//
+//	已是代理(active)          → 升级路径，忽略 slug              → nil
+//	代理被停用(suspended)      → 付款前拒单（避免收钱后不可交付）  → agentplan.ErrAgentSuspended
+//	owner 有软删租户           → 复活路径，复用旧 slug（买家自己的） → nil
+//	全新代理                  → normalize + 格式/保留词 + 状态盲查重
+func (a *App) precheckAgentPurchaseSlug(ctx context.Context, ownerUserID int64, rawSlug string) error {
+	if _, tstatus, existing, err := a.agentTenantByOwner(ctx, ownerUserID); err != nil {
+		return err
+	} else if existing {
+		// suspended：付款前拒单（fail-closed）——被管理员停用的代理不得再付费升级/续费，否则收钱后
+		// agent 鉴权仍拒（TenantByOwner 排除 suspended），钱离账却登不进后台。与 provision 升级分支同构。
+		if tstatus == string(tenant.StatusSuspended) {
+			return agentplan.ErrAgentSuspended
+		}
+		return nil // active 升级：slug 忽略（维持「已是代理则忽略」契约）
+	}
+	if _, hasDeleted, err := a.agentDeletedTenantByOwner(ctx, ownerUserID); err != nil {
+		return err
+	} else if hasDeleted {
+		return nil // 复活：复用买家自己的旧 slug，占位非「他人占用」
+	}
+	// 全新代理：归一化后必须通过与 tenant.Create 同源的格式/保留词校验 + 状态盲唯一性
+	// （tenants.slug 唯一索引状态盲、软删行仍占位；此处 Count 用 raw Table 不套 gorm 软删 scope，与索引一致）。
+	slug := normalizeAgentSlug(rawSlug, ownerUserID)
+	if err := tenant.NewSlugValidator().Validate(slug); err != nil {
+		return err // ErrSlugInvalid / ErrSlugReserved
+	}
+	var n int64
+	if err := a.DB.WithContext(ctx).Table("tenants").
+		Where("slug = ?", slug).Count(&n).Error; err != nil {
+		return err
+	}
+	if n > 0 {
+		return tenant.ErrSlugDuplicate
+	}
+	return nil
 }
 
 // normalizeAgentSlug 规整/兜底代理子域名 slug：非空取原值（tenant.Create 会再校验格式/查重/保留词），

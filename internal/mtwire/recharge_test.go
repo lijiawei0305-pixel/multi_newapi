@@ -9,9 +9,18 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/alert"
 	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/model"
 )
+
+// fakeAlerter 是 alert.AlertSink 的测试桩，记录被分发的告警供断言（命中软删用户入账时应发 Critical）。
+type fakeAlerter struct{ alerts []alert.Alert }
+
+func (f *fakeAlerter) Dispatch(_ context.Context, a alert.Alert) error {
+	f.alerts = append(f.alerts, a)
+	return nil
+}
 
 func TestRechargeQuota(t *testing.T) {
 	per := int(common.QuotaPerUnit)
@@ -216,5 +225,113 @@ func TestRechargeQuotaSinkWritesTopUpRow(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("top_ups rows after retries = %d, want 1 (idempotent, no duplicate write)", count)
+	}
+}
+
+// TestRechargeQuotaSinkSoftDeletedUserStillCredited 锁定审计 #11 修复的核心：用户在回调落地前被
+// 管理员/风控**软删**（users.deleted_at 置位），充值入账**必须**仍把额度落到该用户行（钱不丢、可恢复），
+// 而非旧行为——tx.Model(&User{}) 的软删作用域使 UPDATE 匹配 0 行、静默提交、订单推进 credited、永久丢账。
+// 同时验证：命中软删用户必经 AlertSink 发一条 Critical 告警知会风控；且整条链幂等（重跑不双扣、不重复告警）。
+func TestRechargeQuotaSinkSoftDeletedUserStillCredited(t *testing.T) {
+	prevRedis := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = prevRedis })
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&rechargeTestUser{}, &model.TopUp{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := migrateRechargeLedger(db); err != nil {
+		t.Fatalf("migrate ledger: %v", err)
+	}
+	if err := db.Create(&rechargeTestUser{Id: 42, Quota: 0}).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	// 关键：回调落地前用户被软删。GORM 软删置 deleted_at → 作用域内 UPDATE 匹配 0 行（正是丢账触发条件）。
+	if err := db.Delete(&rechargeTestUser{}, 42).Error; err != nil {
+		t.Fatalf("soft-delete user: %v", err)
+	}
+
+	al := &fakeAlerter{}
+	sink := rechargeQuotaSink{db: db, alerter: al}
+	order := payment.PaidOrder{OrderNo: "RCG-softdel", TenantID: 1, UserID: 42, Provider: payment.ProviderWxpay, AmountUSD: 10, ActualPaid: 73}
+	want := rechargeQuota(10)
+
+	if err := sink.OnPaid(context.Background(), order); err != nil {
+		t.Fatalf("OnPaid on soft-deleted user should credit (not error), got: %v", err)
+	}
+
+	// 额度已 Unscoped 落到软删用户行（钱不丢、可恢复）——需 Unscoped 才读得到软删行。
+	var u rechargeTestUser
+	if err := db.Unscoped().First(&u, 42).Error; err != nil {
+		t.Fatalf("reload (unscoped) user: %v", err)
+	}
+	if u.Quota != want {
+		t.Fatalf("soft-deleted user quota = %d, want %d (credited on their row, not silently dropped)", u.Quota, want)
+	}
+	// 台账 1 条（幂等键就位）+ TopUp 1 条（账单历史可见）。
+	var ledgerRows, topupRows int64
+	db.Model(&rechargeCreditLedgerRow{}).Where("order_no = ?", order.OrderNo).Count(&ledgerRows)
+	db.Model(&model.TopUp{}).Where("trade_no = ?", order.OrderNo).Count(&topupRows)
+	if ledgerRows != 1 || topupRows != 1 {
+		t.Fatalf("ledger=%d topup=%d, want 1/1 (credited + auditable)", ledgerRows, topupRows)
+	}
+	// 风控告警：命中软删用户必发一条 Critical。
+	if len(al.alerts) != 1 || al.alerts[0].Level != alert.LevelCritical {
+		t.Fatalf("alerts = %+v, want exactly 1 Critical (risk notified)", al.alerts)
+	}
+
+	// 幂等：重复入账（回调重推 / 对账重跑）不再加额度、不再重复告警（台账短路，credited 保持 false）。
+	for i := 0; i < 2; i++ {
+		if err := sink.OnPaid(context.Background(), order); err != nil {
+			t.Fatalf("OnPaid retry #%d: %v", i, err)
+		}
+	}
+	if err := db.Unscoped().First(&u, 42).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if u.Quota != want {
+		t.Fatalf("quota after retries = %d, want %d (credited exactly once)", u.Quota, want)
+	}
+	if len(al.alerts) != 1 {
+		t.Fatalf("alerts after retries = %d, want 1 (idempotent, no re-alert)", len(al.alerts))
+	}
+}
+
+// TestRechargeQuotaSinkMissingUser 锁定「目标用户行真的不存在」的 fail-loud：连 Unscoped 都 0 行匹配时
+// 必须返回 errRechargeUserMissing 使整个事务回滚（台账 / quota / TopUp 一并撤销），订单不推进 credited，
+// 由回调重推 + 对账兜底 + 告警接手——绝不静默把这笔钱吞进「已入账」的假象。
+func TestRechargeQuotaSinkMissingUser(t *testing.T) {
+	prevRedis := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = prevRedis })
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&rechargeTestUser{}, &model.TopUp{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := migrateRechargeLedger(db); err != nil {
+		t.Fatalf("migrate ledger: %v", err)
+	}
+	// 不 seed 任何用户：UserID=999 行根本不存在。
+
+	sink := rechargeQuotaSink{db: db}
+	order := payment.PaidOrder{OrderNo: "RCG-ghost", TenantID: 1, UserID: 999, Provider: payment.ProviderWxpay, AmountUSD: 10, ActualPaid: 73}
+
+	if err := sink.OnPaid(context.Background(), order); err != errRechargeUserMissing {
+		t.Fatalf("OnPaid for missing user = %v, want errRechargeUserMissing (fail-loud, not silent credit)", err)
+	}
+	// 整事务回滚：台账与 TopUp 均未落库 → 订单不推进 credited、回调 ack 非 SUCCESS → 平台重推/对账兜底。
+	var ledgerRows, topupRows int64
+	db.Model(&rechargeCreditLedgerRow{}).Where("order_no = ?", order.OrderNo).Count(&ledgerRows)
+	db.Model(&model.TopUp{}).Where("trade_no = ?", order.OrderNo).Count(&topupRows)
+	if ledgerRows != 0 || topupRows != 0 {
+		t.Fatalf("ledger=%d topup=%d after missing-user credit, want 0/0 (rolled back, no phantom credit)", ledgerRows, topupRows)
 	}
 }

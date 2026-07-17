@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "web/package.json", "reason": "真 workspace 根(new-api-web-workspace)，overrides 必须写这里才被 npm/bun 认；已加入 11 条"}
+{"file": "web/default/package.json", "reason": "成员 newapi-web，overrides 写这里被静默忽略；已删除 11 条"}
+{"file": "web/bun.lock", "reason": "必须在服务器 bun install 重生，否则 pin 不生效且 --frozen-lockfile 会挂构建"}
+{"file": "web/classic/package.json", "reason": "默认 theme(theme.go)，直接依赖 mermaid^11.6.0→dompurify，dompurify pin 是唯一真暴露面"}

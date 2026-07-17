@@ -223,6 +223,35 @@ func TestRedeemCode_InvalidAndDisabled(t *testing.T) {
 	}
 }
 
+// TestRedeemCodeAndCredit_RejectsOverflowCredit 覆盖兑换入账的溢出兜底（安全审计纵深防御，利用链
+// 最后一环）：即便某条旁路塞进一张面额大到 int64(amt×perUnit) 会溢出的码（正常建码已被面额上界 +
+// decimal(20,8) 列宽挡死，此处用 EnsureRedemption 直接注入模拟），入账时必须拒（ErrRedeemCodeInvalid）
+// 且分文不入账、事务回滚使码保持 enabled，绝不把无法忠实表示的额度搬进用户钱包。
+func TestRedeemCodeAndCredit_RejectsOverflowCredit(t *testing.T) {
+	ctx := context.Background()
+	r := newRedemptionTestRepo(t)
+	const redeemer = int64(200)
+	const perUnit = 500000.0 // 生产口径 common.QuotaPerUnit
+	seedUserQuota(t, r, redeemer, 0)
+
+	// 面额 2e13 > 阈值 MaxInt64/perUnit ≈ 1.84e13 —— int64(amt×perUnit) 必溢出。
+	bogus := &wallet.RedemptionCode{TenantID: 1, Code: "OVERFLOW", AmountUSD: 2e13}
+	if err := r.EnsureRedemption(ctx, bogus); err != nil {
+		t.Fatalf("seed bogus code: %v", err)
+	}
+
+	if _, _, err := r.RedeemCodeAndCredit(ctx, 1, "OVERFLOW", redeemer, time.Now(), perUnit); err != wallet.ErrRedeemCodeInvalid {
+		t.Fatalf("overflow-credit redeem = %v, want ErrRedeemCodeInvalid", err)
+	}
+	// 分文不入账；事务回滚 → CAS 撤销，码保持 enabled（未作废，留待人工处置）。
+	if q := userQuota(t, r, redeemer); q != 0 {
+		t.Fatalf("redeemer credited on overflow = %d, want 0", q)
+	}
+	if list, _ := r.ListCodesByTenant(ctx, 1); len(list) != 1 || list[0].Status != wallet.RedemptionEnabled {
+		t.Fatalf("code status after rejected redeem = %+v, want 1 code still Enabled", list)
+	}
+}
+
 // TestRedeemCodeAndCredit_AtomicCreditAndRollback 锁定「翻 used 与入账额度同事务原子」：
 //   - 正常：CAS 翻 used + 原生 quota 入账在同一事务内落地，redeemer.quota 精确增加、码翻 used；
 //   - 回滚：入账 UPDATE 失败（此处删 users 表制造）→ 整个事务回滚，CAS 一并撤销，码保持 enabled
@@ -278,5 +307,34 @@ func TestRedeemCodeAndCredit_AtomicCreditAndRollback(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Status != wallet.RedemptionEnabled {
 		t.Fatalf("code status after rollback = %+v, want 1 code still Enabled", list)
+	}
+}
+
+// TestRedeemCodeAndCredit_MissingUserRow 锁定「入账目标用户行不存在（RowsAffected==0）」的 fail-loud：
+// 兑换者 users 行根本不存在（表在、行不在，区别于上一个测试 DropTable 触发的 res.Error 路径）。此前
+// Table("users").UpdateColumn 静默成功 0 行 → 已翻 used 的码作废却不到账（与 CreateCodesWithDeduction
+// 已防的坑同源）。修复后应回滚整事务（CAS 撤销、码保持 enabled 可再兑）并返回 ErrRedeemCreditUserMissing。
+func TestRedeemCodeAndCredit_MissingUserRow(t *testing.T) {
+	ctx := context.Background()
+	const owner = int64(10)
+	const ghost = int64(999) // 不 seed 此用户 → users 行不存在（表结构仍在）
+	const perUnit = 100.0
+
+	r := newRedemptionTestRepo(t)
+	seedUserQuota(t, r, owner, 100000)
+	if err := r.CreateCodesWithDeduction(ctx, 1, owner, 50000, mkCodes(1, 5, "GHOSTCODE")); err != nil {
+		t.Fatalf("create code: %v", err)
+	}
+	// 兑换到不存在的用户行：RowsAffected==0 → fail-loud 回滚（而非静默作废码不到账）。
+	if _, _, err := r.RedeemCodeAndCredit(ctx, 1, "GHOSTCODE", ghost, time.Now(), perUnit); err != wallet.ErrRedeemCreditUserMissing {
+		t.Fatalf("redeem to missing user = %v, want ErrRedeemCreditUserMissing", err)
+	}
+	// 码随事务回滚保持 enabled（未作废），无「作废且不到账」的悬空态。
+	list, err := r.ListCodesByTenant(ctx, 1)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 || list[0].Status != wallet.RedemptionEnabled {
+		t.Fatalf("code status after missing-user redeem = %+v, want 1 code still Enabled", list)
 	}
 }

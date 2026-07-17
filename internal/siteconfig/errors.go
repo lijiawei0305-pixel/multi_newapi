@@ -22,4 +22,7 @@ var (
 	ErrAssetTooLarge = apperr.New("ASSET_TOO_LARGE", "图片体积超过上限（≤2MB）", http.StatusRequestEntityTooLarge)
 	// ErrAssetNotFound 按 id 未找到素材（下架时）。
 	ErrAssetNotFound = apperr.New("ASSET_NOT_FOUND", "素材不存在", http.StatusNotFound)
+	// ErrFooterInvalid 自定义页脚含被禁止的 HTML（脚本/内联事件处理器/可执行或外链标签、
+	// javascript: 等伪协议）或超过长度上限。防存储型 XSS：代理不得经站点装修注入任意 HTML。
+	ErrFooterInvalid = apperr.New("FOOTER_INVALID", "页脚含被禁止的内容（脚本 / 事件处理器 / 危险标签 / 伪协议）或过长", http.StatusBadRequest)
 )

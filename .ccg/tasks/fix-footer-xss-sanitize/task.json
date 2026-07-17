@@ -1,0 +1,20 @@
+{
+  "id": "fix-footer-xss-sanitize",
+  "title": "代理自配页脚未净化经 dangerouslySetInnerHTML 渲染 → 存储型 XSS，前端复用内置 DOMPurify 消毒 + 服务端 ValidatePatch 补 Footer 校验",
+  "status": "done",
+  "strategy": "direct-fix",
+  "currentPhase": "done",
+  "nextAction": "纯静态修复完成(未跑测试,用户指示)。本机无 Go 工具链→go test ./internal/siteconfig/ 与前端 build 待服务器验证；代码仅在本地 git 工作树(500L)",
+  "gate": null,
+  "branch": "500L",
+  "scope": "fix-footer-xss-sanitize",
+  "createdAt": "2026-07-16T00:00:00+08:00",
+  "changedFiles": [
+    "web/default/src/components/layout/components/footer.tsx",
+    "internal/siteconfig/policy.go",
+    "internal/siteconfig/errors.go",
+    "internal/siteconfig/policy_test.go",
+    "RETRO.md",
+    "CLAUDE.md"
+  ]
+}

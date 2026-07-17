@@ -35,7 +35,7 @@ var (
 )
 
 // StartReconcileLoop 启动支付卡单对账兜底定时任务（仅 master 节点，sync.Once 保证只起一次）：
-// 每 reconcileTickInterval 扫一次 RCG 充值卡单（重跑入账）+ SUB 套餐卡单（查单→补激活）。
+// 每 reconcileTickInterval 扫一次 RCG 充值卡单（重跑入账）+ SUB 套餐卡单 + AGT 代理套餐卡单（查单→补激活）。
 // 全程 best-effort：幂等 + atomic 防重入，失败仅记日志，绝不影响主流程。
 // 由 App 装配完成后（InstallHooks 同处）调用。
 func (a *App) StartReconcileLoop() {
@@ -57,7 +57,7 @@ func (a *App) StartReconcileLoop() {
 	})
 }
 
-// runReconcileOnce 跑一轮全 3 路径对账（cron 触发），atomic 防与上一轮重叠：上一轮还没跑完则跳过本次。
+// runReconcileOnce 跑一轮全 4 路径对账（cron 触发），atomic 防与上一轮重叠：上一轮还没跑完则跳过本次。
 // 编排/日志/心跳/历史统一在 runReconcileAll；手动触发（HandleAdminRunReconcile）共用同一入口。
 func (a *App) runReconcileOnce() {
 	if !reconcileRunning.CompareAndSwap(false, true) {

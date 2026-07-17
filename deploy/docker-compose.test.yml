@@ -13,8 +13,18 @@ services:
       # —— new-api 期望的变量 ——
       SQL_DSN: "root:testpass123@tcp(mysql:3306)/new-api-test"
       REDIS_CONN_STRING: "redis://redis"
-      # 测试用会话密钥：随机串，可被外部同名 env 覆盖；仅供测试，勿用于生产。
-      SESSION_SECRET: "${SESSION_SECRET:-4329de40911e7a8bd58004757bfb8c976d72579113fdd7ba}"
+      # —— 会话/加密根密钥（Critical，2026-07-16 修复）——
+      #   过去内联了一个 48 字符默认值(fd17844 引入)：服务器 .env 未设同名键 → compose 插值回落到 git 字面量，
+      #   于是「签会话 cookie」与「派生 API token 缓存键的 HMAC」共用一把「进过 git、可被任何仓库读者读到」的根密钥。
+      #   风险：读到者可离线用 gorilla/securecookie 伪造 {"id":1,"role":100} 的 root cookie → 免密全站管理员。
+      #   修法（fail-closed + 分权）：
+      #     · 去掉内联默认，改 `:?`——未在服务器 .env 提供则 compose 直接报错拒绝部署（把「约定覆盖」升级为「强制」）。
+      #     · 拆两把：SESSION_SECRET 只签 cookie、CRYPTO_SECRET 只做 HMAC 缓存键派生，禁止同一把复用。
+      #   部署前置（务必先做，否则本文件会让 up 失败）：在 /root/newapi-test/.env 写入两把「互不相同」的随机值：
+      #     SESSION_SECRET=$(openssl rand -hex 32)   CRYPTO_SECRET=$(openssl rand -hex 32)
+      #   轮换会使旧 cookie 全失效（用户需重登）、缓存键重算（无数据损失）。详见 RETRO 2026-07-16 与 CLAUDE.md C1。
+      SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET 必须在服务器 .env 设为随机值，禁止内联默认（内联=把根密钥写进 git）}"
+      CRYPTO_SECRET: "${CRYPTO_SECRET:?CRYPTO_SECRET 必须在服务器 .env 设为随机值，且与 SESSION_SECRET 不同（分权，勿复用）}"
       TZ: "Asia/Shanghai"
       PORT: "3000"
       # —— 7c 多档风控：调用前 RPM 限流默认阈值（每分钟每用户，0=关闭）。压测后设 60=合理常用值（≈1 req/s/用户）。——
@@ -69,9 +79,26 @@ services:
       MYSQL_DATABASE: "new-api-test"
     volumes:
       - mysql_test_data:/var/lib/mysql
+    # 数据服务同样需自愈：OOM/宿主重启后自动拉起（此前缺失，崩了需人工介入）。见 RETRO 2026-07-16。
+    restart: unless-stopped
 
   redis:
     image: redis:latest       # new-api 经 REDIS_CONN_STRING=redis://redis 使用（无密码，仅测试）
+    # —— 持久化（Critical，2026-07-16 修复：限购去重键此前只活在**无卷** Redis，容器重建即全站 Trial 终身限购
+    #   一次性归零、且限购在 DB 无任何后备台账 → 所有历史买家可再薅一份，无日志无告警）——
+    #   ① 挂 named volume redis_test_data:/data —— RDB/AOF 落盘到卷，键跨容器重建 / `compose down` / 镜像重拉
+    #      全部存活，仅 `down -v`（显式删卷）才清空。补上「余额丢 ≤5s(MySQL 后备) 而限购丢全部」的不对称。
+    #   ② --appendonly yes 开 AOF（默认 everysec fsync）：进程崩溃至多丢 ≤1s 写，强于默认仅 RDB 快照
+    #      （save 3600/300/60，最坏丢 ~300s）。AOF 与 RDB 并存作双保险，均落在同一持久卷。
+    #   注：本改动需一次容器重建（`up -d` 会 recreate redis）方生效；重建瞬间旧内存键会丢——线上现状本就 0 键
+    #      （主审员实测 risk:trial:* = 0），故无损失。详见 RETRO 2026-07-16 与 CLAUDE.md C4。
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_test_data:/data
+    # OOM/镜像升级/宿主重启后自愈：无此策略则 redis 崩了不会自己起来，需人工介入。
+    # 配合 mtwire/risk.go 的 fail-open（Redis 不可用时 /v1 放行而非 500），缩短「限流暂失效」窗口。见 RETRO 2026-07-16。
+    restart: unless-stopped
 
 volumes:
   mysql_test_data:
+  redis_test_data:

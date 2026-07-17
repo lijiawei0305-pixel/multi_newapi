@@ -147,10 +147,20 @@ func (e *Engine) CheckPurchaseLimit(ctx context.Context, userID int64, plan Plan
 	return nil
 }
 
-// checkTrialLimit 实现 Trial 的用户∪实名∪设备三维去重：
-//  1. 任一维度已被占用（Get 命中）→ 拒；
-//  2. 以用户维度 SetNX 作决胜锁（并发同用户只过 1 次）；
-//  3. 胜者再记录实名/设备维度（供后续 Get 去重）。
+// checkTrialLimit 实现 Trial 的用户∪实名∪设备三维去重（并发单赢家）：
+// 三个维度各自用 SetNX 作决胜锁——任一维度已被占用（SetNX 返回 false）即拒。
+// SetNX 是"不存在才写入"的原子 check-and-set，故并发下每个共享维度（同实名/同设备）
+// 只有 1 个请求能占用成功，其余全部判负 → 天然单赢家。**不再先 Get 预检**：旧实现
+// 的 Get 预检与 SetNX 之间无原子性，且只以 userK 作决胜锁（每用户 key 不同、跨账号不
+// 串行化任何东西），realname/设备维度的 SetNX 返回值被丢弃 → 同设备/同实名的多账号
+// 并发可各自拿到一份 Trial（绕过反刷，proposal §2.4）。此处令每个维度的 SetNX 返回值
+// 都参与决胜，堵死该窗口。
+//
+// 键顺序 [用户, 实名, 设备] 有意为之：同一用户的并发重复请求在第一步 userK 即判负、
+// 不留任何痕迹；只有"跨账号共享实名/设备"的败者才会在自身用户维度留下占用——而这正是
+// 反刷要收紧的对象。KVCache 无删除原语，无法对败者已占的维度做补偿删除，但留痕方向
+// 是 fail-closed（趋向拒绝更多 Trial），与 Trial 终身限购（PurchaseDedupTTL=0）一致，
+// 且单一身份的正常用户永不被误封（只有已与既得 Trial 撞库/撞设备的账号会被连带收紧）。
 //
 // 实名/设备从 context 读取（请求级，经 WithPurchaseIdentity 注入），缺省维度跳过。
 func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
@@ -166,35 +176,44 @@ func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 		devK = trialKey("device", pi.DeviceID)
 	}
 
-	// 1) 任一维度已被占用 → 拒（涵盖同用户/同实名/同设备的二次购买）。
+	// 逐维 SetNX 决胜：任一维度 SetNX 返回 false（已被占用）即拒。
+	// userK 置首：同用户并发重复请求在此即判负，不会在实名/设备维度留痕。
 	for _, k := range []string{userK, realK, devK} {
 		if k == "" {
 			continue
 		}
-		if _, found, err := e.kv.Get(ctx, k); err != nil {
+		ok, err := e.kv.SetNX(ctx, k, "1", ttl)
+		if err != nil {
 			return err
-		} else if found {
+		}
+		if !ok {
 			return ErrPurchaseLimitExceeded
 		}
 	}
-
-	// 2) 用户维度决胜锁：并发同用户只有 1 个 SetNX 成功。
-	ok, err := e.kv.SetNX(ctx, userK, "1", ttl)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return ErrPurchaseLimitExceeded
-	}
-
-	// 3) 胜者记录实名/设备维度（best-effort：Get 预检已做强制，本步仅为后续去重落痕）。
-	if realK != "" {
-		_, _ = e.kv.SetNX(ctx, realK, "1", ttl)
-	}
-	if devK != "" {
-		_, _ = e.kv.SetNX(ctx, devK, "1", ttl)
-	}
 	return nil
+}
+
+// 编译期断言：*Engine 亦满足后台释放契约（限购键补偿释放，见 port.go PurchaseLimitAdmin）。
+var _ PurchaseLimitAdmin = (*Engine)(nil)
+
+// ReleaseTrialLimit 释放某用户的 Trial 三维去重键（用户维度 + 传入的实名/设备维度）。
+// 用途：后台补偿「点开收银台未付款即永久消耗 Trial 终身限购、无释放路径」的误占用——删掉对应维度键后，
+// 该用户即可重新购买 Trial（RETRO 2026-07-16 · Critical）。pi 的实名/设备为空则只释放用户维度
+// （与 checkTrialLimit 建键口径对称：空维度不建亦不删）。Del 幂等：键本就不存在也不报错。
+func (e *Engine) ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity) error {
+	keys := []string{trialKey("user", strconv.FormatInt(userID, 10))}
+	if pi.RealNameID != "" {
+		keys = append(keys, trialKey("realname", pi.RealNameID))
+	}
+	if pi.DeviceID != "" {
+		keys = append(keys, trialKey("device", pi.DeviceID))
+	}
+	return e.kv.Del(ctx, keys...)
+}
+
+// ReleasePurchaseLimit 释放某用户对某非 Trial 套餐的每用户限购计数键（purchaseKey）。
+func (e *Engine) ReleasePurchaseLimit(ctx context.Context, planID, userID int64) error {
+	return e.kv.Del(ctx, purchaseKey(planID, userID))
 }
 
 // NoteUsage used/limit 逼近阈值时打标告警；按 subID 去重（SetNX）确保只告警一次。

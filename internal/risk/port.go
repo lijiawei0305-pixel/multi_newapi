@@ -104,6 +104,22 @@ type KVCache interface {
 	SetNX(ctx context.Context, key, val string, ttl time.Duration) (bool, error)
 	// Expire 为已存在的 key 设置/刷新过期时长；ttl<=0 表示清除过期。
 	Expire(ctx context.Context, key string, ttl time.Duration) error
+	// Del 删除一个或多个 key（幂等：不存在的 key 忽略，不报错；空列表 no-op）。
+	// 补上此前结构性缺失的**释放原语**：KVCache 曾只增（Incr/SetNX）不删 → 被误占用的限购去重键
+	// （用户点开收银台未付款即消耗、TTL=0 永久）在类型层面无法释放，后台零手段（RETRO 2026-07-16 · Critical）。
+	Del(ctx context.Context, keys ...string) error
+}
+
+// PurchaseLimitAdmin 暴露限购去重键的**后台释放**能力，由 *Engine 实现。
+// 用途：补偿「Purchase 在下单前即 SetNX 写永久去重键、KVCache 无 Del → 犹豫关单即永久消耗、
+// 后台无手段可解」的误占用（RETRO 2026-07-16 · Critical）。经带鉴权 + 审计日志的后台端点调用，
+// 替代客服直连无密码/无卷/无审计的 Redis 删键。
+type PurchaseLimitAdmin interface {
+	// ReleaseTrialLimit 释放某用户的 Trial 三维去重键（用户维度 + 传入的实名/设备维度），
+	// 使其可重新购买 Trial。实名/设备为空则只释放用户维度（与 checkTrialLimit 建键口径对称）。
+	ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity) error
+	// ReleasePurchaseLimit 释放某用户对某非 Trial 套餐的每用户限购计数键。
+	ReleasePurchaseLimit(ctx context.Context, planID, userID int64) error
 }
 
 // Clock 是可注入时钟，便于限流窗口与去重 TTL 的确定性单测（detailed-design §2.13 单测策略）。

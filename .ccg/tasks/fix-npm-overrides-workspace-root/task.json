@@ -1,0 +1,12 @@
+{
+  "id": "fix-npm-overrides-workspace-root",
+  "title": "把 11 条安全 overrides 从 workspace 成员迁到根，使 pin 真正生效",
+  "status": "in_progress",
+  "strategy": "direct-fix",
+  "currentPhase": "2",
+  "nextAction": "服务器 web/ 跑 bun install 重生 bun.lock，再 bun audit + 前端构建验证 pin 收敛与不破坏构建",
+  "gate": "服务器 bun install 重生 lockfile（本机无 bun 工具链）",
+  "branch": "500L",
+  "scope": "fix-npm-overrides-workspace-root",
+  "createdAt": "2026-07-16T06:53:31-1000"
+}

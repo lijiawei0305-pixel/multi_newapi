@@ -7,13 +7,16 @@
 #
 # 用法：
 #   ./restore.sh /root/backups/db-20260629-023000.sql.gz
-#   ASSUME_YES=1 ./restore.sh <file>     # 跳过确认（自动化/演练，谨慎）
 #
-# 安全：默认二次确认（键入 yes）。建议恢复前先 ./backup.sh 留一份当前态。
+# ⚠ 目标库 new-api-test 即【生产】（2026-07-03 单栈收敛后 newapi_test 是唯一现网）。整库
+#   覆盖不可逆：期间所有充值 / 套餐激活 / 代理分润 / 消耗日志将被快照替换、且用户可能已付款。
+#   故本脚本【强确认】——必须【键入栈名】（非泛泛 yes），且 **ASSUME_YES 无法跳过**
+#   （restore 无自动化调用方，必须人在环）。
+# 安全：恢复前【强制】留一份当前态（pre-backup）；pre-backup 失败即中止——绝不在无保险时覆盖。
 # 注意：Redis 状态恢复不在本脚本（缓存可重建）；如需，停 redis→替换 /data/dump.rdb→起。
 # ─────────────────────────────────────────────────────────────────────────────
 source "$(dirname "$0")/lib.sh"
-guard_not_prod
+guard_target
 require docker
 require gzip
 
@@ -24,14 +27,13 @@ case "$BACKUP" in *.sql.gz) : ;; *) die "需 .sql.gz（backup.sh 的 DB 产物�
 
 log "目标栈   ：${STACK}（库 ${DB_NAME}）"
 log "恢复来源 ：${BACKUP}（$(du -h "$BACKUP" | cut -f1)，mtime $(date -r "$BACKUP" '+%F %T' 2>/dev/null || true)）"
-warn "此操作将用备份覆盖 $STACK 的 $DB_NAME 现有数据，且不可逆。"
-confirm "确认恢复到 $STACK / $DB_NAME ?"
+warn "此操作将用备份【整库覆盖】生产栈 $STACK 的 $DB_NAME，不可逆——期间充值/套餐/分润/消耗日志将全部被替换。"
+confirm_typed "$STACK" "确认整库覆盖【生产】库 $STACK / $DB_NAME ?"
 
-# 可选：恢复前自动留一份当前态（除非 NO_PRE_BACKUP=1）。
-if [ "${NO_PRE_BACKUP:-0}" != "1" ]; then
-  log "恢复前先备份当前态（保险）…"
-  "$(dirname "$0")/backup.sh" || warn "恢复前备份失败，继续（你已确认）。"
-fi
+# 恢复前【强制】留一份当前态（可恢复保险）。失败即中止——绝不在无保险快照时覆盖生产库。
+# （不提供 NO_PRE_BACKUP 逃生：连给现态拍照都做不到，就不该覆盖它。）
+log "恢复前强制备份当前态（保险）…"
+"$(dirname "$0")/backup.sh" || die "恢复前备份失败——已中止，绝不在无保险快照时覆盖生产库 $DB_NAME。"
 
 log "导入中… gunzip | mysql"
 gunzip -c "$BACKUP" | dc exec -T "$MYSQL_SVC" mysql -u"$DB_USER" -p"$DB_PASS"

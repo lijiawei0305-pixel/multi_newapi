@@ -25,6 +25,8 @@ const (
 	// CodeInsufficientQuota —— 代理建兑换码时，从其原生 users.quota 预扣额度不足。
 	// 与 CodeQuotaInsufficient（钱包/billing 桶不足）区分：本码用于原生 quota 预扣口径。
 	CodeInsufficientQuota = "INSUFFICIENT_QUOTA"
+	// CodeRedeemCreditUserMissing —— 兑换入账时目标用户行不存在（RowsAffected==0）。防御性 fail-loud。
+	CodeRedeemCreditUserMissing = "REDEEM_CREDIT_USER_MISSING"
 )
 
 var (
@@ -40,4 +42,8 @@ var (
 	ErrAmountInvalid = apperr.New(CodeAmountInvalid, "金额非法", http.StatusBadRequest)
 	// ErrInsufficientQuota 代理建兑换码时原生 quota 预扣不足（条件扣减 0 行受影响）。
 	ErrInsufficientQuota = apperr.New(CodeInsufficientQuota, "额度不足，无法生成兑换码", http.StatusPaymentRequired)
+	// ErrRedeemCreditUserMissing 兑换入账时目标用户行不存在（RowsAffected==0）。防御性 fail-loud：
+	// 兑换用户本已登录鉴权、理论不达；一旦命中即回滚整事务（CAS 撤销、码保持 enabled 可再兑），
+	// 绝不让「码已翻 used 却额度不到账」静默发生（对齐 CreateCodesWithDeduction 的 RowsAffected 判定）。
+	ErrRedeemCreditUserMissing = apperr.New(CodeRedeemCreditUserMissing, "入账目标用户不存在，兑换未生效", http.StatusInternalServerError)
 )

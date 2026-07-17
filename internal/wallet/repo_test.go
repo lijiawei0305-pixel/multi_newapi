@@ -2,8 +2,6 @@ package wallet
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -94,47 +92,6 @@ func TestMemRepoUseRedemptionCAS(t *testing.T) {
 	}
 }
 
-// TestRedeemConcurrentSingleWinner：N goroutine 并发兑换同一码，仅 1 个成功，余额只入账一次。
-func TestRedeemConcurrentSingleWinner(t *testing.T) {
-	repo := NewMemRepo()
-	pricing := newFakePricing(1.0)
-	svc := NewService(repo, pricing, newFakeEarnings())
-	repo.AddRedemption(&RedemptionCode{TenantID: 5, Code: "ONCE", AmountUSD: 25})
-
-	ctx := contextWithTenant(5, 8)
-	const workers = 200
-	var (
-		win       int64
-		used      int64
-		wg        sync.WaitGroup
-		startGate = make(chan struct{})
-	)
-	wg.Add(workers)
-	for i := 0; i < workers; i++ {
-		go func() {
-			defer wg.Done()
-			<-startGate
-			err := svc.Redeem(ctx, 8, "ONCE")
-			switch {
-			case err == nil:
-				atomic.AddInt64(&win, 1)
-			case apperr.Is(err, CodeRedeemCodeUsed):
-				atomic.AddInt64(&used, 1)
-			default:
-				t.Errorf("unexpected redeem error: %v", err)
-			}
-		}()
-	}
-	close(startGate)
-	wg.Wait()
-
-	if win != 1 {
-		t.Fatalf("winners = %d, want 1", win)
-	}
-	if win+used != workers {
-		t.Fatalf("accounted = %d, want %d", win+used, workers)
-	}
-	if b, _ := repo.Balance(ctx, 5, 8); b != 25 {
-		t.Fatalf("balance credited %v, want exactly 25 (once)", b)
-	}
-}
+// 注：兑换码「并发单赢家」的原子性保证现由 MemRepo.UseRedemption 的 CAS 直接覆盖
+// （见 TestMemRepoUseRedemptionCAS）。原 TestRedeemConcurrentSingleWinner 经由已删除的
+// walletService.Redeem 驱动，该服务层从未装配、已于 2026-07-16 作为死码移除，故一并删除。

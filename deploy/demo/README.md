@@ -5,7 +5,7 @@
 > 账目对账见 [`../ops/reconcile.sh`](../ops/reconcile.sh)。
 >
 > **运行位置**：`demo.sh` 在**服务器**跑（`ssh newapi628`）—— 它直连回环端口与 mysql 容器。
-> **安全红线**：只操作隔离测试栈 `newapi_test`，绝不碰现网 `newapi_YFNf`（`guard_not_prod` 强制）。
+> **安全护栏**：`newapi_test` 自 2026-07-03 单栈收敛后是【唯一现网 / 生产栈】（原 `newapi_YFNf` 已删除）；`guard_target`（旧名 `guard_not_prod`）确认目标确为它、挡拼写误配。⚠ `demo.sh` 会在生产上造演示数据，仅限受控演示时运行。
 
 ---
 

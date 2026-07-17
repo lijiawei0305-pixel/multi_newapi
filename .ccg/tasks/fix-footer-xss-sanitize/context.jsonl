@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"path\", \"reason\": \"why\"}. Seed rows are skipped."}
+{"file": "web/default/src/components/layout/components/footer.tsx", "reason": "L1 sink:208 裸 dangerouslySetInnerHTML → DOMPurify.sanitize"}
+{"file": "internal/siteconfig/policy.go", "reason": "L2 ValidatePatch 补 Footer 校验(长度+危险模式黑名单)"}
+{"file": "internal/siteconfig/errors.go", "reason": "新错误码 ErrFooterInvalid / FOOTER_INVALID"}
+{"file": "internal/siteconfig/service.go", "reason": "Patch 先 ValidatePatch 再落库,确认服务端层非死代码"}
+{"file": "internal/mtwire/http.go", "reason": "公开 GET /api/tenant/current 下发 cfg.Footer(无鉴权)"}
+{"file": "web/default/src/components/html-content.tsx", "reason": "已内置 DOMPurify 消毒模板,直接复用"}
