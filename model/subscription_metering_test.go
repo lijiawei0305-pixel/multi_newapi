@@ -184,8 +184,8 @@ func TestPreConsume_Idempotent(t *testing.T) {
 func TestPreConsume_MultiSub_SkipsExhausted(t *testing.T) {
 	meterEnsure(t)
 	meterPlan(t, 1, 100, "")
-	meterSub(t, 1, 1, 100, 100, 100, 3600)  // 已满，end 更早（先被排序命中）
-	meterSub(t, 2, 1, 100, 100, 0, 86400)   // 有余量，end 更晚
+	meterSub(t, 1, 1, 100, 100, 100, 3600) // 已满，end 更早（先被排序命中）
+	meterSub(t, 2, 1, 100, 100, 0, 86400)  // 有余量，end 更晚
 
 	res, err := PreConsumeUserSubscription("req-multi", 100, "gpt-4o", 0, 30)
 	require.NoError(t, err)
