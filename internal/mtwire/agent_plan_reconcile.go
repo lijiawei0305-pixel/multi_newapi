@@ -3,8 +3,10 @@ package mtwire
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/payment"
 )
 
@@ -74,7 +76,7 @@ func (a *App) ReconcileStuckAgentPlans(ctx context.Context, before time.Time) (R
 			// 网关持续超时/限流拿不到答复也无妨——若曾支付早被前面数百轮捕获激活）→ 终态过期；其余瞬时错误
 			// 仍在窗口内 → 留 Failed 下轮重试，绝不误杀。
 			if ancient || (expired && errors.Is(err, payment.ErrOrderNotExist)) {
-				a.expireStuckAgentPlanOrder(ctx, row.OrderNo)
+				a.expireStuckAgentPlanOrder(ctx, &row)
 				res.Expired = append(res.Expired, row.OrderNo)
 			} else {
 				res.Failed[row.OrderNo] = "query: " + err.Error()
@@ -88,7 +90,7 @@ func (a *App) ReconcileStuckAgentPlans(ctx context.Context, before time.Time) (R
 			res.Activated = append(res.Activated, row.OrderNo)
 		case expired:
 			// 确认未付且已超时 → 终态过期（二维码失效、永不会付），停止扫描与告警。
-			a.expireStuckAgentPlanOrder(ctx, row.OrderNo)
+			a.expireStuckAgentPlanOrder(ctx, &row)
 			res.Expired = append(res.Expired, row.OrderNo)
 		default:
 			// 未付但仍在有效窗口（未超时）：留待下次。
@@ -101,10 +103,21 @@ func (a *App) ReconcileStuckAgentPlans(ctx context.Context, before time.Time) (R
 // expireStuckAgentPlanOrder 把一笔卡死的 pending 代理套餐单置终态 agtOrderExpired（条件 CAS：仅在仍 pending
 // 时更新，防与并发真实激活竞态——即便本函数与一笔迟到的真实回调激活同时发生，CAS 也只有一方成功）。
 // best-effort：写失败仅下轮再来，绝不影响对账其余单。
-func (a *App) expireStuckAgentPlanOrder(ctx context.Context, orderNo string) {
-	_ = a.DB.WithContext(ctx).Model(&agentPlanOrderRow{}).
-		Where("order_no = ? AND status = ?", orderNo, agtOrderPending).
-		Updates(map[string]any{"status": agtOrderExpired, "updated_at": time.Now()}).Error
+// CAS 赢家同时释放该单携带的 slug 预留（audit 发现#5 预留式的回收半边：弃单不得永久占用 slug）。
+// 释放原语自带「已激活不删 + 兄弟 pending 单引用不删」双守卫；失败仅记日志——占位行仍在、fail-closed，
+// 且订单已终态、本轮后无人再触发，故日志即审计线索（C4：不可逆占用必须有可审计的释放路径）。
+func (a *App) expireStuckAgentPlanOrder(ctx context.Context, ord *agentPlanOrderRow) {
+	res := a.DB.WithContext(ctx).Model(&agentPlanOrderRow{}).
+		Where("order_no = ? AND status = ?", ord.OrderNo, agtOrderPending).
+		Updates(map[string]any{"status": agtOrderExpired, "updated_at": time.Now()})
+	if res.Error != nil || res.RowsAffected == 0 {
+		return // 写失败下轮再来；或输给并发真实激活（预留归赢家，不释放）
+	}
+	if err := a.releaseAgentSlugReservation(ctx, ord.AgentTenantID); err != nil {
+		common.SysLog("agt reconcile: release slug reservation tenant " +
+			strconv.FormatInt(ord.AgentTenantID, 10) + " for expired order " + ord.OrderNo +
+			" failed: " + err.Error())
+	}
 }
 
 // listStuckAgentPlans 只读列出卡在 pending（早于 before）的代理套餐订单，供 admin「支付对账」页展示。

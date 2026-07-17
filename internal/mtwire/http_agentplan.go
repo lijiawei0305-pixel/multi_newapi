@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agentplan"
 	"github.com/QuantumNous/new-api/internal/payment"
 )
@@ -307,7 +308,8 @@ func (a *App) HandlePurchaseAgentPlan(c *gin.Context) {
 	// 付款前 fail-closed 校验 slug（对齐 tokenplan HandlePurchase：先校验再出支付凭据）。非法/保留/占用
 	// 直接返回 SLUG_INVALID/SLUG_RESERVED/SLUG_DUPLICATE，绝不落 AGT 订单、绝不向平台下单收钱——否则
 	// 买家付款后回调激活才校验 slug，钱已离账却确定性永久激活失败、订单永停 pending（付款黑洞）。
-	if err := a.precheckAgentPurchaseSlug(ctx, userID, body.Slug); err != nil {
+	reservedTenantID, err := a.precheckAndReserveAgentSlug(ctx, userID, body.Slug, body.Name)
+	if err != nil {
 		respondErr(c, err)
 		return
 	}
@@ -328,9 +330,15 @@ func (a *App) HandlePurchaseAgentPlan(c *gin.Context) {
 		Slug:               body.Slug,
 		Name:               body.Name,
 		PlanCode:           plan.Code,
+		AgentTenantID:      reservedTenantID, // slug 预留行（0=升级/复活路径无预留）；过期释放、激活翻活都以此为锚
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}); err != nil {
+		// 订单没落地则预留无人认领（对账过期释放以订单为锚）→ 当场补偿释放，失败仅记日志（状态守卫幂等）。
+		if rerr := a.releaseAgentSlugReservation(ctx, reservedTenantID); rerr != nil {
+			common.SysLog("agent-plan purchase: release orphan slug reservation tenant " +
+				strconv.FormatInt(reservedTenantID, 10) + " failed: " + rerr.Error())
+		}
 		respondErr(c, err)
 		return
 	}

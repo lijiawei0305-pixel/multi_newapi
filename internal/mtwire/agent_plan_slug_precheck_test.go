@@ -1,10 +1,11 @@
 package mtwire
 
-// AGT 代理套餐购买：slug 付款前校验 + 软删复活的回归测试。
+// AGT 代理套餐购买：slug 付款前校验/预留 + 软删复活的回归测试。
 //
 // 覆盖两条不变量：
-//  1. precheckAgentPurchaseSlug 与 provisionAgentFromOrder 分支决策同构——「预检通过 ⇒ 激活必成（就
-//     slug 而言）」。非法/保留/占用在付款前 fail-closed 拒绝；升级/复活路径忽略 slug。
+//  1. precheckAndReserveAgentSlug 与 provisionAgentFromOrder 分支决策同构——「预检通过 ⇒ 激活必成（就
+//     slug 而言）」。非法/保留/占用在付款前 fail-closed 拒绝；升级/复活路径忽略 slug；全新代理成功预检
+//     即插入软删态预留行占位（预留语义详见 agent_plan_slug_reservation_test.go）。
 //  2. 软删代理重购不再撞 tenants.slug 唯一键永久失败（付款黑洞的「无需用户输入」触发点），而是复活旧租户。
 
 import (
@@ -37,8 +38,8 @@ func seedAgentTenant(t *testing.T, app *App, ownerID int64, slug string, status 
 	return tn.ID
 }
 
-// TestPrecheckAgentPurchaseSlug 断言付款前校验的三分支：全新代理走格式/保留词/状态盲查重；已是代理与
-// 软删 owner（复活）忽略 slug。用例覆盖付款黑洞的全部输入触发点。
+// TestPrecheckAgentPurchaseSlug 断言付款前校验的三分支：全新代理走格式/保留词/状态盲查重（成功即预留）；
+// 已是代理与软删 owner（复活）忽略 slug。用例覆盖付款黑洞的全部输入触发点。
 func TestPrecheckAgentPurchaseSlug(t *testing.T) {
 	app, _ := newAgentPlanActivateTestApp(t)
 	ctx := context.Background()
@@ -61,18 +62,18 @@ func TestPrecheckAgentPurchaseSlug(t *testing.T) {
 		{"new/reserved", 964, "admin", "SLUG_RESERVED"},
 		{"new/duplicate", 965, "taken-shop", "SLUG_DUPLICATE"},
 		{"new/valid-unique", 966, "fresh-shop", ""},
-		{"new/empty-derives-default", 967, "", ""}, // 空 → 派生 agent967（唯一）
+		{"new/empty-derives-default", 967, "", ""},                       // 空 → 派生 agent967（唯一）
 		{"new/reserved-boundary", 968, "api", "SLUG_RESERVED"},           // 边界长度 3 的保留词（锁定格式先过再判保留词）
 		{"new/uppercase-reserved", 969, "ADMIN", "SLUG_RESERVED"},        // 归一 ToLower 后仍命中保留词
 		{"new/uppercase-duplicate", 970, "TAKEN-SHOP", "SLUG_DUPLICATE"}, // 归一后撞占用（防大小写绕过查重→付款后撞键黑洞）
-		{"new/spaces-trim-valid", 971, " Fresh-Shop ", ""},              // 首尾空格 + 大写 → 归一 fresh-shop（唯一，放行）
-		{"existing-agent/ignores-slug", 951, "admin", ""},               // 升级路径：连保留词都放行（slug 被忽略）
-		{"soft-deleted/reactivate", 952, "我的小店", ""},                 // 复活路径：非法 slug 也放行（复用旧 slug）
-		{"suspended-owner/reject", 953, "我的小店", "AGENT_SUSPENDED"},    // 停用态：suspended 守卫先于 slug 校验拒单
+		{"new/spaces-trim-valid", 971, " Trim-Shop ", ""},                // 首尾空格 + 大写 → 归一 trim-shop（唯一，放行；不复用 966 的 slug——成功预检即预留占位）
+		{"existing-agent/ignores-slug", 951, "admin", ""},                // 升级路径：连保留词都放行（slug 被忽略）
+		{"soft-deleted/reactivate", 952, "我的小店", ""},                     // 复活路径：非法 slug 也放行（复用旧 slug）
+		{"suspended-owner/reject", 953, "我的小店", "AGENT_SUSPENDED"},       // 停用态：suspended 守卫先于 slug 校验拒单
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := app.precheckAgentPurchaseSlug(ctx, c.owner, c.slug)
+			_, err := app.precheckAndReserveAgentSlug(ctx, c.owner, c.slug, "")
 			if c.wantErr == "" {
 				if err != nil {
 					t.Fatalf("precheck(owner=%d, slug=%q) = %v, want nil", c.owner, c.slug, err)
