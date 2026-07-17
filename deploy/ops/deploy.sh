@@ -42,7 +42,8 @@ APP_IMG="${STACK}-${APP_SVC}"; AUTH_IMG="${STACK}-${AUTH_SVC}"
 
 log()  { printf '\033[1;34m[deploy]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m[ ok ]\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*" >&2; }
+# 刻意无 warn()：部署校验只有「过/不过」两态（audit#8）——版本自检曾被降级成"只告警"，叠加镜像
+# tag 闸门的 manifest-list 假通过，等于放行"报告成功实跑旧码"；勿再添加 warn 型闸门。
 die()  { printf '\033[1;31m[fail]\033[0m %s\n' "$*" >&2; exit 1; }
 remote() { ssh "$SSH_HOST" "$@"; }
 # 服务器侧 compose 串（与 lib.sh dc() 等价）。
@@ -174,16 +175,20 @@ if [ "$healthy" = "1" ]; then
     die "构建未产出新镜像（旧容器续跑致健康假通过）。改动未上线——排查上方构建日志后重试。"
   fi
   ok "8/8 健康通过：app /api/status success（${STACK}）｜镜像已更新（≠:prev）"
-  # 版本身份端到端自检（C6/#12）：/api/status 报告的 version 必须等于本次盖入的 $APP_VERSION。
-  # 不等 = 版本身份未正确烤入（VERSION 盖戳/Dockerfile ldflags 断裂）→ 告警但不阻断（健康已过）。
+  # 版本身份端到端自检（C6/#12 · audit#8 改为**阻断闸门**，原"告警不阻断"）：/api/status 报告的
+  # version 必须等于本次盖入的 $APP_VERSION。上方镜像 tag ID 比对在 BuildKit/containerd manifest-list
+  # 下会漂移产生假通过（RETRO「deploy 报成功却跑旧码」事故机制）；本自检直接观测**线上正在跑的二进制**，
+  # 不受任何镜像 ID 歧义影响，是「改动真的上线了」的唯一端到端判据。不等＝改动未上线（旧容器/旧镜像
+  # 续跑）或版本烤入断裂——两者都必须判部署失败，绝不能降级成告警后照报"部署成功 ✅ 版本 <新>"。
+  # 无误伤面：APP_VERSION 含构建时间戳，每次部署必然唯一，旧容器续跑必然不等。
   REPORTED="$(remote "curl -fsS --max-time 8 -H 'Host: $HOST_HEADER' http://127.0.0.1:$APP_PORT/api/status 2>/dev/null" \
     | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' | head -n1)"
-  if [ "$REPORTED" = "$APP_VERSION" ]; then
-    ok "  版本身份自检通过：/api/status version=$REPORTED"
-  else
-    warn "⚠ 版本身份自检失败：/api/status 报告 '$REPORTED' ≠ 期望 '$APP_VERSION'。"
-    warn "   → 版本串未正确烤入镜像，请排查 Dockerfile ldflags 与服务器 VERSION 盖戳（步骤 5.5）。"
+  if [ "$REPORTED" != "$APP_VERSION" ]; then
+    log "构建尾日志（排错用）："
+    remote "tail -n 40 $SERVER_REPO/deploy-build.log 2>/dev/null || true"
+    die "版本身份不符：运行中 app 报告 '$REPORTED' ≠ 本次 '$APP_VERSION' —— 改动未上线（旧容器/旧镜像续跑，或版本未烤入：排查 Dockerfile ldflags 与服务器 VERSION 盖戳步骤 5.5）。"
   fi
+  ok "  版本身份自检通过：/api/status version=$REPORTED"
   remote "$SERVER_REPO/deploy/ops/healthcheck.sh || true"   # 打印完整巡检（不阻断）
   ok "部署成功 ✅ 版本 ${APP_VERSION}（tag=${TAG}，归档 ${ARCHIVE_DIR}/src-${TS}.tgz）"
   log "  溯源：curl -s .../api/status | jq .data.version ｜ ssh $SSH_HOST 'docker exec \$(docker ps -qf name=${STACK}-${APP_SVC}) cat /deploy-manifest.json'"
