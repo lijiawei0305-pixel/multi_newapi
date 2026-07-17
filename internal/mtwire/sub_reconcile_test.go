@@ -177,7 +177,7 @@ func TestReconcileStuckSubscriptions_ExpiryFallback(t *testing.T) {
 	if len(res.Unpaid) != 1 || res.Unpaid[0] != "SUB-unpaid-recent" {
 		t.Fatalf("unpaid=%v, want [SUB-unpaid-recent]", res.Unpaid)
 	}
-	// 已付即便超26h仍激活（maxAge 不覆盖已付），且不被误置 expired。
+	// 已付即便超26h仍激活（无任何超龄短路，绝不漏真实付款），且不被误置 expired。
 	if len(activated) != 1 || activated[0] != "SUB-paid-ancient" {
 		t.Fatalf("activated=%v, want [SUB-paid-ancient]", activated)
 	}

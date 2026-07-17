@@ -25,7 +25,7 @@ var reconcileCreatedFn = func(a *App, ctx context.Context, before time.Time) (pa
 	query := func(ctx context.Context, orderNo, provider string) (bool, error) {
 		return a.providerMgr.QueryOrder(ctx, payment.Provider(provider), orderNo)
 	}
-	return a.RechargeGateway.ReconcileStuckCreated(ctx, before, reconcileCreatedExpireAge, reconcileCreatedMaxAge, reconcileCreatedLimit, query)
+	return a.RechargeGateway.ReconcileStuckCreated(ctx, before, reconcileCreatedExpireAge, reconcileCreatedLimit, query)
 }
 
 var reconcileSubFn = func(a *App, ctx context.Context, before time.Time) (ReconcileSubResult, error) {
