@@ -122,6 +122,12 @@
 - **坑点**：① 症状「CPU 空闲 + 吞吐卡 + 尾延迟」= 典型 **fsync-bound**（等盘），别往 app 算法上找。② 诊断用 **scratch 表 `SET PERSIST`+存储过程 loop 提交** 隔离 fsync 天花板，零上游成本/零真实数据变更/可精确复测，胜过在生产压测（费真实 token + 扰动用户）。③ MySQL 8 用 `SET PERSIST` 持久化动态变量（写 `mysqld-auto.cnf`，落在挂载卷）——比改 compose `command` 免 recreate mysql。
 - **升级**：暂不升级为硬约束（属调优而非红线）。记忆 [[billing-fsync-tuning-and-batch]]；相关 [[used-usd-dead-column-real-usage-native-bucket]]。
 
+### [已解决] deploy.sh「部署成功」但线上跑旧码：containerd 存储 + BuildKit attestation 清单列表没把 `:latest` 挪到新镜像
+- **现象**：`SKIP_PREFLIGHT=1 deploy/ops/deploy.sh` 全绿退出 0（步骤 8「健康通过｜镜像已更新≠:prev」），但线上仍是旧前端 bundle、改动不生效。**直连源站** `curl -H 'Host: www…' 127.0.0.1:3100/` 返回旧 `index.74058af046.js`（CF `cf-cache-status: DYNAMIC` 已排除是缓存）。`docker images newapi_test-app` 显示 `:latest` 仍指 13:52 的旧镜像 `7d2abc`，而本次构建产物 `1be3985b`（14:13:41，构建日志 `exporting manifest list sha256:1be3985b…` + `naming to …:latest done`）**沦为 `<none>` 悬空镜像**；运行容器虽在部署时被 `Recreated`，却落在旧 `:latest` 上。
+- **根因**：服务器 Docker 29 用 **containerd 快照器镜像存储**（`docker info`：`Storage Driver: overlayfs` + `io.containerd.snapshotter.v1`），`docker compose build`（BuildKit「default/docker driver」）**默认产出带 attestation（provenance/SBOM）的 OCI manifest list**。这种清单列表在 tag 到 `:latest` 时没替换旧 tag → 新镜像悬空、`:latest` 停在旧镜像 → `up -d --build` 用旧 `:latest` 把容器 recreate 成旧码。deploy.sh 步骤 8 的 false-success 兜底只比 `docker image inspect :latest` 的 ID——而该 ID 在 manifest-list 下**解析漂移**（同一 tag 先后 inspect 出 `7d2abc`/`a06988c9` 等不同值），且它只验证「tag 指向的镜像变没变」、**不验证运行容器实际跑哪个镜像**，故假通过。
+- **解决/规避**：① 应急——把本次构建的真镜像重打 tag 再强制换容器：`docker tag <本次构建的 manifest-list ID> newapi_test-app:latest && docker compose -p newapi_test --env-file .env -f deploy/docker-compose.test.yml up -d --force-recreate --no-build app`；本次 `1be3985b→:latest` 后源站立即出新 bundle `index.d070d55ce6.js`。定位真镜像：`docker images -a` 里找时间戳=本次构建、且 ID 与构建日志 `exporting manifest list sha256:…` 相同的那个 `<none>`。② 判「改动进没进线上」**永远以运行容器/源站直连为准**，别信 deploy 打印的「部署成功」，也别 grep `:latest`（manifest-list 下 tag 解析飘）：用 `curl 127.0.0.1:3100/ | grep index 哈希` 或 `docker exec <容器> grep -a <标记串> /new-api`（grep 二进制，勿用 strings，见本节旧条）。③ 根治（**待做，改 deploy.sh 前先问用户**）：构建禁用 attestation（`BUILDX_NO_DEFAULT_ATTESTATIONS=1` 或 `--provenance=false --sbom=false`）产出单一镜像使 `:latest` 正常移动；并把步骤 8 兜底改成比对**运行容器 `.Image` 摘要 vs 本次构建镜像摘要**，而非 tag inspect。
+- **升级**：暂记 RETRO（根治改 deploy.sh 待用户确认）。相关记忆 [[verify-live-bundle-async-chunks]]（同类「已修但线上旧样，先怀疑没部署」）；呼应纪律 W4（部署在服务器）。
+
 ---
 
 ## 二、构建与依赖
