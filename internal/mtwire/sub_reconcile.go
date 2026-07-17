@@ -13,11 +13,6 @@ import (
 // reconcileCreatedExpireAge 语义）。注意：查到已付仍幂等激活（无论多旧都补，绝不漏真实付款）。
 const subReconcileExpireAge = 2 * time.Hour
 
-// subReconcileMaxAge：pending 套餐单「兜底强制过期」阈值（对齐 RCG reconcileCreatedMaxAge=26h）。下单超此
-// 时长即极旧：二维码作废多日，若曾被支付，前面数百轮查单/回调必已捕获激活。故即便本轮查单持续超时 / 被
-// 网关限流拿不到确定答复，也终态过期——止住 ancient 卡单在网关不可达时永久重试与告警。查到已付仍先激活。
-const subReconcileMaxAge = 26 * time.Hour
-
 // subOrderPaidQuery 进程内向微信/支付宝主动查单该 SUB 订单是否已支付（对账兜底用）；单测替换为桩。
 // provider 决定向哪个平台查单；providerMgr 未装配（如单测直构 App）时返回 errProviderMgrUnset。
 var subOrderPaidQuery = func(a *App, ctx context.Context, orderNo, provider string) (bool, error) {
@@ -60,7 +55,6 @@ func (a *App) ReconcileStuckSubscriptions(ctx context.Context, before time.Time)
 	res := ReconcileSubResult{Scanned: len(rows), Failed: map[string]string{}}
 	now := before.Add(reconcileMinAge)              // before 恒为 now-reconcileMinAge（cron/manual 一致），反推当前时刻
 	expireCutoff := now.Add(-subReconcileExpireAge) // 下单早于此 = 已超 subReconcileExpireAge（二维码失效）
-	maxAgeCutoff := now.Add(-subReconcileMaxAge)    // 下单早于此 = 已超 subReconcileMaxAge（极旧，查也白查）
 	for _, row := range rows {
 		// 已激活未结算：已确认支付，跳过查单，直接补驱动步骤③（幂等：步骤②命中 activated 短路）。
 		if row.Status == subOrderActivated {
@@ -73,14 +67,14 @@ func (a *App) ReconcileStuckSubscriptions(ctx context.Context, before time.Time)
 		}
 		// pending：先向平台主动查单确认是否已付。
 		expired := row.CreatedAt.Before(expireCutoff) // 下单已超 2h：二维码失效、永不会被支付
-		ancient := row.CreatedAt.Before(maxAgeCutoff) // 下单已超 26h：极旧，网关拿不到答复也兜底过期
 		paid, err := subOrderPaidQuery(a, ctx, row.OrderNo, row.Provider)
 		switch {
 		case err != nil:
-			// 网关明确「查无此单」(ORDER_NOT_EXIST/TRADE_NOT_EXIST) 且已超 2h，或下单已超 maxAge（极旧、
-			// 网关持续超时/限流拿不到答复也无妨——若曾支付早被前面数百轮捕获激活）→ 终态过期；其余瞬时错误
-			// 仍在窗口内 → 留 Failed 下轮重试，绝不误杀。
-			if ancient || (expired && errors.Is(err, payment.ErrOrderNotExist)) {
+			// 终态只接受网关**确定性答复**：明确「查无此单」(ORDER_NOT_EXIST/TRADE_NOT_EXIST) 且已超 2h
+			// → 过期；查单本身失败（超时/限流/凭据不完整）一律留 Failed（可见+告警+下轮重扫），无论多旧。
+			// 旧「超 26h ancient 兜底过期」已删——循环论证会把已付单静默写成终态且零告警，与 AGT 同源同修，
+			// 完整论证见 agent_plan_reconcile.go 同位置注释（audit 2026-07-17 #7）。
+			if expired && errors.Is(err, payment.ErrOrderNotExist) {
 				a.expireStuckSubOrder(ctx, row.OrderNo)
 				res.Expired = append(res.Expired, row.OrderNo)
 			} else {

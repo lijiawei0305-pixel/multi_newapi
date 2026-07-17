@@ -286,6 +286,11 @@ func (a *App) ActivatePaidTokenplanOrder(ctx context.Context, orderNo string, pa
 			return nil // 已激活：原生订阅不再重复建（步骤③仍会幂等补齐我们的记录）
 		}
 		if ord.Status != subOrderPending {
+			// 过期终态单收到「已确认支付」驱动＝网关自相矛盾（2h 边界迟到回调竞态）：钱已收但订单已
+			// 终态，大声留痕供人工核查退款或手工激活（audit 2026-07-17 #7，与 AGT 同款）。
+			if ord.Status == subOrderExpired {
+				common.SysError("SUB 已付驱动命中过期终态单 " + orderNo + "：钱已收但订单已过期，需人工核查（退款或手工激活）")
+			}
 			return tokenplan.ErrSubscriptionNotFound
 		}
 		// 反篡改：回传实付金额必须与库内订单一致（仅对未激活单校验；激活额度以快照为准）。

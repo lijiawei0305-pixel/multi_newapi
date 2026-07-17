@@ -89,11 +89,13 @@ func TestReconcileStuckSubscriptions(t *testing.T) {
 	}
 }
 
-// TestReconcileStuckSubscriptions_ExpiryFallback SUB 对账 2h 过期兜底 + 26h maxAge 兜底：
+// TestReconcileStuckSubscriptions_ExpiryFallback SUB 对账过期兜底——终态只接受网关**确定性答复**：
 //   - 查无此单(ErrOrderNotExist)+超2h → 过期；未超2h → Failed（不误杀）；
 //   - 确认未付+超2h → 过期；未付+未超2h → Unpaid；
-//   - 瞬时错误(超时/限流)在 2h~26h 窗口内 → Failed（绝不因瞬时错误误杀）；超26h → 兜底过期（网关不可达也清）；
-//   - 已付即便超26h → 仍幂等激活（maxAge 不覆盖已付，绝不漏真实付款）。
+//   - 瞬时错误(超时/限流/凭据不完整)无论多旧 → 一律 Failed（可见+告警+下轮重扫，绝不静默终态）。
+//     旧「超26h 兜底过期」已删（audit#7：循环论证——查单正在失败时恰恰没有『前面数百轮成功查单』，
+//     会把已付单静默写死且 Failed 空零告警）；
+//   - 已付即便超26h → 仍幂等激活（绝不漏真实付款）。
 func TestReconcileStuckSubscriptions_ExpiryFallback(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
 	if err != nil {
@@ -104,17 +106,17 @@ func TestReconcileStuckSubscriptions_ExpiryFallback(t *testing.T) {
 	}
 	app := &App{DB: db}
 
-	// now=before+reconcileMinAge(≈100300)；expireCutoff=now-2h(≈93100)；maxAgeCutoff=now-26h(≈6700)。
+	// now=before+reconcileMinAge(≈100300)；expireCutoff=now-2h(≈93100)。
 	before := time.Unix(100000, 0)
 	recentT := time.Unix(99000, 0)                                                 // <2h：未超时
-	midT := time.Unix(50000, 0)                                                    // >2h 且 <26h：过期窗口内、未达 maxAge
-	ancientT := time.Unix(0, 0)                                                    // >26h：ancient，兜底强制过期
+	midT := time.Unix(50000, 0)                                                    // >2h：过期窗口内
+	ancientT := time.Unix(0, 0)                                                    // >26h：极旧（修复后不再有特殊短路）
 	seedSubOrder(t, db, "SUB-notexist-mid", subOrderPending, false, midT)          // 查无此单+超2h → 过期
 	seedSubOrder(t, db, "SUB-notexist-recent", subOrderPending, false, recentT)    // 查无此单+未超2h → Failed
 	seedSubOrder(t, db, "SUB-unpaid-mid", subOrderPending, false, midT)            // 未付+超2h → 过期
 	seedSubOrder(t, db, "SUB-unpaid-recent", subOrderPending, false, recentT)      // 未付+未超2h → Unpaid
-	seedSubOrder(t, db, "SUB-transient-mid", subOrderPending, false, midT)         // 瞬时错误+窗口内(未达maxAge) → Failed
-	seedSubOrder(t, db, "SUB-transient-ancient", subOrderPending, false, ancientT) // 瞬时错误+超26h → 兜底过期
+	seedSubOrder(t, db, "SUB-transient-mid", subOrderPending, false, midT)         // 瞬时错误 → Failed
+	seedSubOrder(t, db, "SUB-transient-ancient", subOrderPending, false, ancientT) // 瞬时错误+超26h → 仍 Failed(audit#7,不得静默终态)
 	seedSubOrder(t, db, "SUB-paid-ancient", subOrderPending, false, ancientT)      // 已付+超26h → 仍激活
 
 	origQ := subOrderPaidQuery
@@ -144,27 +146,32 @@ func TestReconcileStuckSubscriptions_ExpiryFallback(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	// 过期：查无此单+超2h、未付+超2h、瞬时错误但超26h(兜底)。
-	if !containsAll(res.Expired, "SUB-notexist-mid", "SUB-unpaid-mid", "SUB-transient-ancient") || len(res.Expired) != 3 {
-		t.Fatalf("expired=%v, want [SUB-notexist-mid SUB-unpaid-mid SUB-transient-ancient]", res.Expired)
+	// 过期：仅确定性答复——查无此单+超2h、确认未付+超2h。瞬时错误无论多旧都不在此列。
+	if !containsAll(res.Expired, "SUB-notexist-mid", "SUB-unpaid-mid") || len(res.Expired) != 2 {
+		t.Fatalf("expired=%v, want [SUB-notexist-mid SUB-unpaid-mid]（瞬时错误不得静默终态,audit#7）", res.Expired)
 	}
 	// 已过期单落库终态 → 不再被扫。
-	for _, no := range []string{"SUB-notexist-mid", "SUB-unpaid-mid", "SUB-transient-ancient"} {
+	for _, no := range []string{"SUB-notexist-mid", "SUB-unpaid-mid"} {
 		var row subscriptionOrderRow
 		db.First(&row, "order_no = ?", no)
 		if row.Status != subOrderExpired {
 			t.Fatalf("%s status=%q, want %q", no, row.Status, subOrderExpired)
 		}
 	}
-	// 未超2h的查无此单 + 窗口内(未达maxAge)的瞬时错误 → Failed，绝不误杀。
-	if _, ok := res.Failed["SUB-notexist-recent"]; !ok {
-		t.Fatalf("SUB-notexist-recent 未超2h不应过期，应 Failed；got Failed=%v", res.Failed)
+	// 查单失败一律 Failed（含超26h 极旧单）：可见+触发告警+下轮重扫，绝不误杀。
+	for _, no := range []string{"SUB-notexist-recent", "SUB-transient-mid", "SUB-transient-ancient"} {
+		if _, ok := res.Failed[no]; !ok {
+			t.Fatalf("%s 应留 Failed；got Failed=%v", no, res.Failed)
+		}
 	}
-	if _, ok := res.Failed["SUB-transient-mid"]; !ok {
-		t.Fatalf("SUB-transient-mid 窗口内瞬时错误不应过期，应 Failed；got Failed=%v", res.Failed)
+	if len(res.Failed) != 3 {
+		t.Fatalf("Failed=%v, want 恰 3 条(notexist-recent + transient-mid + transient-ancient)", res.Failed)
 	}
-	if len(res.Failed) != 2 {
-		t.Fatalf("Failed=%v, want 恰 2 条(notexist-recent + transient-mid)", res.Failed)
+	// 极旧+瞬时错误的单保持 pending（可见可重试），绝不被写成终态。
+	var ancientRow subscriptionOrderRow
+	db.First(&ancientRow, "order_no = ?", "SUB-transient-ancient")
+	if ancientRow.Status != subOrderPending {
+		t.Fatalf("SUB-transient-ancient status=%q, want pending（查单失败没有确定性答复）", ancientRow.Status)
 	}
 	// 未付未超2h → Unpaid。
 	if len(res.Unpaid) != 1 || res.Unpaid[0] != "SUB-unpaid-recent" {

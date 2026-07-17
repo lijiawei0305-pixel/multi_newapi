@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agent"
 	"github.com/QuantumNous/new-api/internal/agentplan"
 	"github.com/QuantumNous/new-api/internal/payment"
@@ -155,6 +156,12 @@ func (a *App) ActivatePaidAgentPlanOrder(ctx context.Context, orderNo string, pa
 		return nil // 幂等：已激活（含并发败者在此短路，不再进 provision）
 	}
 	if ord.Status != agtOrderPending {
+		// 过期终态单收到「已确认支付」驱动＝网关自相矛盾（先答未付/查无此单致过期，随后又确认已付，
+		// 2h 边界迟到回调竞态）：钱已收但订单已终态，绝不静默吞掉——大声留痕供人工核查退款或手工激活
+		// （audit 2026-07-17 #7；对账路径的该错误同时会进 res.Failed 触发告警）。
+		if ord.Status == agtOrderExpired {
+			common.SysError("AGT 已付驱动命中过期终态单 " + orderNo + "：钱已收但订单已过期，需人工核查（退款或手工激活）")
+		}
 		return payment.ErrOrderInvalid
 	}
 	// 反篡改：回传实付须与库内订单一致（<=0 表示对账兜底查单未提供 → 跳过比对）。

@@ -22,11 +22,6 @@ import (
 // 注意：查到已付仍幂等激活（无论多旧都补，绝不漏真实付款）。
 const agtReconcileExpireAge = 2 * time.Hour
 
-// agtReconcileMaxAge：pending AGT 单「兜底强制过期」阈值（对齐 subReconcileMaxAge=26h）。下单超此即极旧：
-// 二维码作废多日，若曾被支付，前面数百轮查单/回调必已捕获激活。故即便本轮查单持续超时 / 被网关限流拿不到
-// 确定答复，也终态过期——止住 ancient 卡单在网关不可达时永久重试与告警。查到已付仍先激活。
-const agtReconcileMaxAge = 26 * time.Hour
-
 // agtOrderPaidQuery 进程内向微信/支付宝主动查单该 AGT 订单是否已支付（对账兜底用）；单测替换为桩。
 // provider 决定向哪个平台查单；providerMgr 未装配（如单测直构 App）时返回 errProviderMgrUnset。
 var agtOrderPaidQuery = func(a *App, ctx context.Context, orderNo, provider string) (bool, error) {
@@ -65,17 +60,20 @@ func (a *App) ReconcileStuckAgentPlans(ctx context.Context, before time.Time) (R
 	res := ReconcileAgtResult{Scanned: len(rows), Failed: map[string]string{}}
 	now := before.Add(reconcileMinAge)              // before 恒为 now-reconcileMinAge（cron/manual 一致），反推当前时刻
 	expireCutoff := now.Add(-agtReconcileExpireAge) // 下单早于此 = 已超 2h（二维码失效）
-	maxAgeCutoff := now.Add(-agtReconcileMaxAge)    // 下单早于此 = 已超 26h（极旧，查也白查）
 	for _, row := range rows {
 		expired := row.CreatedAt.Before(expireCutoff) // 下单已超 2h：二维码失效、永不会被支付
-		ancient := row.CreatedAt.Before(maxAgeCutoff) // 下单已超 26h：极旧，网关拿不到答复也兜底过期
 		paid, err := agtOrderPaidQuery(a, ctx, row.OrderNo, row.Provider)
 		switch {
 		case err != nil:
-			// 网关明确「查无此单」(ORDER_NOT_EXIST/TRADE_NOT_EXIST) 且已超 2h，或下单已超 maxAge（极旧、
-			// 网关持续超时/限流拿不到答复也无妨——若曾支付早被前面数百轮捕获激活）→ 终态过期；其余瞬时错误
-			// 仍在窗口内 → 留 Failed 下轮重试，绝不误杀。
-			if ancient || (expired && errors.Is(err, payment.ErrOrderNotExist)) {
+			// 终态只接受网关**确定性答复**：明确「查无此单」(ORDER_NOT_EXIST/TRADE_NOT_EXIST) 且已超 2h
+			// 二维码窗口 → 过期。查单本身失败（超时/限流/凭据不完整 errProviderDisabled）一律留 Failed——
+			// 订单保持 pending（卡单页可见）+ 计入 failed（触发 Critical 告警）+ 下轮重扫，直到拿到确定答复。
+			// 旧「超 26h ancient 兜底过期」已删（audit 2026-07-17 #7）：其辩护「若曾支付，前面数百轮查单
+			// 必已捕获」是循环论证——本分支只在查单失败时进入，凭据轮换配错/渠道停用期间恰恰不存在成功过
+			// 的查单轮；它会把已付 ¥9990 静默写成终态且 Failed 为空 → 零告警、卡单页消失、永不重试。代价
+			// （刻意）：真废单在网关持续不可查期间一直占卡单页并重复告警——可见的噪音优于无声的钱损；凭据
+			// 修复后下一轮即收敛（已付→激活 / 确认未付→过期 / 查无此单→过期）。
+			if expired && errors.Is(err, payment.ErrOrderNotExist) {
 				a.expireStuckAgentPlanOrder(ctx, &row)
 				res.Expired = append(res.Expired, row.OrderNo)
 			} else {
