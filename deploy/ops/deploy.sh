@@ -36,6 +36,7 @@ APP_IMG="${STACK}-${APP_SVC}"; AUTH_IMG="${STACK}-${AUTH_SVC}"
 
 log()  { printf '\033[1;34m[deploy]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m[ ok ]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[fail]\033[0m %s\n' "$*" >&2; exit 1; }
 remote() { ssh "$SSH_HOST" "$@"; }
 # 服务器侧 compose 串（与 lib.sh dc() 等价）。
