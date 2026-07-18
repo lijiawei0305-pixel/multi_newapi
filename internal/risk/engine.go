@@ -210,17 +210,32 @@ func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 // 编译期断言：*Engine 亦满足后台释放契约（限购键补偿释放，见 port.go PurchaseLimitAdmin）。
 var _ PurchaseLimitAdmin = (*Engine)(nil)
 
+// forceReleasable 判断「归属不符」的键是否允许经 force 释放：仅限归属不可考的遗留/脏值键，
+// 绝不含另一真实用户的有效占用（值为其 userID）。遗留键值恒为 "1"（旧版 SetNX 写入）；新键
+// 值为占用者 userID 十进制串。注意 userID==1 与遗留 "1" 不可区分——userID 1 通常是 root/系统
+// 用户、几乎不会买 Trial，此边界按遗留处理（可 force 释放）并在此标注接受。
+func forceReleasable(val string) bool {
+	if val == "1" {
+		return true // 遗留 sentinel（或极罕见的 userID==1，见上，按遗留处理）
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
+	return err != nil || n <= 0 // 非法/脏值=归属不可考，可 force；合法 >0=另一真实用户,绝不 force
+}
+
 // ReleaseTrialLimit 释放某用户的 Trial 三维去重键（用户维度 + 传入的实名/设备维度）。
 // 用途：后台补偿「点开收银台未付款即永久消耗 Trial 终身限购、无释放路径」的误占用——删掉对应维度键后，
 // 该用户即可重新购买 Trial（RETRO 2026-07-16 · Critical）。pi 的实名/设备为空则只释放用户维度
 // （与 checkTrialLimit 建键口径对称：空维度不建亦不删）。Del 幂等：键本就不存在也不报错。
 //
-// 归属校验（默认拒删，force 显式绕过）：realname/device 维度**跨用户共享**，键值即占用者
-// userID（checkTrialLimit 写入）。释放前逐键 Get 校验值==userID——不符（含旧版无归属的
-// 遗留值 "1"）即跳过并计入 Skipped，防止「客服按 B 自报的 device_id 释放 B」误删 A 合法
-// 占用的键、令新账号可从已消耗设备再领 Trial。force=true 跳过归属校验（唯一合法用途：
-// 释放遗留 "1" 键——归属不可考但客服已人工核实；调用方必须审计留痕）。用户维度键
-// （trialKey("user", userID)）本身按 userID 建键、无跨用户共享问题，恒删。
+// 归属校验（默认拒删；force 仅豁免归属不可考的遗留/脏值键）：realname/device 维度**跨用户
+// 共享**，键值即占用者 userID（checkTrialLimit 写入）。释放前逐键 Get 校验值==userID——不符
+// 即跳过并计入 Skipped，防止「客服按 B 自报的 device_id 释放 B」误删 A 合法占用的键、令新
+// 账号可从已消耗设备再领 Trial。force=true **只**豁免归属不可考的键（旧版无归属遗留值 "1"、
+// 或非法/脏值，见 forceReleasable），**绝不**豁免「另一真实用户的有效占用键」（值为其
+// userID）——防线（归属校验）与绕过开关（force）握在同一只客服手里，若 force 能无差别绕过
+// 所有归属不符，一键 force:true 即可偷删他人合法反刷键、令新账号从已消耗设备再领 Trial
+// （audit F4 · Medium）。用户维度键（trialKey("user", userID)）本身按 userID 建键、无跨用户
+// 共享问题，恒删。
 //
 // Get→Del 非原子：窗口内键被并发释放又被他人 SetNX 重占时会误删新占用。该窗口仅在
 // 「两个管理员并发释放同一键 + 恰有购买挤进微秒级间隙」时存在，且本端点为人工低频
@@ -247,9 +262,14 @@ func (e *Engine) ReleaseTrialLimit(ctx context.Context, userID int64, pi Purchas
 		if !found {
 			continue // 键不存在：无需释放（幂等），不计入任何列表
 		}
-		if val != owner && !force {
-			res.Skipped = append(res.Skipped, s.dim)
-			continue
+		if val != owner {
+			if !force || !forceReleasable(val) {
+				// 非 force：一律拒删归属不符的键；force：仅放行归属不可考的遗留/脏值键，
+				// 「另一真实用户的有效占用」即便 force 也拒（force 不是偷别人反刷键的后门）。
+				res.Skipped = append(res.Skipped, s.dim)
+				continue
+			}
+			// 至此：force && 归属不可考（遗留 "1" / 脏值）→ 允许释放
 		}
 		keys = append(keys, k)
 		res.Released = append(res.Released, s.dim)

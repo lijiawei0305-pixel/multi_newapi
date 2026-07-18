@@ -220,7 +220,9 @@ func SetMtRouter(router *gin.Engine) {
 	adminRiskGroup := apiBase.Group("/admin/risk")
 	adminRiskGroup.Use(middleware.AdminAuth())
 	{
-		adminRiskGroup.POST("/trial-limit/release", app.HandleAdminReleaseTrialLimit)
+		// CriticalUserRateLimit：释放限购键改反刷/风控状态，对齐同文件 money 端点按认证用户计桶限流
+		// （AdminAuth 已先注入 user id，中间件顺序安全；IP 桶可被伪造 XFF 绕过，audit F4）。
+		adminRiskGroup.POST("/trial-limit/release", middleware.CriticalUserRateLimit(), app.HandleAdminReleaseTrialLimit)
 	}
 
 	// 支付卡单对账（兜底）管理：列当前卡单 + 手动立即对账。复用 new-api AdminAuth。

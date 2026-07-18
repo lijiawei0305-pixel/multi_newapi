@@ -699,6 +699,36 @@ func TestReleaseTrialLimit_CrossUserOwnershipGuard(t *testing.T) {
 	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-B2"), 8, trialPlan()), "")
 }
 
+// 守卫 F4 修复的核心性质（audit · Medium）：force 只豁免「归属不可考」的遗留/脏值键，
+// **绝不**豁免「另一真实用户的有效占用键」（值为其 userID）。否则防线（归属校验）与绕过
+// 开关（force）握在同一只客服手里，一键 force:true 即可偷删他人合法反刷键，令无关新账号
+// 从已消耗设备再领 Trial。探针谓词：以 B(8)+force 释放 A(7) 占用的 devK（值 "7"），device
+// 维仍进 Skipped、devK 仍在、无关新账号 C(9) 从同设备领取仍被拒。
+// 未修代码（if val != owner && !force）下 force 无差别绕过 → devK 被删、C 可再领 → 先红。
+func TestReleaseTrialLimit_ForceCannotStealValidOwnerKey(t *testing.T) {
+	kv := NewMemKVCache(nil)
+	e := NewEngine(kv)
+	// A(7) 从设备 dev-D 合法占用 Trial（devK 值 = "7"，是另一真实用户的有效占用）。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-D"), 7, trialPlan()), "")
+
+	// 以 B(8) + force=true 释放 A 占用的 device 维度键：值 "7" 归属明确（另一真实用户），
+	// force 也必须拒删（force 不是偷他人反刷键的后门）。
+	res, err := e.ReleaseTrialLimit(context.Background(), 8, PurchaseIdentity{DeviceID: "dev-D"}, true)
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if !containsDim(res.Skipped, "device") || containsDim(res.Released, "device") {
+		t.Fatalf("device dim must be skipped even with force (valid owner A=7), got %+v", res)
+	}
+
+	// 探针谓词①：A 占用的 devK 仍在。
+	if _, found, _ := kv.Get(context.Background(), trialKey("device", "dev-D")); !found {
+		t.Fatal("A's valid device key must survive force release attempted by another user")
+	}
+	// 探针谓词②：无关新账号 C(9) 从设备 dev-D 领取仍被拒。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-D"), 9, trialPlan()), CodePurchaseLimitExceeded)
+}
+
 // 真正的占用者释放自己的三维键 → 全部删除，可重新购买同一身份的 Trial
 // （文档化的合法场景：点开收银台未付款、键已被自己消耗）。
 func TestReleaseTrialLimit_OwnerFullRelease(t *testing.T) {
