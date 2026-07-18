@@ -137,6 +137,77 @@ func TestPurchasePaymentError(t *testing.T) {
 	}
 }
 
+// ---- 占键补偿（audit F2）：defer 只在"占键之后、成功之前"失败时归还，且入参与占键对称 ----
+
+// TestPurchaseReleasesClaimOnPaymentError：占键成功后 CreateOrder 失败 → 归还占键恰一次（否则 Trial
+// 终身键永久泄漏）。归还入参必须与占键入参对称（同 userID/plan/device），供归属校验删对键。
+func TestPurchaseReleasesClaimOnPaymentError(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, pay, risk, _ := newSubService(newFakeClock(epoch))
+	pay.err = apperr.New("PAY_DOWN", "x", 502)
+	plan := seedPlanInto(repo, basePlanInput())
+	_ = NewRetailService(repo, &fakeGuard{}).SetListing(ctx, 7, plan.ID, true, 250)
+
+	if _, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID, DeviceID: "d1"}); apperr.CodeOf(err) != "PAY_DOWN" {
+		t.Fatalf("want PAY_DOWN, got %v", err)
+	}
+	if risk.releaseCalls != 1 {
+		t.Fatalf("CreateOrder 失败须归还占键恰 1 次，got %d", risk.releaseCalls)
+	}
+	if got := risk.released[0]; got.UserID != 11 || got.PlanID != plan.ID || got.DeviceID != "d1" || got.TenantID != 7 {
+		t.Fatalf("归还入参与占键不对称: %+v", got)
+	}
+}
+
+// TestPurchaseSuccessKeepsClaim：成功购买绝不归还占键（committed=true → defer no-op）。
+func TestPurchaseSuccessKeepsClaim(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _, risk, _ := newSubService(newFakeClock(epoch))
+	plan := seedPlanInto(repo, basePlanInput())
+	_ = NewRetailService(repo, &fakeGuard{}).SetListing(ctx, 7, plan.ID, true, 250)
+
+	if _, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID, DeviceID: "d1"}); err != nil {
+		t.Fatalf("Purchase: %v", err)
+	}
+	if risk.releaseCalls != 0 {
+		t.Fatalf("成功购买不得归还占键，got %d", risk.releaseCalls)
+	}
+}
+
+// TestPurchasePreClaimFailureNoRelease：占键**之前**失败（PLAN_DISABLED）绝不归还——否则会误删用户
+// 既有的合法 Trial 键（上次真买的），令其重复领取。defer 注册在占键成功之后，故此路径 0 归还。
+func TestPurchasePreClaimFailureNoRelease(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _, risk, _ := newSubService(newFakeClock(epoch))
+	in := basePlanInput()
+	in.Status = PlanDisabled
+	plan := seedPlanInto(repo, in)
+
+	if _, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID, DeviceID: "d1"}); apperr.CodeOf(err) != CodePlanDisabled {
+		t.Fatalf("want PLAN_DISABLED, got %v", err)
+	}
+	if risk.releaseCalls != 0 {
+		t.Fatalf("占键前失败不得归还（防误删既有合法键），got %d", risk.releaseCalls)
+	}
+}
+
+// TestPurchaseDeniedClaimNoRelease：限购拦截（CheckPurchaseLimit 返错、本次未占到键）绝不归还——
+// 否则会归还他人/赢家已持有的键。
+func TestPurchaseDeniedClaimNoRelease(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _, risk, _ := newSubService(newFakeClock(epoch))
+	risk.deny = true
+	plan := seedPlanInto(repo, basePlanInput())
+	_ = NewRetailService(repo, &fakeGuard{}).SetListing(ctx, 7, plan.ID, true, 250)
+
+	if _, err := svc.Purchase(ctx, PurchaseInput{TenantID: 7, UserID: 11, PlanID: plan.ID, DeviceID: "d1"}); apperr.CodeOf(err) != CodePurchaseLimitExceeded {
+		t.Fatalf("want PURCHASE_LIMIT_EXCEEDED, got %v", err)
+	}
+	if risk.releaseCalls != 0 {
+		t.Fatalf("限购拦截（未占到键）不得归还，got %d", risk.releaseCalls)
+	}
+}
+
 // ---- ActivateFromPayment ----
 
 // purchaseAndActivate 跑一遍购买，返回订单号，供激活用例复用。

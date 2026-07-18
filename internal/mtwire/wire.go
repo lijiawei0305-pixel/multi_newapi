@@ -438,6 +438,11 @@ func (allowAllRisk) CheckPurchaseLimit(_ context.Context, _ tokenplan.PurchaseLi
 	return nil
 }
 
+// ReleasePurchaseClaim 占位风控无键可释放（一律放行 → 从不占键），no-op。
+func (allowAllRisk) ReleasePurchaseClaim(_ context.Context, _ tokenplan.PurchaseLimitCheck) error {
+	return nil
+}
+
 // randToken 返回一个十六进制随机串（订单号占位）；熵不足时回退时间戳。
 func randToken(n int) string {
 	b := make([]byte, n)

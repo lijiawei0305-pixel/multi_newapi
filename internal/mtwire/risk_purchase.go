@@ -35,3 +35,26 @@ func (a tokenplanRiskAdapter) CheckPurchaseLimit(ctx context.Context, in tokenpl
 		Trial: in.PlanCode == "trial",
 	})
 }
+
+// ReleasePurchaseClaim 归还本次已通过 CheckPurchaseLimit 的限购占用（补偿：下单/支付凭据创建
+// 失败时调用）。否则 Trial 终身键（PurchaseDedupTTL=0）永久泄漏——用户没付款、订单没成，却再也
+// 买不了 Trial（audit F2）。best-effort：释放失败仅经 SysLog 留痕，仍可经后台 ReleaseTrialLimit 兜底。
+func (a tokenplanRiskAdapter) ReleasePurchaseClaim(ctx context.Context, in tokenplan.PurchaseLimitCheck) error {
+	if a.eng == nil {
+		return nil // 无风控引擎（Redis 关）→ 无键可释放
+	}
+	admin, ok := a.eng.(risk.PurchaseLimitAdmin)
+	if !ok || admin == nil {
+		return nil
+	}
+	if in.PlanCode != "trial" {
+		// 非 Trial 用 Incr 计数键，ReleasePurchaseLimit 的 Del 会整键清零→过度释放（PerUserLimit≥2
+		// 且已有合法计数时），正确做法是原子递减原语，列为后续。故此处 no-op，不引入过度释放。
+		return nil
+	}
+	_, err := admin.ReleaseTrialLimit(ctx, in.UserID, risk.PurchaseIdentity{
+		RealNameID: in.RealNameID,
+		DeviceID:   in.DeviceID,
+	}, false) // force=false：只删值==userID 的键，绝不误删他人/赢家占用
+	return err
+}

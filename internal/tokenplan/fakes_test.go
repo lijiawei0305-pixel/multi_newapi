@@ -85,10 +85,12 @@ func (p *fakePayment) lastOrder() (OrderInput, bool) {
 
 // fakeRisk 是 RiskEngine 的内存假实现：默认放行，deny=true 返回 PURCHASE_LIMIT_EXCEEDED。
 type fakeRisk struct {
-	deny  bool
-	err   error
-	calls int
-	last  PurchaseLimitCheck
+	deny         bool
+	err          error
+	calls        int
+	last         PurchaseLimitCheck
+	releaseCalls int                  // ReleasePurchaseClaim 被调用次数（补偿断言用，audit F2）
+	released     []PurchaseLimitCheck // 每次归还的入参快照
 }
 
 func (r *fakeRisk) CheckPurchaseLimit(_ context.Context, in PurchaseLimitCheck) error {
@@ -100,6 +102,13 @@ func (r *fakeRisk) CheckPurchaseLimit(_ context.Context, in PurchaseLimitCheck) 
 	if r.deny {
 		return apperr.New(CodePurchaseLimitExceeded, "已达套餐限购次数", http.StatusConflict)
 	}
+	return nil
+}
+
+// ReleasePurchaseClaim 记录归还调用（供 Purchase 两级补偿的单测断言）。
+func (r *fakeRisk) ReleasePurchaseClaim(_ context.Context, in PurchaseLimitCheck) error {
+	r.releaseCalls++
+	r.released = append(r.released, in)
 	return nil
 }
 

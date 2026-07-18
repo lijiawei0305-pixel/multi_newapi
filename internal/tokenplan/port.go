@@ -36,6 +36,9 @@ type SubscriptionService interface {
 	// Purchase 校验上架/限购后下单（type=subscription）：套餐未上架 PLAN_NOT_LISTED、
 	// 停用 PLAN_DISABLED、限购 PURCHASE_LIMIT_EXCEEDED。返回支付凭据。
 	Purchase(ctx context.Context, in PurchaseInput) (*PurchaseTicket, error)
+	// ReleasePurchaseClaim 供上层（HandlePurchase）在 Purchase 成功返回后、支付凭据创建失败时
+	// 归还本次占键（覆盖 Purchase 函数内 defer 触不到的 CreatePay 失败点，audit F2）。
+	ReleasePurchaseClaim(ctx context.Context, in PurchaseLimitCheck) error
 	// ActivateFromPayment 凭订单号幂等创建 active 实例（同 orderID 多次只建一个）并触发
 	// tokenplan_spread 收益；订单不存在返回 SUBSCRIPTION_NOT_FOUND。
 	ActivateFromPayment(ctx context.Context, orderID string) (*Subscription, error)
@@ -119,6 +122,10 @@ type PaymentGateway interface {
 type RiskEngine interface {
 	// CheckPurchaseLimit 触发限购返回 PURCHASE_LIMIT_EXCEEDED；放行返回 nil。
 	CheckPurchaseLimit(ctx context.Context, in PurchaseLimitCheck) error
+	// ReleasePurchaseClaim 归还本次已通过 CheckPurchaseLimit 的限购占用（补偿：下单/支付凭据
+	// 创建失败时调用，否则 Trial 终身键永久泄漏，audit F2）。入参与 CheckPurchaseLimit 对称，
+	// 只删归属本用户的键（force=false 归属校验）。幂等；非 Trial 档当前 no-op（见实现注释）。
+	ReleasePurchaseClaim(ctx context.Context, in PurchaseLimitCheck) error
 }
 
 // EarningSink 接收代理收益记录（tokenplan_spread）。由 Agent 模块实现并在 main 注入。

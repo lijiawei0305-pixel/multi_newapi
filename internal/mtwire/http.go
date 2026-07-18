@@ -286,13 +286,16 @@ func (a *App) HandlePurchase(c *gin.Context) {
 	if p, found, err := a.AgentRepo.GetAgentType(ctx, t.ID); err == nil && found {
 		discountRatio = p.DiscountRatio
 	}
+	// 设备指纹只算一次：既作 Purchase 的限购去重维度、又作下方 CreatePay 失败时归还占键的入参
+	// （同一请求内同 IP，二者必然一致）。服务端从 ClientIP 派生，绝不读请求体、绝不含 UA。
+	deviceID := deviceFingerprint(c)
 	ticket, err := a.Subscriptions.Purchase(ctx, tokenplan.PurchaseInput{
 		TenantID: t.ID,
 		UserID:   int64(c.GetInt("id")),
 		PlanID:   planID,
 		// 设备维度：服务端从 ClientIP 派生（不可被监管方自选的信号，绝不读请求体、绝不含 UA）。
 		// 实名维度：暂无可信来源 → 留空（引擎按空维度跳过），绝不用客户端自报串。
-		DeviceID:      deviceFingerprint(c),
+		DeviceID:      deviceID,
 		RealNameID:    "",
 		DiscountRatio: discountRatio,
 	})
@@ -303,6 +306,20 @@ func (a *App) HandlePurchase(c *gin.Context) {
 
 	payURL, err := a.subscriptionPayURL(ctx, ticket, provider)
 	if err != nil {
+		// 支付凭据创建失败（网关运行时抖动等）→ Purchase 已占的 Trial 终身键须归还，
+		// 否则永久泄漏、用户没付款却再也买不了 Trial（audit F2 旗舰场景）。这一步在 Purchase
+		// 返回之后，函数内 defer 触不到，故在此显式补偿。best-effort：释放失败仅 SysLog 留痕，
+		// 不改变返回给用户的原始错误（仍可经后台 ReleaseTrialLimit 兜底）。
+		if rerr := a.Subscriptions.ReleasePurchaseClaim(ctx, tokenplan.PurchaseLimitCheck{
+			TenantID:   t.ID,
+			UserID:     int64(c.GetInt("id")),
+			PlanID:     ticket.PlanID,
+			PlanCode:   ticket.PlanCode,
+			DeviceID:   deviceID,
+			RealNameID: "",
+		}); rerr != nil {
+			common.SysLog("release trial claim after CreatePay failure failed: " + rerr.Error())
+		}
 		respondErr(c, err)
 		return
 	}

@@ -58,16 +58,31 @@ func (s *subscriptionService) Purchase(ctx context.Context, in PurchaseInput) (*
 		return nil, ErrPlanNotListed
 	}
 
-	if err := s.risk.CheckPurchaseLimit(ctx, PurchaseLimitCheck{
+	check := PurchaseLimitCheck{
 		TenantID:   in.TenantID,
 		UserID:     in.UserID,
 		PlanID:     in.PlanID,
 		PlanCode:   plan.Code,
 		DeviceID:   in.DeviceID,
 		RealNameID: in.RealNameID,
-	}); err != nil {
+	}
+	if err := s.risk.CheckPurchaseLimit(ctx, check); err != nil {
 		return nil, err // PURCHASE_LIMIT_EXCEEDED
 	}
+	// committed 门 + defer：占键成功后，若走到成功终点之前的任一步（CreateOrder / SavePendingPurchase）
+	// 失败，即归还本次占键。否则 Trial 终身键（PurchaseDedupTTL=0 永不过期）永久泄漏——用户没付款、
+	// 订单没成，却再也买不了 Trial、只能走客服（audit F2）。
+	// 归还只在**确知本次已占键之后**触发（defer 注册在 CheckPurchaseLimit 成功之后），故绝不会误删
+	// 「购买前即失败（PLAN_DISABLED / PLAN_NOT_LISTED / PLAN_NOT_FOUND）时用户持有的既有合法 Trial 键」。
+	// CreatePay 失败点在 Purchase 返回之后、本 defer 触不到，由 HandlePurchase 另行显式补偿（Level B）。
+	committed := false
+	defer func() {
+		if !committed {
+			// best-effort：释放失败仅由 RiskEngine 侧 SysLog 留痕，仍可经后台 ReleaseTrialLimit 兜底，
+			// 绝不改变返回给用户的原始错误。WithoutCancel：客户端断连致 ctx 取消时释放不被跳过（Go 1.21+）。
+			_ = s.risk.ReleasePurchaseClaim(context.WithoutCancel(ctx), check)
+		}
+	}()
 
 	order, err := s.payment.CreateOrder(ctx, OrderInput{
 		TenantID:  in.TenantID,
@@ -100,12 +115,21 @@ func (s *subscriptionService) Purchase(ctx context.Context, in PurchaseInput) (*
 		return nil, err
 	}
 
+	committed = true // 走到成功终点：占键有效，defer 不再归还。
 	return &PurchaseTicket{
 		OrderID:   order.OrderID,
 		PayURL:    order.PayURL,
 		AmountCNY: listing.RetailPrice,
 		PlanID:    in.PlanID,
+		PlanCode:  plan.Code,
 	}, nil
+}
+
+// ReleasePurchaseClaim 归还本次已通过 CheckPurchaseLimit 的限购占用（薄委托到 RiskEngine）。
+// 供上层 HandlePurchase 在 Purchase 成功返回后、CreatePay 失败时补偿——那一步在 Purchase 返回
+// 之后，本函数内的 defer 触不到，须由调用方显式归还（audit F2 旗舰场景）。
+func (s *subscriptionService) ReleasePurchaseClaim(ctx context.Context, in PurchaseLimitCheck) error {
+	return s.risk.ReleasePurchaseClaim(ctx, in)
 }
 
 // ActivateFromPayment 凭订单号幂等创建 active 实例并触发 tokenplan_spread 收益（detailed-design §3.2）。
