@@ -57,7 +57,7 @@ var errBoom = errors.New("boom")
 // kvErrOn 包装一个真实 KVCache，对选定方法注入错误，用于测试错误透传。
 type kvErrOn struct {
 	KVCache
-	incr, get, setnx, expire bool
+	incr, get, setnx bool
 }
 
 func (k kvErrOn) Incr(ctx context.Context, key string) (int64, error) {
@@ -107,6 +107,48 @@ func (k *kvSetNXErrOnce) SetNX(ctx context.Context, key, val string, ttl time.Du
 		return false, errBoom
 	}
 	return k.KVCache.SetNX(ctx, key, val, ttl)
+}
+
+// kvDelSpy 包装 KVCache：记录每次 Del 的入参（断言「只删该删的」），failNow 置真则 Del 返回 errBoom
+// （模拟 Redis 抖动/只读，验证补偿删除失败时的行为）。并发安全（补偿回滚测试可能并发）。
+type kvDelSpy struct {
+	KVCache
+	mu      sync.Mutex
+	calls   [][]string
+	failNow bool
+}
+
+func (k *kvDelSpy) Del(ctx context.Context, keys ...string) error {
+	k.mu.Lock()
+	k.calls = append(k.calls, append([]string(nil), keys...))
+	k.mu.Unlock()
+	if k.failNow {
+		return errBoom
+	}
+	return k.KVCache.Del(ctx, keys...)
+}
+
+// delCalls 返回记录的 Del 调用快照（并发安全读）。
+func (k *kvDelSpy) delCalls() [][]string {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	out := make([][]string, len(k.calls))
+	copy(out, k.calls)
+	return out
+}
+
+// equalStrs 判断两个字符串切片顺序与内容完全相等：比对补偿 Del 入参 == 期望 claimed 键序。
+// claimed 按 [user, realname, device] 顺序追加，故顺序有意义（用有序比对而非集合比对）。
+func equalStrs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 type errStatus struct{}
@@ -411,6 +453,124 @@ func TestCheckPurchaseLimit_TrialMidLoopErrorHealthyRetrySucceeds(t *testing.T) 
 	}
 	// 抖动恢复后同身份重试 → 放行（零订单零付款的用户不得被烧毁资格）。
 	assertCode(t, e.CheckPurchaseLimit(trialCtx("ID-A", "dev-1"), 7, trialPlan()), "")
+}
+
+// ---- checkTrialLimit：补偿删除（Del）失败/入参守卫（audit F6 · Testing）----
+// 生产 checkTrialLimit 判负/出错路径的补偿删除是「尽力而为」：_ = e.kv.Del(...) 显式丢弃错误
+// （Del 失败仅多留痕，可经 ReleaseTrialLimit 后台解）。此前 3 个 KV 替身都未覆写 Del、全透传底层
+// MemKVCache → 无法注入 Del 失败、也无法断言 Del 入参。下列用例用 kvDelSpy 补齐这两条守卫。
+
+// Del 失败（Redis 抖动/只读）时，跨账号撞设备的败者仍返回业务错误 ErrPurchaseLimitExceeded，
+// 而非把被吞掉的 errBoom 冒泡上来，且不 panic。
+func TestCheckTrialLimit_DelFailureOnLoserStillReturnsBusinessError(t *testing.T) {
+	// failNow 自构造起即置真；A 全维 SetNX 成功、不触发 Del，故不受影响——只有败者 B 会走补偿 Del。
+	spy := &kvDelSpy{KVCache: NewMemKVCache(nil), failNow: true}
+	e := NewEngine(spy)
+	// A(7) 先占住共享设备键。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-1"), 7, trialPlan()), "")
+	// B(8，不同 userID、同设备)判负：补偿 Del([user:8]) 因 failNow 返回 errBoom，但该错误被显式丢弃。
+	err := e.CheckPurchaseLimit(trialCtx("", "dev-1"), 8, trialPlan())
+	assertCode(t, err, CodePurchaseLimitExceeded)
+	// 显式钉死：返回的是业务错误、绝非被吞的 Del 错误 errBoom。
+	if errors.Is(err, errBoom) {
+		t.Fatalf("Del failure must be swallowed, not surfaced; got %v", err)
+	}
+	// 补偿确实以「只本次 claimed」的键发起（[user:8]），未误删 A 的共享设备键。
+	calls := spy.delCalls()
+	if len(calls) != 1 || !equalStrs(calls[0], []string{trialKey("user", "8")}) {
+		t.Fatalf("compensation Del = %v, want exactly one call [%s]", calls, trialKey("user", "8"))
+	}
+}
+
+// 补偿删除只删「本次 SetNX 成功的键」（败者自己的），绝不误删赢家占用的键。
+// n 个不同账号并发抢同一共享设备：SetNX 原子决胜恰 1 赢家，n-1 败者各自补偿删除自己的 user 维键
+// （userK 置首且唯一 → 败者必在第 2 维 devK 判负、只 claim 了自己的 userK）。
+func TestCheckTrialLimit_CompensationDeletesOnlyClaimedKeys(t *testing.T) {
+	spy := &kvDelSpy{KVCache: NewMemKVCache(nil)} // 不注错：Del 记录入参并如实删除
+	e := NewEngine(spy)
+	const n = 4
+	var success int64
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if e.CheckPurchaseLimit(trialCtx("", "dev-shared"), int64(100+i), trialPlan()) == nil {
+				atomic.AddInt64(&success, 1)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if success != 1 {
+		t.Fatalf("want exactly 1 winner, got %d", success)
+	}
+
+	devKey := trialKey("device", "dev-shared")
+	userKeys := map[string]bool{}
+	for i := 0; i < n; i++ {
+		userKeys[trialKey("user", strconv.Itoa(100+i))] = true
+	}
+	// 聚合所有被补偿删除的键。
+	deleted := map[string]bool{}
+	for _, call := range spy.delCalls() {
+		for _, k := range call {
+			deleted[k] = true
+		}
+	}
+	// ① 每个被删键都必须是某败者「自己的」user 维键（⊆ 败者 claimed）——绝不含共享 devK/realname/其它。
+	for k := range deleted {
+		if !userKeys[k] {
+			t.Fatalf("compensated-deleted key %q is outside losers' own claimed user keys (deleted=%v)", k, deleted)
+		}
+	}
+	// ② 赢家占用的共享设备键绝不被补偿删除（否则无关新账号可从已消耗设备再领 Trial）。
+	if deleted[devKey] {
+		t.Fatalf("winner's shared device key %q must never be compensated-deleted", devKey)
+	}
+	// ③ n-1 个败者全部完成补偿：被删的 user 维键恰为 n-1 个（同时守住「补偿 Del 真的发生了」，
+	//    补偿被整段删除时此断言即变红）。
+	if len(deleted) != n-1 {
+		t.Fatalf("want exactly %d losers compensated, got %d deleted keys: %v", n-1, len(deleted), deleted)
+	}
+	// ④ 赢家的键（自己的 user 维键 + 共享设备键）必须仍在（绝不被误删）。
+	var winnerUserKey string
+	for k := range userKeys {
+		if !deleted[k] {
+			winnerUserKey = k
+		}
+	}
+	if _, found, _ := spy.Get(context.Background(), winnerUserKey); !found {
+		t.Fatalf("winner's own user key %q must survive", winnerUserKey)
+	}
+	if _, found, _ := spy.Get(context.Background(), devKey); !found {
+		t.Fatalf("winner's shared device key %q must survive", devKey)
+	}
+}
+
+// 循环中途某维 SetNX 报错时，补偿 Del 也失败（叠加两替身），仍返回原始 errBoom、不 panic。
+// 取舍说明：kvSetNXErrOnKey 与 kvDelSpy(failNow) 均返回同一个 errBoom（后者必须为 errBoom 以供
+// TestReleaseTrialLimit_DelErrorPropagates 断言），故无法从「错误身份」区分返回的是 SetNX 错还是
+// Del 错；此处守卫是「补偿 Del 失败这条路径确实被走到（delCalls 有 record）、且函数仍返回 errBoom
+// （非 nil / 非业务错误 / 非 panic）」——即被吞的 Del 错不改变返回契约。
+func TestCheckTrialLimit_DelFailureOnMidLoopErrorStillReturnsOrigErr(t *testing.T) {
+	inner := NewMemKVCache(nil)
+	// 内层 kvSetNXErrOnKey：device 维 SetNX 报 errBoom（循环中途出错）；外层 kvDelSpy：补偿 Del 亦失败。
+	spy := &kvDelSpy{
+		KVCache: kvSetNXErrOnKey{KVCache: inner, failKey: trialKey("device", "dev-1")},
+		failNow: true,
+	}
+	e := NewEngine(spy)
+	// user:7、realname:ID-A 先 SetNX 成功 → device 维 SetNX 报错 → 补偿 Del([user:7, realname:ID-A]) 亦失败。
+	err := e.CheckPurchaseLimit(trialCtx("ID-A", "dev-1"), 7, trialPlan())
+	if !errors.Is(err, errBoom) {
+		t.Fatalf("want errBoom (original error survives failed compensation Del), got %v", err)
+	}
+	// 证明确实走到「补偿 Del 也失败」这条路径：补偿以循环中途已 claim 的两键（按 [user, realname] 序）发起。
+	calls := spy.delCalls()
+	want := []string{trialKey("user", "7"), trialKey("realname", "ID-A")}
+	if len(calls) != 1 || !equalStrs(calls[0], want) {
+		t.Fatalf("compensation Del = %v, want exactly one call %v", calls, want)
+	}
 }
 
 // 并发同用户购买 Trial：恰好 1 个成功（SetNX 决胜锁，-race 通过）。
@@ -808,5 +968,19 @@ func TestReleaseTrialLimit_GetErrorPropagates(t *testing.T) {
 	e := NewEngine(getErrKV{NewMemKVCache(nil)})
 	if _, err := e.ReleaseTrialLimit(context.Background(), 7, PurchaseIdentity{DeviceID: "dev-D"}, false); !errors.Is(err, errBoom) {
 		t.Fatalf("want errBoom, got %v", err)
+	}
+}
+
+// 覆盖 ReleaseTrialLimit 末尾**有返回值**的 Del 错误传播（与上方 GetErrorPropagates 互补：那条测
+// Get 错、本条测 Del 错）。owner 先占好自己的 device 键（Get 校验值==owner → 进 keys 待删），释放时
+// e.kv.Del(keys...) 因 failNow 返回 errBoom，必须向上传播（区别于 checkTrialLimit 里被吞的 Del）。
+func TestReleaseTrialLimit_DelErrorPropagates(t *testing.T) {
+	spy := &kvDelSpy{KVCache: NewMemKVCache(nil), failNow: true}
+	e := NewEngine(spy)
+	// owner(7) 全维 SetNX 成功、不触发 Del，故 failNow 不影响占用。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-D"), 7, trialPlan()), "")
+	// 释放自己的键：末尾 Del 失败 → 该错误有返回值，必须传播。
+	if _, err := e.ReleaseTrialLimit(context.Background(), 7, PurchaseIdentity{DeviceID: "dev-D"}, false); !errors.Is(err, errBoom) {
+		t.Fatalf("want errBoom propagated from Del, got %v", err)
 	}
 }
