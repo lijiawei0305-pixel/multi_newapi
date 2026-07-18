@@ -210,8 +210,8 @@ func (a *App) HandleListTokenPlans(c *gin.Context) {
 // purchaseRequest 是 POST /api/tenant/token-plans/:id/purchase 入参（全部可选）。
 // provider 缺省 wxpay。
 //
-// **不含 device_id/real_name_id**：Trial 限购的设备维度由服务端从 ClientIP+User-Agent
-// 派生（deviceFingerprint），实名维度暂无可信来源故不启用——二者都**绝不**从请求体读取。
+// **不含 device_id/real_name_id**：Trial 限购的设备维度由服务端从 ClientIP（不可被监管方自选
+// 的信号）派生（deviceFingerprint），实名维度暂无可信来源故不启用——二者都**绝不**从请求体读取。
 // 历史上这两字段是客户端自报且零校验：官方 UI 从不发送（三维去重对真实流量等价于只按
 // user_id、形同虚设），而直接调 API 者可发随机 device_id 免费绕过、或发受害者 real_name_id
 // 写一把终身键定向剥夺其 Trial（PurchaseDedupTTL=0 + 无自助释放）。反滥用维度绝不能由
@@ -220,24 +220,26 @@ type purchaseRequest struct {
 	Provider string `json:"provider"` // wxpay | alipay（默认 wxpay）
 }
 
-// deviceFingerprint 从请求元数据（ClientIP + User-Agent）服务端派生 Trial 限购的设备维度指纹。
-// 这正是 risk.PurchaseIdentity.DeviceID 注释所声称的「UA+IP 等归一」——此前只是空谈（真实来源
-// 是客户端自报的 body 字段），现在名副其实。
+// deviceFingerprint 从**不可由被监管方自选**的请求信号（ClientIP）服务端派生 Trial 终身限购的
+// 设备维度指纹。唯一性键**只能由攻击者难以廉价轮换的信号构成**：ClientIP 由网络路径决定、被监管方
+// 无法逐请求随意更换；而 User-Agent 是客户端完全自选的 HTTP 头，放进唯一性键等于让被监管方自选
+// 分桶——每次换一个 UA 串即得一把全新的、互不碰撞的终身键，绕过成本与「直接自报随机 device_id」
+// 完全相同。故 UA **不满足唯一性键的前提，予以移除**（初版把 UA 揉进键是错误的，见 audit 2026-07-18 F1）。
 //
-// 归一：ClientIP + "\x00" + 规整 UA，取 sha256 前 16 字节 hex（32 字符，够抗碰撞、不泄原始 IP/UA）。
-// 两者皆空（无任何信号，如内部构造/测试）→ 返回 ""：与 checkTrialLimit「空维度跳过」口径一致，
-// 绝不用空串哈希这个常量把所有无信号请求锁成同一设备（否则首个买家会连带封死其余）。
+// 派生：sha256(ClientIP) 取前 16 字节 hex（32 字符，够抗碰撞、不泄原始 IP）。IP 为空（无任何信号，
+// 如内部构造/测试）→ 返回 ""：与 checkTrialLimit「空维度跳过」口径一致，绝不用空串哈希这个常量把
+// 所有无信号请求锁成同一设备（否则首个买家会连带封死其余）。
 //
-// 粒度权衡：同一 NAT/校园网出口 + 相同 UA 的不同真人会撞进同一指纹 → 连带收紧（第二人 Trial 被拒）。
-// 这与引擎既有 fail-closed 取向一致（趋向拒绝更多 Trial），误伤经带鉴权+审计的后台释放通道
-// （ReleaseTrialLimit）解；比「客户端自报」的可绕过+可武器化强得多。要更细可日后引入签名客户端令牌。
+// 粒度权衡：同一 NAT/校园网出口的不同真人共享出口 IP → 撞进同一指纹 → 连带收紧（第二人 Trial 被
+// 拒）。这与引擎既有 fail-closed 取向一致（趋向拒绝更多 Trial），误伤经带鉴权+审计的后台释放通道
+// （ReleaseTrialLimit）解。如需降低共享出口的连带误伤，可日后把粒度退到 /24（IPv4）或 /64（IPv6）
+// 网段——那是「更粗但仍不可自选」，严格优于「更细但可自选」（如 UA）。
 func deviceFingerprint(c *gin.Context) string {
 	ip := strings.TrimSpace(c.ClientIP())
-	ua := strings.TrimSpace(c.GetHeader("User-Agent"))
-	if ip == "" && ua == "" {
-		return "" // 无任何信号 → 跳过设备维度，不建常量键
+	if ip == "" {
+		return "" // 无信号 → 跳过设备维度，不建常量键
 	}
-	sum := sha256.Sum256([]byte(ip + "\x00" + ua))
+	sum := sha256.Sum256([]byte(ip))
 	return hex.EncodeToString(sum[:16])
 }
 
@@ -288,7 +290,7 @@ func (a *App) HandlePurchase(c *gin.Context) {
 		TenantID: t.ID,
 		UserID:   int64(c.GetInt("id")),
 		PlanID:   planID,
-		// 设备维度：服务端从 ClientIP+User-Agent 派生（绝不读请求体）。
+		// 设备维度：服务端从 ClientIP 派生（不可被监管方自选的信号，绝不读请求体、绝不含 UA）。
 		// 实名维度：暂无可信来源 → 留空（引擎按空维度跳过），绝不用客户端自报串。
 		DeviceID:      deviceFingerprint(c),
 		RealNameID:    "",

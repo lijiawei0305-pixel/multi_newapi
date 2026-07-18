@@ -319,9 +319,11 @@ func TestHandlePurchase_UnregisteredSubdomainStillTenantNotFound(t *testing.T) {
 	}
 }
 
-// deviceFingerprint —— Trial 设备维度必须由服务端从 ClientIP+User-Agent 派生（绝不读请求体）。
-// 契约：① 有信号 → 32 字符 hex；② 同 IP+UA 稳定一致、不同则不同；③ 无任何信号 → ""（跳过维度，
-// 不用空串哈希把所有无信号请求锁成同一设备）。锁死 RETRO 2026-07-17 的修复：反滥用维度不可自报。
+// deviceFingerprint —— Trial 设备维度必须由服务端从「不可被监管方自选」的信号（ClientIP）派生
+// （绝不读请求体、绝不含 UA 等客户端可自选字段）。契约：① 有 IP → 32 字符 hex；② 同 IP（不论
+// 端口/UA）→ 指纹一致；③ 不同 IP → 指纹不同；④ IP 为空（无论 UA 有无）→ ""（跳过维度，不用空
+// 串哈希把所有无信号请求锁成同一设备）。锁死 audit 2026-07-18 F1 的修复：唯一性键只认不可自选
+// 信号——UA 可每请求轮换、放进键即等于让被监管方自选分桶，绕过成本与自报随机 device_id 相同。
 func TestDeviceFingerprint(t *testing.T) {
 	fp := func(remoteAddr, ua string) string {
 		req := httptest.NewRequest("POST", "/api/tenant/token-plans/1/purchase", nil)
@@ -338,16 +340,24 @@ func TestDeviceFingerprint(t *testing.T) {
 	if len(a) != 32 {
 		t.Fatalf("fingerprint = %q, want 32-char hex", a)
 	}
+	// 同一 IP、不同端口 → 指纹稳定一致（端口非区分维度）。
 	if b := fp("203.0.113.7:9999", "codex-cli/1.0"); b != a {
-		t.Fatalf("same IP+UA must be stable: got %q vs %q", b, a)
+		t.Fatalf("same IP must be stable regardless of port: got %q vs %q", b, a)
 	}
-	if b := fp("203.0.113.7:5555", "cursor/2.0"); b == a {
-		t.Fatalf("different UA must yield different fingerprint, both = %q", a)
+	// 同一 IP、不同 UA → 指纹必须**相同**：UA 是客户端可自选字段，绝不进唯一性键，否则攻击者
+	// 每请求换个 UA 即得一把全新互不碰撞的终身键、去重形同虚设（audit 2026-07-18 F1 修复的缺陷本身）。
+	if b := fp("203.0.113.7:5555", "cursor/2.0"); b != a {
+		t.Fatalf("same IP with different UA must yield the SAME fingerprint (UA must not affect the key): got %q vs %q", b, a)
 	}
+	// 不同 IP → 不同指纹（ClientIP 是唯一区分维度）。
 	if b := fp("198.51.100.1:5555", "codex-cli/1.0"); b == a {
 		t.Fatalf("different IP must yield different fingerprint, both = %q", a)
 	}
-	// 无信号（空 RemoteAddr + 无 UA）→ "" → 引擎跳过设备维度，不建常量键。
+	// IP 为空（无论 UA 是否存在）→ "" → 引擎跳过设备维度，不建常量键。UA 不是信号，不能把无 IP
+	// 的请求哈希成设备键。
+	if empty := fp("", "codex-cli/1.0"); empty != "" {
+		t.Fatalf("empty IP with a UA present must still yield empty fingerprint (UA is not a signal), got %q", empty)
+	}
 	if empty := fp("", ""); empty != "" {
 		t.Fatalf("no signal must yield empty fingerprint, got %q", empty)
 	}
