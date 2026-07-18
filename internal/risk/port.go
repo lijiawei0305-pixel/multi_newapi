@@ -56,6 +56,10 @@ type Alert struct {
 
 // ---- 配置 ----
 
+// DefaultDeviceDedupTTL 是 Trial 限购**设备维度**去重键的默认有界 TTL（24 小时）。
+// 见 Config.DeviceDedupTTL 注释：device 维绝不用终身键（audit R1）。
+const DefaultDeviceDedupTTL = 24 * time.Hour
+
 // Config 是风控引擎的可调参数。零值经 normalize 回退到 DefaultConfig 的安全默认。
 type Config struct {
 	// DefaultRPM 默认每窗口请求上限；<=0 表示不限流（由 RPMResolver 覆盖具体主体）。
@@ -64,8 +68,18 @@ type Config struct {
 	RateWindow time.Duration
 	// AlertThreshold NoteUsage 告警阈值占比，默认 0.8。
 	AlertThreshold float64
-	// PurchaseDedupTTL 限购去重键 TTL；<=0 表示永不过期（Trial 终身限购）。
+	// PurchaseDedupTTL 限购去重键 TTL；<=0 表示永不过期。用于**用户维度与实名维度**——
+	// 同一账号 / 同一自然人不该无限领 Trial，故这两维保留终身键。
 	PurchaseDedupTTL time.Duration
+	// DeviceDedupTTL 是 Trial 限购**设备维度**去重键的 TTL，**必须有界、绝不终身**。
+	// 设备维度由服务端从粗粒度、跨真人共享的 ClientIP（运营商 CGNAT / NAT 出口）派生
+	// （见 mtwire.deviceFingerprint）；若沿用 PurchaseDedupTTL=0 的终身键，则同一出口 IP
+	// 的首个买家占键后，其余共享该 IP 的真实账号会被**永久**连坐拒绝 Trial、换账号换设备
+	// 都无效，只能人工客服解套（audit R1 · High · 已 live 生产）。有界 TTL 仍能拦「同 IP
+	// 短时批量刷」这一真实滥用，而长期误伤到点自动过期自愈。<=0 经 normalize 回落
+	// DefaultDeviceDedupTTL（24h），**绝不**落成终身——这样生产（wire.go 仅注入 DefaultRPM）
+	// 也自动拿到有界 TTL。
+	DeviceDedupTTL time.Duration
 }
 
 // DefaultConfig 返回安全默认配置。
@@ -74,7 +88,8 @@ func DefaultConfig() Config {
 		DefaultRPM:       0, // 默认不限流；真实部署经 RPMResolver 注入每 Token RPM
 		RateWindow:       time.Minute,
 		AlertThreshold:   0.8,
-		PurchaseDedupTTL: 0, // Trial 终身限购，键不过期
+		PurchaseDedupTTL: 0,                     // 用户/实名维度：终身限购，键不过期
+		DeviceDedupTTL:   DefaultDeviceDedupTTL, // 设备维度：有界 TTL，绝不终身（audit R1）
 	}
 }
 
@@ -85,6 +100,9 @@ func (c Config) normalize() Config {
 	}
 	if c.AlertThreshold <= 0 || c.AlertThreshold > 1 {
 		c.AlertThreshold = 0.8
+	}
+	if c.DeviceDedupTTL <= 0 {
+		c.DeviceDedupTTL = DefaultDeviceDedupTTL // device 维绝不终身（audit R1）：<=0 一律回落有界默认
 	}
 	return c
 }

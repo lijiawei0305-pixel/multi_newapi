@@ -455,6 +455,61 @@ func TestCheckPurchaseLimit_TrialMidLoopErrorHealthyRetrySucceeds(t *testing.T) 
 	assertCode(t, e.CheckPurchaseLimit(trialCtx("ID-A", "dev-1"), 7, trialPlan()), "")
 }
 
+// ---- checkTrialLimit：按维度分设 TTL（audit R1 · High · 已 live 生产）----
+// device 维度由服务端从粗粒度、跨真人共享的 ClientIP（CGNAT/NAT 出口）派生，若沿用终身键，
+// 同 IP 首个买家占键后其余真实账号被**永久**连坐拒绝 Trial。修法=device 维用有界 TTL、
+// user/realname 维仍终身。下列三例分别守：① device 维到点自愈；② user 维不受 device TTL 影响
+// 仍终身；③ normalize 强制 device TTL 恒 >0（生产回退终身的入口被堵死）。
+
+// TestCheckTrialLimit_DeviceDimBoundedTTLSelfHeals 证 R1 核心修复：设备维 TTL 有界，
+// 共享出口 IP 的连带误伤到点自动过期自愈。三个不同 userID 保证 userK 互不干扰、realname
+// 留空只测 device 维：A 占键 → B 同设备被拒（TTL 内）→ 推进过 device TTL → C 同设备放行。
+// 终身键（未修/回归）下 C 会被永久拒 → 本测试变红。
+func TestCheckTrialLimit_DeviceDimBoundedTTLSelfHeals(t *testing.T) {
+	clk := newManualClock()
+	// MemKVCache 用注入时钟做 TTL 过期；engine 亦共享同一时钟。device TTL 设小值（1h）便于推进。
+	e := NewEngine(NewMemKVCache(clk), WithClock(clk),
+		WithConfig(Config{DeviceDedupTTL: time.Hour}))
+	// A（user 1001）从共享设备占用 Trial。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-shared"), 1001, trialPlan()), "")
+	// B（user 1002，同设备）在设备维度判负——device 键仍在 TTL 内。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-shared"), 1002, trialPlan()), CodePurchaseLimitExceeded)
+	// 推进超过 device TTL（1h）→ 设备键过期。
+	clk.Advance(2 * time.Hour)
+	// C（user 1003，同设备）→ 放行：设备键已过期自愈（若 device 维终身则此处被永久拒 = R1 回归）。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-shared"), 1003, trialPlan()), "")
+}
+
+// TestCheckTrialLimit_UserDimStaysLifetimeDespiteDeviceTTL 证「按维度分 TTL」未削弱用户维度：
+// device 维有界不等于放松 user 维——同一账号即便远超 device TTL 也不该再领 Trial（userK 终身）。
+func TestCheckTrialLimit_UserDimStaysLifetimeDespiteDeviceTTL(t *testing.T) {
+	clk := newManualClock()
+	e := NewEngine(NewMemKVCache(clk), WithClock(clk),
+		WithConfig(Config{DeviceDedupTTL: time.Hour}))
+	// 同一 user 1001 首购放行。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-x"), 1001, trialPlan()), "")
+	// 推进 100h（远超 device TTL）。
+	clk.Advance(100 * time.Hour)
+	// 同一 user 1001 再购 → 仍被拒：userK 终身键（PurchaseDedupTTL=0），不随 device TTL 过期。
+	assertCode(t, e.CheckPurchaseLimit(trialCtx("", "dev-x"), 1001, trialPlan()), CodePurchaseLimitExceeded)
+}
+
+// TestConfigNormalize_DeviceDedupTTLNeverLifetime 证 device 维 TTL 经 normalize 绝不落成终身：
+// 零值 Config 与显式负值都必须回落有界默认——这是「生产 wire.go 只传 DefaultRPM 时 device 维
+// 退回终身」（即 R1 回归入口）被堵死的关键保证。
+func TestConfigNormalize_DeviceDedupTTLNeverLifetime(t *testing.T) {
+	if got := (Config{}).normalize().DeviceDedupTTL; got != DefaultDeviceDedupTTL {
+		t.Fatalf("zero Config normalize DeviceDedupTTL = %v, want %v", got, DefaultDeviceDedupTTL)
+	}
+	if got := (Config{}).normalize().DeviceDedupTTL; got <= 0 {
+		t.Fatalf("normalized DeviceDedupTTL must be >0 (never lifetime), got %v", got)
+	}
+	// 显式负值（含任何 <=0）同样回落默认，绝不被当作「终身」放行。
+	if got := (Config{DeviceDedupTTL: -1}).normalize().DeviceDedupTTL; got != DefaultDeviceDedupTTL {
+		t.Fatalf("negative DeviceDedupTTL normalize = %v, want fallback %v", got, DefaultDeviceDedupTTL)
+	}
+}
+
 // ---- checkTrialLimit：补偿删除（Del）失败/入参守卫（audit F6 · Testing）----
 // 生产 checkTrialLimit 判负/出错路径的补偿删除是「尽力而为」：_ = e.kv.Del(...) 显式丢弃错误
 // （Del 失败仅多留痕，可经 ReleaseTrialLimit 后台解）。此前 3 个 KV 替身都未覆写 Del、全透传底层

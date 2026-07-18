@@ -195,7 +195,13 @@ func New(db *gorm.DB) *App {
 	if common.RedisEnabled && common.RDB != nil {
 		riskEngine = risk.NewEngine(
 			risk.NewRedisKVCache(common.RDB),
-			risk.WithConfig(risk.Config{DefaultRPM: common.GetEnvOrDefault("RISK_DEFAULT_RPM", 0)}),
+			risk.WithConfig(risk.Config{
+				DefaultRPM: common.GetEnvOrDefault("RISK_DEFAULT_RPM", 0),
+				// Trial 设备维度去重 TTL（小时）：device 维基于粗粒度共享 ClientIP 派生，绝不用终身键，
+				// 否则同出口 IP 首个买家后其余真人被永久连坐拒绝 Trial（audit R1）。env<=0 时 normalize
+				// 仍回落 24h，绝不终身。user/realname 维度仍走 PurchaseDedupTTL 终身。
+				DeviceDedupTTL: time.Duration(common.GetEnvOrDefault("RISK_DEVICE_DEDUP_TTL_HOURS", 24)) * time.Hour,
+			}),
 		)
 	}
 

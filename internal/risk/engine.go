@@ -156,12 +156,21 @@ func (e *Engine) CheckPurchaseLimit(ctx context.Context, userID int64, plan Plan
 // 并发可各自拿到一份 Trial（绕过反刷，proposal §2.4）。此处令每个维度的 SetNX 返回值
 // 都参与决胜，堵死该窗口。
 //
+// **按维度分设 TTL（audit R1 · High · 曾 live 生产）**：user/实名维度用 PurchaseDedupTTL 终身键
+// （同一账号 / 同一自然人不该无限领 Trial）；device 维度改用 DeviceDedupTTL 有界 TTL（默认 24h）。
+// device 维由服务端从粗粒度、跨真人共享的 ClientIP（运营商 CGNAT / NAT 出口）派生
+// （mtwire.deviceFingerprint）——若沿用 PurchaseDedupTTL=0 的终身键，同一出口 IP 首个买家占键后，
+// 其余共享该 IP 的真实账号会被**永久**连坐拒绝 Trial、换账号换设备都无效，只能人工客服解套。
+// 有界 TTL 仍拦「同 IP 短时批量刷」这一真实滥用，长期误伤到点自动过期自愈。DeviceDedupTTL 经
+// normalize 强制恒 >0（<=0 回落默认），故生产（wire.go 仅注入 DefaultRPM）也绝不回退终身。
+//
 // 键顺序 [用户, 实名, 设备] 有意为之：同一用户的并发重复请求在第一步 userK 即判负、
 // 一个键都未占、连补偿都无需触发；跨账号撞实名/撞设备的败者则对**本次已抢占成功**的
 // 维度做补偿删除（claimed 回滚）——被删键值都是本人 userID（刚由本次 SetNX 写入），
-// 不会误删赢家或他人的占用。不补偿的历史版本会把败者的 userK 永久烧掉：设备指纹按
-// ClientIP+UA 派生（粗粒度），共享出口 IP 的无辜用户一次碰撞即终身买不了 Trial、只能
-// 走客服释放。曾以「KVCache 无删除原语」论证补偿不可能（3dd6b4f），该前提在同批 Del
+// 不会误删赢家或他人的占用。不补偿的历史版本会把败者的 userK（终身键）永久烧掉：设备指纹
+// 按 ClientIP 派生（粗粒度，F1 已移除可自选的 UA），共享出口 IP 的无辜用户一次碰撞即终身买不了
+// Trial、只能走客服释放（device 维本身的连坐另由上文有界 TTL 缓解，audit R1）。曾以「KVCache
+// 无删除原语」论证补偿不可能（3dd6b4f），该前提在同批 Del
 // 落地（714aa6d，port.go）后即不成立，勿再引用。补偿是尽力而为：Del 失败仅多留痕
 // （fail-closed 方向，可经 ReleaseTrialLimit 后台解）；SetNX 成功→Del 之间键被管理员
 // 释放又被他人重占的误删窗口，与 ReleaseTrialLimit 的 Get→Del 竞态同理接受（须管理员
@@ -170,7 +179,6 @@ func (e *Engine) CheckPurchaseLimit(ctx context.Context, userID int64, plan Plan
 // 实名/设备从 context 读取（请求级，经 WithPurchaseIdentity 注入），缺省维度跳过。
 func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 	pi, _ := purchaseIdentityFrom(ctx)
-	ttl := e.cfg.PurchaseDedupTTL
 
 	userK := trialKey("user", strconv.FormatInt(userID, 10))
 	var realK, devK string
@@ -187,13 +195,27 @@ func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 	// 后台释放（ReleaseTrialLimit）必须能校验「这把键真是该用户占的」，否则
 	// 客服按 B 自报的 device_id 释放会误删 A 合法占用的键 → 新账号可从已消耗
 	// 设备再领 Trial，反刷维度被客服通道洗掉。
+	//
+	// 每维度各带 TTL（audit R1）：user/realname 用 PurchaseDedupTTL 终身键（同账号 / 同实名不该
+	// 无限领）；device 用 DeviceDedupTTL 有界 TTL——device 维基于粗粒度、跨真人共享的 ClientIP
+	// 派生，终身键会令同 IP / CGNAT 首个买家占键后其余真人被永久连坐拒绝 Trial（曾 live 生产）。
+	// 键顺序仍严格保持 [user, realname, device]（单赢家性质 + 同用户并发在 userK 首步判负 +
+	// 败者/出错补偿都依赖此顺序，不得改）。
 	owner := strconv.FormatInt(userID, 10)
+	dims := []struct {
+		key string
+		ttl time.Duration
+	}{
+		{userK, e.cfg.PurchaseDedupTTL},
+		{realK, e.cfg.PurchaseDedupTTL},
+		{devK, e.cfg.DeviceDedupTTL},
+	}
 	var claimed []string // 本次已抢占成功的键：判负/出错时补偿删除（Del 空列表为 no-op）
-	for _, k := range []string{userK, realK, devK} {
-		if k == "" {
+	for _, d := range dims {
+		if d.key == "" {
 			continue
 		}
-		ok, err := e.kv.SetNX(ctx, k, owner, ttl)
+		ok, err := e.kv.SetNX(ctx, d.key, owner, d.ttl)
 		if err != nil {
 			_ = e.kv.Del(ctx, claimed...)
 			return err
@@ -202,7 +224,7 @@ func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 			_ = e.kv.Del(ctx, claimed...)
 			return ErrPurchaseLimitExceeded
 		}
-		claimed = append(claimed, k)
+		claimed = append(claimed, d.key)
 	}
 	return nil
 }
