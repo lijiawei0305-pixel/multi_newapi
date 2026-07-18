@@ -28,6 +28,7 @@
 source "$(dirname "$0")/../ops/lib.sh"
 guard_not_prod
 require curl; require docker; require python3
+require_db_pass  # demo 亦用 DB 口令（db() 函数）→ 显式校验，缺则清晰中止（audit F3 口径一致）
 
 APP="http://127.0.0.1:${APP_PORT}"     # 主站 app（经 Host 头识别租户）
 AUTH="http://127.0.0.1:${AUTH_PORT}"   # auth-service（支付网关，mock）

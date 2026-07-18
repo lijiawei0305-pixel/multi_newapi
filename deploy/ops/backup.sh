@@ -19,6 +19,7 @@
 source "$(dirname "$0")/lib.sh"
 guard_not_prod
 require docker
+require_db_pass          # DB 口令缺失即中止（fail-closed）——本脚本 mysqldump 必需
 ensure_backup_dir
 
 TS="$(date +%Y%m%d-%H%M%S)"

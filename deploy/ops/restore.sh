@@ -20,6 +20,7 @@ source "$(dirname "$0")/lib.sh"
 guard_target
 require docker
 require gzip
+require_db_pass          # DB 口令缺失即中止（fail-closed）——恢复导入必需
 
 BACKUP="${1:-}"
 [ -n "$BACKUP" ] || die "用法：$0 <db-*.sql.gz>"

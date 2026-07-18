@@ -24,6 +24,7 @@
 source "$(dirname "$0")/lib.sh"
 guard_not_prod
 require docker
+require_db_pass          # DB 口令缺失即中止（fail-closed）——只读对账 SQL 必需
 
 # ── 解析 mysql 容器（compose 标签定位，cwd/compose 文件无关）────────────────────
 MYSQL_CID="$(docker ps \

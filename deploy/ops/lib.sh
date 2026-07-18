@@ -32,17 +32,19 @@ AUTH_PORT="${AUTH_PORT:-8180}"      # auth 127.0.0.1:8180 → 容器 8080
 HOST_HEADER="${HOST_HEADER:-tokendream.wedreamhub.com}"  # 多租户 Host 识别用
 
 # ── 数据库（库名含连字符需引用；root 密码不入 git——C1，2026-07-17 修复）────────────
-# DB_PASS 解析顺序：环境变量显式覆盖 > 服务器 .env 的 MYSQL_ROOT_PASSWORD > 缺失即中止（fail-closed）。
+# DB_PASS 解析顺序：环境变量显式覆盖 > 服务器 .env 的 MYSQL_ROOT_PASSWORD > 缺失则留空。
 #   过去此处内联低熵默认值（与 compose 两处同值、已进 git）——与 SESSION_SECRET 同款 C1 违例，已移除。
 #   .env 行形如 MYSQL_ROOT_PASSWORD=xxx（取最后一条生效行，容忍两侧单/双引号）。
+#   **本段只解析、绝不中止**：缺口令的 fail-closed 判定收进 require_db_pass()（见下），由真正
+#   用到 DB 口令的脚本（backup/restore/reconcile）在 source 后显式调用。若在此顶层 exit，会
+#   击穿每一个 source 本库、却根本不用 DB 口令的脚本——尤其 rollback.sh（deploy.sh 步骤⑧的
+#   自动回滚执行体、唯一紧急回退手段）与 healthcheck.sh（*/5 cron 唯一自动巡检/告警触发点）：
+#   任何缺 MYSQL_ROOT_PASSWORD 的旧 .env（从旧 config-*.tar.gz 恢复 / 新机重建）会令「最需要
+#   回滚与巡检时」二者同时失效，正撞 C6「回滚兜底路径必须真实可达」（audit F3，High）。
 DB_NAME="${DB_NAME:-new-api-test}"
 DB_USER="${DB_USER:-root}"
 if [ -z "${DB_PASS:-}" ] && [ -f "$ENV_FILE" ]; then
   DB_PASS="$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' "$ENV_FILE" | tail -n 1 | sed "s/^['\"]//;s/['\"]\$//")"
-fi
-if [ -z "${DB_PASS:-}" ]; then
-  printf '\033[1;31m[err]\033[0m %s\n' "DB_PASS 未设置且 $ENV_FILE 缺 MYSQL_ROOT_PASSWORD——DB 密码已按 C1 移出 git，禁止内联默认；请先在服务器 .env(600) 写入。" >&2
-  exit 1
 fi
 
 # ── 备份 / 保留 ─────────────────────────────────────────────────────────────────
@@ -105,6 +107,14 @@ confirm_typed() {
 
 # require：确认依赖命令存在。
 require() { command -v "$1" >/dev/null 2>&1 || die "缺少命令：$1"; }
+
+# require_db_pass：需要 DB 口令的脚本显式调用（backup/restore/reconcile）。
+# 不在 lib.sh 顶层校验——否则 source 期的 exit 会击穿 rollback.sh / healthcheck.sh 等
+# 根本不用 DB 口令的脚本，令「最需要回滚/巡检时」反而因无关凭据失效（C6，audit F3）。
+# die 定义在本函数之前（上方），函数体在调用时（source 完成后）才求值，故引用安全。
+require_db_pass() {
+  [ -n "${DB_PASS:-}" ] || die "DB_PASS 未设置且 $ENV_FILE 缺 MYSQL_ROOT_PASSWORD——DB 密码已按 C1 移出 git，禁止内联默认；请先在服务器 .env(600) 写入。"
+}
 
 # 预创建备份目录。
 ensure_backup_dir() { mkdir -p "$BACKUP_DIR"; }
