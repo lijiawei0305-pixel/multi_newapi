@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
+
 import { agentTicketAdapter } from './audience'
 import { TicketDetailView } from './components/ticket-detail-view'
 import { TicketListView } from './components/ticket-list-view'

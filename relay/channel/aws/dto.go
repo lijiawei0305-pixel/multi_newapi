@@ -45,7 +45,7 @@ func formatRequest(requestBody io.Reader, requestHeader http.Header) (*AwsClaude
 		var tempArray []string
 		tempArray = strings.Split(anthropicBetaValues, ",")
 		if len(tempArray) > 0 {
-			betaJson, err := json.Marshal(tempArray)
+			betaJson, err := common.Marshal(tempArray)
 			if err != nil {
 				return nil, err
 			}
@@ -73,10 +73,10 @@ type NovaRequest struct {
 }
 
 type NovaInferenceConfig struct {
-	MaxTokens     int      `json:"maxTokens,omitempty"`     // 最大生成的 token 数
-	Temperature   float64  `json:"temperature,omitempty"`   // 随机性 (默认 0.7, 范围 0-1)
-	TopP          float64  `json:"topP,omitempty"`          // nucleus sampling (默认 0.9, 范围 0-1)
-	TopK          int      `json:"topK,omitempty"`          // 限制候选 token 数 (默认 50, 范围 0-128)
+	MaxTokens     *uint    `json:"maxTokens,omitempty"`     // 最大生成的 token 数
+	Temperature   *float64 `json:"temperature,omitempty"`   // 随机性 (默认 0.7, 范围 0-1)
+	TopP          *float64 `json:"topP,omitempty"`          // nucleus sampling (默认 0.9, 范围 0-1)
+	TopK          *int     `json:"topK,omitempty"`          // 限制候选 token 数 (默认 50, 范围 0-128)
 	StopSequences []string `json:"stopSequences,omitempty"` // 停止生成的序列
 }
 
@@ -96,19 +96,12 @@ func convertToNovaRequest(req *dto.GeneralOpenAIRequest) *NovaRequest {
 	}
 
 	// 设置推理配置
-	if (req.MaxTokens != nil && *req.MaxTokens != 0) || (req.Temperature != nil && *req.Temperature != 0) || (req.TopP != nil && *req.TopP != 0) || (req.TopK != nil && *req.TopK != 0) || req.Stop != nil {
-		novaReq.InferenceConfig = &NovaInferenceConfig{}
-		if req.MaxTokens != nil && *req.MaxTokens != 0 {
-			novaReq.InferenceConfig.MaxTokens = int(*req.MaxTokens)
-		}
-		if req.Temperature != nil && *req.Temperature != 0 {
-			novaReq.InferenceConfig.Temperature = *req.Temperature
-		}
-		if req.TopP != nil && *req.TopP != 0 {
-			novaReq.InferenceConfig.TopP = *req.TopP
-		}
-		if req.TopK != nil && *req.TopK != 0 {
-			novaReq.InferenceConfig.TopK = *req.TopK
+	if req.MaxTokens != nil || req.Temperature != nil || req.TopP != nil || req.TopK != nil || req.Stop != nil {
+		novaReq.InferenceConfig = &NovaInferenceConfig{
+			MaxTokens:   req.MaxTokens,
+			Temperature: req.Temperature,
+			TopP:        req.TopP,
+			TopK:        req.TopK,
 		}
 		if req.Stop != nil {
 			if stopSequences := parseStopSequences(req.Stop); len(stopSequences) > 0 {

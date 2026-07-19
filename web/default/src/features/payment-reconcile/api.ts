@@ -43,7 +43,11 @@ export interface StuckList {
 }
 
 export interface ReconcileRunResult {
-  rcg?: { scanned: number; credited: string[] | null; failed: Record<string, string> }
+  rcg?: {
+    scanned: number
+    credited: string[] | null
+    failed: Record<string, string>
+  }
   rcg_created?: {
     scanned: number
     credited: string[] | null
@@ -54,6 +58,7 @@ export interface ReconcileRunResult {
     scanned: number
     activated: string[] | null
     unpaid: string[] | null
+    expired?: string[] | null
     failed: Record<string, string>
   }
   agt?: {
@@ -65,7 +70,7 @@ export interface ReconcileRunResult {
   }
 }
 
-/** 列当前卡单（RCG paid + SUB pending，早于对账阈值）。只读。 */
+/** 列当前卡单（RCG paid + SUB 未完成支付态 + AGT 未完成激活态，早于对账阈值）。只读。 */
 export async function listStuckOrders(): Promise<StuckList> {
   const res = await api.get('/api/admin/reconcile/stuck')
   return res.data.data
@@ -87,7 +92,9 @@ export interface HistoryRun {
 
 /** 列最近对账记录（倒序）。手动全记 + 定时有实事才记。 */
 export async function listHistory(limit = 50): Promise<HistoryRun[]> {
-  const res = await api.get('/api/admin/reconcile/history', { params: { limit } })
+  const res = await api.get('/api/admin/reconcile/history', {
+    params: { limit },
+  })
   return res.data.data.runs
 }
 

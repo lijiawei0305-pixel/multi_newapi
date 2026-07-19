@@ -286,7 +286,10 @@ func (a *App) HandlePurchaseAgentPlan(c *gin.Context) {
 		return
 	}
 	var body purchaseAgentPlanIn
-	_ = c.ShouldBindJSON(&body) // body 可选
+	if err := decodeOptionalJSONObject(c, &body, purchaseRequestBodyLimit); err != nil {
+		respondErr(c, payment.ErrOrderInvalid)
+		return
+	}
 
 	provider := payment.ProviderWxpay
 	if body.Provider != "" {

@@ -286,7 +286,20 @@ func (r *Repo) ListListings(ctx context.Context, tenantID int64) ([]tokenplan.Te
 
 // SavePendingPurchase 暂存下单意图（按 order_id；幂等 DoNothing，不覆盖既有）。
 func (r *Repo) SavePendingPurchase(ctx context.Context, p *tokenplan.PendingPurchase) error {
-	row := pendingRow{
+	row := pendingPurchaseRow(p)
+	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error
+}
+
+// SavePendingPurchaseTx 在调用方提供的共享事务里暂存购买意图。mtwire 的 SUB 本地订单桥用它把
+// mt_subscription_orders 与 pending_subscription_orders 作为一个原子提交边界。
+func (r *Repo) SavePendingPurchaseTx(ctx context.Context, tx *gorm.DB, p *tokenplan.PendingPurchase) error {
+	// 原子购买路径必须是新快照；若同 order_id 已有孤儿/冲突行，整笔事务失败回滚，绝不把新订单
+	// 绑定到一份可能属于别的用户/价格的旧快照。
+	return tx.WithContext(ctx).Create(pendingPurchaseRow(p)).Error
+}
+
+func pendingPurchaseRow(p *tokenplan.PendingPurchase) *pendingRow {
+	return &pendingRow{
 		OrderID:        p.OrderID,
 		TenantID:       p.TenantID,
 		UserID:         p.UserID,
@@ -297,7 +310,6 @@ func (r *Repo) SavePendingPurchase(ctx context.Context, p *tokenplan.PendingPurc
 		ValidDays:      p.ValidDays,
 		CreatedAt:      time.Now(),
 	}
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error
 }
 
 // GetPendingPurchase 凭订单号取回购买意图；不存在返回 ErrSubscriptionNotFound。

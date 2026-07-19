@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -27,7 +28,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { PRIORITY_VALUES, STATUS_VALUES, priorityMeta, statusMeta } from '../lib'
+
+import {
+  PRIORITY_VALUES,
+  STATUS_VALUES,
+  priorityMeta,
+  statusMeta,
+} from '../lib'
 import type { TicketListQuery, TicketPriority, TicketStatus } from '../types'
 
 // ============================================================================
@@ -64,7 +71,9 @@ export function TicketFilterBar(props: {
       user_id:
         props.showUserFilter && userId.trim() ? Number(userId) : undefined,
       tenant_id:
-        props.showTenantFilter && tenantId.trim() ? Number(tenantId) : undefined,
+        props.showTenantFilter && tenantId.trim()
+          ? Number(tenantId)
+          : undefined,
     })
   }
 
@@ -134,7 +143,11 @@ export function TicketFilterBar(props: {
         data-testid='ticket-filter-keyword'
       />
 
-      <Button variant='outline' onClick={apply} data-testid='ticket-filter-apply'>
+      <Button
+        variant='outline'
+        onClick={apply}
+        data-testid='ticket-filter-apply'
+      >
         {t('Filter')}
       </Button>
     </div>

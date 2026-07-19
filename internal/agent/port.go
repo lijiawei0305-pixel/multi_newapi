@@ -57,7 +57,7 @@ type PricingGuard interface {
 }
 
 // AgentRepo 是 Agent 模块的持久化依赖（消费者定义接口）。
-// 本轮提供并发安全的内存假实现 MemRepo；GORM 真实实现顺延（见报告 TODO）。
+// 并发安全的内存假实现为 MemRepo；生产 GORM 实现在 gormrepo 子包中。
 //
 // 实现约定：AppendEarning / CreateWithdrawal / ResolveWithdrawal 必须**原子**完成
 // 读-改-写（detailed-design §6.2 条件 UPDATE / 行锁），以保证并发下的幂等与金额守恒。

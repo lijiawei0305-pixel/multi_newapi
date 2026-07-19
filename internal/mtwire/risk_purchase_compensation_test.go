@@ -10,11 +10,20 @@ package mtwire
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
+	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 	"github.com/QuantumNous/new-api/internal/risk"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---- 测试装配辅助 ----
@@ -156,63 +165,178 @@ func TestPurchase_PreClaimFailure_KeepsExistingClaim(t *testing.T) {
 
 // ---- Level B：CreatePay 失败点（Purchase 返回之后）由 HandlePurchase 显式归还 ----
 
-// TestReleasePurchaseClaim_TrialReclaimable：模拟 HandlePurchase 在 subscriptionPayURL→CreatePay 失败后
-// 调用 SubscriptionService.ReleasePurchaseClaim 归还占键（该失败点在 Purchase 返回之后，函数内 defer
-// 触不到，故必须由上层显式补偿，audit F2 旗舰场景）。
-//
-// 注：不在此处装配「CreatePay 失败」的完整 HTTP 路径——providerMgr 为具体类型 *providerManager，
-// 需真实支付 SDK 方能令 CreatePay 返错，成本过高（见 http.go subscriptionPayURL）。本用例直接断言
-// ReleasePurchaseClaim 这一补偿原语（delegate→adapter→ReleaseTrialLimit）端到端可令占键重新可用，
-// 即 HandlePurchase Level B 分支所依赖的机制；HTTP 落点见 http.go HandlePurchase 的归还片段。
-func TestReleasePurchaseClaim_TrialReclaimable(t *testing.T) {
-	ctx := context.Background()
-	engine := risk.NewEngine(risk.NewMemKVCache(nil))
-	adapter := tokenplanRiskAdapter{eng: engine}
-	repo := tokenplan.NewMemRepo()
-	planID := seedTrialPlan(t, repo, 7, true)
-	svc := tokenplan.NewSubscriptionService(repo, repo, okCreateOrder{}, adapter, noopEarnings{}, nil)
-
-	in := tokenplan.PurchaseInput{TenantID: 7, UserID: 3001, PlanID: planID, DeviceID: "dev-C"}
-	ticket, err := svc.Purchase(ctx, in)
-	if err != nil {
-		t.Fatalf("首次购买应成功（占键 + 下单 + 暂存均成功）: %v", err)
-	}
-	// PlanCode 须随 ticket 透传（补偿判定 Trial 档所需，design C）。
-	if ticket.PlanCode != "trial" {
-		t.Fatalf("ticket.PlanCode 应为 trial（供补偿判定档位），得 %q", ticket.PlanCode)
-	}
-	// 二次购买应被限购拦截（键已占）。
-	if _, err := svc.Purchase(ctx, in); apperr.CodeOf(err) != tokenplan.CodePurchaseLimitExceeded {
-		t.Fatalf("二次购买应被限购拦截，得 %v", err)
-	}
-
-	// 模拟 CreatePay 失败后 HandlePurchase 的归还（入参取自 ticket，同 HandlePurchase）。
-	if err := svc.ReleasePurchaseClaim(ctx, tokenplan.PurchaseLimitCheck{
-		TenantID: 7, UserID: 3001, PlanID: ticket.PlanID, PlanCode: ticket.PlanCode, DeviceID: "dev-C",
-	}); err != nil {
-		t.Fatalf("ReleasePurchaseClaim: %v", err)
-	}
-	// 归还后可重新购买。
-	if _, err := svc.Purchase(ctx, in); err != nil {
-		t.Fatalf("归还占键后应能重新购买，却被拒: %v", err)
-	}
+type failingSubscriptionPayCreator struct {
+	calls  int
+	err    error
+	cancel context.CancelFunc
 }
 
-// TestReleasePurchaseClaim_NonTrial_NoOp：非 Trial 档归还是 no-op（不引入过度释放）。
-// 非 Trial 用 Incr 计数键，若用 Del 整键清零会在 PerUserLimit≥2 且已有合法计数时过度释放；
-// 正确做法是原子递减原语，列为后续。本用例锁定「非 Trial 归还不动任何键」的现状承诺。
-func TestReleasePurchaseClaim_NonTrial_NoOp(t *testing.T) {
+func (f *failingSubscriptionPayCreator) CreatePay(context.Context, payment.Provider, string, string, float64, string) (string, error) {
+	f.calls++
+	if f.cancel != nil {
+		f.cancel()
+	}
+	return "", f.err
+}
+
+type observingPurchaseRisk struct {
+	tokenplan.RiskEngine
+	releaseCalls      int
+	releaseContextErr error
+}
+
+func (r *observingPurchaseRisk) ReleasePurchaseClaim(ctx context.Context, in tokenplan.PurchaseLimitCheck) error {
+	r.releaseCalls++
+	r.releaseContextErr = ctx.Err()
+	if r.releaseContextErr != nil {
+		return r.releaseContextErr
+	}
+	return r.RiskEngine.ReleasePurchaseClaim(ctx, in)
+}
+
+// TestHandlePurchaseReleasesTrialClaimWhenCreatePayFails 通过真实 Gin Router + HandlePurchase 触发
+// subscriptionPayURL/CreatePay 失败分支；连续两次相同 Trial 请求都必须到达 CreatePay，而不是第二次被
+// PURCHASE_LIMIT_EXCEEDED 拦下。这会在生产补偿被删除、错序或漏调时直接失败。
+func TestHandlePurchaseReleasesTrialClaimWhenCreatePayFails(t *testing.T) {
+	app := newBuyerTestApp(t)
+	ctx := context.Background()
+	platformTenant, _, err := app.ensurePlatformTenant(ctx)
+	require.NoError(t, err)
+	planID, err := app.TokenPlanRepo.EnsurePlan(ctx, &tokenplan.Plan{
+		Code: "trial", Name: "Trial", BasePrice: 0, Multiplier: 1,
+		MonthLimitUSD: 1, ValidDays: 7, AgentCostPrice: 0, MinPrice: 0, Status: tokenplan.PlanEnabled,
+	})
+	require.NoError(t, err)
+	require.NoError(t, app.TokenPlanRepo.EnsureListing(ctx, platformTenant.ID, planID, true, 0))
+
+	engine := risk.NewEngine(risk.NewMemKVCache(nil))
+	adapter := tokenplanRiskAdapter{eng: engine}
+	app.Subscriptions = tokenplan.NewSubscriptionService(
+		app.TokenPlanRepo, app.TokenPlanRepo,
+		newSubPayment(newSubOrderStore(app.DB), app.TokenPlanRepo),
+		adapter, noopEarnings{}, nil,
+	)
+	payErr := apperr.New("PAY_DOWN", "payment gateway unavailable", http.StatusBadGateway)
+	creator := &failingSubscriptionPayCreator{err: payErr}
+	app.subscriptionPayCreator = creator
+	stubProviderConfigured(t, func(p payment.Provider) bool { return p == payment.ProviderWxpay })
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/api/tenant/token-plans/:id/purchase", func(c *gin.Context) {
+		c.Set("id", 3001)
+		app.HandlePurchase(c)
+	})
+	for attempt := 1; attempt <= 2; attempt++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost,
+			"/api/tenant/token-plans/"+strconv.FormatInt(planID, 10)+"/purchase", strings.NewReader(`{}`))
+		req.Host = "www.wedreamhub.com"
+		req.RemoteAddr = "203.0.113.9:4321"
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(rec, req)
+		resp := decodeResp(t, rec)
+		assert.False(t, resp.Success)
+		assert.Equal(t, "PAY_DOWN", resp.Code, "attempt %d must reach the injected CreatePay failure", attempt)
+	}
+	assert.Equal(t, 2, creator.calls, "the first Handler failure must release the Trial claim for retry")
+
+	var orders []subscriptionOrderRow
+	require.NoError(t, app.DB.Order("created_at ASC").Find(&orders).Error)
+	require.Len(t, orders, 2, "each real Handler attempt must retain its auditable local order")
+	for _, order := range orders {
+		assert.Equal(t, subOrderPayFailed, order.Status,
+			"CreatePay failure must not masquerade as an ordinary unpaid pending order")
+		assert.Equal(t, string(payment.ProviderWxpay), order.Provider)
+	}
+	var pendingCount int64
+	require.NoError(t, app.DB.Model(&subscriptionOrderRow{}).
+		Where("status = ?", subOrderPending).Count(&pendingCount).Error)
+	assert.Zero(t, pendingCount)
+	var snapshotCount int64
+	require.NoError(t, app.DB.Table("pending_subscription_orders").Count(&snapshotCount).Error)
+	assert.Equal(t, int64(2), snapshotCount, "each failed provider attempt keeps its paired purchase snapshot")
+}
+
+func TestHandlePurchaseCompensationSurvivesClientCancellation(t *testing.T) {
+	app := newBuyerTestApp(t)
+	ctx := context.Background()
+	platformTenant, _, err := app.ensurePlatformTenant(ctx)
+	require.NoError(t, err)
+	planID, err := app.TokenPlanRepo.EnsurePlan(ctx, &tokenplan.Plan{
+		Code: "trial", Name: "Trial", BasePrice: 0, Multiplier: 1,
+		MonthLimitUSD: 1, ValidDays: 7, AgentCostPrice: 0, MinPrice: 0, Status: tokenplan.PlanEnabled,
+	})
+	require.NoError(t, err)
+	require.NoError(t, app.TokenPlanRepo.EnsureListing(ctx, platformTenant.ID, planID, true, 0))
+
+	engine := risk.NewEngine(risk.NewMemKVCache(nil))
+	observedRisk := &observingPurchaseRisk{RiskEngine: tokenplanRiskAdapter{eng: engine}}
+	app.Subscriptions = tokenplan.NewSubscriptionService(
+		app.TokenPlanRepo, app.TokenPlanRepo,
+		newSubPayment(newSubOrderStore(app.DB), app.TokenPlanRepo),
+		observedRisk, noopEarnings{}, nil,
+	)
+	payErr := apperr.New("PAY_DOWN", "payment gateway unavailable", http.StatusBadGateway)
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	creator := &failingSubscriptionPayCreator{err: payErr, cancel: cancelRequest}
+	app.subscriptionPayCreator = creator
+	stubProviderConfigured(t, func(p payment.Provider) bool { return p == payment.ProviderWxpay })
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.POST("/api/tenant/token-plans/:id/purchase", func(c *gin.Context) {
+		c.Set("id", 3002)
+		app.HandlePurchase(c)
+	})
+	performPurchase := func(requestContext context.Context) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost,
+			"/api/tenant/token-plans/"+strconv.FormatInt(planID, 10)+"/purchase", strings.NewReader(`{}`)).WithContext(requestContext)
+		request.Host = "www.wedreamhub.com"
+		request.RemoteAddr = "203.0.113.10:4321"
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	first := decodeResp(t, performPurchase(requestCtx))
+	assert.False(t, first.Success)
+	assert.Equal(t, "PAY_DOWN", first.Code)
+	require.ErrorIs(t, requestCtx.Err(), context.Canceled)
+	require.Equal(t, 1, observedRisk.releaseCalls)
+	require.NoError(t, observedRisk.releaseContextErr, "compensation must detach from the canceled client context")
+
+	creator.cancel = nil
+	second := decodeResp(t, performPurchase(context.Background()))
+	assert.False(t, second.Success)
+	assert.Equal(t, "PAY_DOWN", second.Code, "a live compensation context must release the Trial claim for retry")
+	assert.Equal(t, 2, creator.calls)
+}
+
+// TestReleasePurchaseClaim_NonTrial_ReleasesOnlyCurrentClaim：非 Trial 失败订单只原子递减本次占用，
+// 多次 CreatePay/SavePending 失败补偿不能清掉同用户此前两次成功购买的计数。
+func TestReleasePurchaseClaim_NonTrial_ReleasesOnlyCurrentClaim(t *testing.T) {
 	ctx := context.Background()
 	engine := risk.NewEngine(risk.NewMemKVCache(nil))
 	adapter := tokenplanRiskAdapter{eng: engine}
-
-	// 归还非 Trial 档：应无错、且不触碰任何键（此处仅断言不报错——引擎侧非 Trial 无终身键语义）。
-	err := adapter.ReleasePurchaseClaim(ctx, tokenplan.PurchaseLimitCheck{
-		TenantID: 7, UserID: 4001, PlanID: 2, PlanCode: "mini",
-	})
-	if err != nil {
-		t.Fatalf("非 Trial 归还应为 no-op、不报错，得 %v", err)
+	plan := risk.Plan{ID: 2, Code: "mini", PerUserLimit: 3}
+	check := tokenplan.PurchaseLimitCheck{
+		TenantID: 7, UserID: 4001, PlanID: plan.ID, PlanCode: plan.Code,
 	}
+
+	// 两次已成功购买必须始终保留。
+	require.NoError(t, engine.CheckPurchaseLimit(ctx, check.UserID, plan))
+	require.NoError(t, engine.CheckPurchaseLimit(ctx, check.UserID, plan))
+	// 模拟十次“占到第三个名额后，支付/暂存失败”：每次只归还刚取得的那一次。
+	for i := 0; i < 10; i++ {
+		require.NoError(t, engine.CheckPurchaseLimit(ctx, check.UserID, plan))
+		require.NoError(t, adapter.ReleasePurchaseClaim(ctx, check))
+	}
+
+	// 仍只剩一个名额；若补偿误用 DEL 清整键，这里会错误地再放行三次。
+	require.NoError(t, engine.CheckPurchaseLimit(ctx, check.UserID, plan))
+	assert.ErrorIs(t, engine.CheckPurchaseLimit(ctx, check.UserID, plan), risk.ErrPurchaseLimitExceeded)
 }
 
 // TestReleasePurchaseClaim_NilEngine_NoOp：无风控引擎（Redis 关）时归还优雅 no-op，不 panic。

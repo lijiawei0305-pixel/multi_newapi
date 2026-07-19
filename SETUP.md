@@ -1,10 +1,10 @@
-# 环境与起步说明（协作者 · Phase 2 前端）
+# 环境与起步说明（协作者 · 当前主线）
 
 > Wedreamhub AI 聚合平台 —— 基于 [New API](https://github.com/QuantumNous/new-api) 二次开发的**多租户代理分销平台**。
 > 本文帮你把项目跑起来。**真实密钥不在仓库**（安全约定），向**项目负责人**索取。
 
 ## 1. 技术栈
-- **后端**：Go 1.21+（gin + GORM，模块路径 `github.com/QuantumNous/new-api`）
+- **后端**：Go 1.25.1+（以仓库 `go.mod` 的 `go` 指令为准；gin + GORM，模块路径 `github.com/QuantumNous/new-api`）
 - **前端**：`web/default`（React 19 + TanStack Router 文件路由 + shadcn/ui + bun + rsbuild）
 - **数据/基建**：MySQL 8 + Redis + Nginx + Docker Compose
 
@@ -22,7 +22,7 @@
 ## 3. 环境变量
 ```bash
 cp deploy/.env.test.example /root/newapi-test/.env   # 或本地路径
-# 编辑填入真实值（向负责人索取）：MT_INTERNAL_SECRET / AUTH_SIGN_SECRET / SESSION_SECRET / 上游 key / 域名
+# 编辑填入真实值（向负责人索取）：MT_INTERNAL_SECRET / SESSION_SECRET / CRYPTO_SECRET / MYSQL_ROOT_PASSWORD / 上游 key / 域名
 ```
 DB/Redis 默认值内置在 `deploy/docker-compose.test.yml`（测试栈隔离：项目名 `newapi_test`、端口 `127.0.0.1:3100`）。
 
@@ -36,7 +36,7 @@ docker compose -p newapi_test --env-file /root/newapi-test/.env \
 ### 4b. 前端本地开发
 ```bash
 cd web/default
-bun install                       # 装依赖（package.json 已入库；无 bun.lock，装最新匹配版本）
+bun install --frozen-lockfile     # 严格使用已入库的 web/bun.lock，不漂移依赖版本
 bun run dev                       # 本地 dev server
 bunx @tanstack/router-cli generate  # 改了 routes/ 文件路由后重生成 routeTree.gen.ts
 bun run build                     # 产物构建（Docker 内由 rsbuild 构建后 go:embed 进二进制）

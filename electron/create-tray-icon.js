@@ -2,9 +2,8 @@
 // Run: node create-tray-icon.js
 
 const fs = require('fs');
-const { createCanvas } = require('canvas');
 
-function createTrayIcon() {
+function createTrayIcon(createCanvas) {
   // For macOS, we'll use a Template image (black and white)
   // Size should be 22x22 for Retina displays (@2x would be 44x44)
   const canvas = createCanvas(22, 22);
@@ -31,12 +30,13 @@ function createTrayIcon() {
   console.log('Tray icon created successfully!');
 }
 
-// Check if canvas is installed
 try {
-  createTrayIcon();
+  // canvas is optional and intentionally not part of the release dependency set.
+  // When available locally it can produce a nicer development icon.
+  const { createCanvas } = require('canvas');
+  createTrayIcon(createCanvas);
 } catch (err) {
-  console.log('Canvas module not installed.');
-  console.log('For now, creating a placeholder. Install canvas with: npm install canvas');
+  console.log('Optional canvas module unavailable; creating deterministic placeholder tray icons.');
 
   // Create a minimal 1x1 transparent PNG as placeholder
   const minimalPNG = Buffer.from([
@@ -56,5 +56,7 @@ try {
   ]);
 
   fs.writeFileSync('tray-icon.png', minimalPNG);
-  console.log('Created placeholder tray icon.');
+  fs.writeFileSync('tray-iconTemplate.png', minimalPNG);
+  fs.writeFileSync('tray-iconTemplate@2x.png', minimalPNG);
+  console.log('Created placeholder tray icons.');
 }

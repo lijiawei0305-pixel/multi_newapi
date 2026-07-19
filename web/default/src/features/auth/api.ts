@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import { openHttpUrlInNewTab } from '@/lib/safe-navigation'
+
 import type {
   LoginPayload,
   LoginResponse,
@@ -81,7 +83,7 @@ export async function sendPasswordResetEmail(
 // Start GitHub OAuth flow
 export async function githubOAuthStart(clientId: string, state: string) {
   const url = `https://github.com/login/oauth/authorize?client_id=${clientId}&state=${state}&scope=user:email`
-  window.open(url)
+  openHttpUrlInNewTab(url)
 }
 
 // Get OAuth state for CSRF protection

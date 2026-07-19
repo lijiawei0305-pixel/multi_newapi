@@ -16,10 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { QRCodeSVG } from 'qrcode.react'
 import { Check, Globe, KeyRound } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -35,11 +35,12 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import { cn } from '@/lib/utils'
-import { agentContextQueryOptions } from '@/lib/agent-context'
-import { getPaymentIcon } from '@/features/wallet/lib'
 import { useRechargeMethods } from '@/features/wallet/hooks/use-recharge-methods'
 import type { RechargeProvider } from '@/features/wallet/hooks/use-tenant-recharge'
+import { getPaymentIcon } from '@/features/wallet/lib'
+import { agentContextQueryOptions } from '@/lib/agent-context'
+import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
+import { cn } from '@/lib/utils'
 
 import { type AgentPlan, getPublicAgentPlans, purchaseAgentPlan } from './api'
 
@@ -73,8 +74,9 @@ function validateSlugCn(raw: string): string | null {
   const s = raw.trim()
   if (s === '') return null // 留空 → 后端派生默认子域名
   if (s.length < 3 || s.length > 63) return '子域名需 3–63 个字符'
-  if (!/^[a-z0-9-]+$/.test(s))
+  if (!/^[a-z0-9-]+$/.test(s)) {
     return '只能用小写字母、数字、连字符（不支持中文 / 大写 / 空格 / 下划线 / 点）'
+  }
   if (s.startsWith('-') || s.endsWith('-')) return '不能以连字符开头或结尾'
   if (RESERVED_SLUGS.has(s)) return '该子域名为系统保留词，请换一个'
   return null
@@ -133,12 +135,21 @@ export function AgentPlansPurchase() {
       const data = res.data
       const wxQr = data?.pay?.wxpay_qr
       if (wxQr) {
-        setQrState({ orderNo: data?.order_no, qr: wxQr, amountCny: data?.amount_cny })
+        setQrState({
+          orderNo: data?.order_no,
+          qr: wxQr,
+          amountCny: data?.amount_cny,
+        })
         return
       }
       const aliUrl = data?.pay?.alipay_url
       if (aliUrl) {
-        window.location.href = aliUrl
+        const safeAliUrl = normalizeHttpNavigationUrl(aliUrl)
+        if (!safeAliUrl) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
+        window.location.href = safeAliUrl
         return
       }
       toast.success(res.message || t('Order created successfully'))
@@ -178,7 +189,8 @@ export function AgentPlansPurchase() {
         <div className='flex flex-col gap-6 pb-4'>
           <p className='text-muted-foreground text-sm'>
             {t('Become Agent Intro', {
-              defaultValue: '选择一档代理套餐,支付开通后即成为对应档位代理(一次性付费,含有效期)。首次开通请填写你的专属子域名与站点名;已是代理则为升级,可留空。',
+              defaultValue:
+                '选择一档代理套餐,支付开通后即成为对应档位代理(一次性付费,含有效期)。首次开通请填写你的专属子域名与站点名;已是代理则为升级,可留空。',
             })}
           </p>
 
@@ -186,20 +198,20 @@ export function AgentPlansPurchase() {
             <Alert>
               <AlertDescription>
                 {t('Become Agent No Payment', {
-                  defaultValue: '管理员尚未配置支付渠道,暂无法在线开通,请联系客服。',
+                  defaultValue:
+                    '管理员尚未配置支付渠道,暂无法在线开通,请联系客服。',
                 })}
               </AlertDescription>
             </Alert>
           ) : null}
 
-          {
-            /* 首次开通信息(已是代理 → 升级/续期,后端忽略 slug/name → 隐藏输入,免得填了没反应) */
-          }
+          {/* 首次开通信息(已是代理 → 升级/续期,后端忽略 slug/name → 隐藏输入,免得填了没反应) */}
           {isExistingAgent ? (
             <Alert>
               <AlertDescription>
                 {t('Become Agent Upgrade Hint', {
-                  defaultValue: '你已是代理:购买将升级/续期你现有的代理站(档位、批发折扣与有效期),不更改站点标识与子域名;升级到 OEM/API 档会自动开通你的独立站点。',
+                  defaultValue:
+                    '你已是代理:购买将升级/续期你现有的代理站(档位、批发折扣与有效期),不更改站点标识与子域名;升级到 OEM/API 档会自动开通你的独立站点。',
                 })}
               </AlertDescription>
             </Alert>
@@ -223,7 +235,8 @@ export function AgentPlansPurchase() {
                 ) : (
                   <p className='text-muted-foreground/70 text-[11px]'>
                     {t('Become Agent Slug Hint', {
-                      defaultValue: '将生成 <子域名>.wedreamhub.com(仅 OEM/API 档启用站点)',
+                      defaultValue:
+                        '将生成 <子域名>.wedreamhub.com(仅 OEM/API 档启用站点)',
                     })}
                   </p>
                 )}
@@ -234,7 +247,9 @@ export function AgentPlansPurchase() {
                 </label>
                 <Input
                   id='agent-name'
-                  placeholder={t('Become Agent Name Ph', { defaultValue: '我的 AI 站' })}
+                  placeholder={t('Become Agent Name Ph', {
+                    defaultValue: '我的 AI 站',
+                  })}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className='h-9'
@@ -243,9 +258,7 @@ export function AgentPlansPurchase() {
             </div>
           )}
 
-          {
-            /* 支付方式 */
-          }
+          {/* 支付方式 */}
           {officialProviders.length > 0 ? (
             <div className='flex flex-wrap items-center gap-2'>
               <span className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
@@ -258,9 +271,7 @@ export function AgentPlansPurchase() {
             </div>
           ) : null}
 
-          {
-            /* 套餐卡 */
-          }
+          {/* 套餐卡 */}
           {isLoading ? (
             <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
               {[0, 1, 2].map((i) => (
@@ -272,14 +283,18 @@ export function AgentPlansPurchase() {
               {sorted.map((plan) => (
                 <Card
                   key={plan.id}
-                  className={plan.is_recommended ? 'border-primary/40 shadow-lg' : ''}
+                  className={
+                    plan.is_recommended ? 'border-primary/40 shadow-lg' : ''
+                  }
                 >
                   <CardHeader>
                     <CardTitle className='flex items-center justify-between'>
                       <span>{plan.name}</span>
                       {plan.is_recommended ? (
                         <span className='bg-primary text-primary-foreground rounded-full px-2 py-0.5 text-[11px]'>
-                          {t('Agent Join Plan Recommended', { defaultValue: '推荐' })}
+                          {t('Agent Join Plan Recommended', {
+                            defaultValue: '推荐',
+                          })}
                         </span>
                       ) : null}
                     </CardTitle>
@@ -315,12 +330,11 @@ export function AgentPlansPurchase() {
                       {plan.grant_level >= 1 ? (
                         <li className='flex items-center gap-1.5'>
                           <Globe className='text-primary h-3.5 w-3.5' />
-                          {
-                            /* API 档(can_api)明示「含 OEM 全部能力」——API=OEM 超集(2026-07-08 用户定档);OEM 档保持原文案 */
-                          }
+                          {/* API 档(can_api)明示「含 OEM 全部能力」——API=OEM 超集(2026-07-08 用户定档);OEM 档保持原文案 */}
                           {plan.grant_can_api
                             ? t('Become Agent Cap Oem Superset', {
-                                defaultValue: '含 OEM 全部能力(独立域名 + 站点装修)',
+                                defaultValue:
+                                  '含 OEM 全部能力(独立域名 + 站点装修)',
                               })
                             : t('Become Agent Cap Oem', {
                                 defaultValue: '独立域名 + 站点装修(OEM)',
@@ -330,7 +344,9 @@ export function AgentPlansPurchase() {
                       {plan.grant_can_api ? (
                         <li className='flex items-center gap-1.5'>
                           <KeyRound className='text-primary h-3.5 w-3.5' />
-                          {t('Become Agent Cap Api', { defaultValue: '开放 API 能力' })}
+                          {t('Become Agent Cap Api', {
+                            defaultValue: '开放 API 能力',
+                          })}
                         </li>
                       ) : null}
                     </ul>
@@ -346,7 +362,9 @@ export function AgentPlansPurchase() {
                     >
                       {buyingId === plan.id
                         ? t('Processing', { defaultValue: '处理中…' })
-                        : t('Agent Join Plan CTA', { defaultValue: '立即开通' })}
+                        : t('Agent Join Plan CTA', {
+                            defaultValue: '立即开通',
+                          })}
                     </Button>
                   </CardContent>
                 </Card>
@@ -354,9 +372,7 @@ export function AgentPlansPurchase() {
             </div>
           )}
 
-          {
-            /* 微信支付二维码 */
-          }
+          {/* 微信支付二维码 */}
           {qrState ? (
             <Card className='border-primary/30 mx-auto max-w-sm'>
               <CardHeader>
@@ -365,7 +381,8 @@ export function AgentPlansPurchase() {
                 </CardTitle>
                 <CardDescription>
                   {t('Become Agent Scan Hint', {
-                    defaultValue: '支付完成后代理身份将自动开通,可刷新页面查看。',
+                    defaultValue:
+                      '支付完成后代理身份将自动开通,可刷新页面查看。',
                   })}
                 </CardDescription>
               </CardHeader>
@@ -379,8 +396,13 @@ export function AgentPlansPurchase() {
                   </p>
                 ) : null}
                 <div className='flex gap-2'>
-                  <Button variant='outline' onClick={() => window.location.reload()}>
-                    {t('Become Agent Paid Refresh', { defaultValue: '我已支付,刷新' })}
+                  <Button
+                    variant='outline'
+                    onClick={() => window.location.reload()}
+                  >
+                    {t('Become Agent Paid Refresh', {
+                      defaultValue: '我已支付,刷新',
+                    })}
                   </Button>
                   <Button variant='ghost' onClick={() => setQrState(null)}>
                     {t('Close', { defaultValue: '关闭' })}

@@ -18,8 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo } from 'react'
 
-import { filterBySearch } from '@/features/pricing/lib/filters'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
+import { filterBySearch } from '@/features/pricing/lib/filters'
 
 import { filterByCapability } from '../lib/capabilities'
 import type { CatalogFilter } from '../types'

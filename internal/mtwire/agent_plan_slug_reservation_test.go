@@ -16,6 +16,8 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 	"github.com/QuantumNous/new-api/internal/tenant"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // stubAgtUnpaid 把对账查单桩成「确认未付」，测试结束自动还原。
@@ -225,4 +227,95 @@ func TestAgentSlugReservation_NotReleasedWhileSiblingOrderPending(t *testing.T) 
 	if n != 0 {
 		t.Fatalf("全部订单过期后预留仍未释放——弃单永久占用 slug")
 	}
+}
+
+func TestAgentSlugReservation_PaidClaimPreventsExpiryRelease(t *testing.T) {
+	app, _ := newAgentPlanActivateTestApp(t)
+	ctx := context.Background()
+	const owner = int64(935)
+	rid, err := app.precheckAndReserveAgentSlug(ctx, owner, "claim-wins", "")
+	require.NoError(t, err)
+	require.Positive(t, rid)
+	old := time.Now().Add(-3 * time.Hour)
+	order := &agentPlanOrderRow{
+		OrderNo: "AGTCLAIMWINS", OwnerUserID: owner, PlanID: 2, PlanCode: "oem", AmountCNY: 2999,
+		Status: agtOrderPending, GrantLevel: 1, ValidDays: 365, Slug: "claim-wins",
+		AgentTenantID: rid, CreatedAt: old, UpdatedAt: old,
+	}
+	require.NoError(t, app.DB.Create(order).Error)
+
+	// Force the callback's durable claim to be the first CAS winner. Expiry must
+	// observe zero affected rows and leave the reservation for provisioning.
+	claim := app.DB.Model(&agentPlanOrderRow{}).
+		Where("order_no = ? AND status = ?", order.OrderNo, agtOrderPending).
+		Updates(map[string]any{"status": agtOrderActivating, "updated_at": time.Now()})
+	require.NoError(t, claim.Error)
+	require.Equal(t, int64(1), claim.RowsAffected)
+	won, err := app.expireStuckAgentPlanOrder(ctx, order)
+	require.NoError(t, err)
+	assert.False(t, won)
+
+	var reservationCount int64
+	require.NoError(t, app.DB.Table("tenants").Where("id = ?", rid).Count(&reservationCount).Error)
+	assert.Equal(t, int64(1), reservationCount)
+	var persisted agentPlanOrderRow
+	require.NoError(t, app.DB.Take(&persisted, "order_no = ?", order.OrderNo).Error)
+	assert.Equal(t, agtOrderActivating, persisted.Status)
+}
+
+func TestAgentSlugReservation_LatePaidAfterReleaseSurvivesThirdPartyClaim(t *testing.T) {
+	app, _ := newAgentPlanActivateTestApp(t)
+	ctx := context.Background()
+	const paidOwner = int64(940)
+	const nextOwner = int64(941)
+	require.NoError(t, app.DB.Exec(`INSERT INTO users (id, tenant_id) VALUES (?, 0), (?, 0)`, paidOwner, nextOwner).Error)
+
+	rid, err := app.precheckAndReserveAgentSlug(ctx, paidOwner, "released-then-paid", "")
+	require.NoError(t, err)
+	require.Positive(t, rid)
+	old := time.Now().Add(-3 * time.Hour)
+	order := &agentPlanOrderRow{
+		OrderNo: "AGTLATEPAID", OwnerUserID: paidOwner, PlanID: 2, PlanCode: "oem", AmountCNY: 2999,
+		Status: agtOrderPending, GrantLevel: 1, ValidDays: 365, Slug: "released-then-paid",
+		AgentTenantID: rid, CreatedAt: old, UpdatedAt: old,
+	}
+	require.NoError(t, app.DB.Create(order).Error)
+	won, err := app.expireStuckAgentPlanOrder(ctx, order)
+	require.NoError(t, err)
+	require.True(t, won)
+
+	// The abandoned-order release is real: a new buyer may reserve the original
+	// slug before a delayed, trusted paid callback reaches this process.
+	nextReservationID, err := app.precheckAndReserveAgentSlug(ctx, nextOwner, "released-then-paid", "")
+	require.NoError(t, err)
+	require.Positive(t, nextReservationID)
+	require.NoError(t, app.ActivatePaidAgentPlanOrder(ctx, order.OrderNo, order.AmountCNY))
+
+	var persisted agentPlanOrderRow
+	require.NoError(t, app.DB.Take(&persisted, "order_no = ?", order.OrderNo).Error)
+	assert.Equal(t, agtOrderActivated, persisted.Status)
+	assert.NotEqual(t, rid, persisted.AgentTenantID)
+	assert.NotEqual(t, nextReservationID, persisted.AgentTenantID)
+
+	var recovered struct {
+		Slug        string
+		OwnerUserID int64
+		Status      string
+	}
+	require.NoError(t, app.DB.Table("tenants").Select("slug, owner_user_id, status").
+		Where("id = ?", persisted.AgentTenantID).Take(&recovered).Error)
+	assert.Equal(t, paidAgentRecoverySlug(order, 0), recovered.Slug)
+	assert.Equal(t, paidOwner, recovered.OwnerUserID)
+	assert.Equal(t, string(tenant.StatusActive), recovered.Status)
+
+	var nextReservation struct {
+		Slug        string
+		OwnerUserID int64
+		Status      string
+	}
+	require.NoError(t, app.DB.Table("tenants").Select("slug, owner_user_id, status").
+		Where("id = ?", nextReservationID).Take(&nextReservation).Error)
+	assert.Equal(t, "released-then-paid", nextReservation.Slug)
+	assert.Equal(t, nextOwner, nextReservation.OwnerUserID)
+	assert.Equal(t, string(tenant.StatusDeleted), nextReservation.Status, "paid recovery must not steal the next buyer's reservation")
 }

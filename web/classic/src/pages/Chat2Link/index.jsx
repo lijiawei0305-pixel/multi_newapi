@@ -17,29 +17,49 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTokenKeys } from '../../hooks/chat/useTokenKeys';
+import { useTranslation } from 'react-i18next';
+import {
+  assignHttpNavigationUrl,
+  findFirstSafeWebChatTemplate,
+  resolveChatTemplateUrl,
+} from '../../helpers/safeNavigation';
 
-const chat2page = () => {
-  const { keys, chatLink, serverAddress, isLoading } = useTokenKeys();
+const Chat2Page = () => {
+  const { t } = useTranslation();
+  const { keys, serverAddress, isLoading } = useTokenKeys();
+  const redirectedRef = useRef(false);
+  const [failed, setFailed] = useState(false);
 
-  const comLink = (key) => {
-    if (!chatLink || !serverAddress || !key) return '';
-    return `${chatLink}/#/?settings={"key":"sk-${key}","url":"${encodeURIComponent(serverAddress)}"}`;
-  };
-
-  if (keys.length > 0) {
-    const redirectLink = comLink(keys[0]);
-    if (redirectLink) {
-      window.location.href = redirectLink;
+  useEffect(() => {
+    if (redirectedRef.current || isLoading || !keys[0] || !serverAddress) {
+      return;
     }
-  }
+    try {
+      const chats = JSON.parse(localStorage.getItem('chats') || '[]');
+      const template = findFirstSafeWebChatTemplate(chats);
+      const redirectLink = resolveChatTemplateUrl(
+        template,
+        serverAddress,
+        keys[0],
+        { webOnly: true },
+      );
+      if (redirectLink && assignHttpNavigationUrl(redirectLink)) {
+        redirectedRef.current = true;
+        return;
+      }
+      setFailed(true);
+    } catch {
+      setFailed(true);
+    }
+  }, [isLoading, keys, serverAddress]);
 
   return (
     <div className='mt-[60px] px-2'>
-      <h3>正在加载，请稍候...</h3>
+      <h3>{failed ? t('请联系管理员配置聊天链接') : t('正在跳转...')}</h3>
     </div>
   );
 };
 
-export default chat2page;
+export default Chat2Page;

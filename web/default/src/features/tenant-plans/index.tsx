@@ -16,20 +16,26 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearch } from '@tanstack/react-router'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { cn } from '@/lib/utils'
 import { RechargeQrDialog } from '@/features/wallet/components/dialogs/recharge-qr-dialog'
-import { getPaymentIcon } from '@/features/wallet/lib'
 import { useRechargeMethods } from '@/features/wallet/hooks/use-recharge-methods'
 import type { RechargeProvider } from '@/features/wallet/hooks/use-tenant-recharge'
+import { getPaymentIcon } from '@/features/wallet/lib'
+import {
+  normalizeHttpNavigationUrl,
+  openHttpUrlInNewTab,
+} from '@/lib/safe-navigation'
+import { cn } from '@/lib/utils'
+
 import {
   getTenantSubscriptions,
   getTenantTokenPlans,
@@ -119,14 +125,22 @@ function TenantPlansContent() {
       // Alipay: redirect the browser to the gateway page.
       const aliUrl = data?.pay?.alipay_url
       if (aliUrl) {
-        window.location.href = aliUrl
+        const safeAliUrl = normalizeHttpNavigationUrl(aliUrl)
+        if (!safeAliUrl) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
+        window.location.href = safeAliUrl
         return
       }
       // Fallback (legacy shape): open whatever pay URL is present in a new tab.
       const payUrl = extractPayUrl(data)
       if (payUrl) {
+        if (!openHttpUrlInNewTab(payUrl)) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
         toast.success(t('Order created. Redirecting to payment...'))
-        window.open(payUrl, '_blank', 'noopener,noreferrer')
       } else {
         toast.success(res.message || t('Order created successfully'))
       }

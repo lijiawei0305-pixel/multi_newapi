@@ -9,7 +9,7 @@ import (
 )
 
 // Gateway 同时实现 PaymentGateway（下单）与 CallbackHandler（回调入账分发）。
-// 部署于 auth-service 单进程；所有依赖以接口注入，便于单测（mock SDK/Sink/Repo）。
+// 所有依赖以接口注入，便于测试和生产装配。
 type Gateway struct {
 	repo       OrderRepo
 	sdk        PaySDK

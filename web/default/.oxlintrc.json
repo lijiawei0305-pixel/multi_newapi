@@ -197,6 +197,12 @@
       }
     },
     {
+      "files": ["src/features/landing-react/scene3d.ts"],
+      "rules": {
+        "typescript/no-explicit-any": "off"
+      }
+    },
+    {
       "files": ["**/scripts/**/*.{js,mjs,cjs}"],
       "rules": {
         "no-console": "off",

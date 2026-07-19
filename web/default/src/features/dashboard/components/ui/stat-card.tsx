@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { LucideIcon } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
-import { type LucideIcon } from 'lucide-react'
-import { cn } from '@/lib/utils'
+
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 
 type StatCardTone = 'rose' | 'teal' | 'gray'
 type StatCardSparklineVariant = 'bars' | 'line'
@@ -96,7 +97,9 @@ function buildLineSparkline(values?: number[]) {
       sanitized.length === 1
         ? width / 2
         : (index / (sanitized.length - 1)) * width
-    const normalized = range > 0 ? (value - min) / range : max > 0 ? 0.5 : 0
+    let normalized = 0
+    if (range > 0) normalized = (value - min) / range
+    else if (max > 0) normalized = 0.5
     const y = height - padding - normalized * (height - padding * 2)
 
     return { x, y }
@@ -106,7 +109,8 @@ function buildLineSparkline(values?: number[]) {
     .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
     .join(' ')
   const firstPoint = points[0]
-  const lastPoint = points[points.length - 1]
+  const lastPoint = points.at(-1)
+  if (!firstPoint || !lastPoint) return null
   const areaPath = `${linePath} L ${lastPoint.x} ${height} L ${firstPoint.x} ${height} Z`
 
   return {
@@ -117,7 +121,7 @@ function buildLineSparkline(values?: number[]) {
 
 function LineSparkline(props: { values?: number[]; tone: StatCardTone }) {
   const rawGradientId = useId()
-  const gradientId = `stat-card-line-${rawGradientId.replace(/:/g, '')}`
+  const gradientId = `stat-card-line-${rawGradientId.replaceAll(':', '')}`
   const paths = buildLineSparkline(props.values)
 
   if (!paths) return <div className='h-8' aria-hidden='true' />
@@ -158,12 +162,16 @@ function LineSparkline(props: { values?: number[]; tone: StatCardTone }) {
 
 function BarSparkline(props: { values?: number[]; tone: StatCardTone }) {
   const sparkline = normalizeSparkline(props.values)
+  const bars = sparkline.map((height, slot) => ({
+    id: `sparkline-slot-${slot}`,
+    height,
+  }))
 
   return (
     <div className='flex h-8 items-end gap-1' aria-hidden='true'>
-      {sparkline.map((height, index) => (
+      {bars.map(({ id, height }) => (
         <span
-          key={`spark-${index}`}
+          key={id}
           className={cn(
             'flex-1 rounded-t-sm bg-linear-to-t',
             height <= 0 && 'opacity-20',
@@ -220,12 +228,13 @@ export function StatCard(props: StatCardProps) {
         {props.action && <div className='shrink-0'>{props.action}</div>}
       </div>
 
-      {props.loading ? (
+      {props.loading && (
         <div className='flex flex-col gap-1.5'>
           <Skeleton className='h-7 w-24' />
           <Skeleton className='h-3.5 w-32' />
         </div>
-      ) : props.error ? (
+      )}
+      {!props.loading && props.error && (
         <div className='flex flex-col gap-1'>
           <div className='text-muted-foreground mt-0.5 font-mono text-base font-bold tracking-tight break-all tabular-nums sm:text-2xl'>
             --
@@ -234,7 +243,8 @@ export function StatCard(props: StatCardProps) {
             {props.description}
           </p>
         </div>
-      ) : (
+      )}
+      {!props.loading && !props.error && (
         <div className='flex flex-col gap-1'>
           <div className='text-foreground font-mono text-2xl font-semibold tracking-tight break-all tabular-nums'>
             {props.value}
@@ -245,11 +255,13 @@ export function StatCard(props: StatCardProps) {
         </div>
       )}
 
-      {props.details?.length ? (
+      {props.details && props.details.length > 0 && (
         <StatCardDetails details={props.details} />
-      ) : sparklineVariant === 'line' ? (
+      )}
+      {!props.details?.length && sparklineVariant === 'line' && (
         <LineSparkline values={props.sparkline} tone={tone} />
-      ) : (
+      )}
+      {!props.details?.length && sparklineVariant !== 'line' && (
         <BarSparkline values={props.sparkline} tone={tone} />
       )}
     </div>

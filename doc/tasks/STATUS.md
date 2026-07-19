@@ -1,22 +1,22 @@
 # 📍 现状 · 唯一权威（STATUS）
 
-> **本文件是项目当前状态的唯一权威来源。** 盘自 ground truth：git（244 提交，6/28→7/7）+ 后端路由表（`router/mt-router.go`）+ 前端路由树 + 部署实况，**不是计划口吻**。
+> **本文件是项目当前状态的唯一权威入口。** 功能事实必须由当前源码、后端路由表（`router/mt-router.go`）、前端路由树和可复现门禁共同证明，**不是计划口吻**；发布状态必须另以运行制品版本与部署清单证明，不能由源码完成度反推。
 > **取代**：`doc/tasks/progress.md`、`doc/tasks/phase2.md`、`doc/tasks/00~13-*.md`（均降级为**历史存档**，勿再据以判断现状）。
 > **需求权威**仍是 [`doc/proposal.md`](../proposal.md) v2.0；跨模块设计见 [`doc/detailed-design.md`](../detailed-design.md) 及各专题 doc。
-> **最后核实**：2026-07-07（ground-truth 逐项核对；纠正了"违禁词/recharge_spread/整体进度"等多处旧文档误差）。
+> **最后核实**：2026-07-19（本地完整源码/门禁 + VPS 只读拓扑核对）。本次审计修复仍只在本地 worktree，未部署、未切流；下文“已上线”描述的是核对到的既有产品基线，不表示本地未发布修改已进入生产。
 
 ---
 
 ## 一句话
 
-**已建成并上线的多租户代理分销平台。** 三域名 `api` / `www` / `tokendream`.wedreamhub.com 走 fork 栈 `newapi_test`（`127.0.0.1:3100`），live。proposal 的核心能力**几乎全部落地 + 有 UI**；真正剩余的很少（见 §三）。
+**已建成并上线基线的多租户代理分销平台。** 三域名 `api` / `www` / `tokendream`.wedreamhub.com 走 fork 栈 `newapi_test`（`127.0.0.1:3100`），live。proposal 的核心能力**几乎全部落地 + 有 UI**；本地审计加固须经完整发布门禁与单独授权部署后，才可计入线上状态。
 
 ## 部署实况
 
 - 服务器 `64.90.4.114`｜宝塔 Docker｜**单栈 `newapi_test`**（app + redis + `mysql:8.2`，DB `new-api-test`），监听 `127.0.0.1:3100`。
 - 三域名：CF（**Origin CA 证书**，到 2041）→ 宝塔 nginx → 3100。原 stock 栈 `newapi_YFNf`（:3000）已于 07-03 删除。
-- 代码在 **git `main`**；服务器源码为 **rsync 非 git 副本**；部署 = 定向覆盖改动文件 + 容器重建（**非**整树 deploy.sh）。今日部署二进制含下述全部特性。
-- `main` 当前**领先 `origin/main` 18 个提交**（bulb-orbit + 支付修复 + 今日风控/文档，未 push；服务器部署走 rsync 不依赖 push）。
+- 本地代码在 **git `main`**；服务器 `/root/newapi-test` 是非 git release 副本。标准发布路径是 `deploy/ops/deploy.sh` 的配对备份、干净 staging 换树、制品版本/readiness 验证与失败回滚；不得再用定向覆盖文件冒充可重建发布。
+- 分支领先/落后与 dirty 状态是瞬时事实，发布前以 `git status`、`git rev-parse HEAD`、生成的 `VERSION` 和 `deploy-manifest.json` 实测；本文不固化易过期的提交计数。
 
 ---
 
@@ -58,14 +58,13 @@
 
 ## 三、真正剩余 / 可选（很少）
 
-**三期(P3 · 品牌营销+国际化续订,2026-07-08 对账,详见 [acceptance.md](../acceptance.md) Part 3)**：≈ **完成一半**——P3-DOM-01 域名/SSL ✅ 超规格(自助绑定+自动签发+**到期提醒已补**[徽标+回刷])；P3-FE-01 营销化 ✅(营销字段全渲染+10 套主题预设)；P3-I18N-01 多语言 ✅(硬编码清零+六语条目全补齐[zh5660/en5581/其余5625],fallback 回归已修;上游拼接键 ~39 记边界)；P3-RNW-01 续订 🟡 **降级版达成**(到期提醒[≤7天黄/过期宽限红]+一键手动续费深链自动下单;全自动免密代扣仍 ⬜ 待代扣资质)；**P3-CUR-01 多币种 ⬜ 未启动**。**#13 四份交付手册 ✅(2026-07-08)**:落于站内 `/docs`「平台手册」节(营销页与模板/OEM 域名与证书/续订/多语言与多币种),六语。合同 13 条仅剩:套餐对比、主站模板入口、多币种(用户暂缓)、全自动代扣(外部资质)。
+**三期(P3 · 品牌营销+国际化续订,2026-07-08 对账,详见 [acceptance.md](../acceptance.md) Part 3)**：≈ **完成一半**——P3-DOM-01 域名/SSL ✅ 超规格(自助绑定+自动签发+**到期提醒已补**[徽标+回刷])；P3-FE-01 营销化 ✅(营销字段全渲染+10 套主题预设)；P3-I18N-01 多语言 ✅(硬编码清零；严格 source/catalog 门禁现扫描 4,777 个 source/static keys，六语 catalog 各 5,905 条，缺失/多余/占位符/未翻译/动态 allowlist 漂移均为 0)；P3-RNW-01 续订 🟡 **降级版达成**(到期提醒[≤7天黄/过期宽限红]+一键手动续费深链自动下单;全自动免密代扣仍 ⬜ 待代扣资质)；**P3-CUR-01 多币种 ⬜ 未启动**。**#13 四份交付手册 ✅(2026-07-08)**:落于站内 `/docs`「平台手册」节(营销页与模板/OEM 域名与证书/续订/多语言与多币种),六语。合同 13 条仅剩:套餐对比、主站模板入口、多币种(用户暂缓)、全自动代扣(外部资质)。
 
 - ~~7c-2 满额提醒(用户侧)~~ → **✅ 已落地（2026-07-07）**：`SubscriptionUsageBanner` 全局横幅——套餐用量 ≥80% 黄条 /≥100% 红条，可关闭（按 订阅×档位×计费周期 记忆，跨周期/升档自动重弹），CTA 跳 `/plans`；纯前端读原生订阅快照（spec `doc/specs/2026-07-07-subscription-usage-banner.md`，提交 e85afe5..447bed9，SDD 终审 Ready-to-merge）。**服务端主动推送（AlertSink 邮件/webhook）已随 breakage 监控一并落地并部署验证（共用 `internal/alert` sink，2026-07-08 上线测试栈）**。
 - **[已部署+验证 ✅] breakage 监控（P2-BRK-01，2026-07-08 上线测试栈）** —— 独立新页「额度沉淀监控」：4 指标卡（活跃套餐剩余/到期未使用/钱包未消耗/系统异常）+ 明细筛选表 + CSV 导出 + 快照趋势图；后端 `internal/breakage`（新表 `breakage_snapshots`[唯一键 + `idx_breakage_snap_tenant_period`] + 4 指标聚合 + master-only 每日快照 job + 幂等回填）+ `internal/alert`（邮件/webhook AlertSink，阈值后台可配，**兑现 7c-2 服务端主动推送**）+ `/api/admin/breakage/**`（租户隔离，门#4 审查 + 测试锁定）。多 agent 并行实施 + 4 透镜对抗审查（critical=0，warning 已修）。**服务器验证**：`golang:1.25.1` `go build ./internal/... ./router/...` + `go test`（breakage/alert/mtwire，含租户隔离/CSV/Snapshots）全绿；容器重建镜像 `d6d4faad`；迁移建表 + 两索引成功、快照 job 运行（`upserted rows`）；3 端点 HTTP 401（鉴权就位）、三域名 200。修复 MySQL `CREATE INDEX IF NOT EXISTS` 不兼容（改方言分支，[[mysql-create-index-if-not-exists]]）。`main` 已推 origin（提交 `403be6c`）。
 - **8c 运维零头** —— 迁移版本化、监控告警渠道接线。
 - **8a CF「Full (strict)」模式** —— 源站已具 Origin CA 证书；仅差在**你的 CF 面板**切模式。
 - **Trial 设备/实名维（2026-07-17 修正设计）** —— ~~需前端上送 `device_id`/`real_name_id`~~ **作废：反滥用维度绝不能由被监管方自报**（客户端自报可发随机串免费绕过、或填受害者标识反向武器化）。现状：**设备维已由服务端从 `ClientIP+User-Agent` 派生**（`mtwire.deviceFingerprint`，购买端点不再读请求体）→ 对真实流量生效；**实名维暂禁用**（`RealNameID` 恒空），待接入可信 KYC 后由 authenticated user 的服务端记录派生。用户维一直生效。
-- **vhost 注释清理** —— 3 份配置注释过期（"自签"/`newapi_YFNf`/3000），无功能影响。
 - **[已修 ✅ · 已部署验证] 审计 #12 USD→quota 换算 DRY（2026-07-09）** —— 三处 `$→quota`（充值 `rechargeQuota` / 订阅 `usdToQuota` / 分销 `usdToQuotaUnits`）收敛为单一核心 `internal/mtwire/money.go: usdToQuotaRound(usd, rounding)`（decimal 精确乘法 + 显式取整：充值/分销截断、订阅进位对齐原生 Ceil），各调用点签名/行为不变；顺带把两处 float 截断改 decimal，消除 `int(0.29×QuotaPerUnit)=144999` 少算 1 quota 的浮点误差。**已提交 `main`（`ba22be2`，仅这 5 文件，与并行 WIP 解耦）**；服务器**已部署**——`git apply` 定向打补丁到 `/root/newapi-test`（保留他人 WIP 不动）→ `up -d --build`，`go build` 实跑 87.6s 重编译，容器重建健康、内网 3100 + 三域名 200；新增表驱动 `TestUsdToQuotaRound`（服务器 `golang:1.26.1-alpine`/`CGO_ENABLED=0` build+vet+test 全绿）。详见 `audit-report-newapi628-2026-07-09.html` #12。
 
 ## 四、外部阻塞 —— 2026-07-07 均已由用户解除 ✅

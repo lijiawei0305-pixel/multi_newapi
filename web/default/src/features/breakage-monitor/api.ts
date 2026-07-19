@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+
 import type {
   ApiResponse,
   BreakageDetailParams,
@@ -76,7 +77,7 @@ function filenameFromDisposition(
   const star = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(disposition)
   if (star?.[1]) {
     try {
-      return decodeURIComponent(star[1].trim().replace(/^["']|["']$/g, ''))
+      return decodeURIComponent(star[1].trim().replaceAll(/^["']|["']$/g, ''))
     } catch {
       /* 退回普通 filename */
     }

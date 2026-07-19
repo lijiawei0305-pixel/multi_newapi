@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,8 @@ import (
 	"github.com/QuantumNous/new-api/internal/agent"
 	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tenant"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // newPayoutTestApp 组装一个仅含 AgentService/Withdrawals 的最小 App：收款账户 + mark-paid
@@ -31,6 +34,34 @@ func newPayoutTestApp() (*App, *agent.MemRepo) {
 		AgentService: agent.NewService(repo, nil),
 		Withdrawals:  agent.NewWithdrawalService(repo),
 	}, repo
+}
+
+func TestReviewWithdrawalRejectsMalformedOptionalBodyBeforeStateChange(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app, repo := newPayoutTestApp()
+	ctx := context.Background()
+	require.NoError(t, repo.SetPayoutAccount(ctx, 1, agent.PayoutAccount{
+		Method: agent.PayoutAlipay, Account: "alice@example.com", Name: "Alice",
+	}))
+	_, err := repo.AppendEarning(ctx, agent.EarningEntry{
+		TenantID: 1, SourceType: agent.SourceManualAdjustment, SourceID: "malformed-review", Amount: 100,
+	})
+	require.NoError(t, err)
+	withdrawal, err := app.Withdrawals.Request(ctx, agent.WithdrawInput{TenantID: 1, Amount: 40})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/admin/withdrawals/1/reject", strings.NewReader(`{"remark":`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(withdrawal.ID, 10)}}
+
+	app.HandleAdminRejectWithdrawal(c)
+
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	stored, err := repo.GetWithdrawal(ctx, withdrawal.ID)
+	require.NoError(t, err)
+	assert.Equal(t, agent.WithdrawPending, stored.Status)
 }
 
 // newJSONCtx 建一个带（可选）JSON body 的 gin 测试上下文。

@@ -28,6 +28,498 @@ For commercial licensing, please contact support@quantumnous.com
  */
 export function HeroIllustration({ className }: { className?: string }) {
   return (
-    <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 360"><defs><linearGradient id="r2-plat-top" x1="0" y1="0" x2="0.5" y2="1"><stop offset="0" stopColor="#eef2fa"/><stop offset="1" stopColor="#ccd6e8"/></linearGradient><linearGradient id="r2-plat-left" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#828da7"/><stop offset="1" stopColor="#5b6482"/></linearGradient><linearGradient id="r2-plat-right" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#656f8a"/><stop offset="1" stopColor="#464f6b"/></linearGradient><linearGradient id="r2-srv-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#9fadff"/><stop offset="1" stopColor="#5560e6"/></linearGradient><linearGradient id="r2-srv-left" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#619af9"/><stop offset="1" stopColor="#4344cc"/></linearGradient><linearGradient id="r2-srv-right" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#7648d9"/><stop offset="1" stopColor="#3d2380"/></linearGradient><linearGradient id="r2-chip-top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#c99cff"/><stop offset="1" stopColor="#6a97f8"/></linearGradient><linearGradient id="r2-chip-left" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#6d28d9"/><stop offset="1" stopColor="#45197f"/></linearGradient><linearGradient id="r2-chip-right" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#9163f8"/><stop offset="1" stopColor="#6a28d4"/></linearGradient><linearGradient id="r2-line" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3b82f6"/><stop offset="0.5" stopColor="#6366f1"/><stop offset="1" stopColor="#a855f7"/></linearGradient><linearGradient id="r2-beam" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#e9d5ff" stopOpacity="0.95"/><stop offset="0.5" stopColor="#c084fc" stopOpacity="0.55"/><stop offset="1" stopColor="#a855f7" stopOpacity="0.05"/></linearGradient><radialGradient id="r2-core" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stopColor="#ffffff"/><stop offset="0.4" stopColor="#f0abfc"/><stop offset="0.75" stopColor="#b05cf6"/><stop offset="1" stopColor="#7c3aed"/></radialGradient><radialGradient id="r2-coreglow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stopColor="#d8b4fe" stopOpacity="0.55"/><stop offset="0.5" stopColor="#a855f7" stopOpacity="0.26"/><stop offset="1" stopColor="#a855f7" stopOpacity="0"/></radialGradient><radialGradient id="r2-node" cx="0.35" cy="0.32" r="0.8"><stop offset="0" stopColor="#ffffff"/><stop offset="0.32" stopColor="#c4b5fd"/><stop offset="0.7" stopColor="#8b5cf6"/><stop offset="1" stopColor="#4c1d95"/></radialGradient><radialGradient id="r2-nodehalo" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stopColor="#a855f7" stopOpacity="0.34"/><stop offset="0.6" stopColor="#8b5cf6" stopOpacity="0.12"/><stop offset="1" stopColor="#8b5cf6" stopOpacity="0"/></radialGradient><radialGradient id="r2-ambient" cx="0.5" cy="0.45" r="0.5"><stop offset="0" stopColor="#8b5cf6" stopOpacity="0.16"/><stop offset="0.6" stopColor="#6366f1" stopOpacity="0.06"/><stop offset="1" stopColor="#6366f1" stopOpacity="0"/></radialGradient><filter id="r2-soft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="7"/></filter><filter id="r2-ao" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="3.4"/></filter><filter id="r2-blur1" x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="2"/></filter></defs><ellipse cx="230" cy="140" rx="200" ry="150" fill="url(#r2-ambient)"/><ellipse cx="230" cy="328" rx="150" ry="28" fill="#334155" opacity="0.22" filter="url(#r2-soft)"/><g><polygon points="95,245 230,312 230,336 95,269" fill="url(#r2-plat-left)"/><polygon points="230,312 365,245 365,269 230,336" fill="url(#r2-plat-right)"/><polygon points="230,178 365,245 230,312 95,245" fill="url(#r2-plat-top)"/><g stroke="#64748b" strokeOpacity="0.32" strokeWidth="1"><line x1="128.8" y1="228.3" x2="263.8" y2="295.3"/><line x1="162.5" y1="211.5" x2="297.5" y2="278.5"/><line x1="196.3" y1="194.8" x2="331.3" y2="261.8"/><line x1="263.8" y1="194.8" x2="128.8" y2="261.8"/><line x1="297.5" y1="211.5" x2="162.5" y2="278.5"/><line x1="331.3" y1="228.3" x2="196.3" y2="295.3"/></g><polyline points="95,245 230,178 365,245" fill="none" stroke="#f4f7fc" strokeOpacity="0.55" strokeWidth="1.4"/><polyline points="95,245 230,312 365,245" fill="none" stroke="#3b4460" strokeOpacity="0.35" strokeWidth="1"/></g><ellipse cx="230" cy="266" rx="86" ry="23" fill="#1e1b4b" opacity="0.24" filter="url(#r2-ao)"/><g><polygon points="230,176 302,140 302,174 230,210" fill="url(#r2-srv-right)"/><polygon points="230,210 302,174 302,208 230,244" fill="url(#r2-srv-right)"/><polygon points="230,244 302,208 302,242 230,278" fill="url(#r2-srv-right)"/><polygon points="158,140 230,176 230,210 158,174" fill="url(#r2-srv-left)"/><polygon points="158,174 230,210 230,244 158,208" fill="url(#r2-srv-left)"/><polygon points="158,208 230,244 230,278 158,242" fill="url(#r2-srv-left)"/><polygon points="230,104 302,140 230,176 158,140" fill="url(#r2-srv-top)"/><g fill="#67e8f9"><circle cx="256" cy="183" r="1.7"/><circle cx="270" cy="176" r="1.7"/><circle cx="284" cy="169" r="1.7"/><circle cx="256" cy="217" r="1.7"/><circle cx="270" cy="210" r="1.7"/><circle cx="284" cy="203" r="1.7"/><circle cx="256" cy="251" r="1.7"/><circle cx="270" cy="244" r="1.7"/><circle cx="284" cy="237" r="1.7"/></g><g stroke="#2c2960" strokeOpacity="0.20" strokeWidth="1.1"><line x1="168" y1="154" x2="222" y2="181"/><line x1="168" y1="164" x2="222" y2="191"/><line x1="168" y1="188" x2="222" y2="215"/><line x1="168" y1="198" x2="222" y2="225"/><line x1="168" y1="222" x2="222" y2="249"/><line x1="168" y1="232" x2="222" y2="259"/></g><polyline points="158,176 230,212 302,176" fill="none" stroke="#cdd8ff" strokeOpacity="0.5" strokeWidth="1"/><polyline points="158,174 230,210 302,174" fill="none" stroke="#231e54" strokeOpacity="0.5" strokeWidth="1.6"/><polyline points="158,210 230,246 302,210" fill="none" stroke="#cdd8ff" strokeOpacity="0.5" strokeWidth="1"/><polyline points="158,208 230,244 302,208" fill="none" stroke="#231e54" strokeOpacity="0.5" strokeWidth="1.6"/><polyline points="158,242 230,278 302,242" fill="none" stroke="#1c1846" strokeOpacity="0.45" strokeWidth="1.2"/><polyline points="158,140 230,176 302,140" fill="none" stroke="#e6ecff" strokeOpacity="0.6" strokeWidth="1.3"/><polyline points="158,140 230,104 302,140" fill="none" stroke="#eef2ff" strokeOpacity="0.7" strokeWidth="1.3"/><line x1="158" y1="140" x2="158" y2="242" stroke="#bcd0ff" strokeOpacity="0.35" strokeWidth="1"/><line x1="302" y1="140" x2="302" y2="242" stroke="#1c1846" strokeOpacity="0.3" strokeWidth="1"/><line x1="230" y1="176" x2="230" y2="278" stroke="#1c1846" strokeOpacity="0.18" strokeWidth="1"/></g><g><ellipse cx="230" cy="105" rx="15" ry="5.5" fill="#a855f7" opacity="0.28" filter="url(#r2-blur1)"/><polygon points="220,90 230,111 240,111 236,90" fill="url(#r2-beam)" filter="url(#r2-blur1)"/><line x1="230" y1="90" x2="230" y2="108" stroke="#ede0ff" strokeOpacity="0.9" strokeWidth="1.7" strokeLinecap="round"/><circle cx="230" cy="97" r="1.5" fill="#ffffff" opacity="0.9"/><circle cx="230" cy="102" r="1.1" fill="#ffffff" opacity="0.65"/></g><g fill="none" stroke="url(#r2-line)" strokeLinecap="round"><g strokeWidth="5.5" strokeOpacity="0.12"><path d="M230,72 Q140,84 78,128"/><path d="M230,72 Q320,82 392,122"/><path d="M230,72 Q118,150 72,236"/><path d="M230,72 Q346,150 398,232"/></g><g strokeWidth="2.2" strokeOpacity="0.9"><path d="M230,72 Q140,84 78,128"/><path d="M230,72 Q320,82 392,122"/><path d="M230,72 Q118,150 72,236"/><path d="M230,72 Q346,150 398,232"/></g></g><g fill="#a5b4fc"><circle cx="150" cy="90" r="2"/><circle cx="312" cy="88" r="2"/><circle cx="132" cy="152" r="2"/><circle cx="330" cy="151" r="2"/></g><g><circle cx="78" cy="128" r="19" fill="url(#r2-nodehalo)"/><circle cx="78" cy="128" r="13" fill="url(#r2-node)"/><circle cx="78" cy="128" r="13" fill="none" stroke="#4c1d95" strokeOpacity="0.35" strokeWidth="1"/><ellipse cx="74" cy="123" rx="4" ry="2.6" fill="#ffffff" opacity="0.5"/><path d="M79.2,122 L75,129 L77.6,129 L76.6,134 L81.4,126.5 L78.7,126.5 Z" fill="#ffffff" opacity="0.95"/></g><g><circle cx="392" cy="122" r="19" fill="url(#r2-nodehalo)"/><circle cx="392" cy="122" r="13" fill="url(#r2-node)"/><circle cx="392" cy="122" r="13" fill="none" stroke="#4c1d95" strokeOpacity="0.35" strokeWidth="1"/><ellipse cx="388" cy="117" rx="4" ry="2.6" fill="#ffffff" opacity="0.5"/><circle cx="392" cy="122" r="6" fill="none" stroke="#ffffff" strokeOpacity="0.9" strokeWidth="1.4"/><circle cx="392" cy="122" r="2" fill="#ffffff" opacity="0.95"/></g><g><circle cx="72" cy="236" r="19" fill="url(#r2-nodehalo)"/><circle cx="72" cy="236" r="13" fill="url(#r2-node)"/><circle cx="72" cy="236" r="13" fill="none" stroke="#4c1d95" strokeOpacity="0.35" strokeWidth="1"/><ellipse cx="68" cy="231" rx="4" ry="2.6" fill="#ffffff" opacity="0.5"/><circle cx="72" cy="236" r="6" fill="none" stroke="#ffffff" strokeOpacity="0.9" strokeWidth="1.4"/><circle cx="72" cy="236" r="2" fill="#ffffff" opacity="0.95"/></g><g><circle cx="398" cy="232" r="19" fill="url(#r2-nodehalo)"/><circle cx="398" cy="232" r="13" fill="url(#r2-node)"/><circle cx="398" cy="232" r="13" fill="none" stroke="#4c1d95" strokeOpacity="0.35" strokeWidth="1"/><ellipse cx="394" cy="227" rx="4" ry="2.6" fill="#ffffff" opacity="0.5"/><path d="M399.2,226 L395,233 L397.6,233 L396.6,238 L401.4,230.5 L398.7,230.5 Z" fill="#ffffff" opacity="0.95"/></g><ellipse cx="230" cy="66" rx="36" ry="27" fill="url(#r2-coreglow)"/><g><polygon points="196,66 230,83 230,94 196,77" fill="url(#r2-chip-left)"/><polygon points="230,83 264,66 264,77 230,94" fill="url(#r2-chip-right)"/><polygon points="230,49 264,66 230,83 196,66" fill="url(#r2-chip-top)"/><polyline points="196,66 230,49 264,66" fill="none" stroke="#ffffff" strokeOpacity="0.5" strokeWidth="1.2"/><polyline points="196,66 230,83 264,66" fill="none" stroke="#2a1a5c" strokeOpacity="0.3" strokeWidth="1"/><polygon points="230,57 251,66 230,75 209,66" fill="none" stroke="#ffffff" strokeOpacity="0.32" strokeWidth="1"/><g fill="#a5f3fc"><circle cx="230" cy="53" r="1.5"/><circle cx="258" cy="66" r="1.5"/><circle cx="230" cy="79" r="1.5"/><circle cx="202" cy="66" r="1.5"/></g><circle cx="230" cy="66" r="5.5" fill="url(#r2-core)"/><circle cx="230" cy="66" r="2.2" fill="#ffffff"/><g stroke="#ffffff" strokeOpacity="0.75" strokeWidth="1" strokeLinecap="round"><line x1="230" y1="57" x2="230" y2="61"/><line x1="230" y1="71" x2="230" y2="75"/><line x1="221" y1="66" x2="225" y2="66"/><line x1="235" y1="66" x2="239" y2="66"/></g></g><g fill="#c4b5fd"><circle cx="300" cy="70" r="1.6" opacity="0.8"/><circle cx="168" cy="86" r="1.4" opacity="0.7"/><circle cx="278" cy="46" r="1.2" opacity="0.6"/><circle cx="190" cy="52" r="1.3" opacity="0.65"/></g></svg>
+    <svg
+      className={className}
+      xmlns='http://www.w3.org/2000/svg'
+      viewBox='0 0 460 360'
+    >
+      <defs>
+        <linearGradient id='r2-plat-top' x1='0' y1='0' x2='0.5' y2='1'>
+          <stop offset='0' stopColor='#eef2fa' />
+          <stop offset='1' stopColor='#ccd6e8' />
+        </linearGradient>
+        <linearGradient id='r2-plat-left' x1='0' y1='0' x2='0' y2='1'>
+          <stop offset='0' stopColor='#828da7' />
+          <stop offset='1' stopColor='#5b6482' />
+        </linearGradient>
+        <linearGradient id='r2-plat-right' x1='0' y1='0' x2='0' y2='1'>
+          <stop offset='0' stopColor='#656f8a' />
+          <stop offset='1' stopColor='#464f6b' />
+        </linearGradient>
+        <linearGradient id='r2-srv-top' x1='0' y1='0' x2='1' y2='1'>
+          <stop offset='0' stopColor='#9fadff' />
+          <stop offset='1' stopColor='#5560e6' />
+        </linearGradient>
+        <linearGradient id='r2-srv-left' x1='0' y1='0' x2='0' y2='1'>
+          <stop offset='0' stopColor='#619af9' />
+          <stop offset='1' stopColor='#4344cc' />
+        </linearGradient>
+        <linearGradient id='r2-srv-right' x1='0' y1='0' x2='0' y2='1'>
+          <stop offset='0' stopColor='#7648d9' />
+          <stop offset='1' stopColor='#3d2380' />
+        </linearGradient>
+        <linearGradient id='r2-chip-top' x1='0' y1='0' x2='1' y2='1'>
+          <stop offset='0' stopColor='#c99cff' />
+          <stop offset='1' stopColor='#6a97f8' />
+        </linearGradient>
+        <linearGradient id='r2-chip-left' x1='0' y1='0' x2='0' y2='1'>
+          <stop offset='0' stopColor='#6d28d9' />
+          <stop offset='1' stopColor='#45197f' />
+        </linearGradient>
+        <linearGradient id='r2-chip-right' x1='0' y1='0' x2='0' y2='1'>
+          <stop offset='0' stopColor='#9163f8' />
+          <stop offset='1' stopColor='#6a28d4' />
+        </linearGradient>
+        <linearGradient id='r2-line' x1='0' y1='0' x2='1' y2='1'>
+          <stop offset='0' stopColor='#3b82f6' />
+          <stop offset='0.5' stopColor='#6366f1' />
+          <stop offset='1' stopColor='#a855f7' />
+        </linearGradient>
+        <linearGradient id='r2-beam' x1='0' y1='0' x2='0' y2='1'>
+          <stop offset='0' stopColor='#e9d5ff' stopOpacity='0.95' />
+          <stop offset='0.5' stopColor='#c084fc' stopOpacity='0.55' />
+          <stop offset='1' stopColor='#a855f7' stopOpacity='0.05' />
+        </linearGradient>
+        <radialGradient id='r2-core' cx='0.5' cy='0.5' r='0.5'>
+          <stop offset='0' stopColor='#ffffff' />
+          <stop offset='0.4' stopColor='#f0abfc' />
+          <stop offset='0.75' stopColor='#b05cf6' />
+          <stop offset='1' stopColor='#7c3aed' />
+        </radialGradient>
+        <radialGradient id='r2-coreglow' cx='0.5' cy='0.5' r='0.5'>
+          <stop offset='0' stopColor='#d8b4fe' stopOpacity='0.55' />
+          <stop offset='0.5' stopColor='#a855f7' stopOpacity='0.26' />
+          <stop offset='1' stopColor='#a855f7' stopOpacity='0' />
+        </radialGradient>
+        <radialGradient id='r2-node' cx='0.35' cy='0.32' r='0.8'>
+          <stop offset='0' stopColor='#ffffff' />
+          <stop offset='0.32' stopColor='#c4b5fd' />
+          <stop offset='0.7' stopColor='#8b5cf6' />
+          <stop offset='1' stopColor='#4c1d95' />
+        </radialGradient>
+        <radialGradient id='r2-nodehalo' cx='0.5' cy='0.5' r='0.5'>
+          <stop offset='0' stopColor='#a855f7' stopOpacity='0.34' />
+          <stop offset='0.6' stopColor='#8b5cf6' stopOpacity='0.12' />
+          <stop offset='1' stopColor='#8b5cf6' stopOpacity='0' />
+        </radialGradient>
+        <radialGradient id='r2-ambient' cx='0.5' cy='0.45' r='0.5'>
+          <stop offset='0' stopColor='#8b5cf6' stopOpacity='0.16' />
+          <stop offset='0.6' stopColor='#6366f1' stopOpacity='0.06' />
+          <stop offset='1' stopColor='#6366f1' stopOpacity='0' />
+        </radialGradient>
+        <filter id='r2-soft' x='-60%' y='-60%' width='220%' height='220%'>
+          <feGaussianBlur stdDeviation='7' />
+        </filter>
+        <filter id='r2-ao' x='-70%' y='-70%' width='240%' height='240%'>
+          <feGaussianBlur stdDeviation='3.4' />
+        </filter>
+        <filter id='r2-blur1' x='-120%' y='-120%' width='340%' height='340%'>
+          <feGaussianBlur stdDeviation='2' />
+        </filter>
+      </defs>
+      <ellipse cx='230' cy='140' rx='200' ry='150' fill='url(#r2-ambient)' />
+      <ellipse
+        cx='230'
+        cy='328'
+        rx='150'
+        ry='28'
+        fill='#334155'
+        opacity='0.22'
+        filter='url(#r2-soft)'
+      />
+      <g>
+        <polygon
+          points='95,245 230,312 230,336 95,269'
+          fill='url(#r2-plat-left)'
+        />
+        <polygon
+          points='230,312 365,245 365,269 230,336'
+          fill='url(#r2-plat-right)'
+        />
+        <polygon
+          points='230,178 365,245 230,312 95,245'
+          fill='url(#r2-plat-top)'
+        />
+        <g stroke='#64748b' strokeOpacity='0.32' strokeWidth='1'>
+          <line x1='128.8' y1='228.3' x2='263.8' y2='295.3' />
+          <line x1='162.5' y1='211.5' x2='297.5' y2='278.5' />
+          <line x1='196.3' y1='194.8' x2='331.3' y2='261.8' />
+          <line x1='263.8' y1='194.8' x2='128.8' y2='261.8' />
+          <line x1='297.5' y1='211.5' x2='162.5' y2='278.5' />
+          <line x1='331.3' y1='228.3' x2='196.3' y2='295.3' />
+        </g>
+        <polyline
+          points='95,245 230,178 365,245'
+          fill='none'
+          stroke='#f4f7fc'
+          strokeOpacity='0.55'
+          strokeWidth='1.4'
+        />
+        <polyline
+          points='95,245 230,312 365,245'
+          fill='none'
+          stroke='#3b4460'
+          strokeOpacity='0.35'
+          strokeWidth='1'
+        />
+      </g>
+      <ellipse
+        cx='230'
+        cy='266'
+        rx='86'
+        ry='23'
+        fill='#1e1b4b'
+        opacity='0.24'
+        filter='url(#r2-ao)'
+      />
+      <g>
+        <polygon
+          points='230,176 302,140 302,174 230,210'
+          fill='url(#r2-srv-right)'
+        />
+        <polygon
+          points='230,210 302,174 302,208 230,244'
+          fill='url(#r2-srv-right)'
+        />
+        <polygon
+          points='230,244 302,208 302,242 230,278'
+          fill='url(#r2-srv-right)'
+        />
+        <polygon
+          points='158,140 230,176 230,210 158,174'
+          fill='url(#r2-srv-left)'
+        />
+        <polygon
+          points='158,174 230,210 230,244 158,208'
+          fill='url(#r2-srv-left)'
+        />
+        <polygon
+          points='158,208 230,244 230,278 158,242'
+          fill='url(#r2-srv-left)'
+        />
+        <polygon
+          points='230,104 302,140 230,176 158,140'
+          fill='url(#r2-srv-top)'
+        />
+        <g fill='#67e8f9'>
+          <circle cx='256' cy='183' r='1.7' />
+          <circle cx='270' cy='176' r='1.7' />
+          <circle cx='284' cy='169' r='1.7' />
+          <circle cx='256' cy='217' r='1.7' />
+          <circle cx='270' cy='210' r='1.7' />
+          <circle cx='284' cy='203' r='1.7' />
+          <circle cx='256' cy='251' r='1.7' />
+          <circle cx='270' cy='244' r='1.7' />
+          <circle cx='284' cy='237' r='1.7' />
+        </g>
+        <g stroke='#2c2960' strokeOpacity='0.20' strokeWidth='1.1'>
+          <line x1='168' y1='154' x2='222' y2='181' />
+          <line x1='168' y1='164' x2='222' y2='191' />
+          <line x1='168' y1='188' x2='222' y2='215' />
+          <line x1='168' y1='198' x2='222' y2='225' />
+          <line x1='168' y1='222' x2='222' y2='249' />
+          <line x1='168' y1='232' x2='222' y2='259' />
+        </g>
+        <polyline
+          points='158,176 230,212 302,176'
+          fill='none'
+          stroke='#cdd8ff'
+          strokeOpacity='0.5'
+          strokeWidth='1'
+        />
+        <polyline
+          points='158,174 230,210 302,174'
+          fill='none'
+          stroke='#231e54'
+          strokeOpacity='0.5'
+          strokeWidth='1.6'
+        />
+        <polyline
+          points='158,210 230,246 302,210'
+          fill='none'
+          stroke='#cdd8ff'
+          strokeOpacity='0.5'
+          strokeWidth='1'
+        />
+        <polyline
+          points='158,208 230,244 302,208'
+          fill='none'
+          stroke='#231e54'
+          strokeOpacity='0.5'
+          strokeWidth='1.6'
+        />
+        <polyline
+          points='158,242 230,278 302,242'
+          fill='none'
+          stroke='#1c1846'
+          strokeOpacity='0.45'
+          strokeWidth='1.2'
+        />
+        <polyline
+          points='158,140 230,176 302,140'
+          fill='none'
+          stroke='#e6ecff'
+          strokeOpacity='0.6'
+          strokeWidth='1.3'
+        />
+        <polyline
+          points='158,140 230,104 302,140'
+          fill='none'
+          stroke='#eef2ff'
+          strokeOpacity='0.7'
+          strokeWidth='1.3'
+        />
+        <line
+          x1='158'
+          y1='140'
+          x2='158'
+          y2='242'
+          stroke='#bcd0ff'
+          strokeOpacity='0.35'
+          strokeWidth='1'
+        />
+        <line
+          x1='302'
+          y1='140'
+          x2='302'
+          y2='242'
+          stroke='#1c1846'
+          strokeOpacity='0.3'
+          strokeWidth='1'
+        />
+        <line
+          x1='230'
+          y1='176'
+          x2='230'
+          y2='278'
+          stroke='#1c1846'
+          strokeOpacity='0.18'
+          strokeWidth='1'
+        />
+      </g>
+      <g>
+        <ellipse
+          cx='230'
+          cy='105'
+          rx='15'
+          ry='5.5'
+          fill='#a855f7'
+          opacity='0.28'
+          filter='url(#r2-blur1)'
+        />
+        <polygon
+          points='220,90 230,111 240,111 236,90'
+          fill='url(#r2-beam)'
+          filter='url(#r2-blur1)'
+        />
+        <line
+          x1='230'
+          y1='90'
+          x2='230'
+          y2='108'
+          stroke='#ede0ff'
+          strokeOpacity='0.9'
+          strokeWidth='1.7'
+          strokeLinecap='round'
+        />
+        <circle cx='230' cy='97' r='1.5' fill='#ffffff' opacity='0.9' />
+        <circle cx='230' cy='102' r='1.1' fill='#ffffff' opacity='0.65' />
+      </g>
+      <g fill='none' stroke='url(#r2-line)' strokeLinecap='round'>
+        <g strokeWidth='5.5' strokeOpacity='0.12'>
+          <path d='M230,72 Q140,84 78,128' />
+          <path d='M230,72 Q320,82 392,122' />
+          <path d='M230,72 Q118,150 72,236' />
+          <path d='M230,72 Q346,150 398,232' />
+        </g>
+        <g strokeWidth='2.2' strokeOpacity='0.9'>
+          <path d='M230,72 Q140,84 78,128' />
+          <path d='M230,72 Q320,82 392,122' />
+          <path d='M230,72 Q118,150 72,236' />
+          <path d='M230,72 Q346,150 398,232' />
+        </g>
+      </g>
+      <g fill='#a5b4fc'>
+        <circle cx='150' cy='90' r='2' />
+        <circle cx='312' cy='88' r='2' />
+        <circle cx='132' cy='152' r='2' />
+        <circle cx='330' cy='151' r='2' />
+      </g>
+      <g>
+        <circle cx='78' cy='128' r='19' fill='url(#r2-nodehalo)' />
+        <circle cx='78' cy='128' r='13' fill='url(#r2-node)' />
+        <circle
+          cx='78'
+          cy='128'
+          r='13'
+          fill='none'
+          stroke='#4c1d95'
+          strokeOpacity='0.35'
+          strokeWidth='1'
+        />
+        <ellipse
+          cx='74'
+          cy='123'
+          rx='4'
+          ry='2.6'
+          fill='#ffffff'
+          opacity='0.5'
+        />
+        <path
+          d='M79.2,122 L75,129 L77.6,129 L76.6,134 L81.4,126.5 L78.7,126.5 Z'
+          fill='#ffffff'
+          opacity='0.95'
+        />
+      </g>
+      <g>
+        <circle cx='392' cy='122' r='19' fill='url(#r2-nodehalo)' />
+        <circle cx='392' cy='122' r='13' fill='url(#r2-node)' />
+        <circle
+          cx='392'
+          cy='122'
+          r='13'
+          fill='none'
+          stroke='#4c1d95'
+          strokeOpacity='0.35'
+          strokeWidth='1'
+        />
+        <ellipse
+          cx='388'
+          cy='117'
+          rx='4'
+          ry='2.6'
+          fill='#ffffff'
+          opacity='0.5'
+        />
+        <circle
+          cx='392'
+          cy='122'
+          r='6'
+          fill='none'
+          stroke='#ffffff'
+          strokeOpacity='0.9'
+          strokeWidth='1.4'
+        />
+        <circle cx='392' cy='122' r='2' fill='#ffffff' opacity='0.95' />
+      </g>
+      <g>
+        <circle cx='72' cy='236' r='19' fill='url(#r2-nodehalo)' />
+        <circle cx='72' cy='236' r='13' fill='url(#r2-node)' />
+        <circle
+          cx='72'
+          cy='236'
+          r='13'
+          fill='none'
+          stroke='#4c1d95'
+          strokeOpacity='0.35'
+          strokeWidth='1'
+        />
+        <ellipse
+          cx='68'
+          cy='231'
+          rx='4'
+          ry='2.6'
+          fill='#ffffff'
+          opacity='0.5'
+        />
+        <circle
+          cx='72'
+          cy='236'
+          r='6'
+          fill='none'
+          stroke='#ffffff'
+          strokeOpacity='0.9'
+          strokeWidth='1.4'
+        />
+        <circle cx='72' cy='236' r='2' fill='#ffffff' opacity='0.95' />
+      </g>
+      <g>
+        <circle cx='398' cy='232' r='19' fill='url(#r2-nodehalo)' />
+        <circle cx='398' cy='232' r='13' fill='url(#r2-node)' />
+        <circle
+          cx='398'
+          cy='232'
+          r='13'
+          fill='none'
+          stroke='#4c1d95'
+          strokeOpacity='0.35'
+          strokeWidth='1'
+        />
+        <ellipse
+          cx='394'
+          cy='227'
+          rx='4'
+          ry='2.6'
+          fill='#ffffff'
+          opacity='0.5'
+        />
+        <path
+          d='M399.2,226 L395,233 L397.6,233 L396.6,238 L401.4,230.5 L398.7,230.5 Z'
+          fill='#ffffff'
+          opacity='0.95'
+        />
+      </g>
+      <ellipse cx='230' cy='66' rx='36' ry='27' fill='url(#r2-coreglow)' />
+      <g>
+        <polygon
+          points='196,66 230,83 230,94 196,77'
+          fill='url(#r2-chip-left)'
+        />
+        <polygon
+          points='230,83 264,66 264,77 230,94'
+          fill='url(#r2-chip-right)'
+        />
+        <polygon
+          points='230,49 264,66 230,83 196,66'
+          fill='url(#r2-chip-top)'
+        />
+        <polyline
+          points='196,66 230,49 264,66'
+          fill='none'
+          stroke='#ffffff'
+          strokeOpacity='0.5'
+          strokeWidth='1.2'
+        />
+        <polyline
+          points='196,66 230,83 264,66'
+          fill='none'
+          stroke='#2a1a5c'
+          strokeOpacity='0.3'
+          strokeWidth='1'
+        />
+        <polygon
+          points='230,57 251,66 230,75 209,66'
+          fill='none'
+          stroke='#ffffff'
+          strokeOpacity='0.32'
+          strokeWidth='1'
+        />
+        <g fill='#a5f3fc'>
+          <circle cx='230' cy='53' r='1.5' />
+          <circle cx='258' cy='66' r='1.5' />
+          <circle cx='230' cy='79' r='1.5' />
+          <circle cx='202' cy='66' r='1.5' />
+        </g>
+        <circle cx='230' cy='66' r='5.5' fill='url(#r2-core)' />
+        <circle cx='230' cy='66' r='2.2' fill='#ffffff' />
+        <g
+          stroke='#ffffff'
+          strokeOpacity='0.75'
+          strokeWidth='1'
+          strokeLinecap='round'
+        >
+          <line x1='230' y1='57' x2='230' y2='61' />
+          <line x1='230' y1='71' x2='230' y2='75' />
+          <line x1='221' y1='66' x2='225' y2='66' />
+          <line x1='235' y1='66' x2='239' y2='66' />
+        </g>
+      </g>
+      <g fill='#c4b5fd'>
+        <circle cx='300' cy='70' r='1.6' opacity='0.8' />
+        <circle cx='168' cy='86' r='1.4' opacity='0.7' />
+        <circle cx='278' cy='46' r='1.2' opacity='0.6' />
+        <circle cx='190' cy='52' r='1.3' opacity='0.65' />
+      </g>
+    </svg>
   )
 }

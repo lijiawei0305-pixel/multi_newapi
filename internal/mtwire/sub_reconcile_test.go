@@ -11,6 +11,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/QuantumNous/new-api/internal/payment"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // seedSubOrder 直接落一条 SUB 订单（绕过购买流程），status/settled/updatedAt 可控以测扫描过滤。
@@ -186,6 +188,70 @@ func TestReconcileStuckSubscriptions_ExpiryFallback(t *testing.T) {
 	if paidRow.Status == subOrderExpired {
 		t.Fatalf("SUB-paid-ancient 被误置 expired")
 	}
+}
+
+func TestReconcileProviderCreationFailureStatesStayExplicit(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
+	require.NoError(t, err)
+	require.NoError(t, migrateSubscriptionBridge(db))
+	app := &App{DB: db}
+
+	before := time.Unix(100000, 0)
+	recent := time.Unix(99000, 0) // 已卡超过扫描阈值，但尚未超过 2h 支付窗口
+	old := time.Unix(50000, 0)    // 已超过 2h，可在确定未付后安全过期
+	seedSubOrder(t, db, "SUB-pay-failed", subOrderPayFailed, false, recent)
+	seedSubOrder(t, db, "SUB-pay-creating", subOrderPayCreating, false, recent)
+	seedSubOrder(t, db, "SUB-pay-failed-old", subOrderPayFailed, false, old)
+	seedSubOrder(t, db, "SUB-pay-creating-paid", subOrderPayCreating, false, old)
+	seedSubOrder(t, db, "SUB-pay-failed-no-provider", subOrderPayFailed, false, recent)
+	require.NoError(t, db.Model(&subscriptionOrderRow{}).
+		Where("order_no <> ?", "SUB-pay-failed-no-provider").
+		UpdateColumn("provider", string(payment.ProviderWxpay)).Error)
+
+	// 卡单端点必须原样暴露 provider 建单状态，而不是把它们混成 pending。
+	stuck, err := app.listStuckSubscriptions(context.Background(), before)
+	require.NoError(t, err)
+	require.Len(t, stuck, 5)
+	stuckStatuses := make(map[string]string, len(stuck))
+	for _, row := range stuck {
+		stuckStatuses[row.OrderNo] = row.Status
+	}
+	assert.Equal(t, subOrderPayFailed, stuckStatuses["SUB-pay-failed"])
+	assert.Equal(t, subOrderPayCreating, stuckStatuses["SUB-pay-creating"])
+
+	originalQuery := subOrderPaidQuery
+	t.Cleanup(func() { subOrderPaidQuery = originalQuery })
+	var queried []string
+	subOrderPaidQuery = func(_ *App, _ context.Context, orderNo, _ string) (bool, error) {
+		queried = append(queried, orderNo)
+		switch orderNo {
+		case "SUB-pay-creating-paid":
+			return true, nil
+		case "SUB-pay-creating":
+			return false, fmt.Errorf("wxpay query: %w", payment.ErrOrderNotExist)
+		default:
+			return false, nil
+		}
+	}
+	originalActivate := activatePaidSubHook
+	t.Cleanup(func() { activatePaidSubHook = originalActivate })
+	activatePaidSubHook = func(_ *App, _ context.Context, _ string) error { return nil }
+
+	res, err := app.ReconcileStuckSubscriptions(context.Background(), before)
+	require.NoError(t, err)
+	assert.Equal(t, 5, res.Scanned)
+	assert.ElementsMatch(t, []string{"SUB-pay-creating-paid"}, res.Activated)
+	assert.Empty(t, res.Unpaid, "provider creation failures are not ordinary user-unpaid orders")
+	assert.ElementsMatch(t, []string{"SUB-pay-failed-old"}, res.Expired)
+	require.Len(t, res.Failed, 3)
+	assert.Contains(t, res.Failed["SUB-pay-failed"], "create-pay")
+	assert.Contains(t, res.Failed["SUB-pay-creating"], "create-pay")
+	assert.Contains(t, res.Failed["SUB-pay-failed-no-provider"], "retry purchase")
+	assert.NotContains(t, queried, "SUB-pay-failed-no-provider", "missing provider must not issue an invalid platform query")
+
+	var expired subscriptionOrderRow
+	require.NoError(t, db.Take(&expired, "order_no = ?", "SUB-pay-failed-old").Error)
+	assert.Equal(t, subOrderExpired, expired.Status)
 }
 
 // containsAll 报告 got 是否包含全部 want 元素（顺序无关，供对账派发断言用）。

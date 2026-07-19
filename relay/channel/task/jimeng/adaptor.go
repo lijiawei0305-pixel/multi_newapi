@@ -2,6 +2,7 @@ package jimeng
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -38,9 +39,9 @@ type requestPayload struct {
 	BinaryDataBase64 []string `json:"binary_data_base64,omitempty"`
 	ImageUrls        []string `json:"image_urls,omitempty"`
 	Prompt           string   `json:"prompt,omitempty"`
-	Seed             int64    `json:"seed"`
+	Seed             *int64   `json:"seed,omitempty"`
 	AspectRatio      string   `json:"aspect_ratio"`
-	Frames           int      `json:"frames,omitempty"`
+	Frames           *int     `json:"frames,omitempty"`
 }
 
 type responsePayload struct {
@@ -183,22 +184,21 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 
 // DoResponse handles upstream response, returns taskID etc.
 func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *dto.TaskError) {
-	responseBody, err := io.ReadAll(resp.Body)
+	defer resp.Body.Close()
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		taskErr = service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
 		return
 	}
-	_ = resp.Body.Close()
-
 	// Parse Jimeng response
 	var jResp responsePayload
 	if err := common.Unmarshal(responseBody, &jResp); err != nil {
-		taskErr = service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError)
+		taskErr = service.TaskErrorWrapper(errors.Wrapf(err, "response_%s", common.PayloadMetadata(responseBody)), "unmarshal_response_body_failed", http.StatusInternalServerError)
 		return
 	}
 
 	if jResp.Code != 10000 {
-		taskErr = service.TaskErrorWrapper(fmt.Errorf("%s", jResp.Message), fmt.Sprintf("%d", jResp.Code), http.StatusInternalServerError)
+		taskErr = service.TaskErrorWrapper(service.ExplicitTaskSubmissionRejection(fmt.Errorf("%s", jResp.Message)), fmt.Sprintf("%d", jResp.Code), http.StatusInternalServerError)
 		return
 	}
 
@@ -212,7 +212,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 }
 
 // FetchTask fetch task status
-func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
+func (a *TaskAdaptor) FetchTask(ctx context.Context, baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
 	taskID, ok := body["task_id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid task_id")
@@ -231,7 +231,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 		return nil, errors.Wrap(err, "marshal fetch task payload failed")
 	}
 
-	req, err := http.NewRequest(http.MethodPost, uri, bytes.NewBuffer(payloadBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uri, bytes.NewBuffer(payloadBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -384,11 +384,19 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq, in
 		Prompt: req.Prompt,
 	}
 
-	switch req.Duration {
-	case 10:
-		r.Frames = 241 // 24*10+1 = 241
-	default:
-		r.Frames = 121 // 24*5+1 = 121
+	if req.Duration == nil {
+		r.Frames = common.GetPointer(121) // 24*5+1 = 121
+	} else {
+		switch *req.Duration {
+		case 10:
+			r.Frames = common.GetPointer(241) // 24*10+1 = 241
+		case 5:
+			r.Frames = common.GetPointer(121) // 24*5+1 = 121
+		default:
+			// Preserve an explicitly supplied zero/unsupported value so the
+			// provider, rather than a local default, decides its validity.
+			r.Frames = common.GetPointer(*req.Duration)
+		}
 	}
 
 	// Handle one-of image_urls or binary_data_base64

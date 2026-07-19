@@ -1,10 +1,14 @@
 package model
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // 本文件覆盖**生产 /v1 订阅计费真正走的**原生计量路径：
@@ -26,6 +30,67 @@ func meterEnsure(t *testing.T) {
 			InvalidateSubscriptionPlanCache(id)
 		}
 	})
+}
+
+func TestPreConsumeSubscriptionWithTokenRollsBackOnTokenWriteFailure(t *testing.T) {
+	meterEnsure(t)
+	require.NoError(t, DB.AutoMigrate(&BillingAdjustmentIntent{}, &Token{}))
+	meterPlan(t, 61, 100, "")
+	meterSub(t, 61, 61, 6100, 100, 10, 86400)
+	token := &Token{Id: 6101, UserId: 6100, Key: "sub-atomic-token", Name: "sub-atomic", Status: common.TokenStatusEnabled, RemainQuota: 100}
+	require.NoError(t, DB.Create(token).Error)
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM billing_adjustment_intents")
+		DB.Exec("DELETE FROM tokens WHERE id = ?", token.Id)
+	})
+
+	const callbackName = "test:fail_subscription_token_reserve"
+	require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Name == "Token" {
+			tx.AddError(errors.New("injected token reserve failure"))
+		}
+	}))
+	_, err := PreConsumeUserSubscriptionWithToken("sub-atomic-failure", 6100, "gpt-4o", 0, 30, token.Id, 30)
+	require.ErrorContains(t, err, "injected token reserve failure")
+	require.NoError(t, DB.Callback().Update().Remove(callbackName))
+
+	assert.Equal(t, int64(10), meterUsed(t, 61), "subscription mutation must roll back with token failure")
+	require.NoError(t, DB.First(token, token.Id).Error)
+	assert.Equal(t, 100, token.RemainQuota)
+	assert.Zero(t, token.UsedQuota)
+	var records int64
+	require.NoError(t, DB.Model(&SubscriptionPreConsumeRecord{}).Where("request_id = ?", "sub-atomic-failure").Count(&records).Error)
+	assert.Zero(t, records)
+	var intents int64
+	require.NoError(t, DB.Model(&BillingAdjustmentIntent{}).Where("request_id = ?", "sub-atomic-failure").Count(&intents).Error)
+	assert.Zero(t, intents)
+
+	res, err := PreConsumeUserSubscriptionWithToken("sub-atomic-success", 6100, "gpt-4o", 0, 30, token.Id, 30)
+	require.NoError(t, err)
+	assert.Equal(t, int64(30), res.PreConsumed)
+	_, err = PreConsumeUserSubscriptionWithToken("sub-atomic-success", 6100, "gpt-4o", 0, 30, token.Id, 30)
+	require.NoError(t, err)
+	_, err = PreConsumeUserSubscriptionWithToken("sub-atomic-success", 6100, "gpt-4o", 0, 30, token.Id, 20)
+	require.ErrorContains(t, err, "persisted token reservation")
+	assert.Equal(t, int64(40), meterUsed(t, 61), "same request must reserve subscription once")
+	require.NoError(t, DB.First(token, token.Id).Error)
+	assert.Equal(t, 70, token.RemainQuota)
+	assert.Equal(t, 30, token.UsedQuota)
+}
+
+func TestSubscriptionPreConsumeRequestIdSupports128BytesAndRejects129(t *testing.T) {
+	meterEnsure(t)
+	meterPlan(t, 62, 100, "")
+	meterSub(t, 62, 62, 6200, 100, 0, 86400)
+	request128 := strings.Repeat("r", 128)
+	_, err := PreConsumeUserSubscription(request128, 6200, "gpt-4o", 0, 10)
+	require.NoError(t, err)
+	_, err = PreConsumeUserSubscription(strings.Repeat("x", 129), 6200, "gpt-4o", 0, 10)
+	require.ErrorContains(t, err, "requestId is invalid")
+	assert.Equal(t, int64(10), meterUsed(t, 62))
+	var record SubscriptionPreConsumeRecord
+	require.NoError(t, DB.Where("request_id = ?", request128).First(&record).Error)
+	assert.Len(t, record.RequestId, 128)
 }
 
 // meterPlan 落一个套餐（total=0 即不限量），并清缓存保证按 id 回读到最新。
@@ -205,14 +270,15 @@ func TestPostConsume_PositiveWithinTotal(t *testing.T) {
 	assert.Equal(t, int64(80), meterUsed(t, 1))
 }
 
-// 负 delta（退款）夹到 0，不会为负。
-func TestPostConsume_NegativeClampsZero(t *testing.T) {
+// 退款超过已用额度必须拒绝，避免与同一事务内的 token 全额退款失配。
+func TestPostConsume_NegativeUnderflowRejected(t *testing.T) {
 	meterEnsure(t)
 	meterPlan(t, 1, 100, "")
 	meterSub(t, 1, 1, 100, 100, 10, 86400)
 
-	require.NoError(t, PostConsumeUserSubscriptionDelta(1, -50))
-	assert.Equal(t, int64(0), meterUsed(t, 1))
+	err := PostConsumeUserSubscriptionDelta(1, -50)
+	require.ErrorContains(t, err, "would become negative")
+	assert.Equal(t, int64(10), meterUsed(t, 1))
 }
 
 // 结算 delta 冲破 total（AmountTotal>0）→ 报错且不落库（防止 amount_used 越顶）。

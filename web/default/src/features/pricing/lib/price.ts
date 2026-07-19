@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { formatCurrencyFromUSD } from '@/lib/currency'
+
 import { QUOTA_TYPE_VALUES, TOKEN_UNIT_DIVISORS } from '../constants'
 import type { PricingModel, TokenUnit, PriceType } from '../types'
 
@@ -35,11 +36,11 @@ export function stripTrailingZeros(formatted: string): string {
   const [, symbol, number, suffix] = match
 
   // Remove commas for processing
-  const cleanNumber = number.replace(/,/g, '')
+  const cleanNumber = number.replaceAll(',', '')
 
   // Convert to number and back to remove trailing zeros
-  const parsed = parseFloat(cleanNumber)
-  if (isNaN(parsed)) return formatted
+  const parsed = Number.parseFloat(cleanNumber)
+  if (Number.isNaN(parsed)) return formatted
 
   // Convert to string, which automatically removes trailing zeros
   let result = parsed.toString()
@@ -94,26 +95,26 @@ function calculateTokenPrice(
     case 'cache':
       return hasRatio(model.cache_ratio)
         ? base * Number(model.cache_ratio)
-        : NaN
+        : Number.NaN
     case 'create_cache':
       return hasRatio(model.create_cache_ratio)
         ? base * Number(model.create_cache_ratio)
-        : NaN
+        : Number.NaN
     case 'image':
       return hasRatio(model.image_ratio)
         ? base * Number(model.image_ratio)
-        : NaN
+        : Number.NaN
     case 'audio_input':
       return hasRatio(model.audio_ratio)
         ? base * Number(model.audio_ratio)
-        : NaN
+        : Number.NaN
     case 'audio_output':
       return hasRatio(model.audio_ratio) &&
         hasRatio(model.audio_completion_ratio)
         ? base *
             Number(model.audio_ratio) *
             Number(model.audio_completion_ratio)
-        : NaN
+        : Number.NaN
   }
 }
 

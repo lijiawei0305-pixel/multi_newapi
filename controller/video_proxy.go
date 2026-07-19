@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -68,9 +69,9 @@ func VideoProxy(c *gin.Context) {
 
 	var videoURL string
 	proxy := channel.GetSetting().Proxy
-	client, err := service.GetHttpClientWithProxy(proxy)
+	client, err := service.GetSSRFProtectedHttpClientWithProxy(proxy)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to create proxy client for task %s: %s", taskID, err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to create proxy client for task %s error_type=%T", taskID, err))
 		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to create proxy client")
 		return
 	}
@@ -92,17 +93,17 @@ func VideoProxy(c *gin.Context) {
 			videoProxyError(c, http.StatusInternalServerError, "server_error", "API key not stored for task")
 			return
 		}
-		videoURL, err = getGeminiVideoURL(channel, task, apiKey)
+		videoURL, err = getGeminiVideoURL(ctx, channel, task, apiKey)
 		if err != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to resolve Gemini video URL for task %s: %s", taskID, err.Error()))
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to resolve Gemini video URL for task %s error_type=%T", taskID, err))
 			videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to resolve Gemini video URL")
 			return
 		}
 		req.Header.Set("x-goog-api-key", apiKey)
 	case constant.ChannelTypeVertexAi:
-		videoURL, err = getVertexVideoURL(channel, task)
+		videoURL, err = getVertexVideoURL(ctx, channel, task)
 		if err != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to resolve Vertex video URL for task %s: %s", taskID, err.Error()))
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to resolve Vertex video URL for task %s error_type=%T", taskID, err))
 			videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to resolve Vertex video URL")
 			return
 		}
@@ -131,43 +132,52 @@ func VideoProxy(c *gin.Context) {
 
 	fetchSetting := system_setting.GetFetchSetting()
 	if err := common.ValidateURLWithFetchSetting(videoURL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Video URL blocked for task %s: %v", taskID, err))
-		videoProxyError(c, http.StatusForbidden, "server_error", fmt.Sprintf("request blocked: %v", err))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Video URL blocked for task %s url_%s error_type=%T", taskID, logger.PayloadMetadata([]byte(videoURL)), err))
+		videoProxyError(c, http.StatusForbidden, "server_error", "request blocked by fetch policy")
 		return
 	}
 
 	req.URL, err = url.Parse(videoURL)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to parse URL %s: %s", videoURL, err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to parse video URL for task %s url_%s error_type=%T", taskID, logger.PayloadMetadata([]byte(videoURL)), err))
 		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to create proxy request")
 		return
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to fetch video from %s: %s", videoURL, err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to fetch video for task %s url_%s error_type=%T", taskID, logger.PayloadMetadata([]byte(videoURL)), err))
 		videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to fetch video content")
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned status %d for %s", resp.StatusCode, videoURL))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned status %d for task %s url_%s", resp.StatusCode, taskID, logger.PayloadMetadata([]byte(videoURL))))
 		videoProxyError(c, http.StatusBadGateway, "server_error",
 			fmt.Sprintf("Upstream service returned status %d", resp.StatusCode))
 		return
 	}
 
-	for key, values := range resp.Header {
-		for _, value := range values {
-			c.Writer.Header().Add(key, value)
-		}
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	mediaType := ""
+	if contentType != "" {
+		mediaType, _, err = mime.ParseMediaType(contentType)
 	}
-
-	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	if err != nil || (mediaType != "" && !strings.HasPrefix(strings.ToLower(mediaType), "video/") && !strings.EqualFold(mediaType, "application/octet-stream")) {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned unsafe video content type for task %s content_type_%s", taskID, logger.PayloadMetadata([]byte(contentType))))
+		videoProxyError(c, http.StatusBadGateway, "server_error", "Upstream did not return video content")
+		return
+	}
+	service.CopyUpstreamResponseHeaders(c, c.Writer.Header(), resp.Header)
+	if mediaType == "" || strings.EqualFold(mediaType, "application/octet-stream") {
+		c.Writer.Header().Set("Content-Type", "video/mp4")
+	}
+	c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+	c.Writer.Header().Set("Cache-Control", "no-store, private")
 	c.Writer.WriteHeader(resp.StatusCode)
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: error_type=%T", err))
 	}
 }
 
@@ -183,23 +193,24 @@ func writeVideoDataURL(c *gin.Context, dataURL string) error {
 		return fmt.Errorf("unsupported data url")
 	}
 
-	mimeType := strings.TrimPrefix(header, "data:")
-	mimeType = strings.TrimSuffix(mimeType, ";base64")
-	if mimeType == "" {
-		mimeType = "video/mp4"
+	contentType := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(header, "data:"), ";base64"))
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil || !strings.HasPrefix(strings.ToLower(mediaType), "video/") {
+		return fmt.Errorf("data url content type is not video")
 	}
 
-	videoBytes, err := base64.StdEncoding.DecodeString(payload)
-	if err != nil {
-		videoBytes, err = base64.RawStdEncoding.DecodeString(payload)
-		if err != nil {
-			return err
-		}
+	encoding := base64.RawStdEncoding
+	if strings.HasSuffix(payload, "=") {
+		encoding = base64.StdEncoding
+	}
+	if _, err := io.Copy(io.Discard, base64.NewDecoder(encoding, strings.NewReader(payload))); err != nil {
+		return err
 	}
 
-	c.Writer.Header().Set("Content-Type", mimeType)
-	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	c.Writer.Header().Set("Content-Type", mediaType)
+	c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+	c.Writer.Header().Set("Cache-Control", "no-store, private")
 	c.Writer.WriteHeader(http.StatusOK)
-	_, err = c.Writer.Write(videoBytes)
+	_, err = io.Copy(c.Writer, base64.NewDecoder(encoding, strings.NewReader(payload)))
 	return err
 }

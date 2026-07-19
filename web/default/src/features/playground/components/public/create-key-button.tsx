@@ -16,12 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useNavigate } from '@tanstack/react-router'
 import { PlusIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from '@tanstack/react-router'
+
 import { Button } from '@/components/ui/button'
-import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 interface CreateKeyButtonProps {
   className?: string
@@ -43,8 +44,8 @@ export function CreateKeyButton({ className }: CreateKeyButtonProps) {
 
   return (
     <Button
-      variant="outline"
-      size="default"
+      variant='outline'
+      size='default'
       className={cn('gap-1', className)}
       onClick={handleClick}
     >

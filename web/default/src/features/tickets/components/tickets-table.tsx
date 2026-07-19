@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -27,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { fmtDateTime } from '@/lib/agent-format'
+
 import type { Ticket } from '../types'
 import { TicketPriorityBadge } from './ticket-priority-badge'
 import { TicketStatusBadge } from './ticket-status-badge'
@@ -52,7 +54,10 @@ export function TicketsTable(props: {
   const colSpan = 7 + leadingCols
 
   return (
-    <div className='w-full overflow-x-auto rounded-lg border' data-testid='tickets-table'>
+    <div
+      className='w-full overflow-x-auto rounded-lg border'
+      data-testid='tickets-table'
+    >
       <Table>
         <TableHeader>
           <TableRow>
@@ -70,14 +75,20 @@ export function TicketsTable(props: {
         <TableBody>
           {props.loading && (
             <TableRow>
-              <TableCell colSpan={colSpan} className='text-muted-foreground text-center'>
+              <TableCell
+                colSpan={colSpan}
+                className='text-muted-foreground text-center'
+              >
                 {t('Loading...')}
               </TableCell>
             </TableRow>
           )}
           {!props.loading && props.rows.length === 0 && (
             <TableRow>
-              <TableCell colSpan={colSpan} className='text-muted-foreground text-center'>
+              <TableCell
+                colSpan={colSpan}
+                className='text-muted-foreground text-center'
+              >
                 {t('No tickets yet')}
               </TableCell>
             </TableRow>
@@ -106,7 +117,9 @@ export function TicketsTable(props: {
                       props.onOpen(row.id)
                     }}
                   >
-                    <span className='truncate'>{row.title || t('(untitled)')}</span>
+                    <span className='truncate'>
+                      {row.title || t('(untitled)')}
+                    </span>
                   </Button>
                 </TableCell>
                 {props.showUser && (

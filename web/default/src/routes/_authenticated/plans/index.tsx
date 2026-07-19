@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute } from '@tanstack/react-router'
+
 import { TenantPlans } from '@/features/tenant-plans'
 
 // Buyer-facing purchase page. Login is already enforced by the

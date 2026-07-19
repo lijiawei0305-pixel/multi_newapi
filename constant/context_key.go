@@ -67,6 +67,13 @@ const (
 	ContextKeyLanguage ContextKey = "language"
 	ContextKeyIsStream ContextKey = "is_stream"
 
+	// ContextKeyUpstreamAccepted marks that the provider has completed work and
+	// post-response billing must never trigger an automatic retry or refund.
+	ContextKeyUpstreamAccepted ContextKey = "upstream_accepted"
+	// ContextKeyBillingTerminalAttempted distinguishes an actual-quota settlement
+	// attempt from an accepted response that failed before settlement began.
+	ContextKeyBillingTerminalAttempted ContextKey = "billing_terminal_attempted"
+
 	// ContextKeyAuditLogged marks that the current request has already recorded
 	// a manage/operation audit log inside the handler. When set, the admin-audit
 	// fallback in authHelper (finishAdminAudit) skips its record to avoid

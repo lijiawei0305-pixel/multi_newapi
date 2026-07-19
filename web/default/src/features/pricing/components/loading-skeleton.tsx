@@ -17,7 +17,40 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Skeleton } from '@/components/ui/skeleton'
+
 import { VIEW_MODES, type ViewMode } from '../constants'
+
+const CARD_SLOTS = [
+  'card-one',
+  'card-two',
+  'card-three',
+  'card-four',
+  'card-five',
+  'card-six',
+  'card-seven',
+  'card-eight',
+  'card-nine',
+]
+const FILTER_SLOTS = [
+  { id: 'filter-one', width: 80 },
+  { id: 'filter-two', width: 90 },
+  { id: 'filter-three', width: 75 },
+  { id: 'filter-four', width: 85 },
+  { id: 'filter-five', width: 70 },
+]
+const TABLE_ROW_SLOTS = [
+  'row-one',
+  'row-two',
+  'row-three',
+  'row-four',
+  'row-five',
+  'row-six',
+  'row-seven',
+  'row-eight',
+  'row-nine',
+  'row-ten',
+]
+const PAGINATION_SLOTS = ['first', 'previous', 'next', 'last']
 
 export interface LoadingSkeletonProps {
   viewMode?: ViewMode
@@ -46,8 +79,8 @@ export function LoadingSkeleton(props: LoadingSkeletonProps) {
 function CardContentSkeleton() {
   return (
     <div className='grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3'>
-      {Array.from({ length: 9 }).map((_, i) => (
-        <div key={i} className='rounded-xl border p-5'>
+      {CARD_SLOTS.map((slot) => (
+        <div key={slot} className='rounded-xl border p-5'>
           <div className='flex items-start justify-between gap-3'>
             <div className='flex min-w-0 items-start gap-3'>
               <Skeleton className='size-10 shrink-0 rounded-xl' />
@@ -82,9 +115,9 @@ function FilterBarSkeleton() {
     <div className='space-y-3'>
       <div className='flex items-center gap-3'>
         <div className='flex flex-1 flex-wrap items-center gap-2'>
-          {[80, 90, 75, 85, 70].map((width, i) => (
+          {FILTER_SLOTS.map(({ id, width }) => (
             <Skeleton
-              key={i}
+              key={id}
               className='h-8 rounded-lg'
               style={{ width: `${width}px` }}
             />
@@ -104,12 +137,12 @@ function FilterBarSkeleton() {
 
 function TableContentSkeleton() {
   const columns = [
-    { width: 200 },
-    { width: 100 },
-    { width: 100 },
-    { width: 100 },
-    { width: 80 },
-    { width: 100 },
+    { id: 'model', width: 200 },
+    { id: 'input', width: 100 },
+    { id: 'output', width: 100 },
+    { id: 'cached', width: 100 },
+    { id: 'groups', width: 80 },
+    { id: 'actions', width: 100 },
   ]
 
   return (
@@ -117,23 +150,23 @@ function TableContentSkeleton() {
       <div className='overflow-hidden rounded-lg border'>
         <div className='bg-muted/30 border-b px-4 py-3'>
           <div className='flex items-center gap-4'>
-            {columns.map((col, i) => (
+            {columns.map((col) => (
               <Skeleton
-                key={i}
+                key={col.id}
                 className='h-4'
                 style={{ width: `${col.width}px` }}
               />
             ))}
           </div>
         </div>
-        {Array.from({ length: 10 }).map((_, i) => (
+        {TABLE_ROW_SLOTS.map((rowSlot) => (
           <div
-            key={i}
+            key={rowSlot}
             className='flex items-center gap-4 border-b px-4 py-3 last:border-b-0'
           >
-            {columns.map((col, j) => (
+            {columns.map((col) => (
               <Skeleton
-                key={j}
+                key={col.id}
                 className='h-5'
                 style={{ width: `${col.width}px` }}
               />
@@ -144,8 +177,8 @@ function TableContentSkeleton() {
       <div className='flex items-center justify-between'>
         <Skeleton className='h-5 w-32' />
         <div className='flex items-center gap-2'>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className='size-8' />
+          {PAGINATION_SLOTS.map((slot) => (
+            <Skeleton key={slot} className='size-8' />
           ))}
         </div>
       </div>

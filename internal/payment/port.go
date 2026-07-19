@@ -13,7 +13,7 @@ type PaymentGateway interface {
 	CreateOrder(ctx context.Context, in OrderInput) (*PayOrder, error)
 }
 
-// CallbackHandler 处理支付平台异步回调（部署于 auth-service，经 Nginx /pay /auth 转发）。
+// CallbackHandler 处理当前 API 进程收到的支付平台异步回调。
 // 流程：验签 → 幂等（order_no 已 paid/credited 则短路成功）→ 按 type 分发到 OrderSink。
 type CallbackHandler interface {
 	// HandleWxpay 处理微信回调原文。错签 → PAY_SIGN_INVALID；未知单 → ORDER_NOT_FOUND。
@@ -33,8 +33,7 @@ type OrderSink interface {
 	OnPaid(ctx context.Context, order PaidOrder) error
 }
 
-// PaySDK 抽象支付平台 SDK（下单 + 验签）。本轮提供 std-lib HMAC 占位实现 StubPaySDK；
-// 真实微信/支付宝 SDK 适配器顺延（见报告 TODO），不引入外部依赖。
+// PaySDK 抽象支付平台 SDK（下单 + 验签）；生产装配由进程内支付适配器实现。
 type PaySDK interface {
 	// CreatePay 向支付平台下单，返回支付凭据（跳转/二维码）。
 	CreatePay(ctx context.Context, req PayRequest) (*PayCredential, error)
@@ -43,8 +42,7 @@ type PaySDK interface {
 	Verify(ctx context.Context, provider Provider, raw []byte) (*CallbackInfo, error)
 }
 
-// OrderRepo 是支付订单持久化抽象。本轮提供并发安全内存假实现（MemRepo）；
-// 真实 GORM 实现（order_no 唯一索引、scopeByTenant、状态机条件 UPDATE、迁移）顺延（见报告 TODO）。
+// OrderRepo 是支付订单持久化抽象；生产装配使用 GORM 仓储，测试可使用内存实现。
 type OrderRepo interface {
 	// Create 落库新订单；order_no 已存在返回 ErrOrderDuplicate。
 	Create(ctx context.Context, o *PayOrder) error

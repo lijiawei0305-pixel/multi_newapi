@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Loader2Icon, Trash2Icon } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Loader2Icon, Trash2Icon } from 'lucide-react'
+import { toast } from 'sonner'
 
 import {
   Conversation,
@@ -32,6 +33,7 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from '@/components/ai-elements/prompt-input'
+import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
@@ -39,17 +41,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Button } from '@/components/ui/button'
-import { toast } from 'sonner'
-
 import { api } from '@/lib/api'
+import {
+  normalizeHttpResourceUrl,
+  normalizeRasterImageDataUrl,
+  openHttpResourceUrlInNewTab,
+} from '@/lib/safe-navigation'
 
 import { PROMPT_INPUT_SHELL_CLASS } from '../../constants'
-import { useImageConversation } from '../../hooks/use-image-conversation'
-import type { ImageTurn } from '../../hooks/use-image-conversation'
+import {
+  useImageConversation,
+  type ImageTurn,
+} from '../../hooks/use-image-conversation'
 import type { WorkspaceProps } from '../../types'
-import { DEFAULT_IMAGE_SIZE, ImageSizeSelector } from './image-size-selector'
 import { ImageLightbox } from './image-lightbox'
+import { DEFAULT_IMAGE_SIZE } from './image-size-options'
+import { ImageSizeSelector } from './image-size-selector'
 import { ImageTurnView } from './image-turn'
 import { ModelIntroHero } from './model-intro-card'
 
@@ -86,11 +93,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
 
   const { turns, isGenerating, generate, clear } = useImageConversation()
 
-  function runGenerate(params: {
-    prompt: string
-    n: number
-    size: string
-  }) {
+  function runGenerate(params: { prompt: string; n: number; size: string }) {
     if (!apiKey) return
     if (!params.prompt) return
     void generate(apiKey, {
@@ -120,24 +123,33 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
   async function handleDownload(src: string, filename: string) {
     if (!src) return
     if (src.startsWith('data:')) {
-      triggerDownload(src, filename)
+      const safeDataUrl = normalizeRasterImageDataUrl(src)
+      if (safeDataUrl) {
+        triggerDownload(safeDataUrl, filename)
+      } else {
+        toast.error(t('Failed to load image'))
+      }
+      return
+    }
+    const safeSrc = normalizeHttpResourceUrl(src)
+    if (!safeSrc) {
+      toast.error(t('Failed to load image'))
       return
     }
     // 跨域外链 CDN：download 属性对跨域被忽略、带 Bearer 抓 blob 会 CORS 预检失败，
     // 直接新标签打开另存（图片 url 是免鉴权直链，无需鉴权取流）。
     let sameOrigin = false
     try {
-      sameOrigin =
-        new URL(src, window.location.origin).origin === window.location.origin
+      sameOrigin = new URL(safeSrc).origin === window.location.origin
     } catch {
       sameOrigin = false
     }
     if (!sameOrigin) {
-      window.open(src, '_blank', 'noopener')
+      openHttpResourceUrlInNewTab(safeSrc)
       return
     }
     try {
-      const resp = await api.get(src, {
+      const resp = await api.get(safeSrc, {
         responseType: 'blob',
         headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
         skipErrorHandler: true,
@@ -149,8 +161,10 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
     } catch {
       // blob 抓取失败：此处已脱离原始点击手势，window.open 常被弹窗拦截而静默失败，
       // 故显式 toast 反馈，再尽力打开新标签（成功则用户可另存）。
-      toast.error(t('Download failed; right-click the image to save, or try again later'))
-      window.open(src, '_blank', 'noopener')
+      toast.error(
+        t('Download failed; right-click the image to save, or try again later')
+      )
+      openHttpResourceUrlInNewTab(safeSrc)
     }
   }
 
@@ -174,9 +188,11 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
                 />
               ))
             ) : (
-              <div className='flex min-h-[52vh] flex-col items-center justify-center gap-4 text-muted-foreground'>
+              <div className='text-muted-foreground flex min-h-[52vh] flex-col items-center justify-center gap-4'>
                 <ModelIntroHero model={introModel ?? null} />
-                <p className='text-xs'>{t('Enter a prompt and click "Generate" to start creating')}</p>
+                <p className='text-xs'>
+                  {t('Enter a prompt and click "Generate" to start creating')}
+                </p>
               </div>
             )}
           </div>
@@ -227,7 +243,7 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
                   type='button'
                   size='sm'
                   variant='ghost'
-                  className='h-7 px-2 text-xs text-muted-foreground'
+                  className='text-muted-foreground h-7 px-2 text-xs'
                   onClick={clear}
                   disabled={isGenerating}
                 >
@@ -237,11 +253,15 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
               )}
             </PromptInputTools>
 
-            <PromptInputSubmit disabled={isGenerating || !apiKey || !prompt.trim()}>
+            <PromptInputSubmit
+              disabled={isGenerating || !apiKey || !prompt.trim()}
+            >
               {isGenerating ? (
                 <Loader2Icon className='size-4 animate-spin' />
               ) : (
-                <span className='px-1 text-xs font-medium'>{t('Generate')}</span>
+                <span className='px-1 text-xs font-medium'>
+                  {t('Generate')}
+                </span>
               )}
             </PromptInputSubmit>
           </PromptInputFooter>
@@ -257,7 +277,9 @@ export function ImageWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
           if (!open) setZoom(null)
         }}
         onDownload={
-          zoom ? () => handleDownload(zoom.src, t('generated-image.png')) : undefined
+          zoom
+            ? () => handleDownload(zoom.src, t('generated-image.png'))
+            : undefined
         }
       />
     </div>

@@ -294,7 +294,7 @@ export const ADVANCED_CUSTOM_TEMPLATE_OPTIONS: AdvancedCustomTemplateOption[] =
 export function cloneAdvancedCustomConfig(
   config: AdvancedCustomConfig
 ): AdvancedCustomConfig {
-  return JSON.parse(JSON.stringify(config)) as AdvancedCustomConfig
+  return structuredClone(config) as AdvancedCustomConfig
 }
 
 export function getAdvancedCustomTemplateConfig(
@@ -539,7 +539,9 @@ function normalizeAdvancedCustomRoute(
   return nextRoute
 }
 
-function getAdvancedCustomRouteUpstreamPath(route: AdvancedCustomRoute): string {
+function getAdvancedCustomRouteUpstreamPath(
+  route: AdvancedCustomRoute
+): string {
   return (route.upstream_path || '').trim()
 }
 

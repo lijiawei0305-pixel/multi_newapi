@@ -5,7 +5,9 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	httppprof "net/http/pprof"
 	"os"
 	"strconv"
 	"strings"
@@ -32,8 +34,6 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-
-	_ "net/http/pprof"
 )
 
 //go:embed web/default/dist
@@ -121,6 +121,12 @@ func main() {
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
 
+	// Refund intents are persisted before quota is returned. Reconcile any
+	// pending intent left by a transient DB failure or process restart.
+	model.InitBillingRefundReconciler()
+	model.InitBillingAdjustmentReconciler()
+	service.InitTaskSubmissionRecoveryReconciler()
+
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.
 	service.StartSystemInstanceReporter()
@@ -150,16 +156,23 @@ func main() {
 		model.InitBatchUpdater()
 	}
 
-	// 自研计费 hook 异步批量落库开关（mt_wallet_consume_log + agent_earning_logs/agent_wallets）：仅置位标志，
-	// writer goroutine 在 router.SetMtRouter → App.StartBillingWriter 处按此标志启动（App 在那里装配）。
+	// 钱包消耗展示台账异步批量开关：仅置位标志，writer goroutine 在
+	// router.SetMtRouter → App.StartBillingWriter 处按此标志启动。可提现收益始终同步事务入账。
 	if os.Getenv("AGENT_HOOK_ASYNC_ENABLED") == "true" {
 		common.AgentHookAsyncEnabled = true
 		common.SysLog("agent hook async billing writer enabled with interval " + strconv.Itoa(common.AgentHookAsyncInterval) + "s")
 	}
 
 	if os.Getenv("ENABLE_PPROF") == "true" {
+		pprofServer, serverErr := newPprofServer(os.Getenv("PPROF_BIND_ADDRESS"), os.Getenv("PPROF_PORT"))
+		if serverErr != nil {
+			common.FatalLog("invalid pprof listener configuration: " + serverErr.Error())
+			return
+		}
 		gopool.Go(func() {
-			log.Println(http.ListenAndServe("0.0.0.0:8005", nil))
+			if serveErr := pprofServer.ListenAndServe(); serveErr != nil && serveErr != http.ErrServerClosed {
+				log.Println(serveErr)
+			}
 		})
 		go common.Monitor()
 		common.SysLog("pprof enabled")
@@ -176,10 +189,10 @@ func main() {
 	// 否则 gin 默认信任 0.0.0.0/0 → ClientIP() 取攻击者自填的 XFF，限流/风控可被换头绕过。
 	router.ConfigureTrustedClientIP(server)
 	server.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
-		common.SysLog(fmt.Sprintf("panic detected: %v", err))
+		common.SysLog(fmt.Sprintf("panic detected: error_type=%T panic_%s", err, common.PayloadMetadata([]byte(fmt.Sprint(err)))))
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
-				"message": fmt.Sprintf("Panic detected, error: %v. Please submit a issue here: https://github.com/Calcium-Ion/new-api", err),
+				"message": "Panic detected. Please submit a issue here: https://github.com/Calcium-Ion/new-api",
 				"type":    "new_api_panic",
 			},
 		})
@@ -192,13 +205,7 @@ func main() {
 	middleware.SetUpLogger(server)
 	// Initialize session store
 	store := cookie.NewStore([]byte(common.SessionSecret))
-	store.Options(sessions.Options{
-		Path:     "/",
-		MaxAge:   2592000, // 30 days
-		HttpOnly: true,
-		Secure:   false,
-		SameSite: http.SameSiteStrictMode,
-	})
+	store.Options(sessionCookieOptions())
 	server.Use(sessions.Sessions("session", store))
 
 	InjectUmamiAnalytics()
@@ -215,13 +222,53 @@ func main() {
 	if port == "" {
 		port = strconv.Itoa(*common.Port)
 	}
+	bindAddress := strings.TrimSpace(os.Getenv("BIND_ADDRESS"))
+	listenAddress := net.JoinHostPort(bindAddress, port)
 
 	// Log startup success message
 	common.LogStartupSuccess(startTime, port)
 
-	err = server.Run(":" + port)
+	err = server.Run(listenAddress)
 	if err != nil {
 		common.FatalLog("failed to start HTTP server: " + err.Error())
+	}
+}
+
+func newPprofServer(bindAddress, port string) (*http.Server, error) {
+	bindAddress = strings.TrimSpace(bindAddress)
+	if bindAddress == "" {
+		bindAddress = "127.0.0.1"
+	}
+	port = strings.TrimSpace(port)
+	if port == "" {
+		port = "8005"
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return nil, fmt.Errorf("invalid PPROF_PORT %q", port)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", httppprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", httppprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", httppprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", httppprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", httppprof.Trace)
+	return &http.Server{
+		Addr:              net.JoinHostPort(bindAddress, strconv.Itoa(portNumber)),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}, nil
+}
+
+func sessionCookieOptions() sessions.Options {
+	return sessions.Options{
+		Path:     "/",
+		MaxAge:   2592000, // 30 days
+		HttpOnly: true,
+		Secure:   common.SessionCookieSecure,
+		SameSite: http.SameSiteStrictMode,
 	}
 }
 

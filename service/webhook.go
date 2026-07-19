@@ -2,10 +2,10 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -33,6 +33,15 @@ func generateSignature(secret string, payload []byte) string {
 
 // SendWebhookNotify 发送 webhook 通知
 func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error {
+	return SendWebhookNotifyWithContext(context.Background(), webhookURL, secret, data)
+}
+
+func SendWebhookNotifyWithContext(ctx context.Context, webhookURL string, secret string, data dto.Notify) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, notificationRequestTimeout)
+	defer cancel()
 	// 处理占位符
 	content := data.Content
 	for _, value := range data.Values {
@@ -49,7 +58,7 @@ func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error 
 	}
 
 	// 序列化负载
-	payloadBytes, err := json.Marshal(payload)
+	payloadBytes, err := common.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal webhook payload: %v", err)
 	}
@@ -77,9 +86,9 @@ func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error 
 			workerReq.Headers["Authorization"] = "Bearer " + secret
 		}
 
-		resp, err = DoWorkerRequest(workerReq)
+		resp, err = DoWorkerRequestContext(requestCtx, workerReq)
 		if err != nil {
-			return fmt.Errorf("failed to send webhook request through worker: %v", err)
+			return sanitizedHTTPError("failed to send webhook request through worker", err)
 		}
 		defer resp.Body.Close()
 
@@ -94,9 +103,9 @@ func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error 
 			return fmt.Errorf("request reject: %v", err)
 		}
 
-		req, err = http.NewRequest(http.MethodPost, webhookURL, bytes.NewBuffer(payloadBytes))
+		req, err = http.NewRequestWithContext(requestCtx, http.MethodPost, webhookURL, bytes.NewBuffer(payloadBytes))
 		if err != nil {
-			return fmt.Errorf("failed to create webhook request: %v", err)
+			return sanitizedHTTPError("failed to create webhook request", err)
 		}
 
 		// 设置请求头
@@ -109,10 +118,20 @@ func SendWebhookNotify(webhookURL string, secret string, data dto.Notify) error 
 		}
 
 		// 发送请求
-		client := GetHttpClient()
-		resp, err = client.Do(req)
+		client, err := GetSSRFProtectedHttpClientWithProxy("")
 		if err != nil {
-			return fmt.Errorf("failed to send webhook request: %v", err)
+			return fmt.Errorf("failed to create SSRF-protected client: %v", err)
+		}
+		if client == nil {
+			return fmt.Errorf("failed to create SSRF-protected client")
+		}
+		notifyClient := *client
+		if notifyClient.Timeout <= 0 || notifyClient.Timeout > notificationRequestTimeout {
+			notifyClient.Timeout = notificationRequestTimeout
+		}
+		resp, err = notifyClient.Do(req)
+		if err != nil {
+			return sanitizedHTTPError("failed to send webhook request", err)
 		}
 		defer resp.Body.Close()
 

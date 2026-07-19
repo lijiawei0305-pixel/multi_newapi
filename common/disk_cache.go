@@ -33,7 +33,10 @@ func GetDiskCacheDir() string {
 // EnsureDiskCacheDir 确保缓存目录存在
 func EnsureDiskCacheDir() error {
 	dir := GetDiskCacheDir()
-	return os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0700)
 }
 
 // CreateDiskCacheFile 创建磁盘缓存文件

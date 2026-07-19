@@ -131,6 +131,8 @@ docker pull calciumion/new-api:latest
 # 使用 SQLite（預設）
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -138,7 +140,9 @@ docker run --name new-api -d --restart always \
 # 使用 MySQL
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
+  -e SQL_DSN="${SQL_DSN:?export SQL_DSN first}" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -312,8 +316,10 @@ docker run --name new-api -d --restart always \
 
 | 變數名 | 說明                                                           | 預設值 |
 |--------|--------------------------------------------------------------|--------|
-| `SESSION_SECRET` | 會話密鑰（多機部署必須）                                                 | - |
-| `CRYPTO_SECRET` | 加密密鑰（Redis 必須）                                               | - |
+| `DEPLOYMENT_ENV` | 安全模式。未設定或無效值都按 `production` 處理；本地 HTTP 開發必須明確設為 `development` | `production`（fail-closed） |
+| `SESSION_COOKIE_SECURE` | 限制會話 Cookie 僅經 HTTPS 傳送。生產必須為 `true`；`false` 僅限本地 `DEPLOYMENT_ENV=development` | `false` |
+| `SESSION_SECRET` | 明確的會話簽名密鑰；生產環境必填 | - |
+| `CRYPTO_SECRET` | 明確的加密/HMAC 密鑰；生產環境必填，且必須與 `SESSION_SECRET` 不同 | - |
 | `SQL_DSN` | 資料庫連接字符串                                                     | - |
 | `REDIS_CONN_STRING` | Redis 連接字符串                                                  | - |
 | `STREAMING_TIMEOUT` | 流式超時時間（秒）                                                    | `300` |
@@ -328,6 +334,9 @@ docker run --name new-api -d --restart always \
 | `PYROSCOPE_MUTEX_RATE` | Pyroscope mutex 採樣率                               | `5` |
 | `PYROSCOPE_BLOCK_RATE` | Pyroscope block 採樣率                               | `5` |
 | `HOSTNAME` | Pyroscope 標籤裡的主機名                                          | `new-api` |
+
+> [!IMPORTANT]
+> 未設定 `DEPLOYMENT_ENV` **不會**退回不安全的開發模式。公網部署必須保持 production 模式、啟用 HTTPS、設定 `SESSION_COOKIE_SECURE=true`，並提供兩個不同的隨機 `SESSION_SECRET` / `CRYPTO_SECRET`。禁止將真實密鑰提交到倉庫。
 
 📖 **完整配置：** [環境變數文件](https://docs.newapi.pro/zh/docs/installation/config-maintenance/environment-variables)
 
@@ -359,6 +368,8 @@ docker-compose up -d
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -368,7 +379,9 @@ docker run --name new-api -d --restart always \
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
+  -e SQL_DSN="${SQL_DSN:?export SQL_DSN first}" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest

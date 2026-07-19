@@ -73,6 +73,8 @@ export default defineConfig(({ envMode }) => {
       // Production optimizations
       minify: isProd,
       target: 'web',
+      sourceMap:
+        process.env.BUNDLE_ANALYZE === 'true' ? { js: 'source-map' } : false,
       distPath: {
         root: 'dist',
       },

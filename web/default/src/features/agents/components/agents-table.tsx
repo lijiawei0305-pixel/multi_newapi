@@ -16,10 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { DataTablePage, useDataTable } from '@/components/data-table'
+
 import { getAdminAgents } from '../api'
 import { useAgentsColumns } from './agents-columns'
 import { useAgents } from './agents-provider'

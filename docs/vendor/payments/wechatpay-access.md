@@ -116,24 +116,22 @@ openssl x509 -in apiclient_cert.pem -noout -serial
 
 ## 本项目接入配置
 
-填入 `auth-service/config.yaml`：
+当前微信支付 SDK 运行在主站进程内。管理员在「系统设置 → 集成 → 支付 → 微信」填写并验证 AppID、
+商户号、API v3 key、证书序列号与商户私钥；凭据由主站写入现有 options 数据库配置，不使用仓库内 YAML。请限制数据库和备份的访问。
 
-```yaml
-wxpay:
-  mock: false
-  app_id: ""           # 待填：微信公众号/开放平台 AppID
-  mch_id: ""           # 待填：商户号
-  api_v3_key: ""       # 待填：APIv3 密钥
-  cert_serial: ""      # 待填：证书序列号
-  private_key_path: "" # 待填：apiclient_key.pem 在服务器上的绝对路径
-  notify_url: "https://your-domain.com/api/payment/wechat/notify"
+异步通知地址由 `MT_PAY_NOTIFY_BASE` 与固定路径组成：
+
+```text
+https://your-domain.com/api/pay/wechat/notify
 ```
+
+完整上线步骤见 [`deploy-real-payments.md`](deploy-real-payments.md)。
 
 ---
 
 ## 注意事项
 
-1. **私钥不入库**：`apiclient_key.pem` 通过 scp 或 CI Secret 上传到服务器，路径通过配置文件引用。
+1. **私钥不入 Git**：只通过受控管理页提交，禁止写入仓库文件、Compose 或命令历史。
 2. **IP 白名单**：部分商户需要在平台配置调用 API 的服务器 IP，确认是否需要。
 3. **证书有效期**：商户 API 证书有效期通常 5 年，到期前需更新。
 4. **权限开通**：Native 支付和 H5 支付需分别申请，审核通过后才能调用对应接口。

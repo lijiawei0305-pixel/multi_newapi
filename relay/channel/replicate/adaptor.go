@@ -2,7 +2,7 @@ package replicate
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -22,7 +23,6 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
-	"github.com/samber/lo"
 )
 
 type Adaptor struct {
@@ -111,13 +111,13 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 
 	if len(request.OutputFormat) > 0 {
 		var outputFormat string
-		if err := json.Unmarshal(request.OutputFormat, &outputFormat); err == nil && strings.TrimSpace(outputFormat) != "" {
+		if err := common.Unmarshal(request.OutputFormat, &outputFormat); err == nil && strings.TrimSpace(outputFormat) != "" {
 			inputPayload["output_format"] = outputFormat
 		}
 	}
 
-	if imageN := lo.FromPtrOr(request.N, uint(0)); imageN > 0 {
-		inputPayload["num_outputs"] = int(imageN)
+	if request.N != nil {
+		inputPayload["num_outputs"] = common.SaturatingUintToInt(*request.N)
 	}
 
 	if strings.EqualFold(request.Quality, "hd") || strings.EqualFold(request.Quality, "high") {
@@ -176,19 +176,22 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (any, *types.NewAPIError) {
-	if resp == nil {
+	if resp == nil || resp.Body == nil {
 		return nil, types.NewError(errors.New("replicate adaptor: empty response"), types.ErrorCodeBadResponse)
 	}
+	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeReadResponseBodyFailed)
+		service.MarkUpstreamAccepted(c)
+		common.SysError(fmt.Sprintf("accepted Replicate response read failed: error_type=%T", err))
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
-	_ = resp.Body.Close()
-
 	var prediction PredictionResponse
 	if err := common.Unmarshal(responseBody, &prediction); err != nil {
-		return nil, types.NewError(fmt.Errorf("replicate adaptor: failed to decode response: %w", err), types.ErrorCodeBadResponseBody)
+		service.MarkUpstreamAccepted(c)
+		common.SysError(fmt.Sprintf("accepted Replicate response decode failed: error_type=%T", err))
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
 
 	if prediction.Error != nil {
@@ -204,9 +207,18 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		}
 		return nil, types.NewError(errors.New(errMsg), types.ErrorCodeBadResponse)
 	}
-
-	if prediction.Status != "" && !strings.EqualFold(prediction.Status, "succeeded") {
+	status := strings.ToLower(strings.TrimSpace(prediction.Status))
+	switch status {
+	case "", "succeeded":
+		service.MarkUpstreamAccepted(c)
+	case "failed", "canceled", "cancelled":
+		// A terminal failure in the first 200 response is a verified provider
+		// rejection. A prior 201 ACK remains accepted by design because that
+		// irreversible fact was marked before this handler.
 		return nil, types.NewError(fmt.Errorf("replicate adaptor: prediction status %q", prediction.Status), types.ErrorCodeBadResponse)
+	default:
+		service.MarkUpstreamAccepted(c)
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
 
 	var urls []string
@@ -237,7 +249,7 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	}
 
 	if len(urls) == 0 {
-		return nil, types.NewError(errors.New("replicate adaptor: empty prediction output"), types.ErrorCodeBadResponseBody)
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
 
 	var imageReq *dto.ImageRequest
@@ -255,9 +267,10 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	}
 
 	if wantsBase64 {
-		converted, convErr := downloadImagesToBase64(urls)
+		converted, convErr := downloadImagesToBase64(c, urls, service.NewImageResponseEncodedBudget())
 		if convErr != nil {
-			return nil, types.NewError(convErr, types.ErrorCodeBadResponse)
+			common.SysError(fmt.Sprintf("accepted Replicate image conversion failed: error_type=%T", convErr))
+			return nil, channel.AcceptedResponseDeliveryError()
 		}
 		for _, content := range converted {
 			if content == "" {
@@ -275,17 +288,17 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 	}
 
 	if len(imageResponse.Data) == 0 {
-		return nil, types.NewError(errors.New("replicate adaptor: no usable image data"), types.ErrorCodeBadResponse)
-	}
-
-	responseBytes, err := common.Marshal(imageResponse)
-	if err != nil {
-		return nil, types.NewError(fmt.Errorf("replicate adaptor: encode response failed: %w", err), types.ErrorCodeBadResponseBody)
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
 
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(http.StatusOK)
-	_, _ = c.Writer.Write(responseBytes)
+	if err := channel.WriteImageResponse(c.Writer, &imageResponse); err != nil {
+		if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+			_ = buffered.Fail(err)
+		}
+		return nil, channel.AcceptedResponseDeliveryError()
+	}
 
 	usage := &dto.Usage{}
 	return usage, nil
@@ -299,15 +312,29 @@ func (a *Adaptor) GetChannelName() string {
 	return ChannelName
 }
 
-func downloadImagesToBase64(urls []string) ([]string, error) {
+func downloadImagesToBase64(c *gin.Context, urls []string, budget *service.ImageResponseEncodedBudget) ([]string, error) {
+	if budget == nil {
+		budget = service.NewImageResponseEncodedBudget()
+	}
+	downloadContext := context.Background()
+	if c != nil && c.Request != nil {
+		downloadContext = c.Request.Context()
+	}
 	results := make([]string, 0, len(urls))
 	for _, url := range urls {
 		if strings.TrimSpace(url) == "" {
 			continue
 		}
-		_, data, err := service.GetImageFromUrl(url)
+		remainingRawBytes := budget.RemainingRawBytes()
+		if remainingRawBytes <= 0 {
+			return nil, service.ErrImageResponseBudgetExceeded
+		}
+		_, data, err := service.GetImageFromURLContextWithLimit(downloadContext, url, remainingRawBytes)
 		if err != nil {
-			return nil, fmt.Errorf("replicate adaptor: failed to download image from %s: %w", url, err)
+			return nil, fmt.Errorf("replicate adaptor: failed to download image url_%s: %w", common.PayloadMetadata([]byte(url)), err)
+		}
+		if err := budget.ConsumeBase64(data); err != nil {
+			return nil, err
 		}
 		results = append(results, data)
 	}
@@ -471,25 +498,33 @@ func uploadFileFromForm(c *gin.Context, info *relaycommon.RelayInfo, fieldCandid
 	}
 	uploadURL := relaycommon.GetFullRequestURL(baseURL, "/v1/files", info.ChannelType)
 
-	req, err := http.NewRequest(http.MethodPost, uploadURL, &body)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, uploadURL, &body)
 	if err != nil {
 		return "", fmt.Errorf("replicate adaptor: create upload request failed: %w", err)
 	}
 	req.Header.Set("Content-Type", formContentType)
 	req.Header.Set("Authorization", "Bearer "+info.ApiKey)
 
-	resp, err := service.GetHttpClient().Do(req)
+	client := service.GetHttpClient()
+	if client == nil {
+		return "", errors.New("replicate adaptor: upload HTTP client is unavailable")
+	}
+	uploadClient := *client
+	if uploadClient.Timeout <= 0 || uploadClient.Timeout > 60*time.Second {
+		uploadClient.Timeout = 60 * time.Second
+	}
+	resp, err := uploadClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("replicate adaptor: upload image failed: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := common.ReadAllWithLimit(resp.Body, common.ControlPlaneJSONMaxBytes)
 	if err != nil {
 		return "", fmt.Errorf("replicate adaptor: read upload response failed: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("replicate adaptor: upload image failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return "", fmt.Errorf("replicate adaptor: upload image failed with status %d: response_%s", resp.StatusCode, common.PayloadMetadata(respBody))
 	}
 
 	var uploadResp FileUploadResponse
@@ -523,7 +558,7 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(*gin.Context, *relaycommon.Relay
 }
 
 func (a *Adaptor) ConvertClaudeRequest(*gin.Context, *relaycommon.RelayInfo, *dto.ClaudeRequest) (any, error) {
-	return nil, errors.New("replicate adaptor: ConvertClaudeRequest is not implemented")
+	return nil, channel.NewUnsupportedConversionError("Replicate", "Claude")
 }
 
 func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dto.GeminiChatRequest) (any, error) {

@@ -1,6 +1,6 @@
-# 上线手册 — go-live（`*.wedreamhub.com` 通配 + 正式化测试栈）
+# 上线手册 — go-live（`*.wedreamhub.com` 通配 + 单生产栈）
 
-> **目标**：把已跑通的测试栈 `newapi_test`（app `127.0.0.1:3100`）正式化为对外服务，
+> **目标**：维护已正式化、对外服务的生产栈 `newapi_test`（app `127.0.0.1:3100`），
 > 用 `*.wedreamhub.com` 通配域名承载主站 + 全部代理子域，CF Origin CA 升到 **Full (strict)**。
 > **注**（2026-07-03 更新）：原 stock 栈 `newapi_YFNf`（`:3000`）**已删除**，`newapi_test`（`:3100`）已是**唯一现网**；本手册原述"保持 YFNf 作即时回退保险"已不再成立——回退改走 `rollback.sh`（:prev 镜像秒级 / 归档源码 `--to <ts>` 重建）。
 > 运维脚本见 [`README.md`](README.md)；迁移见 [`migrate-note.md`](migrate-note.md)。
@@ -16,18 +16,18 @@
 
 | 类型 | 名称 | 内容 | 代理 | 说明 |
 | --- | --- | --- | --- | --- |
-| A | `*` | `64.90.4.114` | 🟠 Proxied | 通配：承载 `www`/`admin`/代理子域 → 新栈 |
+| A | `*` | `64.90.4.114` | 🟠 Proxied | 通配：承载 `www`/`admin`/代理子域 → 当前生产栈 |
 | A | `@`(`wedreamhub.com`) | `64.90.4.114` | 🟠 Proxied | 主站 apex（通配不含 apex，需单列） |
-| A | `api` | （**保持现状**） | 🟠 | **现网，勿改**；exact 匹配优先于通配，安全 |
+| A | `api` | `64.90.4.114` | 🟠 Proxied | exact vhost 优先于通配，但与其它域名统一反代唯一 app `:3100` |
 
-> 已有的 `tokendream`（测试）记录可保留（exact 优先，仍指 3100），验证通配生效后可删。
+> 已有的 `tokendream` 历史验收记录可保留（exact 优先，仍指 3100），验证通配生效后可删。
 > 验证：`dig +short '随便.wedreamhub.com'` 返回 CF IP；CF 代理下源站看到的是 CF 回源 IP。
 
 ---
 
 ## ② CF Origin CA 证书 + Full (strict)（用户/你侧 + 源站）
 
-当前测试栈用**自签证书**（CF `Full`，不校验源站）。正式化升级为 **Origin CA + Full (strict)**：
+当前仓库契约是 **Origin CA + Full (strict)**。新机或证书轮换按下列步骤签发并安装；已有环境先核对证书 SAN/有效期，不要退回自签：
 
 **A. CF 面板签发 Origin 证书**
 1. CF → SSL/TLS → **Origin Server** → **Create Certificate**。
@@ -45,13 +45,18 @@ chmod 600 /www/server/panel/vhost/cert/wildcard.wedreamhub.com/privkey.pem
 ```
 
 **C. 通配 vhost**（新建 `/www/server/panel/vhost/nginx/wildcard.wedreamhub.com.conf`）
-仓库 `deploy/nginx/tokendream.wedreamhub.com.conf` 是单域版；通配版把 `server_name` 改为通配、证书指向 Origin CA：
+权威配置是仓库 `deploy/nginx/wildcard.wedreamhub.com.conf`；下列片段仅解释其关键约束：
 
 ```nginx
-# *.wedreamhub.com → newapi_test 新栈 (127.0.0.1:3100)。多租户按 Host 解析。
-# server_name 精确匹配优先：api.wedreamhub.com 仍由现网 vhost 命中，本块不影响它。
+# *.wedreamhub.com → 唯一生产栈 newapi_test (127.0.0.1:3100)。多租户按 Host 解析。
+# server_name 精确匹配优先：api.wedreamhub.com 由仓库 api vhost 命中，但同样指向唯一 app :3100。
 server {
     listen 80;
+    server_name wedreamhub.com *.wedreamhub.com;
+    return 308 https://$host$request_uri;
+}
+
+server {
     listen 443 ssl;
     server_name wedreamhub.com *.wedreamhub.com;
 
@@ -59,19 +64,8 @@ server {
     ssl_certificate_key /www/server/panel/vhost/cert/wildcard.wedreamhub.com/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
-    # 内网入账端点：仅 auth-service 经 compose 内网调用，绝不暴露公网。
+    # 内网管理端点绝不暴露公网。
     location ^~ /api/internal/ { return 404; }
-
-    # 支付网关 → auth-service (127.0.0.1:8180)：承载支付异步回调 + mock 确认页。
-    location ^~ /auth/ {
-        proxy_pass http://127.0.0.1:8180;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 60s;
-    }
 
     location / {
         proxy_pass http://127.0.0.1:3100;
@@ -91,20 +85,21 @@ server {
 ```bash
 nginx -t && nginx -s reload      # 宝塔环境也可在面板「重载配置」
 # 源站自检（绕 CF）：
-curl -fsS -H 'Host: www.wedreamhub.com' http://127.0.0.1:3100/api/status | grep success
+curl -fsS -H 'Host: www.wedreamhub.com' http://127.0.0.1:3100/health/live
+curl -fsS -H 'Host: www.wedreamhub.com' http://127.0.0.1:3100/health/ready
 ```
 最后 CF → SSL/TLS → Overview → 模式切 **Full (strict)**。
 > 切 strict 前务必确认源站已是 Origin CA 证书且 vhost 覆盖该 Host，否则全站 526。
-> 回退：临时切回 `Full`（非 strict）即可容忍自签，争取排查时间。
+> 若出现 526，保持 `Full (strict)` 与维护停流，修复源站证书/SAN/链后再开流；不要用降级到非 strict 掩盖无效证书。
 
 ---
 
 ## ③ 灰度切流
 
-测试栈已是目标栈，"正式化" = 通配域名指向同一栈（`:3100`）。两条路径：
+`newapi_test` 已是唯一现网栈，三个域名都指向同一个 `:3100` app；不存在可作为回退目标的旧端口。发布灰度有两条路径：
 
-- **默认（推荐，零灰度风险）**：通配 → 新栈；**`api.wedreamhub.com` 保持现网 `:3000` 不动**。新域全量、老接口零影响；出问题只回退新域（见 ④），现网始终在线。
-- **小流量灰度（可选）**：
+- **默认**：通过 `deploy.sh` 发布；失败时成对回滚 `:prev` 镜像与 release 树，并验证版本/readiness。
+- **双 release 小流量灰度（可选）**：只有先建立了独立数据/端口/版本均可验证的第二 release，才可：
   - **CF 侧**：用 Load Balancer（按权重 origin pool）或 Rules，把一部分流量导向不同源站/端口。
   - **nginx 侧**：同一 Host 用 `split_clients` 按权重分到双 upstream（新栈 3100 / 备份栈）：
     ```nginx
@@ -114,8 +109,8 @@ curl -fsS -H 'Host: www.wedreamhub.com' http://127.0.0.1:3100/api/status | grep 
     }
     # location / { proxy_pass http://$canary_pool; }   # 需配 resolver 或 upstream 块
     ```
-    逐步把 10%→50%→100%，观察 `healthcheck.sh` 与业务日志。
-> 由于新旧是**不同 Host**（新域 vs `api.`），无需在同 Host 内灰度即可平滑切换；`split_clients` 仅在你想对**同一域名**做百分比灰度时才需要。
+    逐步把 10%→50%→100%，观察 `healthcheck.sh`、支付对账与业务日志。
+> 未建立完整第二 release 时不要把不存在的旧栈/旧端口写进灰度配置；直接依赖已验证的 release 回滚。
 
 ---
 
@@ -123,10 +118,10 @@ curl -fsS -H 'Host: www.wedreamhub.com' http://127.0.0.1:3100/api/status | grep 
 
 | 场景 | 操作 |
 | --- | --- |
-| 新栈程序异常 | `ssh newapi628 '/root/newapi-test/deploy/ops/rollback.sh'`（回 `:prev` 镜像，秒级）；或 `--git <稳定tag>` |
-| 数据写坏需恢复 | `restore.sh /root/backups/db-<ts>.sql.gz`（二次确认；会覆盖，谨慎） |
-| 证书/strict 导致全站 5xx | CF SSL 模式切回 `Full`（非 strict）争取时间，再修源站证书 |
-| 新域整体不可用 | CF 把通配 / apex 记录**改回**或暂置 DNS-only / 指回旧资源；`api.` 现网始终可用作主入口 |
+| 新栈程序异常 | `ssh newapi628 '/root/newapi-test/deploy/ops/rollback.sh'`（回 `:prev` 镜像）；更早版本用 `rollback.sh --list` / `rollback.sh --to <ts>`（服务器无 `.git`） |
+| 数据写坏需恢复 | 先外部维护停流，再执行 `MAINTENANCE_CONFIRMED=1 restore.sh /root/backups/backup-<ts>.manifest`（强确认；成对覆盖 MySQL + Redis） |
+| 证书/strict 导致全站 5xx | 保持维护停流与 `Full (strict)`，核对源站证书 SAN、有效期和链，修复并验证后再开流 |
+| 单栈整体不可用 | 保持 CF 代理与维护停流，执行成对 release 回滚；只有事先验证过独立灾备源站时才切 DNS |
 
 > `deploy.sh` 已在「健康轮询失败」时**自动**执行镜像回滚；以上为手动兜底。
 
@@ -137,7 +132,7 @@ curl -fsS -H 'Host: www.wedreamhub.com' http://127.0.0.1:3100/api/status | grep 
 `ssh newapi628` 后 `crontab -e` 加入：
 
 ```cron
-# 每日 02:30 一致性备份（保留最近 7 份）
+# 每日 02:30 停写配对备份（MySQL + Redis + config + SHA-256 manifest，保留最近 7 组）
 30 2 * * *   /root/newapi-test/deploy/ops/backup.sh      >> /var/log/newapi-backup.log 2>&1
 # 每 5 分钟健康巡检（失败退出码=失败数；配 ALERT_WEBHOOK 可推送告警）
 */5 * * * *  ALERT_WEBHOOK= /root/newapi-test/deploy/ops/healthcheck.sh >> /var/log/newapi-health.log 2>&1
@@ -152,10 +147,10 @@ curl -fsS -H 'Host: www.wedreamhub.com' http://127.0.0.1:3100/api/status | grep 
 
 ## 上线检查清单（DoD）
 
-- [ ] CF：`*` + apex A 记录 Proxied 指 `64.90.4.114`；`api` 未动。
+- [ ] CF：`*` + apex + `api` A 记录均 Proxied 指受控源站；三个域名最终进入唯一 app `:3100`。
 - [ ] 源站：通配 vhost + Origin CA 证书装好，`nginx -t` 通过、已 reload。
-- [ ] CF SSL 模式 = **Full (strict)**，随机子域 `https://x.wedreamhub.com/api/status` 返回 `success`。
-- [ ] `api.wedreamhub.com`（现网）仍 200，未受影响。
-- [ ] `deploy.sh` 跑通一次（含自动 `:prev` 镜像 + 部署前备份）。
+- [ ] CF SSL 模式 = **Full (strict)**，HTTP 请求 308 到 HTTPS，随机子域 `/health/live` 与 `/health/ready` 均返回 `status=ok`。
+- [ ] `api` / `www` / `tokendream` 均经 HTTPS 返回正常，且源站/运行版本一致。
+- [ ] `deploy.sh` 跑通一次（含自动成对 `:prev` 镜像/release + 部署前配对备份）。
 - [ ] `healthcheck.sh` 全绿；备份/巡检 cron 已装并产出日志。
 - [ ] 演练 `rollback.sh` 与一次 `restore.sh`（演练环境）成功。

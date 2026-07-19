@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/internal/moderation"
 	"github.com/QuantumNous/new-api/internal/platform/appctx"
@@ -145,11 +146,11 @@ func rawTexts(raw json.RawMessage) []moderation.Message {
 		return nil
 	}
 	var s string
-	if json.Unmarshal(raw, &s) == nil {
+	if common.Unmarshal(raw, &s) == nil {
 		return textsToUserMessages(s)
 	}
 	var arr []string
-	if json.Unmarshal(raw, &arr) == nil {
+	if common.Unmarshal(raw, &arr) == nil {
 		return textsToUserMessages(arr...)
 	}
 	return nil
@@ -176,14 +177,14 @@ func responsesInputTexts(input json.RawMessage) []moderation.Message {
 		return nil
 	}
 	var s string
-	if json.Unmarshal(input, &s) == nil {
+	if common.Unmarshal(input, &s) == nil {
 		return textsToUserMessages(s)
 	}
 	var items []struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	}
-	if json.Unmarshal(input, &items) != nil {
+	if common.Unmarshal(input, &items) != nil {
 		return nil
 	}
 	var out []moderation.Message
@@ -261,13 +262,13 @@ func responsesContentTexts(raw json.RawMessage) []string {
 		return nil
 	}
 	var s string
-	if json.Unmarshal(raw, &s) == nil {
+	if common.Unmarshal(raw, &s) == nil {
 		return []string{s}
 	}
 	var parts []struct {
 		Text string `json:"text"`
 	}
-	if json.Unmarshal(raw, &parts) != nil {
+	if common.Unmarshal(raw, &parts) != nil {
 		return nil
 	}
 	out := make([]string, 0, len(parts))

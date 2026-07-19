@@ -19,9 +19,28 @@ func NewRedisKVCache(rdb *redis.Client) *RedisKVCache { return &RedisKVCache{rdb
 
 var _ KVCache = (*RedisKVCache)(nil)
 
+var decrementAndDeleteAtZero = redis.NewScript(`
+local current = redis.call('GET', KEYS[1])
+if not current then
+  return 0
+end
+local next = redis.call('DECR', KEYS[1])
+if next <= 0 then
+  redis.call('DEL', KEYS[1])
+  return 0
+end
+return next
+`)
+
 // Incr 原子自增并返回新值（key 不存在视为 0→1）。
 func (r *RedisKVCache) Incr(ctx context.Context, key string) (int64, error) {
 	return r.rdb.Incr(ctx, key).Result()
+}
+
+// Decr 在 Lua 内完成“存在才递减 + 到零删键”，避免 DECR/DEL 分步时并发请求插入导致误删，
+// 也避免对不存在的 key 执行 DECR 生成 -1。
+func (r *RedisKVCache) Decr(ctx context.Context, key string) (int64, error) {
+	return decrementAndDeleteAtZero.Run(ctx, r.rdb, []string{key}).Int64()
 }
 
 // Get 读取值；redis.Nil（不存在/已过期）映射为 found=false（不视为错误）。

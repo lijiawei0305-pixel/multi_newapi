@@ -15,7 +15,7 @@ type agentRecord struct {
 }
 
 // MemRepo 是 AgentRepo 的并发安全内存假实现，用于本轮纯逻辑开发与单测，
-// 也可作为 cmd/main 早期装配桩。真实 GORM 实现（迁移 + scopeByTenant + 条件 UPDATE）顺延（见报告 TODO）。
+// 也可作为 cmd/main 早期装配桩；生产 GORM 实现在 gormrepo 子包中。
 //
 // 单 mutex 守护全部状态：AppendEarning / CreateWithdrawal / ResolveWithdrawal 在锁内完成
 // 读-改-写，等价于 detailed-design §6.2 的原子条件更新，保证 -race 下的幂等与金额守恒。

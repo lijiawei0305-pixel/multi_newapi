@@ -2,13 +2,13 @@ package openai
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -22,7 +22,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 	// read response body
 	var responsesResponse dto.OpenAIResponsesResponse
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
@@ -30,9 +30,10 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if oaiError := responsesResponse.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
-		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	if apiErr := explicitOpenAIRejection(responsesResponse.GetOpenAIError(), resp.StatusCode); apiErr != nil {
+		return nil, apiErr
 	}
+	service.MarkUpstreamAccepted(c)
 
 	if responsesResponse.HasImageGenerationCall() {
 		c.Set("image_generation_call", true)
@@ -78,6 +79,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
+	var streamErr *types.NewAPIError
+	seenValidResponse := false
+	completed := false
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -85,12 +89,37 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
-			sr.Error(err)
+			service.MarkUpstreamAccepted(c)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		if apiErr := responsesStreamExplicitRejection(&streamResponse, data, resp.StatusCode); apiErr != nil {
+			if seenValidResponse {
+				service.MarkUpstreamAccepted(c)
+				streamErr = relaychannel.AcceptedResponseDeliveryError()
+			} else {
+				streamErr = apiErr
+			}
+			sr.Stop(streamErr)
+			return
+		}
+		if strings.TrimSpace(streamResponse.Type) == "" {
+			service.MarkUpstreamAccepted(c)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
+			return
+		}
+		service.MarkUpstreamAccepted(c)
+		seenValidResponse = true
+		if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
+			return
+		}
 		switch streamResponse.Type {
-		case "response.completed":
+		case "response.completed", "response.done", "response.incomplete":
+			completed = true
 			if streamResponse.Response != nil {
 				if streamResponse.Response.Usage != nil {
 					if streamResponse.Response.Usage.InputTokens != 0 {
@@ -112,6 +141,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
 				}
 			}
+			sr.Done()
 		case "response.output_text.delta":
 			// 处理输出文本
 			responseTextBuilder.WriteString(streamResponse.Delta)
@@ -129,6 +159,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+	if streamErr != nil {
+		return nil, streamErr
+	}
+	if info.StreamStatus == nil || !info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors() || !seenValidResponse || !completed {
+		service.MarkUpstreamAccepted(c)
+		return nil, relaychannel.AcceptedResponseDeliveryError()
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量

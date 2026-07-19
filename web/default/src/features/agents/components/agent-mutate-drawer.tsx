@@ -16,14 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
 import { CreditCard, TrendingUp, UserCog } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useForm, type Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getUsers } from '@/features/users/api'
+
+import {
+  SideDrawerSection,
+  sideDrawerContentClassName,
+  sideDrawerFooterClassName,
+  sideDrawerFormClassName,
+  sideDrawerHeaderClassName,
+} from '@/components/drawer-layout'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -35,10 +42,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
   Sheet,
   SheetClose,
@@ -48,14 +52,14 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { getUsers } from '@/features/users/api'
+
 import {
-  SideDrawerSection,
-  sideDrawerContentClassName,
-  sideDrawerFooterClassName,
-  sideDrawerFormClassName,
-  sideDrawerHeaderClassName,
-} from '@/components/drawer-layout'
-import { createAgent, getAgentMetrics, setAgentDomain, updateAgent } from '../api'
+  createAgent,
+  getAgentMetrics,
+  setAgentDomain,
+  updateAgent,
+} from '../api'
 import {
   AGENT_FORM_DEFAULTS,
   agentToFormValues,
@@ -77,8 +81,8 @@ interface Props {
 function numberChange(onChange: (v: number) => void, integer = false) {
   return (e: React.ChangeEvent<HTMLInputElement>) => {
     const parsed = integer
-      ? parseInt(e.target.value, 10)
-      : parseFloat(e.target.value)
+      ? Number.parseInt(e.target.value, 10)
+      : Number.parseFloat(e.target.value)
     onChange(Number.isNaN(parsed) ? 0 : parsed)
   }
 }
@@ -321,7 +325,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                             {t('Basic Agent', { defaultValue: '基础代理' })}
                           </NativeSelectOption>
                           <NativeSelectOption value='1'>
-                            {t('Independent Agent', { defaultValue: '独立代理' })}
+                            {t('Independent Agent', {
+                              defaultValue: '独立代理',
+                            })}
                           </NativeSelectOption>
                         </NativeSelect>
                       </FormControl>
@@ -329,7 +335,8 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                         {t(
                           'Independent unlocks subdomain, custom domain and site branding. Promote manually when the agent performs well.',
                           {
-                            defaultValue: '独立代理解锁子域名、自定义域名与站点品牌装修；代理表现良好时再手动升级。',
+                            defaultValue:
+                              '独立代理解锁子域名、自定义域名与站点品牌装修；代理表现良好时再手动升级。',
                           }
                         )}
                       </FormDescription>
@@ -380,7 +387,8 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   </div>
                   <p className='text-muted-foreground text-xs'>
                     {t('Subdomain hint', {
-                      defaultValue: '输入 label 开通 <label>.wedreamhub.com 代理站；更新会替换旧子域名。',
+                      defaultValue:
+                        '输入 label 开通 <label>.wedreamhub.com 代理站；更新会替换旧子域名。',
                     })}
                   </p>
                 </div>
@@ -395,15 +403,17 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                 </h3>
                 <div className='grid grid-cols-3 gap-3'>
                   <div className='rounded-md border p-3'>
-                    <div className='text-xs text-muted-foreground'>
-                      {t('Total recharge (¥)', { defaultValue: '累计充值（¥）' })}
+                    <div className='text-muted-foreground text-xs'>
+                      {t('Total recharge (¥)', {
+                        defaultValue: '累计充值（¥）',
+                      })}
                     </div>
                     <div className='text-lg font-semibold'>
                       {metrics ? cny(metrics.recharge_total_cny) : '—'}
                     </div>
                   </div>
                   <div className='rounded-md border p-3'>
-                    <div className='text-xs text-muted-foreground'>
+                    <div className='text-muted-foreground text-xs'>
                       {t('Commission earned (¥)', {
                         defaultValue: '累计分润（¥）',
                       })}
@@ -413,7 +423,7 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                     </div>
                   </div>
                   <div className='rounded-md border p-3'>
-                    <div className='text-xs text-muted-foreground'>
+                    <div className='text-muted-foreground text-xs'>
                       {t('Downstream users', { defaultValue: '下级用户数' })}
                     </div>
                     <div className='text-lg font-semibold'>
@@ -425,7 +435,8 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   {t(
                     'Lifetime totals to help you decide whether to promote this agent to independent (level 1).',
                     {
-                      defaultValue: '累计数据，帮助你判断是否将该代理升级为独立档（等级 1）。',
+                      defaultValue:
+                        '累计数据，帮助你判断是否将该代理升级为独立档（等级 1）。',
                     }
                   )}
                 </FormDescription>
@@ -446,7 +457,9 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>
-                        {t('Agent Discount Ratio', { defaultValue: '折扣系数' })}
+                        {t('Agent Discount Ratio', {
+                          defaultValue: '折扣系数',
+                        })}
                       </FormLabel>
                       <FormControl>
                         <Input
@@ -459,7 +472,8 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                       </FormControl>
                       <FormDescription>
                         {t('Agent Discount Ratio Hint', {
-                          defaultValue: '全线批发折扣 = 主站价 × 系数（如 0.8 即八折）。消耗按分组基准倍率、套餐按主站价缩放；留空或 0 = 不打折。',
+                          defaultValue:
+                            '全线批发折扣 = 主站价 × 系数（如 0.8 即八折）。消耗按分组基准倍率、套餐按主站价缩放；留空或 0 = 不打折。',
                         })}
                       </FormDescription>
                       <FormMessage />
@@ -486,7 +500,8 @@ export function AgentMutateDrawer({ open, onOpenChange, currentRow }: Props) {
                       </FormControl>
                       <FormDescription>
                         {t('Share of consumption revenue, e.g. 0.1.', {
-                          defaultValue: '消耗分润比例（L0 基础档提成），如 0.1。',
+                          defaultValue:
+                            '消耗分润比例（L0 基础档提成），如 0.1。',
                         })}
                       </FormDescription>
                       <FormMessage />

@@ -111,11 +111,15 @@ func (c Config) normalize() Config {
 // 依据 detailed-design §1.4：模块只 import 自己声明的接口，不 import 兄弟业务模块。
 
 // KVCache 是限流/限购计数与去重的键值抽象（detailed-design §2.13 依赖：KVCache）。
-// 本轮提供并发安全内存假实现 MemKVCache；真实 Redis 适配顺延（见报告 TODO）。
-// 约定：Incr 原子自增，SetNX“不存在才写入”，二者并发安全以保证限流计数与限购单赢家。
+// MemKVCache 用于确定性测试/单进程回退，RedisKVCache 用于多副本生产部署。
+// 约定：Incr/Decr 均为原子计数操作，SetNX“不存在才写入”；三者并发安全以保证限流计数、
+// 限购补偿与去重单赢家。Decr 到 0 时删除 key，避免留下无意义的零值永久键。
 type KVCache interface {
 	// Incr 原子自增 key 的计数并返回新值；key 不存在视为从 0 自增到 1。
 	Incr(ctx context.Context, key string) (int64, error)
+	// Decr 原子递减已存在的计数并返回不小于 0 的新值；key 不存在返回 0。
+	// 递减结果 <=0 时在同一原子操作内删除 key。
+	Decr(ctx context.Context, key string) (int64, error)
 	// Get 读取 SetNX 写入的值；found=false 表示 key 不存在或已过期。
 	Get(ctx context.Context, key string) (val string, found bool, err error)
 	// SetNX 仅当 key 不存在时写入 val 并返回 true；已存在返回 false。ttl<=0 表示不过期。
@@ -142,6 +146,12 @@ type PurchaseLimitAdmin interface {
 	ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity, force bool) (TrialReleaseResult, error)
 	// ReleasePurchaseLimit 释放某用户对某非 Trial 套餐的每用户限购计数键。
 	ReleasePurchaseLimit(ctx context.Context, planID, userID int64) error
+}
+
+// PurchaseLimitCompensator 只归还本次非 Trial CheckPurchaseLimit 成功占用的一次计数。
+// 它与后台 ReleasePurchaseLimit（整键清零）刻意分开，避免失败订单的补偿误删同用户其它成功购买。
+type PurchaseLimitCompensator interface {
+	RollbackPurchaseLimit(ctx context.Context, planID, userID int64) error
 }
 
 // TrialReleaseResult 是 ReleaseTrialLimit 的逐维度结果：让后台端点能如实回报

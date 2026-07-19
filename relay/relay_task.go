@@ -2,12 +2,14 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -27,8 +29,12 @@ type TaskSubmitResult struct {
 	TaskData       []byte
 	Platform       constant.TaskPlatform
 	Quota          int
+	ClientResponse *common.BufferedResponseWriter
+	Replayed       bool
 	//PerCallPrice   types.PriceData
 }
+
+var getTaskSubmitAdaptor = GetTaskAdaptor
 
 // ResolveOriginTask 处理基于已有任务的提交（remix / continuation）：
 // 查找原始任务、从中提取模型名称、将渠道锁定到原始任务的渠道
@@ -149,7 +155,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if platform == "" {
 		platform = GetTaskPlatform(c)
 	}
-	adaptor := GetTaskAdaptor(platform)
+	adaptor := getTaskSubmitAdaptor(platform)
 	if adaptor == nil {
 		return nil, service.TaskErrorWrapperLocal(fmt.Errorf("invalid api platform: %s", platform), "invalid_api_platform", http.StatusBadRequest)
 	}
@@ -202,9 +208,57 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 
-	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
+	// 7. Look up an existing explicit key before reserving local spool capacity,
+	// so a crash-replay remains available even while new submissions are
+	// backpressured. A miss is not ownership; the later insert is authoritative.
+	if strings.TrimSpace(info.RequestId) == "" {
+		info.RequestId = common.GetUUID()
+	}
+	claimSpec, err := buildTaskSubmissionClaimSpec(c, info, model.TaskSubmissionKindTask, info.PublicTaskID)
+	if err != nil {
+		return nil, taskSubmissionClaimFailure(info, taskSubmissionClaimState{}, err)
+	}
+	if existing, found, lookupErr := lookupTaskSubmission(c, info, claimSpec); found || lookupErr != nil {
+		if lookupErr != nil {
+			return nil, taskSubmissionClaimFailure(info, existing, lookupErr)
+		}
+		if existing.Replay {
+			return &TaskSubmitResult{Replayed: true}, nil
+		}
+	}
+
+	// Reserve the bounded response spool before the authoritative insert. A
+	// capacity failure therefore cannot burn a previously unseen client key.
+	responseReservation, err := common.AcquireBufferedResponseReservation()
+	if err != nil {
+		taskErr := service.TaskErrorWrapperLocal(
+			errors.New("response buffer capacity is temporarily unavailable"),
+			"response_buffer_capacity_exhausted",
+			http.StatusServiceUnavailable,
+		)
+		taskErr.Error = err
+		return nil, taskErr
+	}
+	reservationTransferred := false
+	defer func() {
+		if !reservationTransferred {
+			responseReservation.Release()
+		}
+	}()
+
+	// Atomically claim the provider call before pre-consume. Only the insert
+	// owner may send; duplicate preparing/uncertain rows never reach upstream,
+	// while accepted/committed rows replay the frozen public response.
+	claim, err := claimTaskSubmission(c, info, claimSpec)
+	if err != nil {
+		return nil, taskSubmissionClaimFailure(info, claim, err)
+	}
+	if claim.Replay {
+		return &TaskSubmitResult{Replayed: true}, nil
+	}
+
+	// 7.5 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
 	if info.Billing == nil && !info.PriceData.FreeModel {
-		info.ForcePreConsume = true
 		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
 			return nil, service.TaskErrorFromAPIError(apiErr)
 		}
@@ -216,15 +270,54 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		return nil, service.TaskErrorWrapper(err, "build_request_failed", http.StatusInternalServerError)
 	}
 
-	// 9. 发送请求
+	// 9. 发送请求. Mark uncertain immediately before the call so a timeout,
+	// reset, or process crash can never trigger a duplicate upstream submit.
+	if err := model.MarkTaskSubmissionUncertainWithMetadata(info.RequestId, model.TaskSubmissionKindTask,
+		taskSubmissionAttemptMetadata(info, string(platform), info.PriceData.Quota)); err != nil {
+		return nil, service.TaskErrorWrapperLocal(err, "mark_task_submission_uncertain_failed", http.StatusInternalServerError)
+	}
+	info.TaskSubmissionRecoveryProtected = true
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
+		return nil, taskSubmissionStateUnknown(info, err)
+	}
+	if resp == nil {
+		return nil, taskSubmissionStateUnknown(info, errors.New("upstream returned no HTTP response"))
 	}
 	if resp != nil && resp.StatusCode != http.StatusOK {
-		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+		responseBody, readErr := common.ReadAllWithLimit(resp.Body, 4<<20)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			common.SysError(fmt.Sprintf("failed to read bounded task rejection response: error_type=%T", readErr))
+			responseBody = nil
+		}
+		upstreamErr := service.TaskErrorWrapper(fmt.Errorf("upstream response_%s", common.PayloadMetadata(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+		if taskHTTPResponseIsExplicitRejection(resp.StatusCode) {
+			if rejectErr := model.MarkTaskSubmissionRejected(info.RequestId, model.TaskSubmissionKindTask); rejectErr == nil {
+				info.TaskSubmissionRecoveryProtected = false
+				return nil, upstreamErr
+			}
+		}
+		return nil, taskSubmissionStateUnknown(info, upstreamErr.Error)
 	}
+
+	// Buffer the public response until the ACK payload is durable. The capacity
+	// was reserved before DoRequest, so an accepted provider response can always
+	// be spooled without exceeding the process-wide worst-case budget.
+	originalWriter := c.Writer
+	clientResponse, bufferErr := common.NewBufferedResponseWriterWithReservation(originalWriter, responseReservation)
+	if bufferErr != nil {
+		return nil, taskSubmissionStateUnknown(info, bufferErr)
+	}
+	reservationTransferred = true
+	c.Writer = clientResponse
+	defer func() { c.Writer = originalWriter }()
+	responseReturned := false
+	defer func() {
+		if !responseReturned {
+			clientResponse.Discard()
+		}
+	}()
 
 	// 10. 返回 OtherRatios 给下游（header 必须在 DoResponse 写 body 之前设置）
 	otherRatios := info.PriceData.OtherRatios
@@ -237,7 +330,18 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// 11. 解析响应
 	upstreamTaskID, taskData, taskErr := adaptor.DoResponse(c, resp, info)
 	if taskErr != nil {
-		return nil, taskErr
+		clientResponse.Discard()
+		if taskResponseIsExplicitRejection(taskErr) {
+			if rejectErr := model.MarkTaskSubmissionRejected(info.RequestId, model.TaskSubmissionKindTask); rejectErr == nil {
+				info.TaskSubmissionRecoveryProtected = false
+				return nil, taskErr
+			}
+		}
+		return nil, taskSubmissionStateUnknown(info, taskErr.Error)
+	}
+	if strings.TrimSpace(upstreamTaskID) == "" {
+		clientResponse.Discard()
+		return nil, taskSubmissionStateUnknown(info, errors.New("upstream task id is empty after a successful response"))
 	}
 
 	// 11. 提交后计费调整：让适配器根据上游实际返回调整 OtherRatios
@@ -249,12 +353,66 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		info.PriceData.Quota = finalQuota
 	}
 
+	responseReturned = true
 	return &TaskSubmitResult{
 		UpstreamTaskID: upstreamTaskID,
 		TaskData:       taskData,
 		Platform:       platform,
 		Quota:          finalQuota,
+		ClientResponse: clientResponse,
 	}, nil
+}
+
+func taskResponseIsExplicitRejection(taskErr *dto.TaskError) bool {
+	return taskErr != nil && service.IsExplicitTaskSubmissionRejection(taskErr.Error)
+}
+
+func taskHTTPResponseIsExplicitRejection(statusCode int) bool {
+	switch statusCode {
+	case http.StatusBadRequest,
+		http.StatusUnauthorized,
+		http.StatusPaymentRequired,
+		http.StatusForbidden,
+		http.StatusNotFound,
+		http.StatusMethodNotAllowed,
+		http.StatusLengthRequired,
+		http.StatusRequestEntityTooLarge,
+		http.StatusRequestURITooLong,
+		http.StatusUnsupportedMediaType,
+		http.StatusUnprocessableEntity,
+		http.StatusTooManyRequests:
+		return true
+	default:
+		return false
+	}
+}
+
+func taskSubmissionStateUnknown(info *relaycommon.RelayInfo, cause error) *dto.TaskError {
+	requestId := ""
+	if info != nil {
+		requestId = info.RequestId
+	}
+	return &dto.TaskError{
+		Code:       "accepted_state_unknown",
+		Message:    fmt.Sprintf("upstream acceptance state is unknown; do not retry; contact an administrator with request_id=%s", requestId),
+		StatusCode: http.StatusBadGateway,
+		LocalError: true,
+		Error:      cause,
+	}
+}
+
+func taskSubmissionClaimFailure(info *relaycommon.RelayInfo, claim taskSubmissionClaimState, err error) *dto.TaskError {
+	if claim.Recovery != nil && claim.Recovery.Status == model.TaskSubmissionStatusUncertain {
+		return taskSubmissionStateUnknown(info, err)
+	}
+	status := http.StatusBadRequest
+	code := "invalid_idempotency_key"
+	if errors.Is(err, model.ErrTaskSubmissionIdempotencyPayloadMismatch) ||
+		errors.Is(err, model.ErrTaskSubmissionIdempotencyInProgress) || claim.Recovery != nil {
+		status = http.StatusConflict
+		code = "idempotency_conflict"
+	}
+	return service.TaskErrorWrapperLocal(err, code, status)
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。
@@ -379,7 +537,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
-	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
+	if realtimeResp := tryRealtimeFetch(c.Request.Context(), originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
 		respBody = realtimeResp
 		return
 	}
@@ -418,7 +576,15 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 // tryRealtimeFetch 尝试从上游实时拉取 Gemini/Vertex 任务状态。
 // 仅当渠道类型为 Gemini 或 Vertex 时触发；其他渠道或出错时返回 nil。
 // 当非 OpenAI Video API 时，还会构建自定义格式的响应体。
-func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
+const realtimeTaskFetchTimeout = 30 * time.Second
+
+func tryRealtimeFetch(ctx context.Context, task *model.Task, isOpenAIVideoAPI bool) []byte {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, realtimeTaskFetchTimeout)
+	defer cancel()
+
 	channelModel, err := model.GetChannelById(task.ChannelId, true)
 	if err != nil {
 		return nil
@@ -437,7 +603,7 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		return nil
 	}
 
-	resp, err := adaptor.FetchTask(baseURL, channelModel.Key, map[string]any{
+	resp, err := adaptor.FetchTask(fetchCtx, baseURL, channelModel.Key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
 	}, proxy)
@@ -445,7 +611,10 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		return nil
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	body, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return nil
 	}
@@ -474,7 +643,28 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	}
 
 	if !snap.Equal(task.Snapshot()) {
-		_, _ = task.UpdateWithStatus(snap.Status)
+		isTerminal := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
+		if isTerminal && snap.Status != task.Status {
+			actualQuota := task.Quota
+			reason := ti.Reason
+			if task.Status == model.TaskStatusFailure {
+				actualQuota = 0
+				task.FailReason = ti.Reason
+			} else {
+				actualQuota, reason = service.TaskQuotaOnComplete(fetchCtx, adaptor, task, ti)
+			}
+			won, transitionErr := service.TransitionTaskWithBilling(fetchCtx, task, snap.Status, actualQuota, reason)
+			if transitionErr != nil {
+				common.SysLog("realtime task terminal billing remains pending: " + transitionErr.Error())
+			} else if !won {
+				var current model.Task
+				if err := model.DB.First(&current, task.ID).Error; err == nil {
+					*task = current
+				}
+			}
+		} else {
+			_, _ = task.UpdateWithStatus(snap.Status)
+		}
 	}
 
 	// OpenAI Video API 由调用者的 ConvertToOpenAIVideo 分支处理

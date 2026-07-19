@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQueryClient } from '@tanstack/react-query'
 /* eslint-disable react-refresh/only-export-components */
 import React, {
   createContext,
@@ -24,7 +25,7 @@ import React, {
   useCallback,
   useMemo,
 } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+
 import { useChannelUpstreamUpdates } from '../hooks/use-channel-upstream-updates'
 import { channelsQueryKeys } from '../lib'
 import type { Channel } from '../types'

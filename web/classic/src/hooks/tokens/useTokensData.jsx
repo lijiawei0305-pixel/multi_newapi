@@ -35,6 +35,7 @@ import {
   getServerAddress,
   encodeChannelConnectionString,
 } from '../../helpers/token';
+import { openChatUrlInNewTab } from '../../helpers/safeNavigation';
 
 export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
   const { t } = useTranslation();
@@ -214,23 +215,32 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
   // Open link function for chat integrations
   const onOpenLink = async (type, url, record) => {
     const fullKey = await fetchTokenKey(record);
-    if (url && url.startsWith('ccswitch')) {
+    if (typeof url !== 'string') {
+      showError(t('聊天链接配置错误，请联系管理员'));
+      return;
+    }
+    const trimmedUrl = url.trim();
+    if (trimmedUrl.startsWith('ccswitch')) {
       openCCSwitchModal(fullKey);
       return;
     }
-    if (url && url.startsWith('fluent')) {
+    if (trimmedUrl.startsWith('fluent')) {
       openFluentNotification(fullKey);
       return;
     }
-    let status = localStorage.getItem('status');
     let serverAddress = '';
-    if (status) {
-      status = JSON.parse(status);
-      serverAddress = status.server_address;
+    try {
+      const status = localStorage.getItem('status');
+      if (status) {
+        serverAddress = JSON.parse(status)?.server_address || '';
+      }
+    } catch {
+      serverAddress = '';
     }
     if (serverAddress === '') {
       serverAddress = window.location.origin;
     }
+    url = trimmedUrl;
     if (url.includes('{cherryConfig}') === true) {
       let cherryConfig = {
         id: 'new-api',
@@ -267,7 +277,9 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
       url = url.replaceAll('{key}', `sk-${fullKey}`);
     }
 
-    window.open(url, '_blank');
+    if (!openChatUrlInNewTab(url)) {
+      showError(t('聊天链接配置错误，请联系管理员'));
+    }
   };
 
   // Manage token function (delete, enable, disable)
@@ -306,8 +318,7 @@ export const useTokensData = (openFluentNotification, openCCSwitchModal) => {
   // Search tokens function
   const searchTokens = async (page = 1, size = pageSize) => {
     const normalizedPage = Number.isInteger(page) && page > 0 ? page : 1;
-    const normalizedSize =
-      Number.isInteger(size) && size > 0 ? size : pageSize;
+    const normalizedSize = Number.isInteger(size) && size > 0 ? size : pageSize;
 
     const { searchKeyword, searchToken } = getFormValues();
     if (searchKeyword === '' && searchToken === '') {

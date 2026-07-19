@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import i18n from '@/i18n/config'
 
@@ -105,10 +105,12 @@ function persistActiveId(id: string): void {
 function deriveTitle(messages: Message[]): string {
   const firstUser = messages.find((m) => m.from === 'user')
   const versions = firstUser?.versions ?? []
-  const text = versions[versions.length - 1]?.content ?? ''
-  const trimmed = text.trim().replace(/\s+/g, ' ')
+  const text = versions.at(-1)?.content ?? ''
+  const trimmed = text.trim().replaceAll(/\s+/g, ' ')
   if (!trimmed) return i18n.t('New conversation')
-  return trimmed.length > TITLE_MAX ? `${trimmed.slice(0, TITLE_MAX)}…` : trimmed
+  return trimmed.length > TITLE_MAX
+    ? `${trimmed.slice(0, TITLE_MAX)}…`
+    : trimmed
 }
 
 interface UseConversationHistoryOptions {
@@ -125,9 +127,8 @@ export function useConversationHistory({
   onLoadMessages,
   ready,
 }: UseConversationHistoryOptions) {
-  const [conversations, setConversations] = useState<StoredConversation[]>(
-    loadStored
-  )
+  const [conversations, setConversations] =
+    useState<StoredConversation[]>(loadStored)
   const [activeId, setActiveId] = useState<string>(
     () => loadActiveId() ?? nanoid()
   )

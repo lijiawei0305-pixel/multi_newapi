@@ -1,8 +1,12 @@
 # 🏗️ Infra & Foundation — 最小可执行任务（MET）
 
+> ⚠️ **历史基建存档（不是当前运维手册）。** 下文 `newapi_YFNf:3000` 与「`newapi_test`
+> 是可销毁测试栈」是 2026-07-03 以前的当时事实；前者已删除，后者已是唯一生产栈。
+> 当前事实见 [`STATUS.md`](STATUS.md)，发布/备份/恢复只按 [`../../deploy/ops/README.md`](../../deploy/ops/README.md)。
+
 > **职责**：代码基线（fork new-api）、镜像构建、数据库迁移基建、宝塔网关/域名、支付回调服务、`platform` 横切包。
 > **设计参考**：[detailed-design.md](../detailed-design.md) §1/§5/§6 ｜ [proposal.md](../proposal.md) §10/§12/§15
-> **现网事实（已 SSH 核实）**：宝塔 Docker 应用 `newapi_YFNf`（`calciumion/new-api:latest` + `redis` + `mysql:8.2`，DB=`new-api`，跑在 `127.0.0.1:3000`）；域名 `wedreamhub.com`，`api.wedreamhub.com` 已反代到 3000；宿主无 Go/Node（构建在 Docker 内）。
+> **当时现网事实（历史）**：宝塔 Docker 应用 `newapi_YFNf`（`calciumion/new-api:latest` + `redis` + `mysql:8.2`，DB=`new-api`，跑在 `127.0.0.1:3000`）；域名 `wedreamhub.com`，`api.wedreamhub.com` 已反代到 3000；宿主无 Go/Node（构建在 Docker 内）。
 > **约定**：每个子任务的「✅」是完成/测试标准，达成即勾选。
 
 ## A. 代码基线

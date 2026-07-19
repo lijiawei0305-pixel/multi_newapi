@@ -1,6 +1,8 @@
 package channel
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -11,6 +13,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+type UnsupportedConversionError struct {
+	Provider      string
+	RequestFormat string
+}
+
+func (e *UnsupportedConversionError) Error() string {
+	return fmt.Sprintf("%s adaptor: %s request conversion is unsupported", e.Provider, e.RequestFormat)
+}
+
+func NewUnsupportedConversionError(provider string, requestFormat string) error {
+	return &UnsupportedConversionError{Provider: provider, RequestFormat: requestFormat}
+}
 
 type Adaptor interface {
 	// Init IsStream bool
@@ -74,7 +89,7 @@ type TaskAdaptor interface {
 
 	// ── Polling ──────────────────────────────────────────────────────
 
-	FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error)
+	FetchTask(ctx context.Context, baseUrl, key string, body map[string]any, proxy string) (*http.Response, error)
 	ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error)
 }
 

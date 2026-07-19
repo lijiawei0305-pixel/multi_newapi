@@ -16,25 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
 import { Pencil } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import {
-  ADMIN_PERMISSION_ACTIONS,
-  ADMIN_PERMISSION_RESOURCES,
-  EMPTY_PERMISSION_CATALOG,
-  hasPermission,
-  normalizeAdminPermissions,
-} from '@/lib/admin-permissions'
-import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
-import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
-import { ROLE } from '@/lib/roles'
-import { useAuthStore } from '@/stores/auth-store'
-import { getModelGroups } from '@/features/model-groups/api'
+  SideDrawerSection,
+  sideDrawerContentClassName,
+  sideDrawerFooterClassName,
+  sideDrawerFormClassName,
+  sideDrawerHeaderClassName,
+} from '@/components/drawer-layout'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -66,13 +62,19 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
+import { getModelGroups } from '@/features/model-groups/api'
 import {
-  SideDrawerSection,
-  sideDrawerContentClassName,
-  sideDrawerFooterClassName,
-  sideDrawerFormClassName,
-  sideDrawerHeaderClassName,
-} from '@/components/drawer-layout'
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  EMPTY_PERMISSION_CATALOG,
+  hasPermission,
+  normalizeAdminPermissions,
+} from '@/lib/admin-permissions'
+import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
+import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
+
 import {
   createUser,
   updateUser,
@@ -88,7 +90,7 @@ import {
   transformFormDataToPayload,
   transformUserToFormDefaults,
 } from '../lib'
-import { type User } from '../types'
+import type { User } from '../types'
 import { UserQuotaDialog } from './user-quota-dialog'
 import { useUsers } from './users-provider'
 
@@ -147,16 +149,18 @@ export function UsersMutateDrawer({
   useEffect(() => {
     if (open && isUpdate && currentRow) {
       // For update, fetch fresh data
-      getUser(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformUserToFormDefaults(result.data))
-        }
-      })
+      void getUser(currentRow.id)
+        .then((result) => {
+          if (result.success && result.data) {
+            form.reset(transformUserToFormDefaults(result.data))
+          }
+        })
+        .catch(() => toast.error(t('Request failed')))
     } else if (open && !isUpdate) {
       // For create, reset to defaults
       form.reset(USER_FORM_DEFAULT_VALUES)
     }
-  }, [open, isUpdate, currentRow, form])
+  }, [open, isUpdate, currentRow, form, t])
 
   const { meta: currencyMeta } = getCurrencyDisplay()
   const currencyLabel = getCurrencyLabel()
@@ -206,7 +210,7 @@ export function UsersMutateDrawer({
               : t(ERROR_MESSAGES.CREATE_FAILED))
         )
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setIsSubmitting(false)
@@ -289,7 +293,8 @@ export function UsersMutateDrawer({
                             { value: '10', label: t('Admin') },
                           ]}
                           onValueChange={(value) =>
-                            value !== null && field.onChange(parseInt(value))
+                            value !== null &&
+                            field.onChange(Number.parseInt(value))
                           }
                           value={String(field.value)}
                         >
@@ -371,12 +376,10 @@ export function UsersMutateDrawer({
                       <FormItem>
                         <FormLabel>{t('Group')}</FormLabel>
                         <Select
-                          items={[
-                            ...tierGroups.map((group) => ({
-                              value: group,
-                              label: group,
-                            })),
-                          ]}
+                          items={tierGroups.map((group) => ({
+                            value: group,
+                            label: group,
+                          }))}
                           onValueChange={field.onChange}
                           value={field.value}
                         >
@@ -464,88 +467,93 @@ export function UsersMutateDrawer({
               {canEditAdminPermissions &&
                 targetIsAdmin &&
                 permissionCatalog.resources.length > 0 && (
-                <SideDrawerSection>
-                  <h3 className='text-sm font-medium'>
-                    {t('Admin Permissions')}
-                  </h3>
-                  <p className='text-muted-foreground text-xs'>
-                    {t(
-                      'Default administrator permissions can be overridden for this user.'
-                    )}
-                  </p>
-                  <FormField
-                    control={form.control}
-                    name='admin_permissions'
-                    render={({ field }) => {
-                      const selected = normalizeAdminPermissions(
-                        field.value,
-                        permissionCatalog
-                      )
-                      return (
-                        <FormItem>
-                          <div className='space-y-3'>
-                            {permissionCatalog.resources.map((resource) => (
-                              <div
-                                key={resource.resource}
-                                className='space-y-2 rounded-md border p-3'
-                              >
-                                <div className='text-sm font-medium'>
-                                  {t(resource.label_key)}
-                                </div>
-                                <div className='space-y-2'>
-                                  {resource.actions.map((option) => (
-                                    <label
-                                      key={option.action}
-                                      className='flex items-start gap-3'
-                                    >
-                                      <Checkbox
-                                        checked={
-                                          selected[resource.resource]?.[
-                                            option.action
-                                          ] === true
-                                        }
-                                        onCheckedChange={(checked) => {
-                                          field.onChange({
-                                            ...selected,
-                                            [resource.resource]: {
-                                              ...selected[resource.resource],
-                                              [option.action]: checked === true,
-                                            },
-                                          })
-                                        }}
-                                      />
-                                      <span className='flex flex-col gap-1'>
-                                        <span className='text-sm font-medium'>
-                                          {t(option.label_key)}
-                                        </span>
-                                        <span className='text-muted-foreground text-xs'>
-                                          {t(option.description_key)}
-                                        </span>
-                                      </span>
-                                    </label>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          <FormMessage />
-                        </FormItem>
-                      )
-                    }}
-                  />
-                  {currentUser && (
+                  <SideDrawerSection>
+                    <h3 className='text-sm font-medium'>
+                      {t('Admin Permissions')}
+                    </h3>
                     <p className='text-muted-foreground text-xs'>
-                      {hasPermission(
-                        currentUser,
-                        ADMIN_PERMISSION_RESOURCES.CHANNEL,
-                        ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
-                      )
-                        ? t('Your account can edit sensitive channel settings.')
-                        : t('Your account cannot edit sensitive channel settings.')}
+                      {t(
+                        'Default administrator permissions can be overridden for this user.'
+                      )}
                     </p>
-                  )}
-                </SideDrawerSection>
-              )}
+                    <FormField
+                      control={form.control}
+                      name='admin_permissions'
+                      render={({ field }) => {
+                        const selected = normalizeAdminPermissions(
+                          field.value,
+                          permissionCatalog
+                        )
+                        return (
+                          <FormItem>
+                            <div className='space-y-3'>
+                              {permissionCatalog.resources.map((resource) => (
+                                <div
+                                  key={resource.resource}
+                                  className='space-y-2 rounded-md border p-3'
+                                >
+                                  <div className='text-sm font-medium'>
+                                    {t(resource.label_key)}
+                                  </div>
+                                  <div className='space-y-2'>
+                                    {resource.actions.map((option) => (
+                                      <label
+                                        key={option.action}
+                                        className='flex items-start gap-3'
+                                      >
+                                        <Checkbox
+                                          checked={
+                                            selected[resource.resource]?.[
+                                              option.action
+                                            ] === true
+                                          }
+                                          onCheckedChange={(checked) => {
+                                            field.onChange({
+                                              ...selected,
+                                              [resource.resource]: {
+                                                ...selected[resource.resource],
+                                                [option.action]:
+                                                  checked === true,
+                                              },
+                                            })
+                                          }}
+                                        />
+                                        <span className='flex flex-col gap-1'>
+                                          <span className='text-sm font-medium'>
+                                            {t(option.label_key)}
+                                          </span>
+                                          <span className='text-muted-foreground text-xs'>
+                                            {t(option.description_key)}
+                                          </span>
+                                        </span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            <FormMessage />
+                          </FormItem>
+                        )
+                      }}
+                    />
+                    {currentUser && (
+                      <p className='text-muted-foreground text-xs'>
+                        {hasPermission(
+                          currentUser,
+                          ADMIN_PERMISSION_RESOURCES.CHANNEL,
+                          ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
+                        )
+                          ? t(
+                              'Your account can edit sensitive channel settings.'
+                            )
+                          : t(
+                              'Your account cannot edit sensitive channel settings.'
+                            )}
+                      </p>
+                    )}
+                  </SideDrawerSection>
+                )}
 
               {/* Binding Information (Read-only) */}
               {isUpdate && (

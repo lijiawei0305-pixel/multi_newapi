@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wedream AI - Core Intelligence Hub</title>
+  <meta name="description" content="Orchestrating the world's leading AI models around a unified core. OpenAI, Claude, Gemini, Meta, and more orbiting in one intelligent workspace.">
+
+  <!-- Premium Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- CSS Stylesheet -->
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <!-- WebGL Canvas for Particle Effects -->
+  <canvas id="webgl-canvas"></canvas>
+
+  <!-- Interactive Background Glows (Bioluminescent Deep Sea / Space) -->
+  <div class="glow-bg glow-bg-1"></div>
+  <div class="glow-bg glow-bg-2"></div>
+  <div class="vignette"></div>
+
+  <!-- Main Website Interface Overlay -->
+  <div class="ui-wrapper">
+    <!-- Navigation Bar (Sleek and Minimalist) -->
+    <header class="navbar">
+      <div class="logo">
+        <svg viewBox="0 0 100 100" width="30" height="30" class="logo-svg">
+          <circle cx="50" cy="50" r="12" fill="none" stroke="url(#logo-grad)" stroke-width="2.5" />
+          <circle cx="50" cy="50" r="30" fill="none" stroke="url(#logo-grad)" stroke-width="1" stroke-dasharray="6 6" />
+          <circle cx="50" cy="8" r="4" fill="#00f0ff" />
+          <circle cx="50" cy="92" r="4" fill="#00f0ff" />
+          <circle cx="8" cy="50" r="4" fill="#7000ff" />
+          <circle cx="92" cy="50" r="4" fill="#7000ff" />
+          <defs>
+            <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#00f0ff" />
+              <stop offset="100%" stop-color="#7000ff" />
+            </linearGradient>
+          </defs>
+        </svg>
+        <span class="logo-text">Wedream AI</span>
+      </div>
+
+      <nav class="nav-links">
+        <div class="nav-item active">Core</div>
+        <div class="nav-item">Models</div>
+        <div class="nav-item">Solutions</div>
+        <div class="nav-item">Docs</div>
+      </nav>
+
+      <div class="nav-cta">
+        <a href="#signin" class="btn-text">Sign in</a>
+        <a href="#getstarted" class="btn-primary-sm">Launch Console</a>
+      </div>
+    </header>
+
+    <!-- Main Hero Container -->
+    <main class="hero-container">
+      <div class="hero-grid">
+        <!-- Hero Left Column: Clean Copy -->
+        <div class="hero-left">
+          <div class="hero-badge animate-fade-in">
+            <span class="badge-dot"></span>
+            <span class="badge-text">Intelligence Core System</span>
+          </div>
+
+          <h1 class="hero-title animate-slide-up" id="dynamic-title">
+            All Leading AI Models.<br>
+            One <span class="gradient-text">Powerful</span> Platform.
+          </h1>
+
+          <p class="hero-desc animate-slide-up" id="dynamic-desc">
+            Orchestrate and cross-examine the world's most advanced foundation models around a unified, high-speed core. Seamless routing, zero friction.
+          </p>
+
+          <div class="hero-actions animate-slide-up">
+            <button class="btn-primary" id="btn-explore">
+              <span>Initialize Core</span>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </button>
+            <button class="btn-secondary" id="btn-docs">
+              <span>Documentation</span>
+            </button>
+          </div>
+
+          <!-- Metrics Section -->
+          <div class="hero-metrics animate-fade-in-delayed">
+            <div class="metric-item">
+              <div class="metric-value">11</div>
+              <div class="metric-label">Satellites</div>
+            </div>
+            <div class="metric-divider"></div>
+            <div class="metric-item">
+              <div class="metric-value">1.2ms</div>
+              <div class="metric-label">Core Latency</div>
+            </div>
+            <div class="metric-divider"></div>
+            <div class="metric-item">
+              <div class="metric-value">99.99%</div>
+              <div class="metric-label">Uptime</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Position Spacer for 3D canvas alignment (canvas sits in background behind this spacer) -->
+        <div class="hero-right">
+          <!-- Minimalist Glass HUD Panel (Updates on Hover/Click of Orbit Satellites) -->
+          <div class="hud-panel" id="hud-panel">
+            <div class="hud-header">
+              <span class="hud-status-dot"></span>
+              <span class="hud-title" id="hud-model-name">Wedream Core</span>
+              <span class="hud-subtitle" id="hud-model-provider">SYSTEM ACTIVE</span>
+            </div>
+            <p class="hud-desc" id="hud-model-desc">
+              Central bioluminescent intelligence hub. Orbiting satellites represent connected foundation models, communicating in real-time.
+            </p>
+            <div class="hud-footer">
+              <span class="hud-label">TELEMETRY</span>
+              <span class="hud-value" id="hud-model-telemetry">100% Core Load</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Bottom Minimalist Panel -->
+    <footer class="footer-dashboard">
+      <!-- Scroll Discover -->
+      <div class="scroll-discover">
+        <span class="scroll-text">ROTATE CANVAS TO EXPLORE CORE</span>
+        <div class="mouse-icon">
+          <span class="mouse-wheel"></span>
+        </div>
+      </div>
+
+      <!-- Small Bottom Stats Indicator (Minimalist HUD style) -->
+      <div class="status-indicator">
+        <span class="status-indicator-dot"></span>
+        <span class="status-indicator-text">System Status: Optimal | Connected Nodes: 11 / 11</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Entry Script -->
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

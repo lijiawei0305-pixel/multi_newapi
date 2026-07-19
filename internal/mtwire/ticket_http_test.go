@@ -69,8 +69,10 @@ func testCtx(method, target, body string) (*gin.Context, *httptest.ResponseRecor
 	return c, w
 }
 
-func setID(c *gin.Context, id int64)         { c.Set("id", int(id)) }
-func setParam(c *gin.Context, id int64)      { c.Params = gin.Params{gin.Param{Key: "id", Value: strconv.FormatInt(id, 10)}} }
+func setID(c *gin.Context, id int64) { c.Set("id", int(id)) }
+func setParam(c *gin.Context, id int64) {
+	c.Params = gin.Params{gin.Param{Key: "id", Value: strconv.FormatInt(id, 10)}}
+}
 func setAgentTenant(c *gin.Context, t int64) { c.Set(ginKeyAgentTenant, t) }
 
 // apiResp / decodeResp 复用 distribution_test.go 的 {success,code,data} 解码器（同包）。
@@ -318,19 +320,19 @@ func TestTicketRoutesRegisterNoConflict(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"GET /api/tenant/tickets":                 false,
-		"POST /api/tenant/tickets":                false,
-		"GET /api/tenant/tickets/:id":             false,
-		"POST /api/tenant/tickets/:id/replies":    false,
-		"POST /api/tenant/tickets/:id/close":      false,
-		"GET /api/tenant/agent/tickets":           false,
-		"GET /api/tenant/agent/tickets/:id":       false,
+		"GET /api/tenant/tickets":                    false,
+		"POST /api/tenant/tickets":                   false,
+		"GET /api/tenant/tickets/:id":                false,
+		"POST /api/tenant/tickets/:id/replies":       false,
+		"POST /api/tenant/tickets/:id/close":         false,
+		"GET /api/tenant/agent/tickets":              false,
+		"GET /api/tenant/agent/tickets/:id":          false,
 		"POST /api/tenant/agent/tickets/:id/replies": false,
 		"POST /api/tenant/agent/tickets/:id/status":  false,
-		"GET /api/admin/tickets":                  false,
-		"GET /api/admin/tickets/:id":              false,
-		"POST /api/admin/tickets/:id/replies":     false,
-		"POST /api/admin/tickets/:id/status":      false,
+		"GET /api/admin/tickets":                     false,
+		"GET /api/admin/tickets/:id":                 false,
+		"POST /api/admin/tickets/:id/replies":        false,
+		"POST /api/admin/tickets/:id/status":         false,
 	}
 	for _, ri := range r.Routes() {
 		want[ri.Method+" "+ri.Path] = true

@@ -30,6 +30,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { Separator } from '@/components/ui/separator'
+import { openHttpUrlInNewTab } from '@/lib/safe-navigation'
 
 import { getDeployment, listDeploymentContainers } from '../../api'
 
@@ -258,7 +259,7 @@ export function ViewDetailsDialog({
                           <Button
                             variant='outline'
                             size='sm'
-                            onClick={() => window.open(url, '_blank')}
+                            onClick={() => openHttpUrlInNewTab(url)}
                           >
                             <ExternalLink className='mr-2 h-4 w-4' />
                             {t('Open')}

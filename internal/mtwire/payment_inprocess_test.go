@@ -1,14 +1,19 @@
 package mtwire
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/internal/payment/realpay"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 )
 
 // ---- 测试夹具：保存/还原 setting.* 支付凭据（包级全局，须隔离） ----
@@ -176,6 +181,32 @@ func stubNotifyActivate(t *testing.T, fn func(*App, context.Context, string, flo
 	orig := notifyActivateSub
 	t.Cleanup(func() { notifyActivateSub = orig })
 	notifyActivateSub = fn
+}
+
+func TestHandlePayNotifyDoesNotLogVerificationErrorDetails(t *testing.T) {
+	const canary = "private-signature private-body private-buyer@example.test"
+	stubVerifyNotify(t, nil, errors.New(canary))
+
+	var output bytes.Buffer
+	common.LogWriterMu.Lock()
+	originalWriter := gin.DefaultWriter
+	gin.DefaultWriter = &output
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = originalWriter
+		common.LogWriterMu.Unlock()
+	})
+
+	c, _ := newTenantReqCtx(http.MethodPost, "", nil, 0, nil)
+	(&App{}).HandleWechatNotify(c)
+
+	logged := output.String()
+	assert.Contains(t, logged, "pay notify verify failed provider=wxpay")
+	assert.Contains(t, logged, "error_type=")
+	assert.NotContains(t, logged, canary)
+	assert.NotContains(t, logged, "private-signature")
+	assert.NotContains(t, logged, "private-buyer@example.test")
 }
 
 // TestHandlePayNotify_DispatchRecharge 微信成功回调、RCG 前缀 → 走充值入账（不走激活）；200 + SUCCESS ack。

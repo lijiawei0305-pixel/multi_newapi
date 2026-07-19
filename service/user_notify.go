@@ -2,17 +2,20 @@ package service
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 )
+
+const notificationRequestTimeout = 15 * time.Second
 
 func NotifyRootUser(t string, subject string, content string) {
 	user := model.GetRootUser().ToBaseUser()
@@ -49,6 +52,15 @@ func NotifyUpstreamModelUpdateWatchers(subject string, content string) {
 }
 
 func NotifyUser(userId int, userEmail string, userSetting dto.UserSetting, data dto.Notify) error {
+	return NotifyUserWithContext(context.Background(), userId, userEmail, userSetting, data)
+}
+
+func NotifyUserWithContext(ctx context.Context, userId int, userEmail string, userSetting dto.UserSetting, data dto.Notify) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	notifyCtx, cancel := context.WithTimeout(ctx, notificationRequestTimeout)
+	defer cancel()
 	notifyType := userSetting.NotifyType
 	if notifyType == "" {
 		notifyType = dto.NotifyTypeEmail
@@ -85,14 +97,14 @@ func NotifyUser(userId int, userEmail string, userSetting dto.UserSetting, data 
 
 		// 获取 webhook secret
 		webhookSecret := userSetting.WebhookSecret
-		return SendWebhookNotify(webhookURLStr, webhookSecret, data)
+		return SendWebhookNotifyWithContext(notifyCtx, webhookURLStr, webhookSecret, data)
 	case dto.NotifyTypeBark:
 		barkURL := userSetting.BarkUrl
 		if barkURL == "" {
 			common.SysLog(fmt.Sprintf("user %d has no bark url, skip sending bark", userId))
 			return nil
 		}
-		return sendBarkNotify(barkURL, data)
+		return sendBarkNotify(notifyCtx, barkURL, data)
 	case dto.NotifyTypeGotify:
 		gotifyUrl := userSetting.GotifyUrl
 		gotifyToken := userSetting.GotifyToken
@@ -100,7 +112,7 @@ func NotifyUser(userId int, userEmail string, userSetting dto.UserSetting, data 
 			common.SysLog(fmt.Sprintf("user %d has no gotify url or token, skip sending gotify", userId))
 			return nil
 		}
-		return sendGotifyNotify(gotifyUrl, gotifyToken, userSetting.GotifyPriority, data)
+		return sendGotifyNotify(notifyCtx, gotifyUrl, gotifyToken, userSetting.GotifyPriority, data)
 	}
 	return nil
 }
@@ -115,7 +127,7 @@ func sendEmailNotify(userEmail string, data dto.Notify) error {
 	return common.SendEmail(data.Title, userEmail, content)
 }
 
-func sendBarkNotify(barkURL string, data dto.Notify) error {
+func sendBarkNotify(ctx context.Context, barkURL string, data dto.Notify) error {
 	// 处理占位符
 	content := data.Content
 	for _, value := range data.Values {
@@ -142,9 +154,9 @@ func sendBarkNotify(barkURL string, data dto.Notify) error {
 			},
 		}
 
-		resp, err = DoWorkerRequest(workerReq)
+		resp, err = DoWorkerRequestContext(ctx, workerReq)
 		if err != nil {
-			return fmt.Errorf("failed to send bark request through worker: %v", err)
+			return sanitizedHTTPError("failed to send bark request through worker", err)
 		}
 		defer resp.Body.Close()
 
@@ -160,19 +172,29 @@ func sendBarkNotify(barkURL string, data dto.Notify) error {
 		}
 
 		// 直接发送请求
-		req, err = http.NewRequest(http.MethodGet, finalURL, nil)
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, finalURL, nil)
 		if err != nil {
-			return fmt.Errorf("failed to create bark request: %v", err)
+			return sanitizedHTTPError("failed to create bark request", err)
 		}
 
 		// 设置User-Agent
 		req.Header.Set("User-Agent", "OneAPI-Bark-Notify/1.0")
 
 		// 发送请求
-		client := GetHttpClient()
-		resp, err = client.Do(req)
+		client, err := GetSSRFProtectedHttpClientWithProxy("")
 		if err != nil {
-			return fmt.Errorf("failed to send bark request: %v", err)
+			return fmt.Errorf("failed to create SSRF-protected client: %v", err)
+		}
+		if client == nil {
+			return fmt.Errorf("failed to create SSRF-protected client")
+		}
+		notifyClient := *client
+		if notifyClient.Timeout <= 0 || notifyClient.Timeout > notificationRequestTimeout {
+			notifyClient.Timeout = notificationRequestTimeout
+		}
+		resp, err = notifyClient.Do(req)
+		if err != nil {
+			return sanitizedHTTPError("failed to send bark request", err)
 		}
 		defer resp.Body.Close()
 
@@ -185,7 +207,7 @@ func sendBarkNotify(barkURL string, data dto.Notify) error {
 	return nil
 }
 
-func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data dto.Notify) error {
+func sendGotifyNotify(ctx context.Context, gotifyUrl string, gotifyToken string, priority int, data dto.Notify) error {
 	// 处理占位符
 	content := data.Content
 	for _, value := range data.Values {
@@ -215,7 +237,7 @@ func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data d
 	}
 
 	// 序列化为 JSON
-	payloadBytes, err := json.Marshal(payload)
+	payloadBytes, err := common.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal gotify payload: %v", err)
 	}
@@ -236,9 +258,9 @@ func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data d
 			Body: payloadBytes,
 		}
 
-		resp, err = DoWorkerRequest(workerReq)
+		resp, err = DoWorkerRequestContext(ctx, workerReq)
 		if err != nil {
-			return fmt.Errorf("failed to send gotify request through worker: %v", err)
+			return sanitizedHTTPError("failed to send gotify request through worker", err)
 		}
 		defer resp.Body.Close()
 
@@ -254,9 +276,9 @@ func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data d
 		}
 
 		// 直接发送请求
-		req, err = http.NewRequest(http.MethodPost, finalURL, bytes.NewBuffer(payloadBytes))
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, finalURL, bytes.NewBuffer(payloadBytes))
 		if err != nil {
-			return fmt.Errorf("failed to create gotify request: %v", err)
+			return sanitizedHTTPError("failed to create gotify request", err)
 		}
 
 		// 设置请求头
@@ -264,10 +286,20 @@ func sendGotifyNotify(gotifyUrl string, gotifyToken string, priority int, data d
 		req.Header.Set("User-Agent", "NewAPI-Gotify-Notify/1.0")
 
 		// 发送请求
-		client := GetHttpClient()
-		resp, err = client.Do(req)
+		client, err := GetSSRFProtectedHttpClientWithProxy("")
 		if err != nil {
-			return fmt.Errorf("failed to send gotify request: %v", err)
+			return fmt.Errorf("failed to create SSRF-protected client: %v", err)
+		}
+		if client == nil {
+			return fmt.Errorf("failed to create SSRF-protected client")
+		}
+		notifyClient := *client
+		if notifyClient.Timeout <= 0 || notifyClient.Timeout > notificationRequestTimeout {
+			notifyClient.Timeout = notificationRequestTimeout
+		}
+		resp, err = notifyClient.Do(req)
+		if err != nil {
+			return sanitizedHTTPError("failed to send gotify request", err)
 		}
 		defer resp.Body.Close()
 

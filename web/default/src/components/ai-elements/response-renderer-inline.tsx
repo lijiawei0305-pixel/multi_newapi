@@ -24,6 +24,8 @@ import {
   type TextNode,
 } from 'stream-markdown-parser'
 
+import { normalizeHttpResourceUrl } from '@/lib/safe-navigation'
+
 import { ResponseImage } from './response-renderer-image'
 import type { RenderChildren } from './response-types'
 
@@ -36,14 +38,18 @@ export function renderLink(
   key: string,
   renderChildren: RenderChildren
 ): ReactNode {
-  const opensInNewTab = shouldOpenLinkInNewTab(node.href)
+  const safeHref = normalizeHttpResourceUrl(node.href)
+  if (!safeHref) {
+    return <span key={key}>{renderChildren(node.children)}</span>
+  }
+  const opensInNewTab = shouldOpenLinkInNewTab(safeHref)
   const rel = opensInNewTab ? 'noreferrer noopener' : undefined
   const target = opensInNewTab ? '_blank' : undefined
 
   return (
     <a
       className='text-primary underline-offset-4 hover:underline'
-      href={node.href}
+      href={safeHref}
       key={key}
       rel={rel}
       target={target}

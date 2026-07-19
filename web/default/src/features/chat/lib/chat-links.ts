@@ -46,6 +46,39 @@ export type ActiveApiKey = {
 }
 
 const HTTP_REGEX = /^https?:\/\//i
+const BLOCKED_CHAT_PROTOCOLS = new Set([
+  'about:',
+  'blob:',
+  'chrome:',
+  'chrome-extension:',
+  'data:',
+  'file:',
+  'javascript:',
+  'resource:',
+  'vbscript:',
+])
+
+function normalizeChatNavigationUrl(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+
+  try {
+    const parsed = new URL(trimmed)
+    const protocol = parsed.protocol.toLowerCase()
+    if (protocol === 'http:' || protocol === 'https:') {
+      return parsed.toString()
+    }
+    if (
+      BLOCKED_CHAT_PROTOCOLS.has(protocol) ||
+      !/^[a-z][a-z\d+.-]*:$/.test(protocol)
+    ) {
+      return ''
+    }
+    return trimmed
+  } catch {
+    return ''
+  }
+}
 
 function toBase64(value: string) {
   if (typeof window !== 'undefined' && typeof window.btoa === 'function') {
@@ -166,7 +199,7 @@ export function resolveChatUrl({
       apiKey: safeApiKey,
     }
     const encoded = encodeURIComponent(toBase64(JSON.stringify(payload)))
-    return replaceToken(url, '{cherryConfig}', encoded)
+    url = replaceToken(url, '{cherryConfig}', encoded)
   }
 
   if (url.includes('{aionuiConfig}')) {
@@ -176,7 +209,7 @@ export function resolveChatUrl({
       apiKey: safeApiKey,
     }
     const encoded = encodeURIComponent(toBase64(JSON.stringify(payload)))
-    return replaceToken(url, '{aionuiConfig}', encoded)
+    url = replaceToken(url, '{aionuiConfig}', encoded)
   }
 
   if (url.includes('{deepchatConfig}')) {
@@ -186,7 +219,7 @@ export function resolveChatUrl({
       apiKey: safeApiKey,
     }
     const encoded = encodeURIComponent(toBase64(JSON.stringify(payload)))
-    return replaceToken(url, '{deepchatConfig}', encoded)
+    url = replaceToken(url, '{deepchatConfig}', encoded)
   }
 
   if (safeServerAddress) {
@@ -198,7 +231,7 @@ export function resolveChatUrl({
     url = replaceToken(url, '{key}', safeApiKey)
   }
 
-  return url
+  return normalizeChatNavigationUrl(url)
 }
 
 export function getFirstActiveKey(

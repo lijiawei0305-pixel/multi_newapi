@@ -2,10 +2,10 @@ package aws
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -26,6 +26,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	bedrockruntimeTypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+	"github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/auth/bearer"
 )
 
@@ -40,11 +41,37 @@ func getAwsErrorStatusCode(err error) int {
 	return http.StatusInternalServerError
 }
 
-func newAwsInvokeContext() (context.Context, context.CancelFunc) {
-	if common.RelayTimeout <= 0 {
-		return context.Background(), func() {}
+func bedrockRuntimeAPIAvailable(client bedrockRuntimeAPI) bool {
+	if client == nil {
+		return false
 	}
-	return context.WithTimeout(context.Background(), time.Duration(common.RelayTimeout)*time.Second)
+	value := reflect.ValueOf(client)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return !value.IsNil()
+	default:
+		return true
+	}
+}
+
+func newAwsInvokeContext(c *gin.Context, stream bool) (context.Context, context.CancelFunc, error) {
+	if c == nil || c.Request == nil {
+		return nil, nil, errors.New("missing downstream request context")
+	}
+	base := c.Request.Context()
+	if stream {
+		ctx, cancel := context.WithCancel(base)
+		return ctx, cancel, nil
+	}
+	timeout := channel.NonStreamUpstreamTimeout()
+	if common.RelayTimeout > 0 {
+		relayTimeout := time.Duration(common.RelayTimeout) * time.Second
+		if relayTimeout < timeout {
+			timeout = relayTimeout
+		}
+	}
+	ctx, cancel := context.WithTimeout(base, timeout)
+	return ctx, cancel, nil
 }
 
 func newAwsClient(c *gin.Context, info *relaycommon.RelayInfo) (*bedrockruntime.Client, error) {
@@ -222,14 +249,30 @@ func getAwsModelID(requestModel string) string {
 }
 
 func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
-
-	ctx, cancel := newAwsInvokeContext()
+	if info == nil || info.ChannelMeta == nil {
+		return types.NewError(errors.New("aws relay metadata is unavailable"), types.ErrorCodeChannelAwsClientError), nil
+	}
+	if a == nil || !bedrockRuntimeAPIAvailable(a.AwsClient) {
+		return types.NewError(errors.New("aws runtime client is unavailable"), types.ErrorCodeChannelAwsClientError), nil
+	}
+	awsReq, ok := a.AwsReq.(*bedrockruntime.InvokeModelInput)
+	if !ok || awsReq == nil {
+		return types.NewError(errors.New("aws invoke request is invalid"), types.ErrorCodeBadRequestBody), nil
+	}
+	ctx, cancel, contextErr := newAwsInvokeContext(c, false)
+	if contextErr != nil {
+		return types.NewError(contextErr, types.ErrorCodeChannelAwsClientError), nil
+	}
 	defer cancel()
 
-	awsResp, err := a.AwsClient.InvokeModel(ctx, a.AwsReq.(*bedrockruntime.InvokeModelInput))
+	awsResp, err := a.AwsClient.InvokeModel(ctx, awsReq)
 	if err != nil {
 		statusCode := getAwsErrorStatusCode(err)
 		return types.NewOpenAIError(errors.Wrap(err, "InvokeModel"), types.ErrorCodeAwsInvokeError, statusCode), nil
+	}
+	if awsResp == nil {
+		service.MarkUpstreamAccepted(c)
+		return channel.AcceptedResponseDeliveryError(), nil
 	}
 
 	claudeInfo := &claude.ClaudeResponseInfo{
@@ -247,23 +290,60 @@ func awsHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types
 
 	handlerErr := claude.HandleClaudeResponseData(c, info, claudeInfo, nil, awsResp.Body)
 	if handlerErr != nil {
+		if !service.IsExplicitUpstreamRejection(handlerErr) {
+			service.MarkUpstreamAccepted(c)
+		}
 		return handlerErr, nil
 	}
+	service.MarkUpstreamAccepted(c)
 	return nil, claudeInfo.Usage
 }
 
-func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
-	ctx, cancel := newAwsInvokeContext()
-	defer cancel()
+type awsResponseStream interface {
+	Events() <-chan bedrockruntimeTypes.ResponseStream
+	Err() error
+}
 
-	awsResp, err := a.AwsClient.InvokeModelWithResponseStream(ctx, a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput))
-	if err != nil {
-		statusCode := getAwsErrorStatusCode(err)
-		return types.NewOpenAIError(errors.Wrap(err, "InvokeModelWithResponseStream"), types.ErrorCodeAwsInvokeError, statusCode), nil
+func explicitAWSStreamRejection(err error) *types.NewAPIError {
+	if err == nil {
+		return nil
 	}
-	stream := awsResp.GetStream()
-	defer stream.Close()
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) {
+		return nil
+	}
+	status := 0
+	switch apiErr.ErrorCode() {
+	case "AccessDeniedException":
+		status = http.StatusForbidden
+	case "ConflictException":
+		status = http.StatusConflict
+	case "ModelNotReadyException", "ServiceUnavailableException":
+		status = http.StatusServiceUnavailable
+	case "ResourceNotFoundException":
+		status = http.StatusNotFound
+	case "ServiceQuotaExceededException", "ThrottlingException":
+		status = http.StatusTooManyRequests
+	case "ValidationException":
+		status = http.StatusBadRequest
+	default:
+		return nil
+	}
+	common.SysError(fmt.Sprintf("aws event stream rejected request: error_type=%T code=%s", err, apiErr.ErrorCode()))
+	return service.MarkExplicitUpstreamRejection(types.NewOpenAIError(
+		errors.New("AWS Bedrock rejected the streaming request"),
+		types.ErrorCodeAwsInvokeError,
+		status,
+	))
+}
 
+func acceptedAWSStreamFailure(c *gin.Context, err error) *types.NewAPIError {
+	service.MarkUpstreamAccepted(c)
+	common.SysError(fmt.Sprintf("aws event stream failed after dispatch: error_type=%T", err))
+	return channel.AcceptedResponseDeliveryError()
+}
+
+func consumeAWSResponseStream(c *gin.Context, info *relaycommon.RelayInfo, stream awsResponseStream) (*types.NewAPIError, *dto.Usage) {
 	claudeInfo := &claude.ClaudeResponseInfo{
 		ResponseId:   helper.GetResponseID(c),
 		Created:      common.GetTimestamp(),
@@ -273,36 +353,113 @@ func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (
 	}
 
 	for event := range stream.Events() {
-		switch v := event.(type) {
+		switch value := event.(type) {
 		case *bedrockruntimeTypes.ResponseStreamMemberChunk:
-			info.SetFirstResponseTime()
-			respErr := claude.HandleStreamResponseData(c, info, claudeInfo, string(v.Value.Bytes))
-			if respErr != nil {
-				return respErr, nil
+			if value == nil {
+				return acceptedAWSStreamFailure(c, errors.New("aws event stream returned a nil chunk")), nil
 			}
+			info.SetFirstResponseTime()
+			responseErr := claude.HandleStreamResponseData(c, info, claudeInfo, string(value.Value.Bytes))
+			if responseErr == nil {
+				continue
+			}
+			if service.IsUpstreamAccepted(c) {
+				return acceptedAWSStreamFailure(c, responseErr), nil
+			}
+			if service.IsExplicitUpstreamRejection(responseErr) {
+				return responseErr, nil
+			}
+			return acceptedAWSStreamFailure(c, responseErr), nil
 		case *bedrockruntimeTypes.UnknownUnionMember:
-			fmt.Println("unknown tag:", v.Tag)
-			return types.NewError(errors.New("unknown response type"), types.ErrorCodeInvalidRequest), nil
+			return acceptedAWSStreamFailure(c, errors.New("aws event stream returned an unknown event")), nil
 		default:
-			fmt.Println("union is nil or unknown type")
-			return types.NewError(errors.New("nil or unknown response type"), types.ErrorCodeInvalidRequest), nil
+			return acceptedAWSStreamFailure(c, errors.New("aws event stream returned an invalid event")), nil
 		}
+	}
+
+	if streamErr := stream.Err(); streamErr != nil {
+		if service.IsUpstreamAccepted(c) {
+			return acceptedAWSStreamFailure(c, streamErr), nil
+		}
+		if rejection := explicitAWSStreamRejection(streamErr); rejection != nil {
+			return rejection, nil
+		}
+		return acceptedAWSStreamFailure(c, streamErr), nil
+	}
+	if !service.IsUpstreamAccepted(c) {
+		return acceptedAWSStreamFailure(c, errors.New("aws event stream ended without a response")), nil
 	}
 
 	claude.HandleStreamFinalResponse(c, info, claudeInfo)
 	return nil, claudeInfo.Usage
 }
 
-// Nova模型处理函数
-func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
-
-	ctx, cancel := newAwsInvokeContext()
+func awsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	if info == nil || info.ChannelMeta == nil {
+		return types.NewError(errors.New("aws relay metadata is unavailable"), types.ErrorCodeChannelAwsClientError), nil
+	}
+	if a == nil || !bedrockRuntimeAPIAvailable(a.AwsClient) {
+		return types.NewError(errors.New("aws runtime client is unavailable"), types.ErrorCodeChannelAwsClientError), nil
+	}
+	awsReq, ok := a.AwsReq.(*bedrockruntime.InvokeModelWithResponseStreamInput)
+	if !ok || awsReq == nil {
+		return types.NewError(errors.New("aws streaming invoke request is invalid"), types.ErrorCodeBadRequestBody), nil
+	}
+	ctx, cancel, contextErr := newAwsInvokeContext(c, true)
+	if contextErr != nil {
+		return types.NewError(contextErr, types.ErrorCodeChannelAwsClientError), nil
+	}
 	defer cancel()
 
-	awsResp, err := a.AwsClient.InvokeModel(ctx, a.AwsReq.(*bedrockruntime.InvokeModelInput))
+	awsResp, err := a.AwsClient.InvokeModelWithResponseStream(ctx, awsReq)
+	if err != nil {
+		statusCode := getAwsErrorStatusCode(err)
+		return types.NewOpenAIError(errors.Wrap(err, "InvokeModelWithResponseStream"), types.ErrorCodeAwsInvokeError, statusCode), nil
+	}
+	if awsResp == nil {
+		return acceptedAWSStreamFailure(c, errors.New("aws streaming invoke returned no response")), nil
+	}
+	stream := awsResp.GetStream()
+	if stream == nil {
+		return acceptedAWSStreamFailure(c, errors.New("aws streaming invoke returned no event stream")), nil
+	}
+	defer stream.Close()
+	responseErr, usage := consumeAWSResponseStream(c, info, stream)
+	if responseErr != nil {
+		return responseErr, usage
+	}
+	if closeErr := stream.Close(); closeErr != nil {
+		return acceptedAWSStreamFailure(c, closeErr), nil
+	}
+	return nil, usage
+}
+
+// Nova模型处理函数
+func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) (*types.NewAPIError, *dto.Usage) {
+	if info == nil || info.ChannelMeta == nil {
+		return types.NewError(errors.New("aws relay metadata is unavailable"), types.ErrorCodeChannelAwsClientError), nil
+	}
+	if a == nil || !bedrockRuntimeAPIAvailable(a.AwsClient) {
+		return types.NewError(errors.New("aws runtime client is unavailable"), types.ErrorCodeChannelAwsClientError), nil
+	}
+	awsReq, ok := a.AwsReq.(*bedrockruntime.InvokeModelInput)
+	if !ok || awsReq == nil {
+		return types.NewError(errors.New("aws nova invoke request is invalid"), types.ErrorCodeBadRequestBody), nil
+	}
+	ctx, cancel, contextErr := newAwsInvokeContext(c, false)
+	if contextErr != nil {
+		return types.NewError(contextErr, types.ErrorCodeChannelAwsClientError), nil
+	}
+	defer cancel()
+
+	awsResp, err := a.AwsClient.InvokeModel(ctx, awsReq)
 	if err != nil {
 		statusCode := getAwsErrorStatusCode(err)
 		return types.NewOpenAIError(errors.Wrap(err, "InvokeModel"), types.ErrorCodeAwsInvokeError, statusCode), nil
+	}
+	service.MarkUpstreamAccepted(c)
+	if awsResp == nil {
+		return channel.AcceptedResponseDeliveryError(), nil
 	}
 
 	// 解析Nova响应
@@ -321,8 +478,11 @@ func handleNovaRequest(c *gin.Context, info *relaycommon.RelayInfo, a *Adaptor) 
 		} `json:"usage"`
 	}
 
-	if err := json.Unmarshal(awsResp.Body, &novaResp); err != nil {
+	if err := common.Unmarshal(awsResp.Body, &novaResp); err != nil {
 		return types.NewError(errors.Wrap(err, "unmarshal nova response"), types.ErrorCodeBadResponseBody), nil
+	}
+	if len(novaResp.Output.Message.Content) == 0 {
+		return channel.AcceptedResponseDeliveryError(), nil
 	}
 
 	// 构造OpenAI格式响应

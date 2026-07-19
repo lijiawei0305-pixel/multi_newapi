@@ -3,7 +3,7 @@
 # 📋 总体进度看板 — New API 多租户代理分销平台
 
 > **依据**：[proposal.md](../proposal.md) v2.0 ｜ [detailed-design.md](../detailed-design.md) ｜ 任务文件见本目录 `NN-<module>.md`
-> **部署目标（已核实）**：服务器 `64.90.4.114`，宝塔 Docker 栈 `newapi_YFNf`（new-api + redis + mysql:8.2），域名 `wedreamhub.com`。
+> **当时部署目标（历史）**：服务器 `64.90.4.114`，宝塔 Docker 栈 `newapi_YFNf`（new-api + redis + mysql:8.2），域名 `wedreamhub.com`。该栈已删除；当前事实只见 [STATUS.md](STATUS.md)。
 > **排期方针**：proposal §10.5 **方案 A** —— 核心多租户 MVP 先行，tokenplan 第二批，现实工期 ≈ 4.5–5 天。
 > **图例**：`- [ ]` 未完成 ｜ `- [x]` 已完成 ｜ 🔴 阻塞 ｜ 🟡 进行中。每个模块的子任务在各自文件内勾选。
 

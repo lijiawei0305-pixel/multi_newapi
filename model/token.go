@@ -7,7 +7,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
-	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
 )
 
@@ -249,27 +248,13 @@ func GetTokenById(id int) (*Token, error) {
 	token := Token{Id: id}
 	var err error = nil
 	err = DB.First(&token, "id = ?", id).Error
-	if shouldUpdateRedis(true, err) {
-		gopool.Go(func() {
-			if err := cacheSetToken(token); err != nil {
-				common.SysLog("failed to update user status cache: " + err.Error())
-			}
-		})
-	}
+	// This lookup starts with an id and only learns the token key after the DB
+	// read, so it cannot safely snapshot the key's cache generation beforehand.
+	// Do not publish it into the authentication cache.
 	return &token, err
 }
 
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
-	defer func() {
-		// Update Redis cache asynchronously on successful DB read
-		if shouldUpdateRedis(fromDB, err) && token != nil {
-			gopool.Go(func() {
-				if err := cacheSetToken(*token); err != nil {
-					common.SysLog("failed to update user status cache: " + err.Error())
-				}
-			})
-		}
-	}()
 	if !fromDB && common.RedisEnabled {
 		// Try Redis first
 		token, err := cacheGetTokenByKey(key)
@@ -278,8 +263,27 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 		}
 		// Don't return error - fall through to DB
 	}
+
+	var generation authCacheGenerationSnapshot
+	if common.RedisEnabled {
+		generation, err = snapshotAuthCacheGeneration(getTokenCacheKey(key))
+		if err != nil {
+			// Redis is an optimization. A failed generation snapshot must skip the
+			// fill, but must not turn a healthy authoritative DB read into an error.
+			common.SysLog("failed to snapshot token cache generation: " + err.Error())
+			generation = authCacheGenerationSnapshot{}
+		}
+	}
 	fromDB = true
 	err = DB.Where(commonKeyCol+" = ?", key).First(&token).Error
+	if shouldUpdateRedis(fromDB, err) && token != nil && generation.valid {
+		loadedToken := *token
+		scheduleAuthCacheFill(func() {
+			if fillErr := cacheFillToken(loadedToken, generation); fillErr != nil {
+				common.SysLog("failed to fill token cache: " + fillErr.Error())
+			}
+		})
+	}
 	return token, err
 }
 
@@ -291,49 +295,38 @@ func (token *Token) Insert() error {
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
-	defer func() {
-		if shouldUpdateRedis(true, err) {
-			gopool.Go(func() {
-				err := cacheSetToken(*token)
-				if err != nil {
-					common.SysLog("failed to update token cache: " + err.Error())
-				}
-			})
-		}
-	}()
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
 		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
-	return err
+	if err != nil {
+		return err
+	}
+	if cacheErr := cacheDeleteToken(token.Key); cacheErr != nil {
+		return fmt.Errorf("token update committed but cache invalidation failed: %w", cacheErr)
+	}
+	return nil
 }
 
 func (token *Token) SelectUpdate() (err error) {
-	defer func() {
-		if shouldUpdateRedis(true, err) {
-			gopool.Go(func() {
-				err := cacheSetToken(*token)
-				if err != nil {
-					common.SysLog("failed to update token cache: " + err.Error())
-				}
-			})
-		}
-	}()
 	// This can update zero values
-	return DB.Model(token).Select("accessed_time", "status").Updates(token).Error
+	err = DB.Model(token).Select("accessed_time", "status").Updates(token).Error
+	if err != nil {
+		return err
+	}
+	if cacheErr := cacheDeleteToken(token.Key); cacheErr != nil {
+		return fmt.Errorf("token selective update committed but cache invalidation failed: %w", cacheErr)
+	}
+	return nil
 }
 
 func (token *Token) Delete() (err error) {
-	defer func() {
-		if shouldUpdateRedis(true, err) {
-			gopool.Go(func() {
-				err := cacheDeleteToken(token.Key)
-				if err != nil {
-					common.SysLog("failed to delete token cache: " + err.Error())
-				}
-			})
-		}
-	}()
 	err = DB.Delete(token).Error
-	return err
+	if err != nil {
+		return err
+	}
+	if cacheErr := cacheDeleteToken(token.Key); cacheErr != nil {
+		return fmt.Errorf("token delete committed but cache invalidation failed: %w", cacheErr)
+	}
+	return nil
 }
 
 func (token *Token) IsModelLimitsEnabled() bool {
@@ -383,19 +376,18 @@ func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
-	if common.RedisEnabled {
-		gopool.Go(func() {
-			err := cacheIncrTokenQuota(key, int64(quota))
-			if err != nil {
-				common.SysLog("failed to increase token quota: " + err.Error())
-			}
-		})
-	}
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeTokenQuota, tokenId, quota)
+	if quota == 0 {
 		return nil
 	}
-	return increaseTokenQuota(tokenId, quota)
+	if err := increaseTokenQuota(tokenId, quota); err != nil {
+		return err
+	}
+	if common.RedisEnabled {
+		if cacheErr := cacheIncrTokenQuota(key, int64(quota)); cacheErr != nil {
+			common.SysLog("failed to increase token quota cache: " + cacheErr.Error())
+		}
+	}
+	return nil
 }
 
 func increaseTokenQuota(id int, quota int) (err error) {
@@ -413,30 +405,37 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
-	if common.RedisEnabled {
-		gopool.Go(func() {
-			err := cacheDecrTokenQuota(key, int64(quota))
-			if err != nil {
-				common.SysLog("failed to decrease token quota: " + err.Error())
-			}
-		})
-	}
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeTokenQuota, id, -quota)
+	if quota == 0 {
 		return nil
 	}
-	return decreaseTokenQuota(id, quota)
+	if err := decreaseTokenQuota(id, quota); err != nil {
+		return err
+	}
+	if common.RedisEnabled {
+		if cacheErr := cacheDecrTokenQuota(key, int64(quota)); cacheErr != nil {
+			common.SysLog("failed to decrease token quota cache: " + cacheErr.Error())
+		}
+	}
+	return nil
 }
 
 func decreaseTokenQuota(id int, quota int) (err error) {
-	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
-		map[string]interface{}{
-			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
-			"used_quota":    gorm.Expr("used_quota + ?", quota),
-			"accessed_time": common.GetTimestamp(),
-		},
-	).Error
-	return err
+	result := DB.Model(&Token{}).
+		Where("id = ? AND (unlimited_quota = ? OR remain_quota >= ?)", id, true, quota).
+		Updates(
+			map[string]interface{}{
+				"remain_quota":  gorm.Expr("remain_quota - ?", quota),
+				"used_quota":    gorm.Expr("used_quota + ?", quota),
+				"accessed_time": common.GetTimestamp(),
+			},
+		)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrTokenQuotaInsufficient
+	}
+	return nil
 }
 
 // CountUserTokens returns total number of tokens for the given user, used for pagination
@@ -470,11 +469,15 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 	}
 
 	if common.RedisEnabled {
-		gopool.Go(func() {
-			for _, t := range tokens {
-				_ = cacheDeleteToken(t.Key)
+		var cacheErrors []error
+		for _, token := range tokens {
+			if cacheErr := cacheDeleteToken(token.Key); cacheErr != nil {
+				cacheErrors = append(cacheErrors, cacheErr)
 			}
-		})
+		}
+		if cacheErr := errors.Join(cacheErrors...); cacheErr != nil {
+			return len(tokens), fmt.Errorf("token batch delete committed but cache invalidation failed: %w", cacheErr)
+		}
 	}
 
 	return len(tokens), nil
@@ -499,10 +502,7 @@ func InvalidateUserTokensCache(userId int) error {
 		return errors.New("userId 无效")
 	}
 	var tokens []Token
-	if err := DB.Unscoped().
-		Select("id", commonKeyCol).
-		Where("user_id = ?", userId).
-		Find(&tokens).Error; err != nil {
+	if err := DB.Unscoped().Where("user_id = ?", userId).Find(&tokens).Error; err != nil {
 		return err
 	}
 	var firstErr error

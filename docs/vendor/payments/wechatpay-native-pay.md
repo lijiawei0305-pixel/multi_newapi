@@ -98,7 +98,7 @@ curl -X POST \
     "out_trade_no": "ORDER20240101120000001",
     "time_expire": "2024-01-01T13:00:00+08:00",
     "attach": "user_id=123&plan_id=456",
-    "notify_url": "https://your-domain.com/api/payment/wechat/notify",
+    "notify_url": "https://your-domain.com/api/pay/wechat/notify",
     "amount": {
       "total": 2980,
       "currency": "CNY"
@@ -184,7 +184,7 @@ resp, result, err := svc.Prepay(ctx, native.PrepayRequest{
     Mchid:       core.String("1230000109"),
     Description: core.String("充值套餐-月度版"),
     OutTradeNo:  core.String("ORDER20240101120000001"),
-    NotifyUrl:   core.String("https://your-domain.com/api/payment/wechat/notify"),
+    NotifyUrl:   core.String("https://your-domain.com/api/pay/wechat/notify"),
     Amount: &native.Amount{
         Total:    core.Int64(2980),
         Currency: core.String("CNY"),

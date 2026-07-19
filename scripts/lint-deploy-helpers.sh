@@ -28,6 +28,10 @@ $(defs_of "$sf")"
     # 只匹配"命令首词"位置的调用（行首/;/&&/||/管道/$( 之后），排除注释行与定义行本身。
     hits="$(grep -nE "(^|[;&|]|\\\$\\()[[:space:]]*${fn}([[:space:]]|\"|'|$)" "$f" \
       | grep -vE '^[0-9]+:[[:space:]]*#' | grep -vE "${fn}\(\)" || true)"
+    # deploy.sh 会在远端 `bash -c` 内先 source 当前 release 的 lib.sh，再调用其 helper。
+    # 这类调用的定义在同一个远端 shell 中真实可见；不能按本地 deploy.sh 未 source 误报。
+    hits="$(printf '%s\n' "$hits" \
+      | grep -vE "bash[[:space:]]+-c.*lib\\.sh.*;[[:space:]]*${fn}([[:space:]]|\"|'|$)" || true)"
     if [ -n "$hits" ]; then
       echo "✗ $f 调用了未定义的 helper「$fn」（定义仅在同目录其它脚本且本文件未 source）："
       printf '%s\n' "$hits" | sed 's/^/    /'

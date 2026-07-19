@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -247,14 +248,7 @@ func (m *providerManager) QueryOrder(ctx context.Context, provider payment.Provi
 
 // notifyPathFor 返回某渠道异步回调在主站的固定路径（契约；与 auth-service 旧 /pay,/auth 路径无关）。
 func notifyPathFor(provider payment.Provider) string {
-	switch provider {
-	case payment.ProviderWxpay:
-		return "/api/pay/wechat/notify"
-	case payment.ProviderAlipay:
-		return "/api/pay/alipay/notify"
-	default:
-		return ""
-	}
+	return provider.NotifyPath()
 }
 
 // resolveNotifyBase 解析异步回调公网基址：优先 MT_PAY_NOTIFY_BASE，缺省回退 system_setting.ServerAddress。
@@ -331,7 +325,7 @@ func (a *App) handlePayNotify(c *gin.Context, provider payment.Provider) {
 	info, err := providerVerifyNotify(a, ctx, provider, c.Request)
 	if err != nil || info == nil {
 		if err != nil {
-			common.SysLog("pay notify verify failed (" + string(provider) + "): " + err.Error())
+			common.SysLog(fmt.Sprintf("pay notify verify failed provider=%s error_type=%T", provider, err))
 		}
 		ackNotifyFail(c, provider) // 验签失败/报文非法 → ack 失败触发重推
 		return

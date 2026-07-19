@@ -18,16 +18,18 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Zap, ExternalLink, Gauge } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { getBgColorClass } from '@/lib/colors'
-import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
+
 import { CopyButton } from '@/components/copy-button'
 import { StatusBadge } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
 import {
   getLatencyColorClass,
   openExternalSpeedTest,
 } from '@/features/dashboard/lib/api-info'
 import type { ApiInfoItem, PingStatus } from '@/features/dashboard/types'
+import { getBgColorClass } from '@/lib/colors'
+import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
+import { cn } from '@/lib/utils'
 
 interface ApiInfoItemProps {
   item: ApiInfoItem
@@ -39,6 +41,7 @@ export function ApiInfoItemComponent(props: ApiInfoItemProps) {
   const { t } = useTranslation()
   const item = props.item
   const status = props.status
+  const safeUrl = normalizeHttpNavigationUrl(item.url)
 
   return (
     <div className='group hover:bg-muted/40 flex items-center justify-between gap-2 px-3 py-2.5 transition-colors sm:gap-3 sm:px-5 sm:py-3'>
@@ -95,8 +98,8 @@ export function ApiInfoItemComponent(props: ApiInfoItemProps) {
           <Button
             variant='ghost'
             size='sm'
-            onClick={() => props.onTest(item.url)}
-            disabled={status.testing}
+            onClick={() => safeUrl && props.onTest(safeUrl)}
+            disabled={status.testing || !safeUrl}
             className='size-7 p-0'
             title={t('Test Latency')}
           >
@@ -108,7 +111,8 @@ export function ApiInfoItemComponent(props: ApiInfoItemProps) {
           <Button
             variant='ghost'
             size='sm'
-            onClick={() => openExternalSpeedTest(item.url)}
+            onClick={() => safeUrl && openExternalSpeedTest(safeUrl)}
+            disabled={!safeUrl}
             className='hidden size-7 p-0 sm:inline-flex'
             title={t('External Speed Test')}
           >
@@ -125,15 +129,19 @@ export function ApiInfoItemComponent(props: ApiInfoItemProps) {
             aria-label={t('Copy URL')}
           />
 
-          <Button
-            variant='ghost'
-            size='sm'
-            className='hidden size-7 p-0 sm:inline-flex'
-            title={t('Open in New Tab')}
-            render={<a href={item.url} target='_blank' rel='noreferrer' />}
-          >
-            <ExternalLink className='size-3.5' />
-          </Button>
+          {safeUrl && (
+            <Button
+              variant='ghost'
+              size='sm'
+              className='hidden size-7 p-0 sm:inline-flex'
+              title={t('Open in New Tab')}
+              render={
+                <a href={safeUrl} target='_blank' rel='noopener noreferrer' />
+              }
+            >
+              <ExternalLink className='size-3.5' />
+            </Button>
+          )}
         </div>
       </div>
     </div>

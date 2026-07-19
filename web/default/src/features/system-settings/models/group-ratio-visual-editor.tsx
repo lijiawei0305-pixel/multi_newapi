@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useMemo, useEffect, useCallback, memo } from 'react'
 import { Plus, Trash2, GripVertical, ChevronDown } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StaticDataTable } from '@/components/data-table/static/static-data-table'
@@ -1022,7 +1022,7 @@ function SimpleGroupDialog({
             value={value}
             onChange={(e) => {
               const val = e.target.value
-              if (val === '' || !isNaN(Number.parseFloat(val))) {
+              if (val === '' || !Number.isNaN(Number.parseFloat(val))) {
                 setValue(val)
               }
             }}
@@ -1068,7 +1068,7 @@ function GroupOverrideDialog({
   const handleSave = () => {
     if (!targetGroup.trim() || !ratio.trim()) return
     const parsedRatio = Number.parseFloat(ratio)
-    if (isNaN(parsedRatio)) return
+    if (Number.isNaN(parsedRatio)) return
 
     onSave(targetGroup.trim(), parsedRatio, editData?.targetGroup)
     setTargetGroup('')
@@ -1122,7 +1122,7 @@ function GroupOverrideDialog({
             value={ratio}
             onChange={(e) => {
               const val = e.target.value
-              if (val === '' || !isNaN(Number.parseFloat(val))) {
+              if (val === '' || !Number.isNaN(Number.parseFloat(val))) {
                 setRatio(val)
               }
             }}

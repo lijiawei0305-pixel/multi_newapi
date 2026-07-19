@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { API, showError, showSuccess } from '../../helpers';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
+import { normalizeHttpNavigationUrl } from '../../helpers/safeNavigation';
 
 export const useDeploymentsData = () => {
   const { t } = useTranslation();
@@ -348,8 +349,10 @@ export const useDeploymentsData = () => {
         return;
       }
 
-      const rawUrl = String(activeContainer.public_url).trim();
-      const baseUrl = rawUrl.replace(/\/+$/, '');
+      const rawUrl = normalizeHttpNavigationUrl(
+        String(activeContainer.public_url),
+      );
+      const baseUrl = rawUrl?.replace(/\/+$/, '') || '';
       if (!baseUrl) {
         showError(t('容器访问地址无效'));
         return;

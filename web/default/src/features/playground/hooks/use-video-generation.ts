@@ -21,6 +21,7 @@ import { toast } from 'sonner'
 
 import i18n from '@/i18n/config'
 import { api } from '@/lib/api'
+
 import {
   API_ENDPOINTS,
   TASK_SUCCESS_CODE,
@@ -28,11 +29,7 @@ import {
   VIDEO_STATUS_FAILURE,
   VIDEO_STATUS_SUCCESS,
 } from '../constants'
-import type {
-  VideoGenParams,
-  VideoTaskData,
-  VideoTaskEnvelope,
-} from '../types'
+import type { VideoGenParams, VideoTaskData, VideoTaskEnvelope } from '../types'
 
 export type VideoGenerationStatus =
   | 'idle'
@@ -211,23 +208,36 @@ export function useVideoGeneration(): UseVideoGenerationResult {
         if (runId !== runIdRef.current) return
         taskId = extractTaskId(createResp.data)
       } catch {
-        fail(i18n.t('Failed to submit the video generation task, please try again later'), runId)
+        fail(
+          i18n.t(
+            'Failed to submit the video generation task, please try again later'
+          ),
+          runId
+        )
         return
       }
 
       if (!taskId) {
-        fail(i18n.t('No video task ID was returned; cannot query generation progress'), runId)
+        fail(
+          i18n.t(
+            'No video task ID was returned; cannot query generation progress'
+          ),
+          runId
+        )
         return
       }
 
       // 3) Poll the task envelope with exponential backoff.
       setStatus('polling')
       const startedAt = Date.now()
-      let delay = VIDEO_POLL.initialMs
+      let delay: number = VIDEO_POLL.initialMs
 
       while (runId === runIdRef.current) {
         if (Date.now() - startedAt > VIDEO_POLL.timeoutMs) {
-          fail(i18n.t('Video generation timed out, please try again later'), runId)
+          fail(
+            i18n.t('Video generation timed out, please try again later'),
+            runId
+          )
           return
         }
 
@@ -242,15 +252,25 @@ export function useVideoGeneration(): UseVideoGenerationResult {
 
           // Guard: must be HTTP 200 with a `success` envelope code.
           if (pollResp.status !== 200) {
-            fail(i18n.t('Failed to query video generation progress, please try again later'), runId)
+            fail(
+              i18n.t(
+                'Failed to query video generation progress, please try again later'
+              ),
+              runId
+            )
             return
           }
           envelope = pollResp.data as VideoTaskEnvelope
           if (!envelope || envelope.code !== TASK_SUCCESS_CODE) {
             fail(
               envelope?.message
-                ? i18n.t('Failed to query video generation progress: {{message}}', { message: envelope.message })
-                : i18n.t('Failed to query video generation progress, please try again later'),
+                ? i18n.t(
+                    'Failed to query video generation progress: {{message}}',
+                    { message: envelope.message }
+                  )
+                : i18n.t(
+                    'Failed to query video generation progress, please try again later'
+                  ),
               runId
             )
             return
@@ -258,7 +278,12 @@ export function useVideoGeneration(): UseVideoGenerationResult {
         } catch {
           // 401 / 4xx / network error mid-poll: abort immediately, never spin.
           if (runId !== runIdRef.current) return
-          fail(i18n.t('Failed to query video generation progress, please try again later'), runId)
+          fail(
+            i18n.t(
+              'Failed to query video generation progress, please try again later'
+            ),
+            runId
+          )
           return
         }
 
@@ -273,7 +298,12 @@ export function useVideoGeneration(): UseVideoGenerationResult {
         // Terminal: failure.
         if (VIDEO_STATUS_FAILURE.has(taskStatus)) {
           const reason = data?.error || data?.fail_reason
-          fail(reason ? i18n.t('Video generation failed: {{reason}}', { reason }) : i18n.t('Video generation failed'), runId)
+          fail(
+            reason
+              ? i18n.t('Video generation failed: {{reason}}', { reason })
+              : i18n.t('Video generation failed'),
+            runId
+          )
           return
         }
 
@@ -281,7 +311,10 @@ export function useVideoGeneration(): UseVideoGenerationResult {
         if (VIDEO_STATUS_SUCCESS.has(taskStatus)) {
           const resultUrl = data?.url ?? data?.result_url
           if (!resultUrl) {
-            fail(i18n.t('Video generated, but no playable URL was returned'), runId)
+            fail(
+              i18n.t('Video generated, but no playable URL was returned'),
+              runId
+            )
             return
           }
 
@@ -322,13 +355,10 @@ export function useVideoGeneration(): UseVideoGenerationResult {
             // 避免把真实 WebM 硬贴 video/mp4 致严格浏览器(WebKit)拒解码 → 黑屏。
             const rawBlob = blobResp.data as Blob
             const fmt = (data?.format ?? '').toLowerCase()
-            const fallbackType = fmt.startsWith('video/')
-              ? fmt
-              : fmt === 'webm'
-                ? 'video/webm'
-                : fmt === 'mov'
-                  ? 'video/quicktime'
-                  : 'video/mp4'
+            let fallbackType = 'video/mp4'
+            if (fmt.startsWith('video/')) fallbackType = fmt
+            else if (fmt === 'webm') fallbackType = 'video/webm'
+            else if (fmt === 'mov') fallbackType = 'video/quicktime'
             const playableBlob =
               rawBlob.type && rawBlob.type.startsWith('video/')
                 ? rawBlob
@@ -339,7 +369,10 @@ export function useVideoGeneration(): UseVideoGenerationResult {
             setStatus('success')
             setProgress(null)
           } catch {
-            fail(i18n.t('Failed to load the video, please try again later'), runId)
+            fail(
+              i18n.t('Failed to load the video, please try again later'),
+              runId
+            )
           }
           return
         }

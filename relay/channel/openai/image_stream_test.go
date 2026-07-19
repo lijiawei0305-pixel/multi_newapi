@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,12 +10,30 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
+type failingImageResponseWriter struct {
+	gin.ResponseWriter
+	err error
+}
+
+func (w *failingImageResponseWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
+
+func (w *failingImageResponseWriter) WriteString(string) (int, error) {
+	return 0, w.err
+}
+
 func newImageTestContext(t *testing.T, body, contentType string, isStream bool) (*gin.Context, *httptest.ResponseRecorder, *http.Response, *relaycommon.RelayInfo) {
 	t.Helper()
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -58,7 +77,8 @@ func TestOpenaiImageStreamHandlerForwardsSSEAndUsage(t *testing.T) {
 	c, recorder, resp, info := newImageTestContext(t, body, "text/event-stream", true)
 
 	usage, err := OpenaiImageStreamHandler(c, info, resp)
-	require.Nil(t, err)
+	require.Nil(t, err, "stream errors: %+v", info.StreamStatus.Errors)
+	require.True(t, service.IsUpstreamAccepted(c))
 	require.Equal(t, 3, usage.PromptTokens)
 	require.Equal(t, 4, usage.CompletionTokens)
 	require.Equal(t, 7, usage.TotalTokens)
@@ -84,6 +104,7 @@ func TestOpenaiImageStreamHandlerWrapsJSONResponse(t *testing.T) {
 
 	usage, err := OpenaiImageStreamHandler(c, info, resp)
 	require.Nil(t, err)
+	require.True(t, service.IsUpstreamAccepted(c))
 	require.Equal(t, 3, usage.PromptTokens)
 	require.Equal(t, 4, usage.CompletionTokens)
 	require.Equal(t, 7, usage.TotalTokens)
@@ -114,7 +135,8 @@ func TestOpenaiImageHandlersReturnJSONError(t *testing.T) {
 		usage, err := OpenaiImageHandler(c, info, resp)
 		require.Nil(t, usage)
 		require.NotNil(t, err)
-		require.Equal(t, http.StatusOK, err.StatusCode)
+		require.False(t, service.IsUpstreamAccepted(c))
+		require.Equal(t, http.StatusBadGateway, err.StatusCode)
 		oaiError := err.ToOpenAIError()
 		require.Equal(t, "content moderation failed", oaiError.Message)
 		require.Equal(t, "upstream_error", oaiError.Type)
@@ -128,15 +150,27 @@ func TestOpenaiImageHandlersReturnJSONError(t *testing.T) {
 		usage, err := OpenaiImageStreamHandler(c, info, resp)
 		require.Nil(t, usage)
 		require.NotNil(t, err)
-		require.Equal(t, http.StatusOK, err.StatusCode)
+		require.False(t, service.IsUpstreamAccepted(c))
+		require.Equal(t, http.StatusBadGateway, err.StatusCode)
 		require.Equal(t, "content moderation failed", err.ToOpenAIError().Message)
 		require.Empty(t, recorder.Body.String())
 	})
 }
 
+func TestOpenAIImageErrorWithoutTypeRemainsUnaccepted(t *testing.T) {
+	c, recorder, resp, info := newImageTestContext(t, `{"error":{"message":"policy rejected","code":"policy_rejected"}}`, "application/json", false)
+
+	usage, apiErr := OpenaiImageHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
+	require.False(t, service.IsUpstreamAccepted(c))
+	require.Empty(t, recorder.Body.String())
+}
+
 // TestOpenaiImageStreamHandlerRecordsUpstreamErrorEvent verifies that an error
-// event inside the SSE stream is recorded as a soft error while the payload is
-// still forwarded to the client.
+// event after partial output is terminal and cannot trigger a retry/refund.
 func TestOpenaiImageStreamHandlerRecordsUpstreamErrorEvent(t *testing.T) {
 	oldMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
@@ -157,17 +191,110 @@ func TestOpenaiImageStreamHandlerRecordsUpstreamErrorEvent(t *testing.T) {
 
 	c, recorder, resp, info := newImageTestContext(t, body, "text/event-stream", true)
 
-	usage, err := OpenaiImageStreamHandler(c, info, resp)
-	require.Nil(t, err)
-	require.NotNil(t, usage)
+	usage, apiErr := OpenaiImageStreamHandler(c, info, resp)
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.True(t, types.IsSkipRetryError(apiErr))
+	require.True(t, service.IsUpstreamAccepted(c))
 	require.NotNil(t, info.StreamStatus)
-	require.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
 	require.True(t, info.StreamStatus.HasErrors())
 	require.Equal(t, 1, info.StreamStatus.TotalErrorCount())
 	require.Contains(t, info.StreamStatus.Errors[0].Message, "INTERNAL_ERROR")
-	// The scanner strips the upstream "event: error" line; the event name is
-	// rebuilt from the JSON "type" field (upstream_error). The error message
-	// is still forwarded in the data: payload (stream ID 77).
-	require.Contains(t, recorder.Body.String(), `event: upstream_error`)
-	require.Contains(t, recorder.Body.String(), `stream ID 77`)
+	require.Contains(t, recorder.Body.String(), `event: image_generation.partial_image`)
+	require.NotContains(t, recorder.Body.String(), `event: upstream_error`)
+	require.NotContains(t, recorder.Body.String(), `stream ID 77`)
+	require.NotContains(t, recorder.Body.String(), `data: [DONE]`)
+}
+
+func TestOpenaiImageStreamHandlerFirstErrorIsExplicitRejection(t *testing.T) {
+	body := "data: {\"type\":\"upstream_error\",\"error\":{\"message\":\"policy rejected\",\"code\":\"policy_rejected\"}}\n\n"
+	c, recorder, resp, info := newImageTestContext(t, body, "text/event-stream", true)
+
+	usage, apiErr := OpenaiImageStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.True(t, service.IsExplicitUpstreamRejection(apiErr))
+	require.False(t, service.IsUpstreamAccepted(c))
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOpenaiImageStreamHandlerRejectsTruncatedAndMalformedStreams(t *testing.T) {
+	tests := []struct {
+		name             string
+		body             string
+		wantPartialEvent bool
+	}{
+		{
+			name:             "partial event without completion",
+			body:             "data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"partial\"}\n\n",
+			wantPartialEvent: true,
+		},
+		{
+			name: "malformed event",
+			body: "data: not-json\n\n",
+		},
+		{
+			name: "usage without image",
+			body: "data: {\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n\ndata: [DONE]\n\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c, recorder, resp, info := newImageTestContext(t, test.body, "text/event-stream", true)
+
+			usage, apiErr := OpenaiImageStreamHandler(c, info, resp)
+
+			require.Nil(t, usage)
+			require.NotNil(t, apiErr)
+			require.True(t, types.IsSkipRetryError(apiErr))
+			require.True(t, service.IsUpstreamAccepted(c))
+			require.NotContains(t, recorder.Body.String(), `data: [DONE]`)
+			if test.wantPartialEvent {
+				require.Contains(t, recorder.Body.String(), `event: image_generation.partial_image`)
+			}
+		})
+	}
+}
+
+func TestOpenaiImageStreamHandlerAcceptsCompletedEventAtEOF(t *testing.T) {
+	body := "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"final\"}\n\n"
+	c, recorder, resp, info := newImageTestContext(t, body, "text/event-stream", true)
+
+	usage, apiErr := OpenaiImageStreamHandler(c, info, resp)
+
+	require.NotNil(t, usage)
+	require.Nil(t, apiErr)
+	require.True(t, service.IsUpstreamAccepted(c))
+	require.Contains(t, recorder.Body.String(), `event: image_generation.completed`)
+}
+
+func TestOpenaiImageStreamHandlerRejectsUnsafeEventName(t *testing.T) {
+	body := "data: {\"type\":\"image_generation.partial_image\\nevent: injected\",\"b64_json\":\"partial\"}\n\ndata: [DONE]\n\n"
+	c, recorder, resp, info := newImageTestContext(t, body, "text/event-stream", true)
+
+	usage, apiErr := OpenaiImageStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.True(t, service.IsUpstreamAccepted(c))
+	require.NotContains(t, recorder.Body.String(), "event: injected")
+}
+
+func TestOpenaiImageJSONAsStreamHandlerWriteFailureIsTerminal(t *testing.T) {
+	body := `{"created":1710000000,"data":[{"b64_json":"final"}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}`
+	c, _, resp, info := newImageTestContext(t, body, "application/json", true)
+	writeErr := errors.New("downstream write failed")
+	c.Writer = &failingImageResponseWriter{ResponseWriter: c.Writer, err: writeErr}
+
+	usage, apiErr := OpenaiImageJSONAsStreamHandler(c, info, resp)
+
+	require.NotNil(t, usage)
+	require.NotNil(t, apiErr)
+	require.True(t, types.IsSkipRetryError(apiErr))
+	require.True(t, service.IsUpstreamAccepted(c))
+	require.NotNil(t, info.StreamStatus)
+	require.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	require.ErrorIs(t, info.StreamStatus.EndError, writeErr)
 }

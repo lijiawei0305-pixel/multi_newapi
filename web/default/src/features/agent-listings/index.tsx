@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,13 +34,22 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { cny, usd } from '@/lib/agent-format'
+
 import { getAgentListings, updateAgentListing } from './api'
 import type { AgentListing } from './types'
 
 /** Editable row: local draft of retail price + enabled flag, saved per row. */
-function ListingRow({ row, onSaved }: { row: AgentListing; onSaved: () => void }) {
+function ListingRow({
+  row,
+  onSaved,
+}: {
+  row: AgentListing
+  onSaved: () => void
+}) {
   const { t } = useTranslation()
-  const [retail, setRetail] = useState<number>(Number(row.retail_price_cny ?? 0))
+  const [retail, setRetail] = useState<number>(
+    Number(row.retail_price_cny ?? 0)
+  )
   const [enabled, setEnabled] = useState<boolean>(Boolean(row.enabled))
   const [saving, setSaving] = useState(false)
 
@@ -48,7 +58,11 @@ function ListingRow({ row, onSaved }: { row: AgentListing; onSaved: () => void }
 
   const handleSave = async () => {
     if (belowFloor) {
-      toast.error(t('Retail price must not be lower than {{floor}}', { floor: cny(floor) }))
+      toast.error(
+        t('Retail price must not be lower than {{floor}}', {
+          floor: cny(floor),
+        })
+      )
       return
     }
     setSaving(true)
@@ -84,7 +98,7 @@ function ListingRow({ row, onSaved }: { row: AgentListing; onSaved: () => void }
           value={Number.isFinite(retail) ? retail : ''}
           aria-invalid={belowFloor}
           onChange={(e) => {
-            const parsed = parseFloat(e.target.value)
+            const parsed = Number.parseFloat(e.target.value)
             setRetail(Number.isNaN(parsed) ? 0 : parsed)
           }}
         />
@@ -155,7 +169,7 @@ export function AgentListings() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading ? (
+                {isLoading && (
                   <TableRow>
                     <TableCell
                       colSpan={8}
@@ -164,7 +178,8 @@ export function AgentListings() {
                       {t('Loading...')}
                     </TableCell>
                   </TableRow>
-                ) : rows.length === 0 ? (
+                )}
+                {!isLoading && rows.length === 0 && (
                   <TableRow>
                     <TableCell
                       colSpan={8}
@@ -173,11 +188,12 @@ export function AgentListings() {
                       {t('No listings yet')}
                     </TableCell>
                   </TableRow>
-                ) : (
+                )}
+                {!isLoading &&
+                  rows.length > 0 &&
                   rows.map((row) => (
                     <ListingRow key={row.plan_id} row={row} onSaved={refresh} />
-                  ))
-                )}
+                  ))}
               </TableBody>
             </Table>
           </div>

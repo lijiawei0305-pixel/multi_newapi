@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMemKV_IncrSequential(t *testing.T) {
@@ -15,6 +18,36 @@ func TestMemKV_IncrSequential(t *testing.T) {
 			t.Fatalf("Incr = %d (err=%v), want %d", got, err, want)
 		}
 	}
+}
+
+func TestMemKV_DecrFloorsAtZeroAndDeletesAtomically(t *testing.T) {
+	kv := NewMemKVCache(nil)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		_, err := kv.Incr(ctx, "purchase")
+		require.NoError(t, err)
+	}
+
+	n, err := kv.Decr(ctx, "purchase")
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), n)
+	_, found, err := kv.Get(ctx, "purchase")
+	require.NoError(t, err)
+	assert.True(t, found)
+
+	n, err = kv.Decr(ctx, "purchase")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+	n, err = kv.Decr(ctx, "purchase")
+	require.NoError(t, err)
+	assert.Zero(t, n)
+	_, found, err = kv.Get(ctx, "purchase")
+	require.NoError(t, err)
+	assert.False(t, found, "zero counter must be deleted")
+
+	n, err = kv.Decr(ctx, "purchase")
+	require.NoError(t, err)
+	assert.Zero(t, n, "missing counter must not become negative")
 }
 
 func TestMemKV_GetMissingAndPresent(t *testing.T) {

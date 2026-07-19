@@ -18,9 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Landmark, Pencil, Wallet } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+
 import { payoutMethodLabel } from '../lib'
 import type { PayoutAccount } from '../types'
 
@@ -47,9 +49,8 @@ export function PayoutAccountCard({ account, loading, onEdit }: Props) {
         {t('Payout Account', { defaultValue: '收款账户' })}
       </h3>
       <div className='flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between sm:p-4'>
-        {loading ? (
-          <Skeleton className='h-5 w-48' />
-        ) : configured ? (
+        {loading && <Skeleton className='h-5 w-48' />}
+        {!loading && configured && (
           <div className='flex min-w-0 flex-wrap items-center gap-2 text-sm'>
             <StatusBadge
               label={t('Configured', { defaultValue: '已设置' })}
@@ -76,7 +77,8 @@ export function PayoutAccountCard({ account, loading, onEdit }: Props) {
               </span>
             )}
           </div>
-        ) : (
+        )}
+        {!loading && !configured && (
           <div className='flex items-center gap-2 text-sm'>
             <StatusBadge
               label={t('Not set', { defaultValue: '未设置' })}

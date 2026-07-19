@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { expect, test } from 'vitest'
 
 import { approach, sampleAlphaToPoints } from './scene3d-assets'
 
@@ -21,7 +21,11 @@ test('sampleAlphaToPoints: 数量与范围', () => {
 })
 
 test('sampleAlphaToPoints: 透明图不产生点(返回空)', () => {
-  const empty = { data: new Uint8ClampedArray(16 * 16 * 4), width: 16, height: 16 }
+  const empty = {
+    data: new Uint8ClampedArray(16 * 16 * 4),
+    width: 16,
+    height: 16,
+  }
   expect(sampleAlphaToPoints(empty, 500, 0.05).length).toBe(0)
 })
 

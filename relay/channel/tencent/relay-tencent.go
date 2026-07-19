@@ -1,14 +1,11 @@
 package tencent
 
 import (
-	"bufio"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -92,63 +90,82 @@ func streamResponseTencent2OpenAI(TencentResponse *TencentChatResponse) *dto.Cha
 
 func tencentStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	var responseText string
-	scanner := helper.NewStreamScanner(resp.Body)
-	scanner.Split(bufio.ScanLines)
-
 	helper.SetEventStreamHeaders(c)
-
-	for scanner.Scan() {
-		data := scanner.Text()
-		if len(data) < 5 || !strings.HasPrefix(data, "data:") {
-			continue
-		}
-		data = strings.TrimPrefix(data, "data:")
-
+	var streamErr *types.NewAPIError
+	seenValidResponse := false
+	completed := false
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		var tencentResponse TencentChatResponse
-		err := common.Unmarshal([]byte(data), &tencentResponse)
-		if err != nil {
+		if err := common.Unmarshal([]byte(data), &tencentResponse); err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
-			continue
+			service.MarkUpstreamAccepted(c)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
+			return
 		}
-
+		if tencentResponse.Error.Code != 0 || tencentResponse.Error.Message != "" {
+			apiErr := types.WithOpenAIError(types.OpenAIError{
+				Message: tencentResponse.Error.Message,
+				Code:    tencentResponse.Error.Code,
+			}, http.StatusBadGateway)
+			if seenValidResponse {
+				service.MarkUpstreamAccepted(c)
+				streamErr = relaychannel.AcceptedResponseDeliveryError()
+			} else {
+				streamErr = service.MarkExplicitUpstreamRejection(apiErr)
+			}
+			sr.Stop(streamErr)
+			return
+		}
+		service.MarkUpstreamAccepted(c)
+		seenValidResponse = true
+		for _, choice := range tencentResponse.Choices {
+			if choice.FinishReason != "" {
+				completed = true
+				break
+			}
+		}
 		response := streamResponseTencent2OpenAI(&tencentResponse)
 		if len(response.Choices) != 0 {
 			responseText += response.Choices[0].Delta.GetContentString()
 		}
-
-		err = helper.ObjectData(c, response)
-		if err != nil {
+		if err := helper.ObjectData(c, response); err != nil {
 			common.SysLog(err.Error())
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
 		}
+	})
+	usage := service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens())
+	if streamErr != nil {
+		return usage, streamErr
 	}
-
-	if err := scanner.Err(); err != nil {
-		common.SysLog("error reading stream: " + err.Error())
+	if info.StreamStatus == nil || !info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors() || !seenValidResponse || !completed {
+		service.MarkUpstreamAccepted(c)
+		return usage, relaychannel.AcceptedResponseDeliveryError()
 	}
-
-	helper.Done(c)
-
-	service.CloseResponseBodyGracefully(resp)
-
-	return service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens()), nil
+	if err := helper.StringData(c, "[DONE]"); err != nil {
+		service.MarkUpstreamAccepted(c)
+		return usage, relaychannel.AcceptedResponseDeliveryError()
+	}
+	return usage, nil
 }
 
 func tencentHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	var tencentSb TencentChatResponseSB
-	responseBody, err := io.ReadAll(resp.Body)
+	defer service.CloseResponseBodyGracefully(resp)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
-	service.CloseResponseBodyGracefully(resp)
-	err = json.Unmarshal(responseBody, &tencentSb)
+	err = common.Unmarshal(responseBody, &tencentSb)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	if tencentSb.Response.Error.Code != 0 {
-		return nil, types.WithOpenAIError(types.OpenAIError{
+		return nil, service.MarkExplicitUpstreamRejection(types.WithOpenAIError(types.OpenAIError{
 			Message: tencentSb.Response.Error.Message,
 			Code:    tencentSb.Response.Error.Code,
-		}, resp.StatusCode)
+		}, http.StatusBadGateway))
 	}
 	fullTextResponse := responseTencent2OpenAI(&tencentSb.Response)
 	jsonResponse, err := common.Marshal(fullTextResponse)
@@ -193,7 +210,7 @@ func getTencentSign(req TencentChatRequest, adaptor *Adaptor, secId, secKey stri
 	canonicalHeaders := fmt.Sprintf("content-type:%s\nhost:%s\nx-tc-action:%s\n",
 		"application/json", host, strings.ToLower(adaptor.Action))
 	signedHeaders := "content-type;host;x-tc-action"
-	payload, _ := json.Marshal(req)
+	payload, _ := common.Marshal(req)
 	hashedRequestPayload := sha256hex(string(payload))
 	canonicalRequest := fmt.Sprintf("%s\n%s\n%s\n%s\n%s\n%s",
 		httpRequestMethod,

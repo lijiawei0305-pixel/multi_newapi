@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import React, { useState } from 'react'
+
 import type { Withdrawal, WithdrawalAction } from '../types'
 
 type WithdrawalsContextType = {
@@ -68,7 +69,9 @@ export function WithdrawalsProvider({
 export const useWithdrawals = () => {
   const ctx = React.useContext(WithdrawalsContext)
   if (!ctx) {
-    throw new Error('useWithdrawals has to be used within <WithdrawalsProvider>')
+    throw new Error(
+      'useWithdrawals has to be used within <WithdrawalsProvider>'
+    )
   }
   return ctx
 }

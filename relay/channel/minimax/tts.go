@@ -2,14 +2,15 @@ package minimax
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
@@ -19,7 +20,7 @@ import (
 type MiniMaxTTSRequest struct {
 	Model             string             `json:"model"`
 	Text              string             `json:"text"`
-	Stream            bool               `json:"stream,omitempty"`
+	Stream            *bool              `json:"stream,omitempty"`
 	StreamOptions     *StreamOptions     `json:"stream_options,omitempty"`
 	VoiceSetting      VoiceSetting       `json:"voice_setting"`
 	PronunciationDict *PronunciationDict `json:"pronunciation_dict,omitempty"`
@@ -27,23 +28,23 @@ type MiniMaxTTSRequest struct {
 	TimbreWeights     []TimbreWeight     `json:"timbre_weights,omitempty"`
 	LanguageBoost     string             `json:"language_boost,omitempty"`
 	VoiceModify       *VoiceModify       `json:"voice_modify,omitempty"`
-	SubtitleEnable    bool               `json:"subtitle_enable,omitempty"`
+	SubtitleEnable    *bool              `json:"subtitle_enable,omitempty"`
 	OutputFormat      string             `json:"output_format,omitempty"`
-	AigcWatermark     bool               `json:"aigc_watermark,omitempty"`
+	AigcWatermark     *bool              `json:"aigc_watermark,omitempty"`
 }
 
 type StreamOptions struct {
-	ExcludeAggregatedAudio bool `json:"exclude_aggregated_audio,omitempty"`
+	ExcludeAggregatedAudio *bool `json:"exclude_aggregated_audio,omitempty"`
 }
 
 type VoiceSetting struct {
-	VoiceID           string  `json:"voice_id"`
-	Speed             float64 `json:"speed,omitempty"`
-	Vol               float64 `json:"vol,omitempty"`
-	Pitch             int     `json:"pitch,omitempty"`
-	Emotion           string  `json:"emotion,omitempty"`
-	TextNormalization bool    `json:"text_normalization,omitempty"`
-	LatexRead         bool    `json:"latex_read,omitempty"`
+	VoiceID           string   `json:"voice_id"`
+	Speed             *float64 `json:"speed,omitempty"`
+	Vol               *float64 `json:"vol,omitempty"`
+	Pitch             *int     `json:"pitch,omitempty"`
+	Emotion           string   `json:"emotion,omitempty"`
+	TextNormalization *bool    `json:"text_normalization,omitempty"`
+	LatexRead         *bool    `json:"latex_read,omitempty"`
 }
 
 type PronunciationDict struct {
@@ -51,11 +52,11 @@ type PronunciationDict struct {
 }
 
 type AudioSetting struct {
-	SampleRate int    `json:"sample_rate,omitempty"`
-	Bitrate    int    `json:"bitrate,omitempty"`
+	SampleRate *int   `json:"sample_rate,omitempty"`
+	Bitrate    *int   `json:"bitrate,omitempty"`
 	Format     string `json:"format,omitempty"`
-	Channel    int    `json:"channel,omitempty"`
-	ForceCbr   bool   `json:"force_cbr,omitempty"`
+	Channel    *int   `json:"channel,omitempty"`
+	ForceCbr   *bool  `json:"force_cbr,omitempty"`
 }
 
 type TimbreWeight struct {
@@ -64,9 +65,9 @@ type TimbreWeight struct {
 }
 
 type VoiceModify struct {
-	Pitch        int    `json:"pitch,omitempty"`
-	Intensity    int    `json:"intensity,omitempty"`
-	Timbre       int    `json:"timbre,omitempty"`
+	Pitch        *int   `json:"pitch,omitempty"`
+	Intensity    *int   `json:"intensity,omitempty"`
+	Timbre       *int   `json:"timbre,omitempty"`
 	SoundEffects string `json:"sound_effects,omitempty"`
 }
 
@@ -106,24 +107,23 @@ func getContentTypeByFormat(format string) string {
 }
 
 func handleTTSResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
-	body, readErr := io.ReadAll(resp.Body)
-	if readErr != nil {
-		return nil, types.NewErrorWithStatusCode(
-			fmt.Errorf("failed to read minimax response: %w", readErr),
-			types.ErrorCodeReadResponseBodyFailed,
-			http.StatusInternalServerError,
-		)
-	}
 	defer resp.Body.Close()
-
-	// Parse response
 	var minimaxResp MiniMaxTTSResponse
-	if unmarshalErr := json.Unmarshal(body, &minimaxResp); unmarshalErr != nil {
-		return nil, types.NewErrorWithStatusCode(
-			fmt.Errorf("failed to unmarshal minimax TTS response: %w", unmarshalErr),
-			types.ErrorCodeBadResponseBody,
-			http.StatusInternalServerError,
-		)
+	decodeErr := common.DecodeJsonWithLimit(resp.Body, &minimaxResp, common.UpstreamJSONBodyLimit())
+	if decodeErr != nil {
+		service.MarkUpstreamAccepted(c)
+		if errors.Is(decodeErr, common.ErrReadLimitExceeded) {
+			common.SysError("accepted minimax TTS response exceeded the local response limit; retry suppressed")
+			if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+				_ = buffered.Fail(decodeErr)
+			}
+			return nil, channel.AcceptedResponseDeliveryError()
+		}
+		common.SysError(fmt.Sprintf("accepted minimax TTS JSON decode failed: error_type=%T", decodeErr))
+		if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+			_ = buffered.Fail(decodeErr)
+		}
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
 
 	// Check base_resp status code
@@ -134,6 +134,7 @@ func handleTTSResponse(c *gin.Context, resp *http.Response, info *relaycommon.Re
 			http.StatusBadRequest,
 		)
 	}
+	service.MarkUpstreamAccepted(c)
 
 	// Check if we have audio data
 	if minimaxResp.Data.Audio == "" {
@@ -144,36 +145,43 @@ func handleTTSResponse(c *gin.Context, resp *http.Response, info *relaycommon.Re
 		)
 	}
 
-	if strings.HasPrefix(minimaxResp.Data.Audio, "http") {
-		c.Redirect(http.StatusFound, minimaxResp.Data.Audio)
-	} else {
-		// Handle hex-encoded audio data
-		audioData, decodeErr := hex.DecodeString(minimaxResp.Data.Audio)
-		if decodeErr != nil {
-			return nil, types.NewErrorWithStatusCode(
-				fmt.Errorf("failed to decode hex audio data: %w", decodeErr),
-				types.ErrorCodeBadResponse,
-				http.StatusInternalServerError,
-			)
-		}
-
-		// Determine content type - default to mp3
-		contentType := "audio/mpeg"
-
-		c.Data(http.StatusOK, contentType, audioData)
-	}
-
 	usage = &dto.Usage{
 		PromptTokens:     info.GetEstimatePromptTokens(),
 		CompletionTokens: 0,
 		TotalTokens:      int(minimaxResp.ExtraInfo.UsageCharacters),
 	}
 
+	if strings.HasPrefix(minimaxResp.Data.Audio, "http") {
+		c.Redirect(http.StatusFound, minimaxResp.Data.Audio)
+	} else {
+		// Determine content type - default to mp3
+		contentType := "audio/mpeg"
+		c.Header("Content-Type", contentType)
+		c.Status(http.StatusOK)
+		decoder := hex.NewDecoder(strings.NewReader(minimaxResp.Data.Audio))
+		if _, decodeErr := io.Copy(c.Writer, decoder); decodeErr != nil {
+			// The provider has already returned success; never turn a local spool
+			// or decode failure into a duplicate upstream synthesis attempt.
+			common.SysError("failed to spool accepted minimax TTS audio: " + decodeErr.Error())
+			if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+				_ = buffered.Fail(decodeErr)
+			}
+		}
+	}
+
 	return usage, nil
 }
 
 func handleChatCompletionResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
-	body, readErr := io.ReadAll(resp.Body)
+	if resp == nil || resp.Body == nil {
+		return nil, types.NewErrorWithStatusCode(
+			errors.New("minimax response is unavailable"),
+			types.ErrorCodeBadResponse,
+			http.StatusBadGateway,
+		)
+	}
+	defer service.CloseResponseBodyGracefully(resp)
+	body, readErr := common.ReadAllWithLimit(resp.Body)
 	if readErr != nil {
 		return nil, types.NewErrorWithStatusCode(
 			errors.New("failed to read minimax response"),
@@ -181,17 +189,7 @@ func handleChatCompletionResponse(c *gin.Context, resp *http.Response, info *rel
 			http.StatusInternalServerError,
 		)
 	}
-	defer resp.Body.Close()
-
-	// Set response headers
-	for key, values := range resp.Header {
-		if !service.ShouldCopyUpstreamHeader(c, key, values) {
-			continue
-		}
-		for _, value := range values {
-			c.Header(key, value)
-		}
-	}
+	service.CopyUpstreamResponseHeaders(c, c.Writer.Header(), resp.Header)
 
 	c.Data(resp.StatusCode, "application/json", body)
 	return nil, nil

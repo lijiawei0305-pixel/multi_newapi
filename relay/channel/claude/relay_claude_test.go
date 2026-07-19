@@ -6,12 +6,38 @@ import (
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func commonPointer[T any](value T) *T {
 	return &value
+}
+
+func TestRequestOpenAI2ClaudeMessageDistinguishesAbsentMaxTokensFromExplicitZero(t *testing.T) {
+	model := "claude-test"
+	absent, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{Model: model})
+	require.NoError(t, err)
+	require.NotNil(t, absent.MaxTokens)
+	assert.Equal(t, uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(model)), *absent.MaxTokens)
+
+	explicitZero, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{
+		Model:     model,
+		MaxTokens: commonPointer(uint(0)),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, explicitZero.MaxTokens)
+	assert.Zero(t, *explicitZero.MaxTokens)
+
+	maxCompletionZero, err := RequestOpenAI2ClaudeMessage(nil, dto.GeneralOpenAIRequest{
+		Model:               model,
+		MaxTokens:           commonPointer(uint(7)),
+		MaxCompletionTokens: commonPointer(uint(0)),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, maxCompletionZero.MaxTokens)
+	assert.Zero(t, *maxCompletionZero.MaxTokens)
 }
 
 func TestResponseOpenAI2ClaudeToolUseInputIsObject(t *testing.T) {

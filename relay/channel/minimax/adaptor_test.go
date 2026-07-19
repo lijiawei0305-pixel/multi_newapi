@@ -2,6 +2,7 @@ package minimax
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,9 +12,17 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func init() {
+	gin.SetMode(gin.TestMode)
+}
 
 func TestGetRequestURLForImageGeneration(t *testing.T) {
 	t.Parallel()
@@ -87,7 +96,6 @@ func TestConvertImageRequest(t *testing.T) {
 func TestDoResponseForImageGeneration(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 
@@ -118,6 +126,102 @@ func TestDoResponseForImageGeneration(t *testing.T) {
 	if strings.Contains(body, `"image_urls"`) {
 		t.Fatalf("response body = %s, should not expose raw MiniMax image_urls payload", body)
 	}
+}
+
+func TestMiniMaxImageStructured200ErrorRemainsUnacceptedRejection(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(`{
+			"data":{"image_urls":[],"image_base64":[]},
+			"base_resp":{"status_code":1008,"status_msg":"image rejected"}
+		}`)),
+	}
+	info := &relaycommon.RelayInfo{StartTime: time.Now()}
+
+	usage, apiErr := miniMaxImageHandler(c, resp, info)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.False(t, service.IsUpstreamAccepted(c))
+	require.False(t, types.IsSkipRetryError(apiErr))
+}
+
+func TestMiniMaxImageEmptySuccessIsAcceptedDeliveryFailure(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"data":{"image_urls":[],"image_base64":[]},"base_resp":{"status_code":0}}`)),
+	}
+
+	usage, apiErr := miniMaxImageHandler(c, resp, &relaycommon.RelayInfo{StartTime: time.Now()})
+
+	assert.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	assert.True(t, types.IsSkipRetryError(apiErr))
+	assert.True(t, service.IsUpstreamAccepted(c))
+	assert.Empty(t, recorder.Body.Bytes())
+}
+
+type trackingMiniMaxBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *trackingMiniMaxBody) Close() error {
+	b.closed = true
+	return nil
+}
+
+func TestMiniMaxImageClosesBodyWhenBoundedReadFails(t *testing.T) {
+	t.Setenv("RELAY_UPSTREAM_JSON_MAX_BYTES", "4")
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	body := &trackingMiniMaxBody{Reader: strings.NewReader(`{"data":{}}`)}
+	resp := &http.Response{StatusCode: http.StatusOK, Body: body}
+
+	usage, apiErr := miniMaxImageHandler(c, resp, &relaycommon.RelayInfo{StartTime: time.Now()})
+
+	assert.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	assert.True(t, body.closed)
+	assert.True(t, service.IsUpstreamAccepted(c))
+}
+
+func TestMiniMaxChatClosesBodyWhenBoundedReadFails(t *testing.T) {
+	t.Setenv("RELAY_UPSTREAM_JSON_MAX_BYTES", "4")
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	body := &trackingMiniMaxBody{Reader: strings.NewReader(`{"choices":[]}`)}
+	resp := &http.Response{StatusCode: http.StatusOK, Body: body}
+
+	usage, apiErr := handleChatCompletionResponse(c, resp, &relaycommon.RelayInfo{})
+
+	assert.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	assert.True(t, body.closed)
+}
+
+func TestMiniMaxImagesShareOneCumulativeEncodedBudget(t *testing.T) {
+	t.Setenv("RELAY_UPSTREAM_JSON_MAX_BYTES", "1000")
+	t.Setenv("RELAY_RESPONSE_BUFFER_MAX_BYTES", "300")
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	first := strings.Repeat("A", 100)
+	second := strings.Repeat("B", 100)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"data":{"image_base64":["` + first + `","` + second + `"]},"base_resp":{"status_code":0}}`,
+		)),
+	}
+
+	usage, apiErr := miniMaxImageHandler(c, resp, &relaycommon.RelayInfo{StartTime: time.Now()})
+
+	assert.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	assert.True(t, types.IsSkipRetryError(apiErr))
+	assert.True(t, service.IsUpstreamAccepted(c))
+	assert.Empty(t, recorder.Body.Bytes())
 }
 
 type nopReadCloser struct {

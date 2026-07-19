@@ -1,5 +1,13 @@
 # New API 多租户分销平台开发方案
 
+> [!WARNING]
+> **历史方案，已被替代，不是部署或支付操作手册。** 本文保留用于追溯早期需求；其中独立
+> `auth-service`、`/pay/wxpay/notify`、`/auth/alipay/notify`、旧 Nginx 转发和配置文件示例均已退役，
+> 禁止用于当前环境。当前需求权威入口是 [`doc/proposal.md`](doc/proposal.md) 与
+> [`doc/acceptance.md`](doc/acceptance.md)；当前单栈部署和支付接入分别以
+> [`deploy/ops/README.md`](deploy/ops/README.md) 和
+> [`docs/vendor/payments/deploy-real-payments.md`](docs/vendor/payments/deploy-real-payments.md) 为准。
+
 版本：v1.0  
 日期：2026-06-27  
 阶段：第一期全栈可演示 MVP + 第二期前端品牌化增强

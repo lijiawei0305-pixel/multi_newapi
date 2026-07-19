@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	rootcommon "github.com/QuantumNous/new-api/common"
 )
 
 type StreamEndReason string
@@ -29,9 +31,9 @@ type StreamErrorEntry struct {
 }
 
 type StreamStatus struct {
-	EndReason  StreamEndReason
-	EndError   error
-	endOnce    sync.Once
+	EndReason StreamEndReason
+	EndError  error
+	endOnce   sync.Once
 
 	mu         sync.Mutex
 	Errors     []StreamErrorEntry
@@ -101,7 +103,7 @@ func (s *StreamStatus) Summary() string {
 	b := &strings.Builder{}
 	fmt.Fprintf(b, "reason=%s", s.EndReason)
 	if s.EndError != nil {
-		fmt.Fprintf(b, " end_error=%q", s.EndError.Error())
+		fmt.Fprintf(b, " end_error_%s", rootcommon.PayloadMetadata([]byte(s.EndError.Error())))
 	}
 	s.mu.Lock()
 	if s.ErrorCount > 0 {

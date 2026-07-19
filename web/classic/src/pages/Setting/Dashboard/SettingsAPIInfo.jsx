@@ -38,6 +38,7 @@ import {
 import { Plus, Edit, Trash2, Save, Settings } from 'lucide-react';
 import { API, showError, showSuccess } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
+import { normalizeHttpNavigationUrl } from '../../../helpers/safeNavigation';
 
 const { Text } = Typography;
 
@@ -151,7 +152,8 @@ const SettingsAPIInfo = ({ options, refresh }) => {
   };
 
   const handleSaveApi = async () => {
-    if (!apiForm.url || !apiForm.route || !apiForm.description) {
+    const safeApiUrl = normalizeHttpNavigationUrl(apiForm.url);
+    if (!safeApiUrl || !apiForm.route || !apiForm.description) {
       showError('请填写完整的API信息');
       return;
     }
@@ -162,13 +164,16 @@ const SettingsAPIInfo = ({ options, refresh }) => {
       let newList;
       if (editingApi) {
         newList = apiInfoList.map((api) =>
-          api.id === editingApi.id ? { ...api, ...apiForm } : api,
+          api.id === editingApi.id
+            ? { ...api, ...apiForm, url: safeApiUrl }
+            : api,
         );
       } else {
         const newId = Math.max(...apiInfoList.map((api) => api.id), 0) + 1;
         const newApi = {
           id: newId,
           ...apiForm,
+          url: safeApiUrl,
         };
         newList = [...apiInfoList, newApi];
       }

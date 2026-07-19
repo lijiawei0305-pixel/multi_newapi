@@ -9,10 +9,11 @@ function getDataDirPath() {
   }
 }
 
-contextBridge.exposeInMainWorld('electron', {
-  isElectron: true,
-  version: process.versions.electron,
-  platform: process.platform,
-  versions: process.versions,
-  dataDir: getDataDirPath()
-});
+if (/^http:\/\/127\.0\.0\.1:\d+$/.test(window.location.origin)) {
+  contextBridge.exposeInMainWorld('electron', {
+    isElectron: true,
+    version: process.versions.electron,
+    platform: process.platform,
+    dataDir: getDataDirPath()
+  });
+}

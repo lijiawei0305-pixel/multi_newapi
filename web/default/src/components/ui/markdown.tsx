@@ -18,9 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import DOMPurify from 'dompurify'
 import * as katex from 'katex'
+
 import 'katex/dist/katex.min.css'
 import { Marked, Renderer, type MarkedExtension, type Tokens } from 'marked'
 import { useMemo } from 'react'
+
+import {
+  FORBIDDEN_RICH_CONTENT_ATTRIBUTES,
+  FORBIDDEN_RICH_CONTENT_TAGS,
+  hardenSanitizedHtml,
+} from '@/lib/safe-html'
 import { cn } from '@/lib/utils'
 
 interface MarkdownProps {
@@ -127,7 +134,18 @@ const allowedTags = [
 const sanitizeOptions = {
   ADD_ATTR: allowedAttributes,
   ADD_TAGS: allowedTags,
+  FORBID_TAGS: FORBIDDEN_RICH_CONTENT_TAGS,
 } as const
+
+const MATH_PLACEHOLDER_ATTRIBUTE = 'data-new-api-safe-math'
+
+interface MathRenderContext {
+  fragments: Map<string, string>
+  id: number
+}
+
+let activeMathRenderContext: MathRenderContext | null = null
+let mathRenderSequence = 0
 
 type FlowNode = {
   id: string
@@ -179,11 +197,19 @@ function normalizeMathSource(source: string): string {
 }
 
 function renderMath(source: string, displayMode: boolean): string {
-  return katex.renderToString(normalizeMathSource(source), {
+  const html = katex.renderToString(normalizeMathSource(source), {
     displayMode,
     output: 'htmlAndMathml',
     throwOnError: false,
   })
+
+  if (!activeMathRenderContext) {
+    return html
+  }
+
+  const marker = `${activeMathRenderContext.id}-${activeMathRenderContext.fragments.size}`
+  activeMathRenderContext.fragments.set(marker, html)
+  return `<span ${MATH_PLACEHOLDER_ATTRIBUTE}="${marker}"></span>`
 }
 
 function replaceEmojiShortcodes(value: string): string {
@@ -232,7 +258,8 @@ function splitFlowLabel(label: string, maxUnits: number): string[] {
 
 function renderFlowText(layout: FlowNodeLayout): string {
   const lineHeight = 18
-  const firstLineY = layout.y - ((layout.labelLines.length - 1) * lineHeight) / 2 + 5
+  const firstLineY =
+    layout.y - ((layout.labelLines.length - 1) * lineHeight) / 2 + 5
 
   return layout.labelLines
     .map((line, index) => {
@@ -241,10 +268,16 @@ function renderFlowText(layout: FlowNodeLayout): string {
     .join('')
 }
 
-function getFlowNodeLayout(node: FlowNode, index: number, centerX: number): FlowNodeLayout {
+function getFlowNodeLayout(
+  node: FlowNode,
+  index: number,
+  centerX: number
+): FlowNodeLayout {
   const isCondition = node.type === 'condition'
   const labelLines = splitFlowLabel(node.label, isCondition ? 14 : 18)
-  const labelWidth = Math.max(...labelLines.map((line) => getTextUnits(line) * 7.2))
+  const labelWidth = Math.max(
+    ...labelLines.map((line) => getTextUnits(line) * 7.2)
+  )
   const textHeight = labelLines.length * 18
 
   if (isCondition) {
@@ -279,7 +312,10 @@ function getFlowNodeLayout(node: FlowNode, index: number, centerX: number): Flow
   }
 }
 
-function getFlowAnchor(layout: FlowNodeLayout, side: 'bottom' | 'left' | 'right' | 'top'): {
+function getFlowAnchor(
+  layout: FlowNodeLayout,
+  side: 'bottom' | 'left' | 'right' | 'top'
+): {
   x: number
   y: number
 } {
@@ -323,7 +359,10 @@ function renderFlowShape(layout: FlowNodeLayout): string {
   `
 }
 
-function parseFlowDiagram(source: string): { edges: FlowEdge[]; nodes: FlowNode[] } {
+function parseFlowDiagram(source: string): {
+  edges: FlowEdge[]
+  nodes: FlowNode[]
+} {
   const lines = source
     .split('\n')
     .map((line) => line.trim())
@@ -347,8 +386,12 @@ function parseFlowDiagram(source: string): { edges: FlowEdge[]; nodes: FlowNode[
     }
 
     for (let index = 0; index < edgeParts.length - 1; index += 1) {
-      const fromMatch = /^([A-Za-z][\w-]*)(?:\(([^)]+)\))?$/.exec(edgeParts[index])
-      const toMatch = /^([A-Za-z][\w-]*)(?:\(([^)]+)\))?$/.exec(edgeParts[index + 1])
+      const fromMatch = /^([A-Za-z][\w-]*)(?:\(([^)]+)\))?$/.exec(
+        edgeParts[index]
+      )
+      const toMatch = /^([A-Za-z][\w-]*)(?:\(([^)]+)\))?$/.exec(
+        edgeParts[index + 1]
+      )
 
       if (!fromMatch || !toMatch) {
         continue
@@ -371,10 +414,17 @@ function renderFlowDiagram(source: string): string {
   const loopX = 520
   const nodeIndex = new Map(nodes.map((node, index) => [node.id, index]))
   const nodePositions = new Map(
-    nodes.map((node, index) => [node.id, getFlowNodeLayout(node, index, centerX)])
+    nodes.map((node, index) => [
+      node.id,
+      getFlowNodeLayout(node, index, centerX),
+    ])
   )
-  const lastNode = nodes.length > 0 ? nodePositions.get(nodes.at(-1)?.id ?? '') : undefined
-  const height = Math.max(180, (lastNode?.y ?? 64) + (lastNode?.height ?? 40) / 2 + 54)
+  const lastNode =
+    nodes.length > 0 ? nodePositions.get(nodes.at(-1)?.id ?? '') : undefined
+  const height = Math.max(
+    180,
+    (lastNode?.y ?? 64) + (lastNode?.height ?? 40) / 2 + 54
+  )
   const renderedEdges = edges
     .map((edge) => {
       const from = nodePositions.get(edge.from)
@@ -384,7 +434,8 @@ function renderFlowDiagram(source: string): string {
         return ''
       }
 
-      const isBackward = (nodeIndex.get(edge.to) ?? 0) <= (nodeIndex.get(edge.from) ?? 0)
+      const isBackward =
+        (nodeIndex.get(edge.to) ?? 0) <= (nodeIndex.get(edge.from) ?? 0)
 
       if (isBackward) {
         const fromAnchor = getFlowAnchor(from, 'right')
@@ -436,7 +487,10 @@ function renderFlowDiagram(source: string): string {
   `
 }
 
-function parseSequenceDiagram(source: string): { messages: SequenceMessage[]; participants: string[] } {
+function parseSequenceDiagram(source: string): {
+  messages: SequenceMessage[]
+  participants: string[]
+} {
   const lines = source
     .split('\n')
     .map((line) => line.trim())
@@ -466,7 +520,9 @@ function parseSequenceDiagram(source: string): { messages: SequenceMessage[]; pa
       return
     }
 
-    const messageMatch = /^([^-\s]+)\s*(-{1,2}>>?|-->)\s*([^:]+):\s*(.+)$/.exec(line)
+    const messageMatch = /^([^-\s]+)\s*(-{1,2}>>?|-->)\s*([^:]+):\s*(.+)$/.exec(
+      line
+    )
 
     if (!messageMatch) {
       return
@@ -495,10 +551,16 @@ function renderSequenceDiagram(source: string): string {
   const marginX = 80
   const top = 42
   const rowGap = 72
-  const width = Math.max(360, marginX * 2 + Math.max(0, participants.length - 1) * laneGap)
+  const width = Math.max(
+    360,
+    marginX * 2 + Math.max(0, participants.length - 1) * laneGap
+  )
   const height = Math.max(180, 126 + messages.length * rowGap)
   const positions = new Map(
-    participants.map((participant, index) => [participant, marginX + index * laneGap])
+    participants.map((participant, index) => [
+      participant,
+      marginX + index * laneGap,
+    ])
   )
   const participantBoxes = participants
     .map((participant) => {
@@ -539,7 +601,8 @@ function renderSequenceDiagram(source: string): string {
       const toX = positions.get(message.to ?? '') ?? marginX
       const labelX = (fromX + toX) / 2
       const label = escapeHtml(message.label)
-      const dash = message.lineStyle === 'dashed' ? ' stroke-dasharray="4 4"' : ''
+      const dash =
+        message.lineStyle === 'dashed' ? ' stroke-dasharray="4 4"' : ''
 
       return `
         <line x1="${fromX}" y1="${y}" x2="${toX}" y2="${y}" class="markdown-diagram-edge"${dash} marker-end="url(#markdown-diagram-arrow)" />
@@ -680,12 +743,13 @@ const markdownParser = new Marked({
 markdownParser.use(...markdownExtensions)
 
 function addExternalLinkAttributes(html: string): string {
+  const hardenedHtml = hardenSanitizedHtml(html)
   if (typeof window === 'undefined') {
-    return html
+    return hardenedHtml
   }
 
   const template = document.createElement('template')
-  template.innerHTML = html
+  template.innerHTML = hardenedHtml
 
   template.content.querySelectorAll('a[href]').forEach((link) => {
     link.setAttribute('target', '_blank')
@@ -695,12 +759,72 @@ function addExternalLinkAttributes(html: string): string {
   return template.innerHTML
 }
 
+function restoreTrustedMath(html: string, context: MathRenderContext): string {
+  if (context.fragments.size === 0) {
+    return html
+  }
+
+  const safeFragments = new Map(
+    [...context.fragments].map(([marker, fragment]) => [
+      marker,
+      DOMPurify.sanitize(fragment, sanitizeOptions),
+    ])
+  )
+
+  if (typeof document === 'undefined') {
+    let restoredHtml = html
+    safeFragments.forEach((fragment, marker) => {
+      restoredHtml = restoredHtml.replaceAll(
+        `<span ${MATH_PLACEHOLDER_ATTRIBUTE}="${marker}"></span>`,
+        fragment
+      )
+    })
+    return restoredHtml
+  }
+
+  const template = document.createElement('template')
+  template.innerHTML = html
+  template.content
+    .querySelectorAll<HTMLElement>(`[${MATH_PLACEHOLDER_ATTRIBUTE}]`)
+    .forEach((placeholder) => {
+      const marker = placeholder.getAttribute(MATH_PLACEHOLDER_ATTRIBUTE) ?? ''
+      const fragment = safeFragments.get(marker)
+      if (!fragment) {
+        placeholder.remove()
+        return
+      }
+
+      const fragmentTemplate = document.createElement('template')
+      fragmentTemplate.innerHTML = fragment
+      placeholder.replaceWith(fragmentTemplate.content.cloneNode(true))
+    })
+
+  return template.innerHTML
+}
+
 function renderMarkdown(markdown: string, breaks = false): string {
-  const parsedHtml = markdownParser.parse(markdown, {
-    ...markdownOptions,
-    breaks,
+  const context: MathRenderContext = {
+    fragments: new Map(),
+    id: ++mathRenderSequence,
+  }
+  const previousContext = activeMathRenderContext
+  activeMathRenderContext = context
+
+  let parsedHtml: string
+  try {
+    parsedHtml = markdownParser.parse(markdown, {
+      ...markdownOptions,
+      breaks,
+    })
+  } finally {
+    activeMathRenderContext = previousContext
+  }
+
+  const sanitizedHtml = DOMPurify.sanitize(parsedHtml, {
+    ...sanitizeOptions,
+    FORBID_ATTR: FORBIDDEN_RICH_CONTENT_ATTRIBUTES,
   })
-  const html = DOMPurify.sanitize(parsedHtml, sanitizeOptions)
+  const html = restoreTrustedMath(sanitizedHtml, context)
 
   return addExternalLinkAttributes(html)
 }

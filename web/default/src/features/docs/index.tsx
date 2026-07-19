@@ -53,7 +53,8 @@ export function Docs() {
       no: '03',
       title: t('Docs Step3 Title', { defaultValue: '替换地址' }),
       desc: t('Docs Step3 Desc', {
-        defaultValue: '将 base_url 换成本站地址，请求头 Authorization: Bearer 你的令牌',
+        defaultValue:
+          '将 base_url 换成本站地址，请求头 Authorization: Bearer 你的令牌',
       }),
     },
     {
@@ -78,11 +79,12 @@ response = client.chat.completions.create(
 )
 print(response.choices[0].message.content)`
 
-
   // ── 平台手册(合同三期交付 #13,内容随功能定稿持续更新)──────────────────────
   const manuals = [
     {
-      title: t('Docs Manual Marketing Title', { defaultValue: '营销页与模板说明' }),
+      title: t('Docs Manual Marketing Title', {
+        defaultValue: '营销页与模板说明',
+      }),
       intro: t('Docs Manual Marketing Intro', {
         defaultValue: '套餐购买页营销位与站点视觉模板的运营配置说明。',
       }),
@@ -106,7 +108,9 @@ print(response.choices[0].message.content)`
       ],
     },
     {
-      title: t('Docs Manual Domain Title', { defaultValue: 'OEM 域名接入与证书配置手册' }),
+      title: t('Docs Manual Domain Title', {
+        defaultValue: 'OEM 域名接入与证书配置手册',
+      }),
       intro: t('Docs Manual Domain Intro', {
         defaultValue: '独立代理绑定自有域名并自动启用 HTTPS 的完整流程。',
       }),
@@ -137,7 +141,9 @@ print(response.choices[0].message.content)`
       ],
     },
     {
-      title: t('Docs Manual Renewal Title', { defaultValue: '续订说明(到期提醒与一键续费)' }),
+      title: t('Docs Manual Renewal Title', {
+        defaultValue: '续订说明(到期提醒与一键续费)',
+      }),
       intro: t('Docs Manual Renewal Intro', {
         defaultValue: '套餐到期的提醒机制与续费操作路径。',
       }),
@@ -165,7 +171,9 @@ print(response.choices[0].message.content)`
       ],
     },
     {
-      title: t('Docs Manual I18n Title', { defaultValue: '多语言与多币种配置说明' }),
+      title: t('Docs Manual I18n Title', {
+        defaultValue: '多语言与多币种配置说明',
+      }),
       intro: t('Docs Manual I18n Intro', {
         defaultValue: '界面语言能力与币种口径说明。',
       }),
@@ -216,7 +224,8 @@ print(response.choices[0].message.content)`
             <CardContent className='p-6'>
               <p className='text-muted-foreground'>
                 {t('Docs QuickStart Desc', {
-                  defaultValue: '将您的 OpenAI SDK base_url 替换为以下地址即可接入：',
+                  defaultValue:
+                    '将您的 OpenAI SDK base_url 替换为以下地址即可接入：',
                 })}
               </p>
               <div className='bg-muted mt-4 flex items-center justify-between gap-3 rounded-md px-4 py-3'>
@@ -228,7 +237,9 @@ print(response.choices[0].message.content)`
         </section>
 
         <section className='mt-16'>
-          <h2 className={h2}>{t('Docs Steps', { defaultValue: '接入步骤' })}</h2>
+          <h2 className={h2}>
+            {t('Docs Steps', { defaultValue: '接入步骤' })}
+          </h2>
           <div className='mt-6 flex flex-col gap-4'>
             {steps.map((s) => (
               <Card key={s.no}>
@@ -249,7 +260,9 @@ print(response.choices[0].message.content)`
         </section>
 
         <section className='mt-16'>
-          <h2 className={h2}>{t('Docs Sample', { defaultValue: '示例代码' })}</h2>
+          <h2 className={h2}>
+            {t('Docs Sample', { defaultValue: '示例代码' })}
+          </h2>
           <Card className='mt-6'>
             <CardContent className='relative p-6'>
               <div className='absolute top-4 right-4'>
@@ -279,10 +292,12 @@ print(response.choices[0].message.content)`
               <Card key={m.title}>
                 <CardContent className='p-6'>
                   <h3 className='text-foreground font-semibold'>{m.title}</h3>
-                  <p className='text-muted-foreground mt-1 text-sm'>{m.intro}</p>
+                  <p className='text-muted-foreground mt-1 text-sm'>
+                    {m.intro}
+                  </p>
                   <ul className='text-muted-foreground mt-4 list-disc space-y-2 pl-5 text-sm'>
-                    {m.points.map((pt, i) => (
-                      <li key={i}>{pt}</li>
+                    {m.points.map((pt) => (
+                      <li key={pt}>{pt}</li>
                     ))}
                   </ul>
                 </CardContent>

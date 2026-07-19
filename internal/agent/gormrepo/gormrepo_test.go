@@ -2,11 +2,15 @@ package gormrepo
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
 	"github.com/QuantumNous/new-api/internal/agent"
@@ -30,6 +34,20 @@ func newTestRepo(t *testing.T) *Repo {
 	}
 	return New(db)
 }
+
+type legacyEarningRow struct {
+	ID         int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	TenantID   int64     `gorm:"column:tenant_id;not null;index:idx_agent_earnings_tenant"`
+	UserID     int64     `gorm:"column:user_id;not null;default:0"`
+	SourceType string    `gorm:"column:source_type;type:varchar(32);not null"`
+	SourceID   string    `gorm:"column:source_id;type:varchar(128);not null"`
+	IdemKey    string    `gorm:"column:idem_key;type:varchar(200);not null;uniqueIndex:idx_agent_earnings_idem"`
+	Amount     float64   `gorm:"column:amount;type:decimal(20,8);not null"`
+	Remark     string    `gorm:"column:remark;type:varchar(255);not null;default:''"`
+	CreatedAt  time.Time `gorm:"column:created_at"`
+}
+
+func (legacyEarningRow) TableName() string { return "agent_earning_logs" }
 
 func TestSetAgentType_Upsert(t *testing.T) {
 	ctx := context.Background()
@@ -134,6 +152,62 @@ func TestAppendEarning_IdempotentAndAccrues(t *testing.T) {
 	if err != nil || len(logs) != 2 {
 		t.Fatalf("earning logs = %d (err %v), want 2", len(logs), err)
 	}
+}
+
+func TestAutoMigratePreservesLegacyEarningIdempotency(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, AutoMigrate(db))
+	require.NoError(t, AutoMigrate(db))
+	require.NoError(t, db.Migrator().DropTable(&earningRow{}))
+
+	// This is the table shape produced before claim_id and the composite source
+	// uniqueness constraint were added. Its idem_key is the old raw NUL-delimited
+	// value rather than the current bounded SHA-256 encoding.
+	require.NoError(t, db.Migrator().CreateTable(&legacyEarningRow{}))
+
+	createdAt := time.Date(2026, time.July, 19, 6, 7, 8, 0, time.UTC)
+	legacyKey := "42\x00consume_commission\x00legacy-request"
+	require.NoError(t, db.Exec(`INSERT INTO agent_earning_logs
+		(tenant_id, user_id, source_type, source_id, idem_key, amount, remark, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		42, 99, string(agent.SourceConsumeCommission), "legacy-request", legacyKey, 1.25, "legacy", createdAt).Error)
+	require.NoError(t, db.Exec(`INSERT INTO agent_wallets
+		(tenant_id, user_id, withdrawable_balance, total_earned, updated_at)
+		VALUES (?, ?, ?, ?, ?)`, 42, 99, 1.25, 1.25, createdAt).Error)
+
+	require.NoError(t, AutoMigrate(db))
+	repo := New(db)
+	entry := agent.EarningEntry{
+		TenantID:   42,
+		UserID:     99,
+		SourceType: agent.SourceConsumeCommission,
+		SourceID:   "legacy-request",
+		Amount:     1.25,
+		Remark:     "legacy",
+	}
+
+	applied, err := repo.AppendEarning(context.Background(), entry)
+	require.NoError(t, err)
+	assert.False(t, applied, "a legacy row must remain an exact idempotent replay after migration")
+	wallet, err := repo.GetWallet(context.Background(), 42)
+	require.NoError(t, err)
+	assert.Equal(t, 1.25, wallet.WithdrawableBalance)
+	assert.Equal(t, 1.25, wallet.TotalEarned)
+
+	mismatched := entry
+	mismatched.Amount = 2.50
+	applied, err = repo.AppendEarning(context.Background(), mismatched)
+	assert.False(t, applied)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, agent.ErrEarningInvalid))
+
+	var count int64
+	require.NoError(t, db.Table("agent_earning_logs").Count(&count).Error)
+	assert.Equal(t, int64(1), count)
 }
 
 // TestWithdrawal_ApproveMovesNoMoney 验证提现闭环补强 #2 的钱流调整：「申请冻结 → 通过」

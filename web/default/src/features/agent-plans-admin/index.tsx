@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -138,7 +138,9 @@ export function AgentPlansAdmin() {
 
   const save = useMutation({
     mutationFn: (f: FormState) =>
-      f.id == null ? createAgentPlan(toInput(f)) : updateAgentPlan(f.id, toInput(f)),
+      f.id == null
+        ? createAgentPlan(toInput(f))
+        : updateAgentPlan(f.id, toInput(f)),
     onSuccess: (res) => {
       if (!res.success) return
       toast.success(t('Saved', { defaultValue: '已保存' }))
@@ -159,7 +161,8 @@ export function AgentPlansAdmin() {
           <div className='flex items-center justify-between'>
             <p className='text-muted-foreground text-sm'>
               {t('Agent Plans Admin Intro', {
-                defaultValue: '配置「购买代理套餐」的档位:价格、授予能力(代理等级/开放 API/批发折扣系数)、有效期与上下架。',
+                defaultValue:
+                  '配置「购买代理套餐」的档位:价格、授予能力(代理等级/开放 API/批发折扣系数)、有效期与上下架。',
               })}
             </p>
             <Button size='sm' onClick={() => setForm({ ...emptyForm })}>
@@ -176,10 +179,18 @@ export function AgentPlansAdmin() {
                   <TableRow>
                     <TableHead>{t('Name', { defaultValue: '名称' })}</TableHead>
                     <TableHead>Code</TableHead>
-                    <TableHead>{t('Price', { defaultValue: '价格(¥)' })}</TableHead>
-                    <TableHead>{t('Grant', { defaultValue: '授予' })}</TableHead>
-                    <TableHead>{t('Validity', { defaultValue: '有效期' })}</TableHead>
-                    <TableHead>{t('Status', { defaultValue: '状态' })}</TableHead>
+                    <TableHead>
+                      {t('Price', { defaultValue: '价格(¥)' })}
+                    </TableHead>
+                    <TableHead>
+                      {t('Grant', { defaultValue: '授予' })}
+                    </TableHead>
+                    <TableHead>
+                      {t('Validity', { defaultValue: '有效期' })}
+                    </TableHead>
+                    <TableHead>
+                      {t('Status', { defaultValue: '状态' })}
+                    </TableHead>
                     <TableHead className='text-right'>
                       {t('Actions', { defaultValue: '操作' })}
                     </TableHead>
@@ -191,11 +202,17 @@ export function AgentPlansAdmin() {
                       <TableCell className='font-medium'>
                         {p.name}
                         {p.is_recommended ? (
-                          <span className='text-primary ml-1 text-[11px]'>★</span>
+                          <span className='text-primary ml-1 text-[11px]'>
+                            ★
+                          </span>
                         ) : null}
                       </TableCell>
-                      <TableCell className='text-muted-foreground'>{p.code}</TableCell>
-                      <TableCell>¥{p.price_cny.toLocaleString('zh-CN')}</TableCell>
+                      <TableCell className='text-muted-foreground'>
+                        {p.code}
+                      </TableCell>
+                      <TableCell>
+                        ¥{p.price_cny.toLocaleString('zh-CN')}
+                      </TableCell>
                       <TableCell className='text-muted-foreground text-xs'>
                         L{p.grant_level}
                         {p.grant_can_api ? ' · API' : ''}
@@ -233,9 +250,7 @@ export function AgentPlansAdmin() {
             </div>
           )}
 
-          {
-            /* 内联创建/编辑表单 */
-          }
+          {/* 内联创建/编辑表单 */}
           {form ? (
             <Card>
               <CardHeader>
@@ -255,9 +270,15 @@ export function AgentPlansAdmin() {
                     />
                   </Field>
                   <Field label={t('Name', { defaultValue: '名称' })}>
-                    <Input value={form.name} onChange={(e) => set('name', e.target.value)} />
+                    <Input
+                      value={form.name}
+                      onChange={(e) => set('name', e.target.value)}
+                    />
                   </Field>
-                  <Field label={t('Description', { defaultValue: '描述' })} full>
+                  <Field
+                    label={t('Description', { defaultValue: '描述' })}
+                    full
+                  >
                     <Input
                       value={form.description}
                       onChange={(e) => set('description', e.target.value)}
@@ -270,28 +291,42 @@ export function AgentPlansAdmin() {
                       onChange={(e) => set('price_cny', e.target.value)}
                     />
                   </Field>
-                  <Field label={t('Anchor Price CNY', { defaultValue: '原价划线(¥)' })}>
+                  <Field
+                    label={t('Anchor Price CNY', {
+                      defaultValue: '原价划线(¥)',
+                    })}
+                  >
                     <Input
                       type='number'
                       value={form.anchor_price_cny}
                       onChange={(e) => set('anchor_price_cny', e.target.value)}
                     />
                   </Field>
-                  <Field label={t('Discount Label', { defaultValue: '折扣角标' })}>
+                  <Field
+                    label={t('Discount Label', { defaultValue: '折扣角标' })}
+                  >
                     <Input
                       value={form.discount_label}
                       onChange={(e) => set('discount_label', e.target.value)}
-                      placeholder={t('Discount Label Placeholder', { defaultValue: '5折' })}
+                      placeholder={t('Discount Label Placeholder', {
+                        defaultValue: '5折',
+                      })}
                     />
                   </Field>
-                  <Field label={t('Valid Days', { defaultValue: '有效期(天)' })}>
+                  <Field
+                    label={t('Valid Days', { defaultValue: '有效期(天)' })}
+                  >
                     <Input
                       type='number'
                       value={form.valid_days}
                       onChange={(e) => set('valid_days', e.target.value)}
                     />
                   </Field>
-                  <Field label={t('Grant Level', { defaultValue: '代理等级(0普通/1独立)' })}>
+                  <Field
+                    label={t('Grant Level', {
+                      defaultValue: '代理等级(0普通/1独立)',
+                    })}
+                  >
                     <Input
                       type='number'
                       value={form.grant_level}
@@ -299,12 +334,16 @@ export function AgentPlansAdmin() {
                     />
                   </Field>
                   <Field
-                    label={t('Grant Discount Ratio', { defaultValue: '批发折扣系数(0=不设)' })}
+                    label={t('Grant Discount Ratio', {
+                      defaultValue: '批发折扣系数(0=不设)',
+                    })}
                   >
                     <Input
                       type='number'
                       value={form.grant_discount_ratio}
-                      onChange={(e) => set('grant_discount_ratio', e.target.value)}
+                      onChange={(e) =>
+                        set('grant_discount_ratio', e.target.value)
+                      }
                       placeholder='0.9'
                     />
                   </Field>
@@ -339,7 +378,10 @@ export function AgentPlansAdmin() {
                   <Button variant='outline' onClick={() => setForm(null)}>
                     {t('Cancel', { defaultValue: '取消' })}
                   </Button>
-                  <Button disabled={save.isPending} onClick={() => save.mutate(form)}>
+                  <Button
+                    disabled={save.isPending}
+                    onClick={() => save.mutate(form)}
+                  >
                     {t('Save', { defaultValue: '保存' })}
                   </Button>
                 </div>

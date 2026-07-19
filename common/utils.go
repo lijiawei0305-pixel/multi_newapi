@@ -5,13 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
 	"log"
 	"math/big"
-	"math/rand"
 	"net"
 	"net/url"
 	"os"
@@ -208,10 +205,6 @@ func Interface2String(inter interface{}) string {
 	return fmt.Sprintf("%v", inter)
 }
 
-func UnescapeHTML(x string) interface{} {
-	return template.HTML(x)
-}
-
 func IntMax(a int, b int) int {
 	if a >= b {
 		return a
@@ -257,8 +250,24 @@ func GenerateKey() (string, error) {
 }
 
 func GetRandomInt(max int) int {
-	//rand.Seed(time.Now().UnixNano())
-	return rand.Intn(max)
+	if max <= 0 {
+		panic("random upper bound must be positive")
+	}
+	value, err := crand.Int(crand.Reader, big.NewInt(int64(max)))
+	if err != nil {
+		panic("secure random source unavailable")
+	}
+	return int(value.Int64())
+}
+
+// SaturatingUintToInt preserves non-negative request limits without allowing
+// an oversized unsigned value to wrap into a negative int on 32/64-bit hosts.
+func SaturatingUintToInt(value uint) int {
+	maxInt := int(^uint(0) >> 1)
+	if value > uint(maxInt) {
+		return maxInt
+	}
+	return int(value) // #nosec G115 -- bounded above by the host int maximum.
 }
 
 func GetTimestamp() int64 {
@@ -296,7 +305,7 @@ func MessageWithRequestId(message string, id string) string {
 
 func RandomSleep() {
 	// Sleep for 0-3000 ms
-	time.Sleep(time.Duration(rand.Intn(3000)) * time.Millisecond)
+	time.Sleep(time.Duration(GetRandomInt(3000)) * time.Millisecond)
 }
 
 func GetPointer[T any](v T) *T {
@@ -305,12 +314,12 @@ func GetPointer[T any](v T) *T {
 
 func Any2Type[T any](data any) (T, error) {
 	var zero T
-	bytes, err := json.Marshal(data)
+	bytes, err := Marshal(data)
 	if err != nil {
 		return zero, err
 	}
 	var res T
-	err = json.Unmarshal(bytes, &res)
+	err = Unmarshal(bytes, &res)
 	if err != nil {
 		return zero, err
 	}

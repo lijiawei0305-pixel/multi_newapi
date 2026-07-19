@@ -4,9 +4,21 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestGetMaxTokensUsesPresenceNotNonZeroValue(t *testing.T) {
+	request := GeneralOpenAIRequest{
+		MaxTokens:           common.GetPointer(uint(100)),
+		MaxCompletionTokens: common.GetPointer(uint(0)),
+	}
+	assert.Zero(t, request.GetMaxTokens())
+
+	request.MaxCompletionTokens = nil
+	assert.Equal(t, uint(100), request.GetMaxTokens())
+}
 
 func TestGeneralOpenAIRequestPreserveExplicitZeroValues(t *testing.T) {
 	raw := []byte(`{
@@ -23,6 +35,10 @@ func TestGeneralOpenAIRequestPreserveExplicitZeroValues(t *testing.T) {
 		"logprobs":false,
 		"top_logprobs":0,
 		"dimensions":0,
+		"stream_options":{
+			"include_usage":false,
+			"include_obfuscation":false
+		},
 		"return_images":false,
 		"return_related_questions":false
 	}`)
@@ -46,6 +62,10 @@ func TestGeneralOpenAIRequestPreserveExplicitZeroValues(t *testing.T) {
 	require.True(t, gjson.GetBytes(encoded, "logprobs").Exists())
 	require.True(t, gjson.GetBytes(encoded, "top_logprobs").Exists())
 	require.True(t, gjson.GetBytes(encoded, "dimensions").Exists())
+	require.True(t, gjson.GetBytes(encoded, "stream_options.include_usage").Exists())
+	require.False(t, gjson.GetBytes(encoded, "stream_options.include_usage").Bool())
+	require.True(t, gjson.GetBytes(encoded, "stream_options.include_obfuscation").Exists())
+	require.False(t, gjson.GetBytes(encoded, "stream_options.include_obfuscation").Bool())
 	require.True(t, gjson.GetBytes(encoded, "return_images").Exists())
 	require.True(t, gjson.GetBytes(encoded, "return_related_questions").Exists())
 }

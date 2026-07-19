@@ -13,12 +13,20 @@ const IcHeadset = () => (
   </svg>
 )
 
-export function KefuModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function KefuModal({
+  open,
+  onClose,
+}: {
+  open: boolean
+  onClose: () => void
+}) {
   const { t } = useTranslation()
 
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose])
@@ -26,20 +34,35 @@ export function KefuModal({ open, onClose }: { open: boolean; onClose: () => voi
   return (
     <div
       className={`lp-kefu-modal${open ? ' show' : ''}`}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
     >
       <div className='lp-kefu-card'>
         <div className='lp-kefu-head'>
-          <span className='lp-kh-ic'><IcHeadset /></span>
+          <span className='lp-kh-ic'>
+            <IcHeadset />
+          </span>
           <div>
             <b>{t('Live Support')}</b>
-            <small>{t('AI bot + human agents, standing by around the clock')}</small>
+            <small>
+              {t('AI bot + human agents, standing by around the clock')}
+            </small>
           </div>
-          <button className='lp-kefu-close' type='button' onClick={onClose} aria-label={t('Close')}>×</button>
+          <button
+            className='lp-kefu-close'
+            type='button'
+            onClick={onClose}
+            aria-label={t('Close')}
+          >
+            ×
+          </button>
         </div>
 
         <div className='lp-kefu-body'>
-          <div className='lp-kefu-orb'><IcHeadset /></div>
+          <div className='lp-kefu-orb'>
+            <IcHeadset />
+          </div>
           <div className='lp-kefu-title'>{t('24/7 Live Support')}</div>
           <div className='lp-kefu-status'>{t('Online 24/7')}</div>
           <div className='lp-kefu-qr'>
@@ -50,15 +73,22 @@ export function KefuModal({ open, onClose }: { open: boolean; onClose: () => voi
                 <rect x='3' y='14' width='7' height='7' rx='1' />
                 <path d='M14 14h3v3M20 14v7M14 20h3' />
               </svg>
-              <span>{t('WeChat QR')}<br />{t('placeholder · to be replaced')}</span>
+              <span>
+                {t('WeChat QR')}
+                <br />
+                {t('placeholder · to be replaced')}
+              </span>
             </div>
           </div>
-          <div className='lp-kefu-hint'>{t('(Scan the QR code with WeChat)')}</div>
+          <div className='lp-kefu-hint'>
+            {t('(Scan the QR code with WeChat)')}
+          </div>
         </div>
 
         {/* 原版此按钮 onclick=lpOpenKefu()，弹窗已开时为空操作 —— 保持一致，等真实客服入口再接。 */}
         <button className='lp-kefu-contact' type='button'>
-          <IcHeadset />{t('Contact support now')}
+          <IcHeadset />
+          {t('Contact support now')}
         </button>
       </div>
     </div>

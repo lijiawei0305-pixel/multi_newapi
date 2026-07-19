@@ -1,12 +1,12 @@
 package jimeng
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
@@ -26,7 +26,7 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(*gin.Context, *relaycommon.RelayInfo, *dto.ClaudeRequest) (any, error) {
-	return nil, errors.New("not implemented")
+	return nil, channel.NewUnsupportedConversionError("Jimeng", "Claude")
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
@@ -48,25 +48,25 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 }
 
 type LogoInfo struct {
-	AddLogo         bool    `json:"add_logo,omitempty"`
-	Position        int     `json:"position,omitempty"`
-	Language        int     `json:"language,omitempty"`
-	Opacity         float64 `json:"opacity,omitempty"`
-	LogoTextContent string  `json:"logo_text_content,omitempty"`
+	AddLogo         *bool    `json:"add_logo,omitempty"`
+	Position        *int     `json:"position,omitempty"`
+	Language        *int     `json:"language,omitempty"`
+	Opacity         *float64 `json:"opacity,omitempty"`
+	LogoTextContent string   `json:"logo_text_content,omitempty"`
 }
 
 type imageRequestPayload struct {
-	ReqKey     string   `json:"req_key"`                      // Service identifier, fixed value: jimeng_high_aes_general_v21_L
-	Prompt     string   `json:"prompt"`                       // Prompt for image generation, supports both Chinese and English
-	Seed       int64    `json:"seed,omitempty"`               // Random seed, default -1 (random)
-	Width      int      `json:"width,omitempty"`              // Image width, default 512, range [256, 768]
-	Height     int      `json:"height,omitempty"`             // Image height, default 512, range [256, 768]
-	UsePreLLM  bool     `json:"use_pre_llm,omitempty"`        // Enable text expansion, default true
-	UseSR      bool     `json:"use_sr,omitempty"`             // Enable super resolution, default true
-	ReturnURL  bool     `json:"return_url,omitempty"`         // Whether to return image URL (valid for 24 hours)
-	LogoInfo   LogoInfo `json:"logo_info,omitempty"`          // Watermark information
-	ImageUrls  []string `json:"image_urls,omitempty"`         // Image URLs for input
-	BinaryData []string `json:"binary_data_base64,omitempty"` // Base64 encoded binary data
+	ReqKey     string    `json:"req_key"`                      // Service identifier, fixed value: jimeng_high_aes_general_v21_L
+	Prompt     string    `json:"prompt"`                       // Prompt for image generation, supports both Chinese and English
+	Seed       *int64    `json:"seed,omitempty"`               // Random seed, default -1 (random)
+	Width      *int      `json:"width,omitempty"`              // Image width, default 512, range [256, 768]
+	Height     *int      `json:"height,omitempty"`             // Image height, default 512, range [256, 768]
+	UsePreLLM  *bool     `json:"use_pre_llm,omitempty"`        // Enable text expansion, default true
+	UseSR      *bool     `json:"use_sr,omitempty"`             // Enable super resolution, default true
+	ReturnURL  *bool     `json:"return_url,omitempty"`         // Whether to return image URL (valid for 24 hours)
+	LogoInfo   *LogoInfo `json:"logo_info,omitempty"`          // Watermark information
+	ImageUrls  []string  `json:"image_urls,omitempty"`         // Image URLs for input
+	BinaryData []string  `json:"binary_data_base64,omitempty"` // Base64 encoded binary data
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
@@ -75,11 +75,11 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		Prompt: request.Prompt,
 	}
 	if request.ResponseFormat == "" || request.ResponseFormat == "url" {
-		payload.ReturnURL = true // Default to returning image URLs
+		payload.ReturnURL = common.GetPointer(true) // Default to returning image URLs
 	}
 
 	if len(request.ExtraFields) > 0 {
-		if err := json.Unmarshal(request.ExtraFields, &payload); err != nil {
+		if err := common.Unmarshal(request.ExtraFields, &payload); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal extra fields: %w", err)
 		}
 	}
@@ -108,7 +108,7 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}

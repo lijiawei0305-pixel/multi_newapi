@@ -18,10 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAuthStore } from '@/stores/auth-store'
-import { formatCompactNumber, formatNumber, formatQuota } from '@/lib/format'
-import { computeTimeRange } from '@/lib/time'
-import { cn } from '@/lib/utils'
+
 import { Skeleton } from '@/components/ui/skeleton'
 import { getUserQuotaDates } from '@/features/dashboard/api'
 import { useModelStatCardsConfig } from '@/features/dashboard/hooks/use-dashboard-config'
@@ -34,6 +31,10 @@ import type {
   QuotaDataItem,
   DashboardFilters,
 } from '@/features/dashboard/types'
+import { formatCompactNumber, formatNumber, formatQuota } from '@/lib/format'
+import { computeTimeRange } from '@/lib/time'
+import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 interface LogStatCardsProps {
   filters?: DashboardFilters
@@ -88,7 +89,7 @@ export function LogStatCards(props: LogStatCardsProps) {
     const timeDiff = (timeRange.end_timestamp - timeRange.start_timestamp) / 60
     setTimeRangeMinutes(timeDiff)
 
-    getUserQuotaDates(buildQueryParams(timeRange, filters), isAdmin)
+    void getUserQuotaDates(buildQueryParams(timeRange, filters), isAdmin)
       .then((res) => {
         if (abortController.signal.aborted) return
         const data = res?.data || []
@@ -160,12 +161,13 @@ export function LogStatCards(props: LogStatCardsProps) {
                 </div>
               </div>
 
-              {loading ? (
+              {loading && (
                 <div className='mt-2 flex flex-col gap-1.5'>
                   <Skeleton className='h-7 w-20' />
                   <Skeleton className='h-3.5 w-28' />
                 </div>
-              ) : error ? (
+              )}
+              {!loading && error && (
                 <>
                   <div className='text-muted-foreground mt-1.5 font-mono text-lg font-bold tracking-tight tabular-nums sm:mt-2 sm:text-2xl'>
                     --
@@ -174,7 +176,8 @@ export function LogStatCards(props: LogStatCardsProps) {
                     {it.desc}
                   </div>
                 </>
-              ) : (
+              )}
+              {!loading && !error && (
                 <>
                   <div
                     className='text-foreground mt-1.5 max-w-full truncate font-mono text-lg font-bold tracking-tight tabular-nums sm:mt-2 sm:text-2xl'

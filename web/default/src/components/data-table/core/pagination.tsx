@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type Table } from '@tanstack/react-table'
+import type { Table } from '@tanstack/react-table'
 import {
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
@@ -24,7 +24,7 @@ import {
   ChevronsRight as DoubleArrowRightIcon,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { cn, getPageNumbers } from '@/lib/utils'
+
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -34,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { cn, getPageNumbers } from '@/lib/utils'
 
 type DataTablePaginationProps<TData> = {
   table: Table<TData>
@@ -55,6 +56,12 @@ export function DataTablePagination<TData>({
   const totalPages = table.getPageCount()
   const totalRows = table.getRowCount()
   const pageNumbers = getPageNumbers(currentPage, totalPages)
+  let ellipsisCount = 0
+  const pageItems = pageNumbers.map((value) => {
+    if (value !== '...') return { key: `page-${value}`, value }
+    ellipsisCount += 1
+    return { key: `ellipsis-${ellipsisCount}`, value }
+  })
 
   return (
     <div
@@ -117,8 +124,8 @@ export function DataTablePagination<TData>({
             <ChevronLeftIcon className='h-4 w-4' />
           </Button>
 
-          {pageNumbers.map((pageNumber, index) => (
-            <div key={`${pageNumber}-${index}`} className='flex items-center'>
+          {pageItems.map(({ key, value: pageNumber }) => (
+            <div key={key} className='flex items-center'>
               {pageNumber === '...' ? (
                 <span className='text-muted-foreground/60 px-0.5 text-sm @lg/pagination:px-1'>
                   ...

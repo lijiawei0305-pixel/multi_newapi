@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/pkg/cachex"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -612,7 +613,7 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		cache := getChannelAffinityCache()
 		channelID, found, err := cache.Get(cacheKeySuffix)
 		if err != nil {
-			common.SysError(fmt.Sprintf("channel affinity cache get failed: key=%s, err=%v", cacheKeyFull, err))
+			common.SysError(fmt.Sprintf("channel affinity cache get failed key_%s error_type=%T", logger.PayloadMetadata([]byte(cacheKeyFull)), err))
 			return 0, false
 		}
 		if found {
@@ -735,7 +736,7 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 	}
 	cache := getChannelAffinityCache()
 	if err := cache.SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
-		common.SysError(fmt.Sprintf("channel affinity cache set failed: key=%s, err=%v", cacheKey, err))
+		common.SysError(fmt.Sprintf("channel affinity cache set failed key_%s error_type=%T", logger.PayloadMetadata([]byte(cacheKey)), err))
 	}
 }
 

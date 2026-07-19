@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,8 +23,9 @@ import (
 
 // 上游地址
 const (
-	upstreamModelsURL  = "https://basellm.github.io/llm-metadata/api/newapi/models.json"
-	upstreamVendorsURL = "https://basellm.github.io/llm-metadata/api/newapi/vendors.json"
+	upstreamModelsURL    = "https://basellm.github.io/llm-metadata/api/newapi/models.json"
+	upstreamVendorsURL   = "https://basellm.github.io/llm-metadata/api/newapi/vendors.json"
+	syncRequestBodyLimit = int64(4 << 10)
 )
 
 func normalizeLocale(locale string) (string, bool) {
@@ -180,10 +182,10 @@ func fetchJSON[T any](ctx context.Context, url string, out *upstreamEnvelope[T])
 				cacheMutex.Unlock()
 
 				// Try decode as envelope first
-				if err := json.Unmarshal(buf, out); err != nil {
+				if err := common.Unmarshal(buf, out); err != nil {
 					// Try decode as pure array
 					var arr []T
-					if err2 := json.Unmarshal(buf, &arr); err2 != nil {
+					if err2 := common.Unmarshal(buf, &arr); err2 != nil {
 						lastErr = err
 						return
 					}
@@ -205,9 +207,9 @@ func fetchJSON[T any](ctx context.Context, url string, out *upstreamEnvelope[T])
 					lastErr = errors.New("cache miss for 304 response")
 					return
 				}
-				if err := json.Unmarshal(buf, out); err != nil {
+				if err := common.Unmarshal(buf, out); err != nil {
 					var arr []T
-					if err2 := json.Unmarshal(buf, &arr); err2 != nil {
+					if err2 := common.Unmarshal(buf, &arr); err2 != nil {
 						lastErr = err
 						return
 					}
@@ -267,8 +269,20 @@ func ensureVendorID(vendorName string, vendorByName map[string]upstreamVendor, v
 // - 可通过 overwrite 选择性覆盖更新本地已有模型的字段（前提：sync_official <> 0）
 func SyncUpstreamModels(c *gin.Context) {
 	var req syncRequest
-	// 允许空体
-	_ = c.ShouldBindJSON(&req)
+	// An absent body selects the default sync behavior. Any supplied body must
+	// be one bounded JSON object; malformed admin input must never trigger a
+	// default upstream sync as a side effect.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, syncRequestBodyLimit)
+	bodyBytes, readErr := io.ReadAll(c.Request.Body)
+	if readErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求参数非法"})
+		return
+	}
+	trimmedBody := bytes.TrimSpace(bodyBytes)
+	if len(trimmedBody) > 0 && (common.GetJsonType(trimmedBody) != "object" || common.Unmarshal(trimmedBody, &req) != nil) {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求参数非法"})
+		return
+	}
 	// 1) 获取未配置模型列表
 	missing, err := model.GetMissingModels()
 	if err != nil {

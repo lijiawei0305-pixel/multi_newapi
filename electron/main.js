@@ -2,13 +2,15 @@ const { app, BrowserWindow, dialog, Tray, Menu, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
+const net = require('net');
 const fs = require('fs');
+const { classifyNavigation } = require('./navigation-policy');
 
 let mainWindow;
 let serverProcess;
 let tray = null;
 let serverErrorLogs = [];
-const PORT = 3000;
+let backendPort = 3000;
 const DEV_FRONTEND_PORT = 5173; // Vite dev server port
 
 // 保存日志到文件并打开
@@ -70,9 +72,9 @@ function analyzeError(errorLogs) {
       allLogs.includes('listen tcp') && allLogs.includes('bind: address already in use')) {
     return {
       type: '端口被占用',
-      title: '端口 ' + PORT + ' 被占用',
+      title: '端口 ' + backendPort + ' 被占用',
       message: '无法启动服务器，端口已被其他程序占用',
-      solution: `可能的解决方案：\n\n1. 关闭占用端口 ${PORT} 的其他程序\n2. 检查是否已经运行了另一个 New API 实例\n3. 使用以下命令查找占用端口的进程：\n   Mac/Linux: lsof -i :${PORT}\n   Windows: netstat -ano | findstr :${PORT}\n4. 重启电脑以释放端口`
+      solution: `可能的解决方案：\n\n1. 关闭占用端口 ${backendPort} 的其他程序\n2. 检查是否已经运行了另一个 New API 实例\n3. 使用以下命令查找占用端口的进程：\n   Mac/Linux: lsof -i :${backendPort}\n   Windows: netstat -ano | findstr :${backendPort}\n4. 重启电脑以释放端口`
     };
   }
   
@@ -175,47 +177,101 @@ function getBinaryPath() {
 }
 
 // Check if a server is available with retry logic
-function checkServerAvailability(port, maxRetries = 30, retryDelay = 1000) {
+function checkServerAvailability(port, maxRetries = 30, retryDelay = 1000, verifyBackend = false) {
   return new Promise((resolve, reject) => {
     let currentAttempt = 0;
-    
+
     const tryConnect = () => {
       currentAttempt++;
-      
+
       if (currentAttempt % 5 === 1 && currentAttempt > 1) {
         console.log(`Attempting to connect to port ${port}... (attempt ${currentAttempt}/${maxRetries})`);
       }
-      
-      const req = http.get({
-        hostname: '127.0.0.1', // Use IPv4 explicitly instead of 'localhost' to avoid IPv6 issues
-        port: port,
-        timeout: 10000
-      }, (res) => {
-        // Server responded, connection successful
-        req.destroy();
-        console.log(`✓ Successfully connected to port ${port} (status: ${res.statusCode})`);
-        resolve();
-      });
 
-      req.on('error', (err) => {
+      let attemptFinished = false;
+      const retryOrReject = (error) => {
+        if (attemptFinished) return;
+        attemptFinished = true;
         if (currentAttempt >= maxRetries) {
-          reject(new Error(`Failed to connect to port ${port} after ${maxRetries} attempts: ${err.message}`));
+          reject(new Error(`Failed to validate port ${port} after ${maxRetries} attempts: ${error.message}`));
         } else {
           setTimeout(tryConnect, retryDelay);
         }
+      };
+
+      const req = http.get({
+        hostname: '127.0.0.1', // Use IPv4 explicitly instead of 'localhost' to avoid IPv6 issues
+        port: port,
+        path: verifyBackend ? '/api/status' : '/',
+        timeout: 10000
+      }, (res) => {
+        if (!verifyBackend) {
+          attemptFinished = true;
+          req.destroy();
+          console.log(`✓ Successfully connected to port ${port} (status: ${res.statusCode})`);
+          resolve();
+          return;
+        }
+        const chunks = [];
+        let size = 0;
+        res.on('data', (chunk) => {
+          size += chunk.length;
+          if (size <= 64 * 1024) chunks.push(chunk);
+          else req.destroy(new Error('Backend status response exceeded 64 KiB'));
+        });
+        res.on('end', () => {
+          try {
+            const status = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+            if (
+              res.statusCode !== 200 ||
+              status?.success !== true ||
+              typeof status?.data?.version !== 'string' ||
+              !status.data.version
+            ) {
+              throw new Error('Unexpected backend status response');
+            }
+            if (!serverProcess || serverProcess.exitCode !== null) {
+              throw new Error('Backend process exited before readiness was confirmed');
+            }
+            attemptFinished = true;
+            console.log(`✓ Validated backend on loopback port ${port}`);
+            resolve();
+          } catch (error) {
+            retryOrReject(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        retryOrReject(err);
       });
 
       req.on('timeout', () => {
         req.destroy();
-        if (currentAttempt >= maxRetries) {
-          reject(new Error(`Connection timeout on port ${port} after ${maxRetries} attempts`));
-        } else {
-          setTimeout(tryConnect, retryDelay);
-        }
+        retryOrReject(new Error('Connection timeout'));
       });
     };
-    
+
     tryConnect();
+  });
+}
+
+function findAvailableLoopbackPort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.unref();
+    probe.once('error', (error) => {
+      reject(error);
+    });
+    probe.listen({ host: '127.0.0.1', port: 0, exclusive: true }, () => {
+      const address = probe.address();
+      const port = address && typeof address === 'object' ? address.port : 0;
+      probe.close((error) => {
+        if (error) reject(error);
+        else if (!port) reject(new Error('Could not allocate a loopback port'));
+        else resolve(port);
+      });
+    });
   });
 }
 
@@ -235,7 +291,7 @@ function startServer() {
       console.log('Development mode: skipping server startup');
       console.log('Please make sure you have started:');
       console.log('  1. Go backend: go run main.go (port 3000)');
-      console.log('  2. Frontend dev server: cd web && bun dev (port 5173)');
+      console.log('  2. Frontend dev server: cd web/default && bun run dev (port 5173)');
       console.log('');
       console.log('Checking if servers are running...');
       
@@ -248,14 +304,18 @@ function startServer() {
         .catch((err) => {
           console.error(`✗ Cannot connect to frontend dev server on port ${DEV_FRONTEND_PORT}`);
           console.error('Please make sure the frontend dev server is running:');
-          console.error('  cd web && bun dev');
+          console.error('  cd web/default && bun run dev');
           reject(err);
         });
       return;
     }
 
     // 生产模式：启动二进制服务器
-    const env = { ...process.env, PORT: PORT.toString() };
+    const env = {
+      ...process.env,
+      PORT: backendPort.toString(),
+      BIND_ADDRESS: '127.0.0.1'
+    };
 
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
@@ -373,9 +433,8 @@ function startServer() {
       }
     });
 
-    checkServerAvailability(PORT)
+    checkServerAvailability(backendPort, 30, 1000, true)
       .then(() => {
-        console.log('✓ Backend server is accessible on port 3000');
         resolve();
       })
       .catch((err) => {
@@ -387,7 +446,8 @@ function startServer() {
 
 function createWindow() {
   const isDev = process.env.NODE_ENV === 'development';
-  const loadPort = isDev ? DEV_FRONTEND_PORT : PORT;
+  const loadPort = isDev ? DEV_FRONTEND_PORT : backendPort;
+  const appOrigin = `http://127.0.0.1:${loadPort}`;
   
   mainWindow = new BrowserWindow({
     width: 1080,
@@ -395,13 +455,58 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      sandbox: true
     },
     title: 'New API',
     icon: path.join(__dirname, 'icon.png')
   });
 
-  mainWindow.loadURL(`http://127.0.0.1:${loadPort}`);
+  mainWindow.loadURL(appOrigin);
+
+  const appSession = mainWindow.webContents.session;
+  appSession.setPermissionCheckHandler((_webContents, permission, requestingOrigin) => {
+    return requestingOrigin === appOrigin && permission === 'clipboard-sanitized-write';
+  });
+  appSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const requestingOrigin = (() => {
+      try {
+        return new URL(details.requestingUrl).origin;
+      } catch {
+        return '';
+      }
+    })();
+    callback(
+      webContents === mainWindow.webContents &&
+      requestingOrigin === appOrigin &&
+      permission === 'clipboard-sanitized-write'
+    );
+  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    const decision = classifyNavigation(url, appOrigin);
+    if (decision.action === 'allow-in-app') {
+      void mainWindow.loadURL(decision.url);
+      return { action: 'deny' };
+    }
+    if (decision.action === 'open-external') {
+      void shell.openExternal(decision.url).catch((error) => {
+        console.error('Failed to open external URL:', error);
+      });
+    }
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const decision = classifyNavigation(url, appOrigin);
+    if (decision.action === 'allow-in-app') {
+      return;
+    }
+    event.preventDefault();
+    if (decision.action === 'open-external') {
+      void shell.openExternal(decision.url).catch((error) => {
+        console.error('Failed to open external URL:', error);
+      });
+    }
+  });
   
   console.log(`Loading from: http://127.0.0.1:${loadPort}`);
 
@@ -476,6 +581,9 @@ function createTray() {
 
 app.whenReady().then(async () => {
   try {
+    if (process.env.NODE_ENV !== 'development') {
+      backendPort = await findAvailableLoopbackPort();
+    }
     await startServer();
     createTray();
     createWindow();

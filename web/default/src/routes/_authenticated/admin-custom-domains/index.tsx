@@ -17,9 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { useAuthStore } from '@/stores/auth-store'
-import { ROLE } from '@/lib/roles'
+
 import { AdminCustomDomains } from '@/features/admin-custom-domains'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 // Main-site admin: cross-tenant custom-domain overview. Admin role required.
 export const Route = createFileRoute('/_authenticated/admin-custom-domains/')({

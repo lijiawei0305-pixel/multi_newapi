@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
@@ -50,7 +51,7 @@ func LoadFileSource(c *gin.Context, source types.FileSource, reason ...string) (
 	}
 
 	if common.DebugEnabled {
-		logger.LogDebug(c, "LoadFileSource starting for: %s", source.GetIdentifier())
+		logger.LogDebug(c, "LoadFileSource starting identifier_%s", logger.PayloadMetadata([]byte(source.GetIdentifier())))
 	}
 
 	// 1. 快速检查内部缓存
@@ -161,9 +162,15 @@ func loadFromURL(c *gin.Context, url string, reason ...string) (*types.CachedFil
 	if common.DebugEnabled {
 		logger.LogDebug(c, "loadFromURL: initiating download")
 	}
-	resp, err := DoDownloadRequest(url, reason...)
+	requestContext := context.Background()
+	if c != nil && c.Request != nil {
+		requestContext = c.Request.Context()
+	}
+	requestContext, cancel := boundedFileDownloadContext(requestContext)
+	defer cancel()
+	resp, err := DoDownloadRequestContext(requestContext, url, reason...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download file from %s: %w", url, err)
+		return nil, fmt.Errorf("failed to download file url_%s: %w", logger.PayloadMetadata([]byte(url)), err)
 	}
 	defer resp.Body.Close()
 
@@ -208,7 +215,7 @@ func loadFromURL(c *gin.Context, url string, reason ...string) (*types.CachedFil
 			}
 			common.IncrementDiskFiles(base64Size)
 			if common.DebugEnabled {
-				logger.LogDebug(c, "File cached to disk: %s, size: %d bytes", diskPath, base64Size)
+				logger.LogDebug(c, "File cached to disk path_%s size=%d bytes", logger.PayloadMetadata([]byte(diskPath)), base64Size)
 			}
 		}
 	} else {
@@ -532,7 +539,11 @@ func parseHEIFDimensions(data []byte) (int, int, bool) {
 			if offset+16 > size {
 				break
 			}
-			boxSize = int(binary.BigEndian.Uint64(data[offset+8 : offset+16]))
+			extendedSize := binary.BigEndian.Uint64(data[offset+8 : offset+16])
+			if extendedSize > uint64(size-offset) {
+				break
+			}
+			boxSize = int(extendedSize) // #nosec G115 -- bounded by the remaining in-memory slice length.
 			headerLen = 16
 		} else if boxSize == 0 {
 			// box extends to end of data

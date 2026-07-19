@@ -20,8 +20,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuthStore } from '@/stores/auth-store'
 
-import { PlaygroundChat } from '../chat/playground-chat'
-import { PlaygroundInput } from '../input/playground-input'
 import {
   useChatHandler,
   usePlaygroundConversation,
@@ -30,6 +28,8 @@ import {
 } from '../../hooks'
 import { useConversationHistory } from '../../hooks/use-conversation-history'
 import type { GroupOption, ModelOption, WorkspaceProps } from '../../types'
+import { PlaygroundChat } from '../chat/playground-chat'
+import { PlaygroundInput } from '../input/playground-input'
 import { ConversationHistoryBar } from './conversation-history-bar'
 
 /**
@@ -179,15 +179,11 @@ export function ChatWorkspace({
   // 这里用「左侧目录已选中的模型」+「auto」合成单条列表喂给底部输入：发送键恢复可用、
   // 选择器如实回显当前模型与 auto。真正的发送分组仍由凭据上下文覆写为 'auto'，config.group
   // 在 auto 模式不参与发送（见上），此处仅作展示用途。非 auto 模式沿用拉取到的真实列表。
-  const footerModels = useMemo<ModelOption[]>(
-    () =>
-      autoMode
-        ? config.model
-          ? [{ label: config.model, value: config.model }]
-          : []
-        : models,
-    [autoMode, config.model, models]
-  )
+  const footerModels = useMemo<ModelOption[]>(() => {
+    if (!autoMode) return models
+    if (!config.model) return []
+    return [{ label: config.model, value: config.model }]
+  }, [autoMode, config.model, models])
   const footerGroups = useMemo<GroupOption[]>(
     () =>
       autoMode ? [{ label: 'auto', value: config.group, ratio: 1 }] : groups,
@@ -221,7 +217,9 @@ export function ChatWorkspace({
           editingKey={editingMessageKey}
           onCancelEdit={handleEditOpenChange}
           onSaveEdit={(newContent) => handleApplyEdit(newContent, false)}
-          onSaveEditAndSubmit={(newContent) => handleApplyEdit(newContent, true)}
+          onSaveEditAndSubmit={(newContent) =>
+            handleApplyEdit(newContent, true)
+          }
         />
       </div>
 

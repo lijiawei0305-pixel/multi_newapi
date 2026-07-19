@@ -17,9 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
+
+import { AdminTickets } from '@/features/tickets'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
-import { AdminTickets } from '@/features/tickets'
 
 // Admin cross-tenant ticket console. Mirrors moderation-violations: anything
 // below ROLE.ADMIN is redirected to /403 before the AdminAuth endpoints reject.

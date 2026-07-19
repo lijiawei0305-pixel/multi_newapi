@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -34,9 +36,7 @@ func DecodeBase64ImageData(base64String string) (image.Config, string, string, e
 		return image.Config{}, "", "", fmt.Errorf("failed to decode base64 string: %s", err.Error())
 	}
 
-	// 创建一个bytes.Buffer用于存储解码后的数据
-	reader := bytes.NewReader(decodedData)
-	config, format, err := getImageConfig(reader)
+	config, format, err := getImageConfig(decodedData)
 	return config, format, base64String, err
 }
 
@@ -67,7 +67,35 @@ func DecodeBase64FileData(base64String string) (string, string, error) {
 
 // GetImageFromUrl 获取图片的类型和base64编码的数据
 func GetImageFromUrl(url string) (mimeType string, data string, err error) {
-	resp, err := DoDownloadRequest(url)
+	return GetImageFromURLContext(context.Background(), url)
+}
+
+func GetImageFromURLContext(ctx context.Context, url string) (mimeType string, data string, err error) {
+	maxImageSize := int64(constant.MaxFileDownloadMB) * 1024 * 1024
+	return GetImageFromURLContextWithLimit(ctx, url, maxImageSize)
+}
+
+// GetImageFromURLContextWithLimit downloads one image with a caller-provided
+// raw-byte ceiling. Media response adaptors use this to keep cumulative base64
+// conversion within their private response budget.
+func GetImageFromURLContextWithLimit(ctx context.Context, url string, maxImageSize int64) (mimeType string, data string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	configuredMaxImageSize := int64(constant.MaxFileDownloadMB) * 1024 * 1024
+	if configuredMaxImageSize > 0 && maxImageSize > configuredMaxImageSize {
+		maxImageSize = configuredMaxImageSize
+	}
+	if maxImageSize <= 0 {
+		return "", "", errors.New("image download byte limit is exhausted")
+	}
+	timeoutSeconds := common.GetEnvOrDefault("RELAY_IMAGE_DOWNLOAD_TIMEOUT_SECONDS", 30)
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+	resp, err := DoDownloadRequestContext(ctx, url)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to download image: %w", err)
 	}
@@ -82,26 +110,17 @@ func GetImageFromUrl(url string) (mimeType string, data string, err error) {
 	if contentType != "application/octet-stream" && !strings.HasPrefix(contentType, "image/") {
 		return "", "", fmt.Errorf("invalid content type: %s, required image/*", contentType)
 	}
-	maxImageSize := int64(constant.MaxFileDownloadMB * 1024 * 1024)
-
 	// Check Content-Length if available
 	if resp.ContentLength > maxImageSize {
 		return "", "", fmt.Errorf("image size %d exceeds maximum allowed size of %d bytes", resp.ContentLength, maxImageSize)
 	}
 
-	// Use LimitReader to prevent reading oversized images
-	limitReader := io.LimitReader(resp.Body, maxImageSize)
-	buffer := &bytes.Buffer{}
-
-	written, err := io.Copy(buffer, limitReader)
+	imageData, err := common.ReadAllWithLimit(resp.Body, maxImageSize)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read image data: %w", err)
 	}
-	if written >= maxImageSize {
-		return "", "", fmt.Errorf("image size exceeds maximum allowed size of %d bytes", maxImageSize)
-	}
 
-	data = base64.StdEncoding.EncodeToString(buffer.Bytes())
+	data = base64.StdEncoding.EncodeToString(imageData)
 	mimeType = contentType
 
 	// Handle application/octet-stream type
@@ -117,15 +136,21 @@ func GetImageFromUrl(url string) (mimeType string, data string, err error) {
 }
 
 func DecodeUrlImageData(imageUrl string) (image.Config, string, error) {
-	response, err := DoDownloadRequest(imageUrl)
+	return DecodeURLImageDataContext(context.Background(), imageUrl)
+}
+
+func DecodeURLImageDataContext(ctx context.Context, imageUrl string) (image.Config, string, error) {
+	ctx, cancel := boundedFileDownloadContext(ctx)
+	defer cancel()
+	response, err := DoDownloadRequestContext(ctx, imageUrl)
 	if err != nil {
-		common.SysLog(fmt.Sprintf("fail to get image from url: %s", err.Error()))
+		common.SysLog(fmt.Sprintf("fail to get image from url_%s error_type=%T", common.PayloadMetadata([]byte(imageUrl)), err))
 		return image.Config{}, "", err
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != 200 {
-		err = errors.New(fmt.Sprintf("fail to get image from url: %s", response.Status))
+		err = fmt.Errorf("fail to get image from url: %s", response.Status)
 		return image.Config{}, "", err
 	}
 
@@ -136,35 +161,31 @@ func DecodeUrlImageData(imageUrl string) (image.Config, string, error) {
 	}
 
 	var readData []byte
-	for _, limit := range []int64{1024 * 8, 1024 * 24, 1024 * 64} {
+	var decodeErr error
+	for _, limit := range []int{8 << 10, 24 << 10, 64 << 10} {
 		common.SysLog(fmt.Sprintf("try to decode image config with limit: %d", limit))
 
-		// 从response.Body读取更多的数据直到达到当前的限制
-		additionalData := make([]byte, limit-int64(len(readData)))
-		n, _ := io.ReadFull(response.Body, additionalData)
+		additionalData := make([]byte, limit-len(readData))
+		n, readErr := io.ReadFull(response.Body, additionalData)
 		readData = append(readData, additionalData[:n]...)
 
-		// 使用io.MultiReader组合已经读取的数据和response.Body
-		limitReader := io.MultiReader(bytes.NewReader(readData), response.Body)
-
-		var config image.Config
-		var format string
-		config, format, err = getImageConfig(limitReader)
+		config, format, err := getImageConfig(readData)
 		if err == nil {
 			return config, format, nil
 		}
+		decodeErr = err
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
+				return image.Config{}, "", decodeErr
+			}
+			return image.Config{}, "", fmt.Errorf("failed to read image header: %w", readErr)
+		}
 	}
 
-	return image.Config{}, "", err // 返回最后一个错误
+	return image.Config{}, "", fmt.Errorf("failed to decode image config within 65536-byte header limit: %w", decodeErr)
 }
 
-func getImageConfig(reader io.Reader) (image.Config, string, error) {
-	// Read all data so we can retry with different decoders
-	data, readErr := io.ReadAll(reader)
-	if readErr != nil {
-		return image.Config{}, "", fmt.Errorf("failed to read image data: %w", readErr)
-	}
-
+func getImageConfig(data []byte) (image.Config, string, error) {
 	// 读取图片的头部信息来获取图片尺寸
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err == nil {

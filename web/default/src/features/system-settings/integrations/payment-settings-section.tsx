@@ -16,16 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import * as React from 'react'
-import * as z from 'zod'
-import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Code2, Eye, ShieldAlert } from 'lucide-react'
+import * as React from 'react'
+import { useForm, type Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
-import { SiAlipay, SiWechat } from 'react-icons/si'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
+import * as z from 'zod'
+
+import { IconAlipay, IconWeChat } from '@/assets/brand-icons'
+import { RiskAcknowledgementDialog } from '@/components/risk-acknowledgement-dialog'
 import {
   Alert,
   AlertAction,
@@ -46,7 +47,8 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
-import { RiskAcknowledgementDialog } from '@/components/risk-acknowledgement-dialog'
+import { cn } from '@/lib/utils'
+
 import { confirmPaymentCompliance } from '../api'
 import {
   SettingsForm,
@@ -1133,7 +1135,8 @@ export function PaymentSettingsSection({
                           <Textarea
                             rows={4}
                             placeholder={t('Payment methods JSON example', {
-                              defaultValue: '[{"name":"支付宝","type":"alipay","icon":"SiAlipay"}]',
+                              defaultValue:
+                                '[{"name":"支付宝","type":"alipay","icon":"SiAlipay"}]',
                             })}
                             {...field}
                             onChange={(event) =>
@@ -1272,7 +1275,7 @@ export function PaymentSettingsSection({
               <div className='space-y-4'>
                 <div>
                   <h3 className='flex items-center gap-2 text-lg font-medium'>
-                    <SiWechat
+                    <IconWeChat
                       className='h-5 w-5'
                       style={{ color: '#07C160' }}
                     />
@@ -1454,7 +1457,9 @@ export function PaymentSettingsSection({
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('Paste PEM content; leave blank to keep the current key')}
+                        {t(
+                          'Paste PEM content; leave blank to keep the current key'
+                        )}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -1518,7 +1523,9 @@ export function PaymentSettingsSection({
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('Paste PEM content; leave blank to keep the current key')}
+                        {t(
+                          'Paste PEM content; leave blank to keep the current key'
+                        )}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -1531,7 +1538,7 @@ export function PaymentSettingsSection({
               <div className='space-y-4'>
                 <div>
                   <h3 className='flex items-center gap-2 text-lg font-medium'>
-                    <SiAlipay
+                    <IconAlipay
                       className='h-5 w-5'
                       style={{ color: '#1677FF' }}
                     />

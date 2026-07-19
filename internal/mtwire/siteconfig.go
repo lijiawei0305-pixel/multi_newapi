@@ -10,13 +10,21 @@ package mtwire
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/QuantumNous/new-api/internal/siteconfig"
 	"github.com/QuantumNous/new-api/internal/tenant"
 )
+
+// maxAgentLogoMultipartRequestBytes bounds the complete multipart request,
+// including field names, headers, and any non-file fields. The extra 64 KiB
+// leaves room for normal multipart framing while keeping parsing memory and
+// work tightly bounded before FormFile returns.
+const maxAgentLogoMultipartRequestBytes int64 = siteconfig.MaxAssetBytes + (64 << 10)
 
 // ---- data: URL Blob（免对象存储的最小实现）----
 
@@ -154,8 +162,18 @@ func (a *App) HandleAgentUploadLogo(c *gin.Context) {
 		return
 	}
 	tenantID := agentTenantID(c)
+	if c.Request.ContentLength > maxAgentLogoMultipartRequestBytes {
+		respondErr(c, siteconfig.ErrAssetTooLarge)
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAgentLogoMultipartRequestBytes)
 	fh, err := c.FormFile("file")
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			respondErr(c, siteconfig.ErrAssetTooLarge)
+			return
+		}
 		respondErr(c, siteconfig.ErrAssetTypeForbidden)
 		return
 	}

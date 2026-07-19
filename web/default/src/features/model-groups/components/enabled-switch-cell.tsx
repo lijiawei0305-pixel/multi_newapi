@@ -16,11 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
 import type { Row } from '@tanstack/react-table'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { Switch } from '@/components/ui/switch'
+
 import { updateModelGroup } from '../api'
 import type { ModelGroup } from '../types'
 import { useModelGroups } from './model-groups-provider'

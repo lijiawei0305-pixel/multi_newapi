@@ -21,6 +21,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func applyClaudeDefaultMaxTokens(request *dto.ClaudeRequest) {
+	if request == nil || request.MaxTokens != nil {
+		return
+	}
+	defaultMaxTokens := uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model))
+	request.MaxTokens = &defaultMaxTokens
+}
+
 func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 
 	info.InitChannelMeta(c)
@@ -47,10 +55,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 	adaptor.Init(info)
 
-	if request.MaxTokens == nil || *request.MaxTokens == 0 {
-		defaultMaxTokens := uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model))
-		request.MaxTokens = &defaultMaxTokens
-	}
+	applyClaudeDefaultMaxTokens(request)
 
 	if baseModel, effortLevel, ok := reasoning.TrimEffortSuffix(request.Model); ok && effortLevel != "" &&
 		(strings.HasPrefix(request.Model, "claude-opus-4-6") ||
@@ -60,7 +65,11 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		request.Thinking = &dto.Thinking{
 			Type: "adaptive",
 		}
-		request.OutputConfig = json.RawMessage(fmt.Sprintf(`{"effort":"%s"}`, effortLevel))
+		outputConfig, err := common.Marshal(map[string]string{"effort": effortLevel})
+		if err != nil {
+			return types.NewError(err, types.ErrorCodeJsonMarshalFailed, types.ErrOptionWithSkipRetry())
+		}
+		request.OutputConfig = outputConfig
 		if strings.HasPrefix(request.Model, "claude-opus-4-7") ||
 			strings.HasPrefix(request.Model, "claude-opus-4-8") {
 			// Opus 4.7/4.8 reject non-default temperature/top_p/top_k with 400
@@ -144,8 +153,11 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		if newApiErr != nil {
 			return newApiErr
 		}
+		service.MarkUpstreamAccepted(c)
 
-		service.PostTextConsumeQuota(c, info, usage, nil)
+		if billingErr := service.PostTextConsumeQuota(c, info, usage, nil); billingErr != nil {
+			return billingErr
+		}
 		return nil
 	}
 
@@ -182,7 +194,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
-		logger.LogDebug(c, "requestBody: %s", jsonData)
+		logger.LogPayload(c, "Claude request body", jsonData)
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
@@ -200,10 +212,13 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
 
-	if resp != nil {
-		httpResp = resp.(*http.Response)
+	httpResp, newAPIError = resolveSynchronousHTTPResponse(resp, info)
+	if newAPIError != nil {
+		return newAPIError
+	}
+	if httpResp != nil {
 		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
-		if httpResp.StatusCode != http.StatusOK {
+		if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			// reset status code 重置状态码
 			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
@@ -212,12 +227,19 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
+	recordSynchronousUpstreamResult(c, httpResp, newAPIError)
 	if newAPIError != nil {
 		// reset status code 重置状态码
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
 	}
+	resolvedUsage, usageErr := acceptedResponseUsage(c, usage)
+	if usageErr != nil {
+		return usageErr
+	}
 
-	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+	if billingErr := service.PostTextConsumeQuota(c, info, resolvedUsage, nil); billingErr != nil {
+		return billingErr
+	}
 	return nil
 }

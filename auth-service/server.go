@@ -3,7 +3,6 @@ package authservice
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"html"
 	"io"
@@ -12,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/internal/payment/realpay"
 )
@@ -109,7 +109,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("GET /auth/order/status", s.handleOrderStatus)
 	mux.HandleFunc("GET /auth/mock/pay", s.handleMockPayPage)
 	mux.HandleFunc("POST /auth/mock/confirm", s.handleMockConfirm)
-	// 微信回调：真实微信 POST 到 notify_url = base + Provider.NotifyPath() = base + "/pay/wxpay/notify"
+	// 历史独立服务的微信回调（当前生产回调由主 API 的 /api/pay/wechat/notify 承载）。
 	// （nginx ^~ /pay/ 反代到此）。同时保留 /auth/wxpay/notify 兼容既有 mock 自检/单测。
 	mux.HandleFunc("POST /pay/wxpay/notify", s.handleWxpayNotify)
 	mux.HandleFunc("POST /auth/wxpay/notify", s.handleWxpayNotify)
@@ -133,7 +133,7 @@ type createOrderRequest struct {
 //   - mock 模式：落 created 订单（MemRepo）+ 返回 mock 确认页 URL。
 func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 	var req createOrderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.OrderNo == "" {
+	if err := common.DecodeJson(r.Body, &req); err != nil || req.OrderNo == "" {
 		writeJSON(w, http.StatusBadRequest, jsonObj{"success": false, "message": "bad request"})
 		return
 	}
@@ -411,7 +411,7 @@ var _ payment.OrderSink = (*forwarder)(nil)
 // 透传 paid_amount（元）+ provider 供主站反篡改金额校验；入账金额仍以主站库内订单为准。
 // 失败返回 error → 调用方（mock Gateway 回滚；真实 handler 返回非 2xx）据此让平台重推/重试。
 func (f *forwarder) OnPaid(ctx context.Context, o payment.PaidOrder) error {
-	body, _ := json.Marshal(jsonObj{
+	body, _ := common.Marshal(jsonObj{
 		"order_no":    o.OrderNo,
 		"txn_id":      o.Reference,
 		"paid_amount": o.ActualPaid,
@@ -441,7 +441,7 @@ type jsonObj = map[string]any
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_ = common.EncodeJson(w, v)
 }
 
 func readBody(r *http.Request) []byte {

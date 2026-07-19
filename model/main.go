@@ -1,6 +1,8 @@
 package model
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -54,29 +56,6 @@ var DB *gorm.DB
 
 var LOG_DB *gorm.DB
 
-func createRootAccountIfNeed() error {
-	var user User
-	//if user.Status != common.UserStatusEnabled {
-	if err := DB.First(&user).Error; err != nil {
-		common.SysLog("no user exists, create a root user for you: username is root, password is 123456")
-		hashedPassword, err := common.Password2Hash("123456")
-		if err != nil {
-			return err
-		}
-		rootUser := User{
-			Username:    "root",
-			Password:    hashedPassword,
-			Role:        common.RoleRootUser,
-			Status:      common.UserStatusEnabled,
-			DisplayName: "Root User",
-			AccessToken: nil,
-			Quota:       100000000,
-		}
-		DB.Create(&rootUser)
-	}
-	return nil
-}
-
 func CheckSetup() {
 	setup := GetSetup()
 	if setup == nil {
@@ -111,17 +90,40 @@ func isClickHouseDSN(dsn string) bool {
 		strings.HasPrefix(dsn, "https://")
 }
 
-func normalizeClickHouseDSN(dsn string) string {
+func normalizeClickHouseDSN(dsn string) (string, error) {
 	parsed, err := url.Parse(dsn)
-	if err != nil || parsed.Scheme != "https" {
-		return dsn
+	if err != nil {
+		return "", fmt.Errorf("invalid ClickHouse log DSN: %w", err)
+	}
+	if !isClickHouseDSN(dsn) {
+		return dsn, nil
+	}
+	if strings.Contains(parsed.Host, ",") {
+		return "", errors.New("ClickHouse log DSN must use one direct endpoint; durable billing projection deduplication does not support multi-host routing")
 	}
 	query := parsed.Query()
-	if _, ok := query["secure"]; !ok {
-		query.Set("secure", "true")
-		parsed.RawQuery = query.Encode()
+	for key := range query {
+		if strings.EqualFold(strings.TrimSpace(key), "alt_hosts") {
+			return "", errors.New("ClickHouse log DSN must not use alt_hosts; durable billing projection deduplication requires one direct endpoint")
+		}
 	}
-	return parsed.String()
+	// Projection replay verifies a stable key immediately after every insert.
+	// Force synchronous inserts even if a server/user DSN opted into async
+	// inserts; otherwise a successful INSERT could be invisible to readback and
+	// a crash replay could append a duplicate to ClickHouse.
+	query.Set("async_insert", "0")
+	query.Set("wait_for_async_insert", "1")
+	// Preserve ordinary log semantics even though the table retains a large
+	// deduplication window. Billing projections override this per insert with a
+	// stable token and insert_deduplicate=1.
+	query.Set("insert_deduplicate", "0")
+	if parsed.Scheme == "https" {
+		if _, ok := query["secure"]; !ok {
+			query.Set("secure", "true")
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
 }
 
 func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error) {
@@ -131,8 +133,12 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 			if !isLog {
 				return nil, "", fmt.Errorf("%s does not support ClickHouse; use SQLite, MySQL, or PostgreSQL for the primary database and LOG_SQL_DSN for ClickHouse logs", envName)
 			}
+			normalizedDSN, err := normalizeClickHouseDSN(dsn)
+			if err != nil {
+				return nil, "", fmt.Errorf("%s: %w", envName, err)
+			}
 			common.SysLog("using ClickHouse as log database")
-			db, err := gorm.Open(clickhouse.Open(normalizeClickHouseDSN(dsn)), &gorm.Config{
+			db, err := gorm.Open(clickhouse.Open(normalizedDSN), &gorm.Config{
 				PrepareStmt: false,
 			})
 			return db, common.DatabaseTypeClickHouse, err
@@ -261,6 +267,7 @@ func InitLogDB() (err error) {
 }
 
 func migrateDB() error {
+	quotaDataTableExisted := DB.Migrator().HasTable(&QuotaData{})
 	// Migrate price_amount column from float/double to decimal for existing tables
 	migrateSubscriptionPlanPriceAmount()
 	// Migrate model_limits column from varchar to text for existing tables
@@ -289,8 +296,17 @@ func migrateDB() error {
 		&TwoFABackupCode{},
 		&Checkin{},
 		&SubscriptionOrder{},
+		&SubscriptionPaymentReceipt{},
+		&SubscriptionPaymentEvidence{},
+		&SubscriptionPaymentReviewDecision{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},
+		&BillingRefundIntent{},
+		&BillingAdjustmentIntent{},
+		&BillingSettlementEvent{},
+		&BillingTerminalRecovery{},
+		&BillingProjectionOutbox{},
+		&TaskSubmissionRecovery{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
@@ -303,6 +319,21 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := ensureSubscriptionPaymentReceiptIndexes(DB); err != nil {
+		return err
+	}
+	if err := backfillSubscriptionPaymentReceiptMetadata(); err != nil {
+		return err
+	}
+	if err := backfillSubscriptionOrderReviewMetadata(); err != nil {
+		return err
+	}
+	if err := EnsureTaskSubmissionIdempotencyUniqueIndex(DB); err != nil {
+		return err
+	}
+	if err := ensureQuotaDataBucketUniqueIndex(DB, quotaDataTableExisted); err != nil {
+		return err
+	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -312,10 +343,11 @@ func migrateDB() error {
 			return err
 		}
 	}
-	return nil
+	return backfillUserSubscriptionBenefitSnapshots()
 }
 
 func migrateDBFast() error {
+	quotaDataTableExisted := DB.Migrator().HasTable(&QuotaData{})
 
 	var wg sync.WaitGroup
 
@@ -343,8 +375,17 @@ func migrateDBFast() error {
 		{&TwoFABackupCode{}, "TwoFABackupCode"},
 		{&Checkin{}, "Checkin"},
 		{&SubscriptionOrder{}, "SubscriptionOrder"},
+		{&SubscriptionPaymentReceipt{}, "SubscriptionPaymentReceipt"},
+		{&SubscriptionPaymentEvidence{}, "SubscriptionPaymentEvidence"},
+		{&SubscriptionPaymentReviewDecision{}, "SubscriptionPaymentReviewDecision"},
 		{&UserSubscription{}, "UserSubscription"},
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
+		{&BillingRefundIntent{}, "BillingRefundIntent"},
+		{&BillingAdjustmentIntent{}, "BillingAdjustmentIntent"},
+		{&BillingSettlementEvent{}, "BillingSettlementEvent"},
+		{&BillingTerminalRecovery{}, "BillingTerminalRecovery"},
+		{&BillingProjectionOutbox{}, "BillingProjectionOutbox"},
+		{&TaskSubmissionRecovery{}, "TaskSubmissionRecovery"},
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&PerfMetric{}, "PerfMetric"},
@@ -375,6 +416,21 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := ensureSubscriptionPaymentReceiptIndexes(DB); err != nil {
+		return err
+	}
+	if err := backfillSubscriptionPaymentReceiptMetadata(); err != nil {
+		return err
+	}
+	if err := backfillSubscriptionOrderReviewMetadata(); err != nil {
+		return err
+	}
+	if err := EnsureTaskSubmissionIdempotencyUniqueIndex(DB); err != nil {
+		return err
+	}
+	if err := ensureQuotaDataBucketUniqueIndex(DB, quotaDataTableExisted); err != nil {
+		return err
+	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
 			return err
@@ -383,6 +439,9 @@ func migrateDBFast() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	if err := backfillUserSubscriptionBenefitSnapshots(); err != nil {
+		return err
 	}
 	common.SysLog("database migrated")
 	return nil
@@ -395,12 +454,40 @@ func migrateLOGDB() error {
 	return LOG_DB.AutoMigrate(&Log{})
 }
 
+const clickHouseLogProjectionKeyMigrationSQL = "ALTER TABLE logs ADD COLUMN IF NOT EXISTS projection_key Nullable(String) DEFAULT NULL"
+const clickHouseLogProjectionKeyIndexMigrationSQL = "ALTER TABLE logs ADD INDEX IF NOT EXISTS idx_logs_projection_key projection_key TYPE bloom_filter(0.001) GRANULARITY 1"
+
 func migrateClickHouseLogDB() error {
 	ttlDays := clickHouseLogTTLDays()
-	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays)).Error; err != nil {
+	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays, clickHouseLogDeduplicationWindow())).Error; err != nil {
+		return err
+	}
+	if err := LOG_DB.Exec(clickHouseLogProjectionKeyMigrationSQL).Error; err != nil {
+		return err
+	}
+	// Do not MATERIALIZE this index during startup. Existing parts predate
+	// projection_key and contain only NULL; lookups also constrain created_at so
+	// the primary key and monthly partition bound their historical scan.
+	if err := LOG_DB.Exec(clickHouseLogProjectionKeyIndexMigrationSQL).Error; err != nil {
+		return err
+	}
+	if err := LOG_DB.Exec(fmt.Sprintf(
+		"ALTER TABLE logs MODIFY SETTING non_replicated_deduplication_window = %d",
+		clickHouseLogDeduplicationWindow(),
+	)).Error; err != nil {
 		return err
 	}
 	return syncClickHouseLogTTL(ttlDays)
+}
+
+const defaultClickHouseLogDeduplicationWindow = 1_000_000
+
+func clickHouseLogDeduplicationWindow() int {
+	window := common.GetEnvOrDefault("LOG_SQL_CLICKHOUSE_DEDUPLICATION_WINDOW", defaultClickHouseLogDeduplicationWindow)
+	if window <= 0 {
+		return defaultClickHouseLogDeduplicationWindow
+	}
+	return window
 }
 
 func clickHouseLogTTLDays() int {
@@ -426,7 +513,10 @@ func clickHouseLogTTLClause(ttlDays int) string {
 	return "\nTTL " + expression
 }
 
-func clickHouseLogCreateTableSQL(ttlDays int) string {
+func clickHouseLogCreateTableSQL(ttlDays int, deduplicationWindow int) string {
+	if deduplicationWindow <= 0 {
+		deduplicationWindow = defaultClickHouseLogDeduplicationWindow
+	}
 	return fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS logs (
 	id Int64 DEFAULT 0,
@@ -448,11 +538,14 @@ CREATE TABLE IF NOT EXISTS logs (
 	ip String DEFAULT '',
 	request_id String DEFAULT '',
 	upstream_request_id String DEFAULT '',
+	projection_key Nullable(String) DEFAULT NULL,
+	INDEX idx_logs_projection_key projection_key TYPE bloom_filter(0.001) GRANULARITY 1,
 	other String DEFAULT ''
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime(created_at))
-ORDER BY (created_at, request_id)%s`, clickHouseLogTTLClause(ttlDays))
+ORDER BY (created_at, request_id)%s
+SETTINGS non_replicated_deduplication_window = %d`, clickHouseLogTTLClause(ttlDays), deduplicationWindow)
 }
 
 func syncClickHouseLogTTL(ttlDays int) error {
@@ -820,4 +913,19 @@ func PingDB() error {
 	lastPingTime = time.Now()
 	common.SysLog("Database pinged successfully")
 	return nil
+}
+
+// PingDBContext performs an uncached database check for readiness probes. The
+// cached PingDB function is retained for the admin diagnostic endpoint, where
+// avoiding repeated manual probes is useful; orchestration probes must always
+// observe the current dependency state.
+func PingDBContext(ctx context.Context) error {
+	if DB == nil {
+		return errors.New("database is not initialized")
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.PingContext(ctx)
 }

@@ -12,8 +12,8 @@ func TestProviderValidAndNotifyPath(t *testing.T) {
 		valid bool
 		path  string
 	}{
-		{ProviderWxpay, true, "/pay/wxpay/notify"},
-		{ProviderAlipay, true, "/auth/alipay/notify"},
+		{ProviderWxpay, true, "/api/pay/wechat/notify"},
+		{ProviderAlipay, true, "/api/pay/alipay/notify"},
 		{Provider("paypal"), false, ""},
 		{Provider(""), false, ""},
 	}
@@ -74,6 +74,7 @@ func TestOrderStatusStateMachine(t *testing.T) {
 		{OrderPaid, OrderCreated, true}, // 入账失败回滚
 		{OrderPaid, OrderFailed, true},
 		{OrderCredited, OrderPaid, false}, // 终态不可迁出
+		{OrderFailed, OrderPaid, true},    // 后续可信已付事实覆盖本地失败判断
 		{OrderFailed, OrderCreated, false},
 	} {
 		if got := c.from.CanTransitionTo(c.to); got != c.ok {

@@ -94,10 +94,10 @@ type breakageDetailOut struct {
 
 // breakageSnapshotPointOut 是 snapshots 趋势的一个桶。period_end 为 epoch 秒（桶锚点）。
 type breakageSnapshotPointOut struct {
-	PeriodEnd         int64   `json:"period_end"` // epoch 秒
-	ExpiredUnusedUSD  float64 `json:"expired_unused_usd"`
+	PeriodEnd          int64   `json:"period_end"` // epoch 秒
+	ExpiredUnusedUSD   float64 `json:"expired_unused_usd"`
 	ActiveRemainingUSD float64 `json:"active_remaining_usd"`
-	SubscriptionCount int     `json:"subscription_count"`
+	SubscriptionCount  int     `json:"subscription_count"`
 }
 
 // breakageSnapshotsOut 是 snapshots 响应体（升序时间序列）。

@@ -46,6 +46,9 @@ func newRatioMarkupTestApp(t *testing.T) *App {
 	if err := migrateWalletConsumeLog(db); err != nil {
 		t.Fatalf("wallet consume migrate: %v", err)
 	}
+	if err := migratePayableEarningIntents(db); err != nil {
+		t.Fatalf("payable earning migrate: %v", err)
+	}
 	ar := agentrepo.New(db)
 	return &App{
 		DB: db, ModelGroupRepo: modelgroup.New(db), TenantRepo: tenantrepo.New(db),

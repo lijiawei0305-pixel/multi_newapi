@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>newapi628 全仓代码审计报告</title>
+<style>
+  :root {
+    --sidebar-bg: #1a1f2e;
+    --sidebar-hover: #242a3d;
+    --sidebar-active: #2d3555;
+    --bg: #f0f3f7;
+    --card-bg: #ffffff;
+    --border: #e6eaef;
+    --text: #1e2233;
+    --text-secondary: #6b7394;
+    --accent: #3370ff;
+    --accent-light: #e8f0ff;
+    --success: #34c759;
+    --warning: #ff9500;
+    --danger: #ff3b30;
+    --info: #5ac8fa;
+    --badge-critical: #ff3b30;
+    --badge-high: #ff9500;
+    --badge-medium: #3370ff;
+    --badge-low: #8e8e93;
+    --badge-info: #5ac8fa;
+    --bar-bg: #e8eaed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    display: flex;
+    min-height: 100vh;
+    font-size: 15px;
+  }
+  .sidebar { width: 240px; background: var(--sidebar-bg); color: #fff; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  .sidebar-header .sub { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 4px; }
+  .sidebar-nav { padding: 8px 0; flex: 1; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 14px 20px; color: rgba(255,255,255,.6); text-decoration: none; font-size: 14px; transition: all .15s; border-left: 3px solid transparent; }
+  .sidebar-nav a:hover { background: var(--sidebar-hover); color: #fff; }
+  .sidebar-nav a.active { background: var(--sidebar-active); color: #fff; border-left-color: var(--accent); }
+  .sidebar-nav a .icon { width: 18px; text-align: center; font-size: 14px; }
+  .sidebar-footer { padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.3); }
+  .main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+  .page-header { margin-bottom: 32px; }
+  .page-header h2 { font-size: 26px; font-weight: 700; }
+  .page-header .meta { font-size: 14px; color: var(--text-secondary); margin-top: 6px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .page-header .meta span { display: flex; align-items: center; gap: 4px; }
+  .card { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .card-body { padding: 24px; }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .score-item { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); }
+  .score-item .label { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .4px; }
+  .score-item .bar-row { display: flex; align-items: center; gap: 12px; }
+  .score-item .bar-track { flex: 1; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .score-item .bar-fill { height: 100%; border-radius: 5px; transition: width .6s ease; }
+  .score-item .value { font-size: 22px; font-weight: 700; min-width: 52px; text-align: right; }
+  .score-item .grade { font-size: 15px; font-weight: 700; min-width: 22px; text-align: center; }
+  .bar-fill.s { background: linear-gradient(90deg, #34c759, #30d158); }
+  .bar-fill.a { background: linear-gradient(90deg, #3370ff, #5e8cff); }
+  .bar-fill.b { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .bar-fill.c { background: linear-gradient(90deg, #ff3b30, #ff6b61); }
+  .bar-fill.d { background: linear-gradient(90deg, #ff6b61, #ff9f91); }
+  .bar-fill.f { background: linear-gradient(90deg, #9b1d1a, #d63031); }
+  .grade-s { color: #34c759; } .grade-a { color: #3370ff; }
+  .grade-b { color: #ff9500; } .grade-c { color: #ff3b30; }
+  .grade-d { color: #ff6b61; } .grade-f { color: #9b1d1a; }
+  .overall-row { grid-column: 1 / -1; background: linear-gradient(135deg, #1a1f2e, #2d3555); border-color: transparent; }
+  .overall-row .label { color: rgba(255,255,255,.6); }
+  .overall-row .value { color: #fff; }
+  .overall-row .grade { color: #34c759; }
+  .overall-row .bar-fill { background: linear-gradient(90deg, #34c759, #30d158); }
+  .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat-card { flex: 1; min-width: 140px; padding: 20px 24px; background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); text-align: center; }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1.3; }
+  .stat-card .desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .finding { border-left: 4px solid var(--border); margin-bottom: 20px; padding: 20px 24px; border-radius: 0 10px 10px 0; background: #fafbfc; border: 1px solid var(--border); border-left-width: 4px; }
+  .finding.severity-critical { border-left-color: var(--badge-critical); }
+  .finding.severity-high { border-left-color: var(--badge-high); }
+  .finding.severity-medium { border-left-color: var(--badge-medium); }
+  .finding.severity-low { border-left-color: var(--badge-low); }
+  .finding.severity-info { border-left-color: var(--badge-info); }
+  .finding-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .finding-header h4 { font-size: 16px; font-weight: 600; flex: 1; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; line-height: 1.6; }
+  .badge-critical { background: #ffeae9; color: var(--badge-critical); }
+  .badge-high { background: #fff3e0; color: var(--badge-high); }
+  .badge-medium { background: var(--accent-light); color: var(--badge-medium); }
+  .badge-low { background: #f2f2f5; color: var(--badge-low); }
+  .badge-info { background: #e4f5ff; color: #007aff; }
+  .badge-confirmed { background: #e8ffe8; color: #248a3d; }
+  .badge-suspected { background: #fff8e1; color: #b8860b; }
+  .badge-s { background: #e8ffe8; color: #248a3d; }
+  .badge-a { background: var(--accent-light); color: var(--accent); }
+  .badge-b { background: #fff3e0; color: var(--warning); }
+  .badge-c { background: #ffeae9; color: var(--danger); }
+  .finding-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+  .finding-meta span { display: flex; align-items: center; gap: 4px; }
+  .finding .evidence { margin: 12px 0; padding: 14px 18px; background: #f0f2f5; border-radius: 8px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .finding .problem { font-size: 14px; margin: 12px 0; color: var(--text); line-height: 1.8; }
+  .finding .fix-box { margin-top: 12px; padding: 14px 18px; background: #f0f7ff; border-radius: 8px; border: 1px solid #d6e4ff; font-size: 13px; }
+  .finding .fix-box code { display: block; margin-top: 6px; padding: 12px 16px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .fix-label { font-weight: 600; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
+  .section-title { font-size: 20px; font-weight: 700; margin: 36px 0 20px; padding-bottom: 10px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 12px 16px; font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); background: #f8fafc; }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; }
+  .check-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.6; }
+  .check-item .check { color: var(--success); font-weight: 700; }
+  .check-item .cross { color: var(--danger); font-weight: 700; }
+  .win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .win-card { padding: 16px; background: linear-gradient(135deg, #f0f7ff, #e8f0ff); border-radius: 8px; border: 1px solid #d6e4ff; }
+  .win-card .win-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .win-card .win-meta { font-size: 11px; color: var(--text-secondary); }
+  .small { font-size: 13px; color: var(--text-secondary); }
+  .code-block { margin: 8px 0; padding: 14px 18px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; overflow-x: auto; white-space: pre; line-height: 1.7; }
+  .hl { color: #f7768e; font-weight: 600; } .cm { color: #565f89; }
+  .kw { color: #bb9af7; } .fn { color: #7aa2f7; }
+  .ty { color: #ff9e64; } .op { color: #89ddff; }
+  .str { color: #9ece6a; } .nu { color: #ff9e64; }
+  @media (max-width: 768px) { .sidebar { display: none; } .main { padding: 16px; } .score-grid { grid-template-columns: 1fr; } .stats-row { flex-direction: column; } .check-list { grid-template-columns: 1fr; } .win-grid { grid-template-columns: 1fr; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c1c7d0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a8adb8; }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>newapi628</h1>
+    <div class="sub">全量审计 · 2026-07-18</div>
+  </div>
+  <div class="sidebar-nav">
+    <a href="#summary"><span class="icon">📊</span> 评分概览</a>
+    <a href="#executive-summary"><span class="icon">📝</span> 总体评估</a>
+    <a href="#project-map"><span class="icon">🗺</span> 项目地图</a>
+    <a href="#coverage"><span class="icon">🧭</span> 覆盖矩阵</a>
+    <a href="#findings"><span class="icon">🔍</span> 详细发现</a>
+    <a href="#architecture"><span class="icon">🏗</span> 架构边界</a>
+    <a href="#security"><span class="icon">🔒</span> 安全</a>
+    <a href="#stability"><span class="icon">⚡</span> 稳定性</a>
+    <a href="#performance"><span class="icon">🚀</span> 性能</a>
+    <a href="#testing"><span class="icon">🧪</span> 测试</a>
+    <a href="#maintainability"><span class="icon">📐</span> 可维护性</a>
+    <a href="#design"><span class="icon">📋</span> 设计原则</a>
+    <a href="#release"><span class="icon">🚢</span> 发布</a>
+    <a href="#documentation"><span class="icon">📚</span> 文档</a>
+    <a href="#configuration"><span class="icon">⚙️</span> 配置</a>
+    <a href="#observability"><span class="icon">🩺</span> 可观测性</a>
+    <a href="#data-integrity"><span class="icon">🧱</span> 数据完整性</a>
+    <a href="#privacy"><span class="icon">🛡</span> 隐私</a>
+    <a href="#accessibility"><span class="icon">⌨️</span> 可访问性</a>
+    <a href="#supply-chain"><span class="icon">🔗</span> 供应链</a>
+    <a href="#cost"><span class="icon">💸</span> 成本</a>
+    <a href="#ai-safety"><span class="icon">🤖</span> AI 安全</a>
+    <a href="#fallback"><span class="icon">🪂</span> 降级策略</a>
+    <a href="#testing-authenticity"><span class="icon">🎭</span> 测试真实性</a>
+    <a href="#type-safety"><span class="icon">🔤</span> 类型安全</a>
+    <a href="#frontend-state"><span class="icon">🖥</span> 前端状态</a>
+    <a href="#backend-api"><span class="icon">🔌</span> 后端 API</a>
+    <a href="#dependency-weight"><span class="icon">📦</span> 依赖重量</a>
+    <a href="#code-consistency"><span class="icon">🧹</span> 代码一致性</a>
+    <a href="#comment-coverage"><span class="icon">💬</span> 注释覆盖</a>
+    <a href="#principles"><span class="icon">📏</span> 原则汇总</a>
+    <a href="#fix-order"><span class="icon">🎯</span> 修复顺序</a>
+  </div>
+  <div class="sidebar-footer">Fuck My Shit Mountain v1.0</div>
+</nav>
+
+<div class="main">
+  <div class="page-header" id="summary">
+    <h2>newapi628 全仓代码审计报告</h2>
+    <div class="meta">
+      <span>📅 2026-07-18 23:29 +08:00</span>
+      <span>🔍 Full · 当前完整工作树</span>
+      <span>🛠 Claude Skill: fuck-my-shit-mountain</span>
+      <span>🔖 HEAD 93155552f101bfd963742e1e6c8b14c8dd17b199</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">📊 评分面板</div>
+    <div class="card-body">
+      <div class="score-grid">
+        <div class="score-item"><div class="label">Security</div><div class="bar-row"><div class="bar-track"><div class="bar-fill c" style="width:40%"></div></div><span class="value grade-c">4.0</span><span class="grade grade-c">C</span></div><div class="small">会话撤销、明文 Cookie、SSRF TOCTOU 与发布供应链形成多条攻击链；安全覆盖 High。</div></div>
+        <div class="score-item"><div class="label">Stability</div><div class="bar-row"><div class="bar-track"><div class="bar-fill c" style="width:32%"></div></div><span class="value grade-c">3.2</span><span class="grade grade-c">C</span></div><div class="small">计费、退款、支付回调与权益激活存在多条并发/持久化失效路径；覆盖 High。</div></div>
+        <div class="score-item"><div class="label">Performance</div><div class="bar-row"><div class="bar-track"><div class="bar-fill b" style="width:53%"></div></div><span class="value grade-b">5.3</span><span class="grade grade-b">B</span></div><div class="small">后端缓存/批处理有吞吐意识，但默认前端首屏约 9.73 MB JS，且缺资源预算；覆盖 Medium。</div></div>
+        <div class="score-item"><div class="label">Testing</div><div class="bar-row"><div class="bar-track"><div class="bar-fill c" style="width:46%"></div></div><span class="value grade-c">4.6</span><span class="grade grade-c">C</span></div><div class="small">Go 与重点 race 测试基础较强，但 CI 漏掉 533 个 Go 测试和多个交付面，且存在虚假补偿测试；覆盖 High。</div></div>
+        <div class="score-item"><div class="label">Maintainability</div><div class="bar-row"><div class="bar-track"><div class="bar-fill b" style="width:51%"></div></div><span class="value grade-b">5.1</span><span class="grade grade-b">B</span></div><div class="small">分层清晰，但 4,179 行组件、失真的 i18n/文档与大量失效质量门增加变更风险；覆盖 High。</div></div>
+        <div class="score-item"><div class="label">Design</div><div class="bar-row"><div class="bar-track"><div class="bar-fill c" style="width:39%"></div></div><span class="value grade-c">3.9</span><span class="grade grade-c">C</span></div><div class="small">关键资金状态机多次违反原子性、Fail-Fast 与错误不可吞原则；覆盖 High。</div></div>
+        <div class="score-item"><div class="label">Release</div><div class="bar-row"><div class="bar-track"><div class="bar-fill d" style="width:28%"></div></div><span class="value grade-d">2.8</span><span class="grade grade-d">D</span></div><div class="small">恢复链存在 Critical，备份/回滚/Classic 构建/版本身份均有确定性缺陷；覆盖 High。</div></div>
+        <div class="score-item overall-row"><div class="label">Overall</div><div class="bar-row"><div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:41%;background:linear-gradient(90deg,#ff3b30,#ff6b61)"></div></div><span class="value" style="color:#fff">4.1</span><span class="grade" style="color:#ff6b61">C</span></div><div class="small" style="color:rgba(255,255,255,.65)">总体为 Poor：功能体量和测试资产可观，但资金不变量与发布恢复路径尚不足以支撑低风险发布。</div></div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="executive-summary">📝 总体评估</h3>
+  <div class="card">
+    <div class="card-header">📋 总体评估</div>
+    <div class="card-body">
+      <p><strong>项目概况：</strong>这是一个 Go 1.22+ / Gin / GORM 的多供应商 AI API 网关，配套 React 19 Default、React 18 Classic、Electron 与 Orbit 子项目，覆盖认证、计费、支付、代理分润、多租户、风控和发布运维。审计从最新拉取点 52204cb 扩展到当前 HEAD 9315555 的完整工作树；扫描 3,708 个文件，并排除生成物、node_modules、既有审计报告和参考素材作为主结论来源。</p>
+      <p style="margin-top:12px"><strong>主要风险：</strong>最大风险不是代码风格，而是资金与权益状态机：并发额度可透支、退款和批量扣费可永久丢失、支付/过期竞态可能成功 ACK 却不入账。发布侧的在线整库恢复同时遗漏 Redis 权威 Trial 键，构成 Critical 级一致性风险。</p>
+      <p style="margin-top:12px"><strong>亮点：</strong>全仓 Go 测试通过，重点 internal race 通过；风险引擎最新限购键补偿和设备 TTL 有明确回归测试；主 Dockerfile pin digest，并为稳定镜像生成 SBOM/provenance/cosign；生产测试栈的敏感配置多数采用 fail-closed，Redis 也启用了 AOF 与持久卷。</p>
+      <p style="margin-top:12px"><strong>优先修复：</strong>先冻结会改变资金/恢复状态的发布，修复 F01–F07 的原子性与持久化，再封堵会话/SSRF 和备份/回滚链，最后补齐真实 CI 门禁、前端体积/i18n/复杂度治理。</p>
+      <p style="margin-top:12px"><strong>总评：</strong>4.1 / 10（C）。代码并非不可救，但当前存在多条可造成真实资金、权益、会话或恢复事故的路径；在关键不变量完成回归验证前，不建议把“测试通过”视为可安全发布的充分条件。</p>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="project-map">🗺 项目地图与审计边界</h3>
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>区域</th><th>职责 / 关键边界</th><th>主要审计证据</th></tr></thead>
+        <tbody>
+          <tr><td>Go 入口与 HTTP</td><td>main → router → middleware → controller；Cookie/Token 认证、API 路由、panic recovery</td><td>main.go、router/、middleware/、controller/</td></tr>
+          <tr><td>业务与数据</td><td>service/model + internal 领域模块；GORM 同时支持 SQLite/MySQL/PostgreSQL</td><td>service/、model/、internal/payment、tokenplan、agentplan、mtwire、risk</td></tr>
+          <tr><td>AI Relay</td><td>OpenAI/Claude/Gemini 等统一协议与 40+ provider adaptor，涉及请求隐私、重试和计费</td><td>relay/、dto/、types/、provider 转换和 debug 日志</td></tr>
+          <tr><td>Default 前端</td><td>React 19、TypeScript、Rsbuild、Base UI、Tailwind、TanStack、六语言 i18n</td><td>web/default/src、package.json、rsbuild.config.ts、构建/测试/typecheck/lint</td></tr>
+          <tr><td>其他交付面</td><td>Classic React、Electron、auth-service、bulb-orbit/v2</td><td>Classic 构建与 HTML 注入；Electron/auth clean-checkout；Orbit test/build/lint</td></tr>
+          <tr><td>发布与运行</td><td>GitHub Actions、Docker/Compose、Nginx、备份/恢复/回滚/健康检查</td><td>.github/workflows、Dockerfile*、deploy/、scripts/</td></tr>
+          <tr><td>本次限制</td><td>未写应用代码；未连接生产 DB/Redis/日志/告警；未执行真实推镜像、支付或灾备切换；静态安全工具多项不可用</td><td>结论以源码、锁文件、构建和本地测试为证；Suspected 单独标记</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="coverage">🧭 覆盖矩阵</h3>
+  <div class="card"><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+    <thead><tr><th>维度</th><th style="width:120px">覆盖</th><th>已检查证据</th><th>排除 / 限制</th></tr></thead>
+    <tbody>
+      <tr><td>Architecture</td><td><span class="badge badge-confirmed">High</span></td><td>入口、分层、internal 领域模块、relay/provider、前端路由与交付面</td><td>未绘制运行时服务依赖遥测</td></tr>
+      <tr><td>Security</td><td><span class="badge badge-confirmed">High</span></td><td>Cookie/Token/RBAC、SSRF、HTML 注入、secret pattern、Nginx、Actions 权限</td><td>无 gitleaks/semgrep；未做渗透测试</td></tr>
+      <tr><td>Stability</td><td><span class="badge badge-confirmed">High</span></td><td>错误/补偿、panic、支付状态机、日志、健康与恢复链</td><td>未做生产故障注入</td></tr>
+      <tr><td>Performance</td><td><span class="badge badge-suspected">Medium</span></td><td>前端构建体积、路由分块、批处理/缓存/热路径源码</td><td>无真实流量压测、CPU/heap profile</td></tr>
+      <tr><td>Testing</td><td><span class="badge badge-confirmed">High</span></td><td>go test、race、vet、coverage、Bun/Vitest、CI 测试集合</td><td>未运行外部服务集成/E2E</td></tr>
+      <tr><td>Maintainability</td><td><span class="badge badge-confirmed">High</span></td><td>文件/函数体量、lint、knip、层次与重复治理</td><td>未逐函数人工阅读全部 3,708 文件</td></tr>
+      <tr><td>Design</td><td><span class="badge badge-confirmed">High</span></td><td>资金状态机、接口边界、SRP/DRY/Fail-Fast/错误处理</td><td>架构意图以仓库文档推断</td></tr>
+      <tr><td>Release</td><td><span class="badge badge-confirmed">High</span></td><td>8 workflow、3 Dockerfile、Compose、ops/证书/Electron/版本链</td><td>未实际发布制品</td></tr>
+      <tr><td>Documentation</td><td><span class="badge badge-confirmed">High</span></td><td>运维、迁移、Electron README 与脚本/拓扑对照</td><td>未验证全部外链和全部语言 README</td></tr>
+      <tr><td>Configuration</td><td><span class="badge badge-confirmed">High</span></td><td>Go 默认值、Compose、Nginx、环境变量和 secret fail-closed</td><td>未读取服务器真实 .env</td></tr>
+      <tr><td>Observability</td><td><span class="badge badge-confirmed">High</span></td><td>request ID、日志、status/readiness、健康脚本、对账告警</td><td>未接入真实日志/告警后端</td></tr>
+      <tr><td>Data Integrity</td><td><span class="badge badge-confirmed">High</span></td><td>额度、退款、订单、权益、备份/恢复、Redis 权威键</td><td>未对生产副本演练</td></tr>
+      <tr><td>Privacy</td><td><span class="badge badge-suspected">Medium</span></td><td>支付/LLM payload 日志、文件权限、保留策略</td><td>未逐一追踪全部 provider 字段和用户删除流程</td></tr>
+      <tr><td>Accessibility</td><td><span class="badge badge-suspected">Medium</span></td><td>Base UI 组合、TypeScript、语义化触发器与 UI 源码</td><td>未用屏幕阅读器/键盘跑浏览器 E2E</td></tr>
+      <tr><td>Supply Chain</td><td><span class="badge badge-confirmed">High</span></td><td>Action pin/权限、镜像 digest/SBOM/cosign、锁文件与 audit</td><td>trivy/osv/cosign 等 CLI 不可用</td></tr>
+      <tr><td>Cost</td><td><span class="badge badge-suspected">Medium</span></td><td>上游付费调用、额度透支、批处理、日志和前端资源</td><td>无真实账单/磁盘曲线</td></tr>
+      <tr><td>AI Safety</td><td><span class="badge badge-suspected">Medium</span></td><td>AI relay 输入、供应商边界、敏感 prompt 日志、provider 能力</td><td>项目非自主 Agent；未运行模型红队</td></tr>
+      <tr><td>Fallback</td><td><span class="badge badge-confirmed">High</span></td><td>计费补偿、风险 fail-open、DB/Redis/支付错误分支</td><td>未注入真实云服务故障</td></tr>
+      <tr><td>Testing Authenticity</td><td><span class="badge badge-confirmed">High</span></td><td>测试调用路径、CI 收集范围、补偿测试与生产 Handler 对照</td><td>未评估每个测试断言质量</td></tr>
+      <tr><td>Type Safety</td><td><span class="badge badge-confirmed">High</span></td><td>tsgo、Go vet、DTO/可选字段与 UI primitive 类型</td><td>Classic 为 JS，静态保证有限</td></tr>
+      <tr><td>Frontend State</td><td><span class="badge badge-suspected">Medium</span></td><td>Default 数据获取/路由/巨型表单组件/localStorage 缓存</td><td>未做浏览器状态竞态录制</td></tr>
+      <tr><td>Backend API</td><td><span class="badge badge-confirmed">High</span></td><td>认证、绑定、错误、provider adaptor、支付回调与状态端点</td><td>未对每个公开 endpoint 发送请求</td></tr>
+      <tr><td>Dependency Weight</td><td><span class="badge badge-suspected">Medium</span></td><td>Bun/npm/Go locks、audit/why、构建 chunk</td><td>未测最终 Go/Electron 制品尺寸</td></tr>
+      <tr><td>Code Consistency</td><td><span class="badge badge-confirmed">High</span></td><td>gofmt、oxlint、format、JSON wrapper、组件规范</td><td>未自动修复任何问题</td></tr>
+      <tr><td>Comment Coverage</td><td><span class="badge badge-suspected">Medium</span></td><td>复杂风控/支付/运维注释与实现对照</td><td>未对每个导出符号做文档覆盖统计</td></tr>
+    </tbody>
+  </table></div></div></div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">31</div><div class="desc">总发现</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-critical)">1</div><div class="desc">Critical</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-high)">15</div><div class="desc">High</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">13</div><div class="desc">Medium</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-low)">2</div><div class="desc">Low</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-info)">2</div><div class="desc">Suspected</div></div>
+  </div>
+
+  <h3 class="section-title" id="top-risks">⚠️ 首要风险</h3>
+  <div class="card"><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+    <thead><tr><th style="width:60px">#</th><th>发现</th><th style="width:100px">严重度</th><th style="width:150px">类别</th></tr></thead>
+    <tbody>
+      <tr><td>F01</td><td>生产恢复在线覆盖 MySQL，遗漏 Redis 权威状态</td><td><span class="badge badge-critical">Critical</span></td><td>数据 / 发布</td></tr>
+      <tr><td>F02</td><td>余额“先查后扣”可被并发请求透支</td><td><span class="badge badge-high">High</span></td><td>计费 / 并发</td></tr>
+      <tr><td>F03</td><td>钱包退款是非持久、非幂等 best-effort</td><td><span class="badge badge-high">High</span></td><td>计费 / 补偿</td></tr>
+      <tr><td>F04</td><td>默认批量计费写在故障时永久丢 delta</td><td><span class="badge badge-high">High</span></td><td>计费 / 持久化</td></tr>
+      <tr><td>F05</td><td>支付过期竞态会成功 ACK 却不入账</td><td><span class="badge badge-high">High</span></td><td>支付状态机</td></tr>
+      <tr><td>F06</td><td>AGT 激活与过期任务竞态造成权益/订单分裂</td><td><span class="badge badge-high">High</span></td><td>权益 / 并发</td></tr>
+      <tr><td>F07</td><td>两笔已付款续费只获得约一份有效期</td><td><span class="badge badge-high">High</span></td><td>权益守恒</td></tr>
+      <tr><td>F08</td><td>降权或禁用用户的旧 Cookie 仍可授权 30 天</td><td><span class="badge badge-high">High</span></td><td>认证 / 授权</td></tr>
+      <tr><td>F09</td><td>会话 Cookie 明文可传输且密钥默认不持久</td><td><span class="badge badge-high">High</span></td><td>会话配置</td></tr>
+      <tr><td>F10</td><td>部署吞掉备份失败并继续不可逆升级</td><td><span class="badge badge-high">High</span></td><td>发布 / 数据</td></tr>
+      <tr><td>F11</td><td>部署与归档回滚会留下新旧混合源码树</td><td><span class="badge badge-high">High</span></td><td>发布 / 回滚</td></tr>
+      <tr><td>F12</td><td>发布门漏测真实交付面，Classic 当前已无法构建</td><td><span class="badge badge-high">High</span></td><td>CI / 发布</td></tr>
+      <tr><td>F13</td><td>稳定镜像发布用可变 Action tag 处理发布凭据</td><td><span class="badge badge-high">High</span></td><td>供应链</td></tr>
+      <tr><td>F14</td><td>证书脚本以 root 直接执行未校验远程脚本</td><td><span class="badge badge-high">High</span></td><td>供应链</td></tr>
+      <tr><td>F15</td><td>SSRF 校验与实际拨号二次解析，存在 DNS Rebinding</td><td><span class="badge badge-high">High</span></td><td>网络安全</td></tr>
+      <tr><td>F16</td><td>代理折扣查询错误被吞并固化错误分润快照</td><td><span class="badge badge-high">High</span></td><td>财务一致性</td></tr>
+    </tbody>
+  </table></div></div></div>
+
+  <h3 class="section-title" id="findings">🔍 详细发现</h3>
+
+  <div class="finding severity-critical">
+    <div class="finding-header"><h4>F01. 生产恢复在线覆盖 MySQL，且遗漏 Redis 权威状态</h4><span class="badge badge-critical">Critical</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Data Integrity / Release / Stability</span><span>影响：支付、额度、Trial 限购、恢复点一致性</span></div>
+    <div class="problem"><strong>问题：</strong>恢复脚本在应用仍可写入时把含 DROP/CREATE/INSERT 的 dump 导入当前生产库，完成后只“建议”重启；同时宣称 Redis 是可重建缓存而不恢复，但 Redis 实际保存没有 DB 后备的永久 Trial 去重键。<br><strong>为什么重要：</strong>恢复期间的支付/扣费写可能被后续导入覆盖；DB 与 Redis 来自不同时间线会让限购历史丢失或与订单脱节。<br><strong>可复现场景：</strong>导入时支付回调写入一笔订单；dump 随后覆盖该表。新机仅恢复 DB 后，历史 Trial 用户的永久 Redis 键不存在，可再次领取。</div>
+    <div class="evidence">deploy/ops/restore.sh:17,45-53 — 在线导入，只建议重启，不恢复 Redis
+deploy/ops/backup.sh:45-54 — 已生成 redis-&lt;ts&gt;.rdb
+deploy/docker-compose.test.yml:95-105 — 注释明确 Trial 键无 DB 后备
+internal/risk/port.go:71-92 — 用户/实名维度 PurchaseDedupTTL=0（永久）</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>进入维护模式并停流 → 停止 app/worker → 校验无写者 → 恢复同一 manifest 的 MySQL + Redis → 启动 → DB/Redis/readiness/reconcile 全通过 → 开流。任一步失败不得报告完成。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>备份增加 manifest、成对快照 ID、checksum；优先在隔离栈恢复并验证后切换。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>Compose 演练加入 DB marker、Redis 永久键和并发 writer；恢复期间 writer 必须不可达，恢复后两类 marker 必须属于同一恢复点。 <strong>工作量：</strong>1–2 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F02. 钱包及 Token 额度“先查后无条件扣减”，并发可透支</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Concurrency / Billing</span><span>影响：用户余额、上游成本</span></div>
+    <div class="problem"><strong>问题：</strong>预扣前先读余额，随后执行不带 quota ≥ amount 条件的减法更新。<br><strong>为什么重要：</strong>读取与扣减不原子，多请求可同时通过检查并调用付费上游。<br><strong>场景：</strong>余额 100，两请求各扣 80，均读到 100，最终余额 -60 且两次上游成本都已发生。</div>
+    <div class="evidence">service/billing_session.go:349-374 — 先读钱包余额再预扣
+service/quota.go:393-400 — 先读 Token 余额
+model/user.go:939-958、model/token.go:412-438 — quota = quota - ?，无余额条件和 RowsAffected 守卫</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>使用 WHERE quota &gt;= ? 的原子条件 UPDATE，并要求 RowsAffected == 1；Redis 模式用 Lua 原子检查扣减。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>以 request_id 建立可审计的 reserve/commit/refund 资金状态机，统一 DB 与 Redis 不变量。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>SQLite/MySQL/PostgreSQL 上以屏障并发两次超半额扣减，必须恰一笔成功且余额不为负。 <strong>工作量：</strong>2–4 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F03. 钱包退款/回滚是非持久、非幂等的 best-effort</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Billing / Fallback</span><span>影响：错误扣费、退款可靠性</span></div>
+    <div class="problem"><strong>问题：</strong>内存标志在异步退款真正成功前就置为 refunded，DB 失败只记日志；钱包 refund 本身是 quota += N，无法安全重试。<br><strong>为什么重要：</strong>进程退出或瞬时 DB 故障会把用户预扣永久留在系统中，却没有持久重驱动依据。<br><strong>场景：</strong>上游失败后安排退款，进程在 goroutine 落库前退出；重启后既无 pending 台账，也不能安全重复退款。</div>
+    <div class="evidence">service/billing_session.go:81-122、152-170、256-267
+service/funding_source.go:57-64 — 钱包退款非幂等，无法安全重试</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>事务写入 request_id 唯一的 refund_pending；可重试 worker 以 CAS 推进至 refunded，首次失败不得丢弃。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>把预扣、结算、退款统一为持久双录账本并定期对账。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>首次退款写故障、第二次成功；重启后补偿且最终只退款一次。 <strong>工作量：</strong>2–4 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F04. 默认批量计费更新在故障时永久丢失 delta</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Billing / Persistence</span><span>影响：少扣费、少计用量、财务差异</span></div>
+    <div class="problem"><strong>问题：</strong>默认部署开启批量更新，额度 delta 先只进入进程内 map；flush 先交换清空旧 map，数据库失败后仅记录日志，不回队。<br><strong>为什么重要：</strong>已经发生的上游成本可能永远没有对应扣费。<br><strong>场景：</strong>flush 时 DB 短暂不可用，旧 map 被清空；服务恢复后无任何机制补写。</div>
+    <div class="evidence">docker-compose.yml:37 — BATCH_UPDATE_ENABLED=true
+model/user.go:924-951、model/token.go:394-426 — 仅写内存 map
+model/utils.go:69-112 — swap 后 DB 失败不重新入队</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>资金扣减保持同步原子写；若保留批量统计，flush 失败必须保留 batch 并重试。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>改为持久 WAL/队列，以 request_id 保证 exactly-once 应用并提供 backlog 告警。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>注入首次 flush 失败与进程重启，恢复后必须精确补写一次。 <strong>工作量：</strong>2–4 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F05. 支付超时过期与真实付款竞态会“成功 ACK 但不入账”</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Payment State Machine</span><span>影响：已付款未到账</span></div>
+    <div class="problem"><strong>问题：</strong>对账先查未付再 CAS created→failed；回调 CAS created→paid 失败时，对包括 failed 在内的状态返回 nil，而上层把 nil 当成功 ACK。<br><strong>为什么重要：</strong>平台停止重推后，已付款订单可能永久不入账。<br><strong>场景：</strong>对账刚查到未付，用户随即付款；对账先置 failed，回调随后 CAS 失败并成功 ACK。</div>
+    <div class="evidence">internal/payment/reconcile.go:96-124
+internal/payment/credit.go:55-73
+internal/mtwire/payment_inprocess.go:343-357</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>CAS 失败后回读；只有 paid/credited 才幂等成功。已验签付款应允许从可恢复 expired 推进或返回可重试失败。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>显式状态迁移表 + event inbox/outbox，支付事实优先且可重放。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>屏障固定查单与置 failed 的窗口，同时注入成功回调，最终必须恰好入账一次。 <strong>工作量：</strong>1–2 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F06. AGT 激活先做副作用、后做且不检查 CAS，与过期任务竞态</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Concurrency / Entitlement</span><span>影响：订单、代理权益、slug 归属</span></div>
+    <div class="problem"><strong>问题：</strong>激活读取 pending 后先完成代理开通，最后才 CAS pending→activated 且忽略 RowsAffected；过期任务不参与激活锁，可并发把 pending 置 expired 并释放 slug。<br><strong>为什么重要：</strong>已付款订单、实际权益和预留状态可能分裂。<br><strong>场景：</strong>回调读 pending 后暂停；对账过期并释放；回调继续开通，最终 CAS 为 0 却返回成功。</div>
+    <div class="evidence">internal/mtwire/agent_plan_bridge.go:145-189
+internal/mtwire/agent_plan_reconcile.go:101-118
+internal/mtwire/activation_lock.go:21-28</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>副作用前 CAS pending→activating 并检查 RowsAffected；过期任务只处理 pending；成功再迁移 activated。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>采用事务 outbox/saga，使外部副作用可幂等补偿，所有状态迁移有唯一所有者。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>固定回调/过期竞态，结果只能是 activated+完整交付或 expired+无副作用。 <strong>工作量：</strong>2–4 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F07. 两笔已付款 AGT “续费”只得到约一份有效期</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Entitlement Integrity</span><span>影响：已付权益损失</span></div>
+    <div class="problem"><strong>问题：</strong>每单都以 now + ValidDays 算到期日，冲突更新直接覆盖现有 expire_at，而不是从未过期到期日累加。<br><strong>为什么重要：</strong>用户支付两份周期却只得到约一份，违反权益守恒。<br><strong>场景：</strong>同一 owner 连续或并发激活两笔一年订单，两笔订单均 activated，但最终仍约一年。</div>
+    <div class="evidence">internal/mtwire/agent_plan_bridge.go:197-200、250-251、354-381
+internal/mtwire/agent_plan_activate_concurrency_test.go:146-189 — 允许两单成功但未断言期限累加</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>事务锁定会员行；续费基准为 max(now,current_expire_at)，每个 source_order_no 只延长一次。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>把订单到权益变更记录为不可变 ledger，明确升级/降级的剩余期限策略。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>顺序和并发激活两笔订单，到期日必须累加两份周期；重复同订单不延长。 <strong>工作量：</strong>1–2 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F08. 禁用或降权用户的旧 Cookie 仍可继续授权</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Authorization</span><span>影响：Admin/Root 路由</span></div>
+    <div class="problem"><strong>问题：</strong>登录时把 role/status/group 固化进 30 天 Cookie；Cookie 分支直接信任旧值，而只有 Access Token 分支重查 DB。<br><strong>为什么重要：</strong>管理员禁用、降权或改密不能及时撤销现有高权限会话。<br><strong>场景：</strong>管理员登录后被降为普通用户，旧 Cookie 仍携带管理员 role 并通过 AdminAuth/RootAuth。</div>
+    <div class="evidence">controller/user.go:134-143 — role/status/group 写入 session
+middleware/auth.go:37-95、116-140 — Cookie 分支使用旧 session
+main.go:194-202 — MaxAge 30 天</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>每次高权限请求重载用户状态，或验证服务端 session_version/revoked_at；降权、禁用、改密时递增版本。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>集中会话管理、短期 access session + 可撤销 refresh，并对敏感操作二次验证。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>取得管理员 Cookie 后更新 DB 为禁用/降权，旧 Cookie 访问 Admin/Root 必须 401/403。 <strong>工作量：</strong>0.5–1 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F09. 会话 Cookie 可明文发送，且默认密钥不持久</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Session / Configuration</span><span>影响：全部网页登录会话</span></div>
+    <div class="problem"><strong>问题：</strong>Cookie Secure=false，仓库 Nginx 的 80 端口直接反代业务；部分公开部署未 fail-closed 要求 SESSION_SECRET，缺省值每进程随机。<br><strong>为什么重要：</strong>HTTP 访问可泄露 30 天 Cookie；重启会使全部会话失效，多实例则随机互不验签。<br><strong>场景：</strong>用户访问 http 入口，同网段攻击者重放 Cookie；或请求在两个随机 key 实例间轮转并随机 401。</div>
+    <div class="evidence">main.go:194-201 — Secure:false、MaxAge 30 天
+deploy/nginx/wildcard.wedreamhub.com.conf:8-10,34-44
+deploy/nginx/tokendream.wedreamhub.com.conf:4-6,22-32 — 80 不跳转
+common/constants.go:75-76、common/init.go:49-58 — 缺省随机 key</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>生产 Secure=true；80 除 ACME 外 308 HTTPS；生产缺 SESSION_SECRET/CRYPTO_SECRET 时启动失败，开发需显式 opt-in。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>支持 key ring 平滑轮换，部署检查 HSTS、Cookie 属性与跨实例互验。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>HTTPS Set-Cookie 含 Secure/HttpOnly/SameSite；HTTP 不达 app；双实例互验；缺 key 拒绝生产启动。 <strong>工作量：</strong>0.5 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F10. 部署把任何备份失败伪装成“脚本尚未上传”并继续</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Release / Data Integrity</span><span>影响：迁移前恢复点</span></div>
+    <div class="problem"><strong>问题：</strong>test -x &amp;&amp; backup.sh || echo 把脚本存在但执行失败的状态也转换为成功。<br><strong>为什么重要：</strong>磁盘满、凭据错或 mysqldump 失败后仍继续上传、构建和执行不可逆 AutoMigrate。<br><strong>场景：</strong>backup.sh 返回 42；部署日志却说“尚未上传”，随后上线无可用恢复点的新 schema。</div>
+    <div class="evidence">deploy/ops/deploy.sh:102-105
+deploy/ops/migrate-note.md:50-55 — 文档承认 schema 前向且无 down，要求部署前备份</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>分别处理“不存在”和“执行失败”；存在但失败必须 die。首次无备份只能通过显式、可审计 ALLOW_INITIAL_NO_BACKUP=1。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>部署状态机要求已验证 backup manifest，并在数据库迁移前再次校验可恢复性。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>假 backup 返回 42，deploy 必须在上传/compose up 前退出非零。 <strong>工作量：</strong>30–60 分钟。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F11. 部署与归档回滚采用覆盖解包，会形成新旧混合源码树</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Release / Rollback</span><span>影响：制品身份、可回滚性</span></div>
+    <div class="problem"><strong>问题：</strong>部署只预删前端 src 与 internal 后覆盖 tar；controller/service/relay 删除文件会残留。归档回滚甚至不删 internal，且构建后未自动健康/版本验证。<br><strong>为什么重要：</strong>上线或回滚结果可能是不存在于任何 commit/归档的混合代码。<br><strong>场景：</strong>B 新增 controller/legacy.go，回滚 A 后文件仍参与编译，导致失败或运行混合逻辑。</div>
+    <div class="evidence">deploy/ops/deploy.sh:115-133
+deploy/ops/rollback.sh:63-72</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>解包到全新 staging，保留明确外部状态后原子替换；或保护清单 + rsync --delete。回滚自动验证版本/readiness/关键业务探针。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>只部署不可变镜像/制品 digest；源码不再原地覆盖。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>A/B 归档分别在 internal/controller/frontend 新增文件，回滚后清单/hash 必须与 A 完全一致。 <strong>工作量：</strong>0.5–1 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F12. 发布门遗漏真实交付面，Classic 当前已确定性构建失败</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：CI / Release / Testing</span><span>影响：二进制、镜像、Classic/Electron/auth/Orbit</span></div>
+    <div class="problem"><strong>问题：</strong>CI 只 race/vet internal 和 test/build Default；全树 1,200 个 Go Test/Benchmark/Fuzz 中仅收集 667 个。Release 却构建 Classic，而当前锁文件中 date-fns-tz 1.3.8 对根 date-fns 4.4.0 的子路径导入已失败。<br><strong>为什么重要：</strong>PR 可以全绿，但 tag 发布会在 Classic 阶段直接失败，或把未测试的 provider/支付代码发布。<br><strong>场景：</strong>当前 clean lock 执行 web/classic 的 bun run build，Rspack 报 package subpath not exported。</div>
+    <div class="evidence">.github/workflows/ci.yml:61-93 — 只 internal + web/default
+.github/workflows/release.yml:32-49 — release 构建 default + classic
+动态验证：go 全树测试函数 1200，internal 667；Classic build exit 1
+错误链：@douyinfe/semi-ui → date-fns-tz@1.3.8 → date-fns@4.4.0 未导出 ./format/index.js 等子路径</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>修正锁文件/依赖版本；CI 增加 Classic build、go test ./... -race、Electron/auth clean smoke、Orbit；release 必须 needs 同一 gate。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>维护交付面矩阵，每个制品必须有 build/test/owner/豁免到期日。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>每个交付面放失败哨兵并验证 CI 必红；tag 只消费已通过且可复现的制品。 <strong>工作量：</strong>1–2 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F13. 稳定 Docker 发布使用可变 Action tag，同时持有发布凭据和 OIDC</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Supply Chain</span><span>影响：稳定 latest 镜像、Docker Hub 凭据、签名身份</span></div>
+    <div class="problem"><strong>问题：</strong>稳定与 nightly workflow 的 Action 全用 @vN 可变 tag，相关 job 可读取 Docker Hub token、推镜像并拥有 id-token。<br><strong>为什么重要：</strong>任一上游 tag/账号劫持即可污染稳定镜像或滥用发布身份。<br><strong>场景：</strong>恶意 login/build Action 读取 token 并替换 latest；消费者拉取受污染镜像。</div>
+    <div class="evidence">.github/workflows/docker-build.yml:32-35、39、62、65、72、78、93、117 — 0/7 SHA pin
+.github/workflows/docker-image-nightly.yml — 0/7 SHA pin
+对照：docker-image-alpha.yml 10/10、release.yml 12/12 已 pin 完整 SHA</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>复用 alpha 中已验证 SHA；删除无必要 packages:write；用 Dependabot/Renovate 更新 SHA。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>组织级 policy 拒绝非 40 位 SHA 的 uses，并最小化每 job 权限/secret 暴露。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>workflow lint 要求 uses 匹配完整 SHA，发布权限符合 allowlist。 <strong>工作量：</strong>1–2 小时。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F14. 证书安装脚本以 root 直接执行未校验远程脚本</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Supply Chain</span><span>影响：宿主机 root 与 systemd 持久化</span></div>
+    <div class="problem"><strong>问题：</strong>install-acme.sh 使用 curl | sh，不固定 release/commit，也不校验 checksum/签名，随后写 systemd unit。<br><strong>为什么重要：</strong>安装源或解析链被攻陷时，下载内容直接获得 root 并建立长期持久化。<br><strong>场景：</strong>远程端点返回恶意脚本，执行后伪装正常安装并注册定时服务。</div>
+    <div class="evidence">scripts/install-acme.sh:13-16 — curl -fsS https://get.acme.sh | sh
+scripts/install-acme.sh:21-46 — 写 /etc/systemd/system，默认 /root 安装</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>下载固定 release/commit 到临时文件，校验仓库维护的 SHA256 或签名后执行；校验失败不得写 unit。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>由受控包/镜像管理证书客户端，最小化 root 安装面并记录 provenance。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>假下载 checksum 错误时必须非零退出且不创建 unit/安装目录。 <strong>工作量：</strong>2–4 小时。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F15. SSRF 校验与实际连接分离，存在 DNS Rebinding TOCTOU</h4><span class="badge badge-high">High</span><span class="badge badge-suspected">Suspected</span></div>
+    <div class="finding-meta"><span>置信度：Medium</span><span>类别：SSRF / Network Boundary</span><span>影响：内网、回环、云元数据</span></div>
+    <div class="problem"><strong>问题：</strong>校验阶段独立 LookupIP，实际普通 HTTP client 连接时再次解析，未固定到已验证 IP；代理模式还可能由代理侧解析。<br><strong>为什么重要：</strong>攻击域可第一次返回公网通过、第二次返回私网，实现 DNS Rebinding。<br><strong>场景：</strong>验证得到公共 IP，Dial 时解析为 127.0.0.1/169.254.169.254，服务端读取内部资源。由于未运行可控 DNS 集成实验，利用链标为 Suspected。</div>
+    <div class="evidence">common/ssrf_protection.go:251-329 — 独立 net.LookupIP
+service/download.go:52-69、controller/video_proxy.go:132-146 — 校验后普通 client 连接
+service/http_client.go:36-59、107-167 — Dial 未绑定已验证 IP</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>自定义 DialContext：实际拨号时验证每个候选 IP 并连接精确 IP，同时保留 Host/SNI；重定向和代理应用同一策略。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>集中 egress gateway/allowlist，统一解析、拨号、重定向与审计。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>resolver 首次公网、第二次私网；直连/重定向/代理均不得触达私网监听器。 <strong>工作量：</strong>2–4 天。</div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header"><h4>F16. 代理折扣查询错误被吞，并固化错误分润快照</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Financial Integrity / Error Handling</span><span>影响：代理成本、差价收益</span></div>
+    <div class="problem"><strong>问题：</strong>GetAgentType 只有 err==nil 才设置折扣；任何 DB 错误都静默落为 discountRatio=0，随后按通用 AgentCostPrice 保存 PendingPurchase。激活按该快照结算差价。<br><strong>为什么重要：</strong>瞬时查询错误从“请求失败”变成不可逆的错误财务快照，可能多付或少付代理。<br><strong>场景：</strong>代理折扣查询超时，购买仍成功；后续 DB 恢复也不会纠正已保存成本。</div>
+    <div class="evidence">internal/mtwire/http.go:286-303 — err 被忽略并传 0
+internal/tokenplan/subscription.go:99-115 — 0 回退并保存 AgentCostPrice
+internal/tokenplan/subscription.go:163-176 — 按快照计算 tokenplanSpread 并入账</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>代理租户的 GetAgentType 错误必须 fail closed 返回 5xx；只有明确 found=false 才使用平台回退。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>订单保存价格版本、折扣来源与计算明细；对账可重算并发现偏差。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>注入 GetAgentType 错误，订单/快照不得创建；found=false 仍按既定平台价格。 <strong>工作量：</strong>0.5–1 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F17. 敏感支付/LLM 内容写入宽权限且无界日志</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Privacy / Observability / Resource</span><span>影响：签名、支付身份、prompt、磁盘</span></div>
+    <div class="problem"><strong>问题：</strong>支付 webhook 在验签前记录完整 signature/body，DEBUG 时多条 relay 记录完整请求/响应；文件模式 0644，访问日志不计入百万条轮转，目录没有自动保留上限。<br><strong>为什么重要：</strong>同机用户、备份或支持日志包可能获得敏感内容；常规访问流量还可无界占满磁盘。<br><strong>场景：</strong>开启 DEBUG 排障后 prompt/响应长期留存；支付日志包含 buyer identity；磁盘耗尽影响 DB/服务。</div>
+    <div class="evidence">controller/topup_waffo.go:355-378、topup_waffo_pancake.go:452-457、topup_stripe.go:162-169
+relay/claude_handler.go:185、responses_handler.go:105、relay/channel/claude/relay-claude.go:954
+logger/logger.go:55-68、112-118；middleware/logger.go:19-39
+common/init.go:67-77 — 目录 0777；文件 0644；无自动保留</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>仅记 event type、内部 ID、长度/哈希、验签结果；禁止 body/signature/buyer identity/prompt。文件 0600，设置 MaxSize/MaxAge/MaxBackups 和容器日志上限。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>集中结构化日志 + 字段级分类/脱敏 + 保留策略与访问审计。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>成功/失败 webhook 和 DEBUG relay 日志不含原文；并发写触发轮转且 -race 无竞争。 <strong>工作量：</strong>1–2 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F18. Classic 将后台 HTML/Markdown 未净化注入 DOM</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Stored XSS</span><span>影响：Classic 访问者会话</span></div>
+    <div class="problem"><strong>问题：</strong>marked.parse 输出和原始 HTML 直接进入 dangerouslySetInnerHTML；名为 sanitizeHtml 的函数只解析/提取 style，并未移除事件处理器、危险 URL 或标签。<br><strong>为什么重要：</strong>获得内容编辑权限或污染内容源的攻击者可在所有 Classic 用户浏览器执行脚本。<br><strong>场景：</strong>公告/关于/文档包含带事件处理器的标签；本地 marked 证明事件属性会保留。攻击前置受管理员内容权限约束，故为 Medium。</div>
+    <div class="evidence">web/classic/src/pages/About/index.jsx:41-45、167-170
+web/classic/src/components/dashboard/AnnouncementsPanel.jsx:83-103
+web/classic/src/components/common/DocumentRenderer/index.jsx:49-61、117-139、196-208
+Classic package 未引入 DOMPurify</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>所有 HTML/Markdown 输出统一 DOMPurify allowlist；禁止 style、script、on*、javascript:，外链加安全属性。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>复用 Default 的安全渲染组件，服务端也做内容策略和 CSP 防御。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>覆盖事件属性、javascript URL、SVG/style payload，DOM 不得执行且危险节点被移除。 <strong>工作量：</strong>0.5–1 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F19. 健康检查同时存在永久假红和依赖故障假绿</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Observability / Release</span><span>影响：告警、部署判定</span></div>
+    <div class="problem"><strong>问题：</strong>auth-service 已退役，healthcheck 仍强制检查其端口和容器；app 探针 /api/status 只返回配置，不 ping DB/Redis。<br><strong>为什么重要：</strong>正常拓扑长期报警导致疲劳，而 DB 故障时部署和容器仍判绿。<br><strong>场景：</strong>cron 每次至少报两项 auth 异常；同时断开 DB，/api/status 仍 success:true。</div>
+    <div class="evidence">deploy/docker-compose.test.yml:70-71
+deploy/ops/healthcheck.sh:33-63
+controller/misc.go:42-123 — status 不探测依赖
+controller/misc.go:23-38 — PingDB 位于另一个受保护端点</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>删除退役 auth 检查；新增 /health/live 和 /health/ready，ready 检查 DB，并区分 Redis required/degraded。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>服务级 SLO + 合成关键交易探针，部署只消费 readiness。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>当前拓扑全绿；断 DB 时 live=200、ready=503；Redis 按配置判定。 <strong>工作量：</strong>0.5–1 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F20. Release/Electron 版本注入路径错误，二进制保留 v0.0.0</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Release Identity</span><span>影响：事故定位、兼容判断、回滚取证</span></div>
+    <div class="problem"><strong>问题：</strong>workflow 用 new-api/common.Version 注入，但真实 Go import path 是 github.com/QuantumNous/new-api/common；错误 -X 静默不改默认值。<br><strong>为什么重要：</strong>文件名与 checksum 带 tag，二进制自身却自报 v0.0.0。<br><strong>场景：</strong>事故中多个 tag 产物无法通过 --version 区分。</div>
+    <div class="evidence">go.mod:1；common/constants.go:16
+.github/workflows/release.yml:57、62、117、174
+.github/workflows/electron-build.yml:64
+Dockerfile:43-45 使用正确完整路径，可作对照</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>统一 -X github.com/QuantumNous/new-api/common.Version=$VERSION，并在上传前执行产物 --version 精确比对。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>抽成单一可复用构建脚本/Make target，所有 OS/容器共享。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>每个 OS 产物 --version 必须等于触发 tag，否则禁止发布。 <strong>工作量：</strong>1–2 小时。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F21. 已退役拓扑、辅助构建和运维文档相互漂移</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Documentation / Auxiliary Release</span><span>影响：auth-service、Electron、事故 runbook</span></div>
+    <div class="problem"><strong>问题：</strong>auth Dockerfile COPY 被 gitignore 的 config.yaml；Electron 在无 build script 的 web 根运行 build，README 又引用不存在的 npm start；运维文档继续推荐已被脚本拒绝的 --git 回滚及退役 8180 拓扑。<br><strong>为什么重要：</strong>clean checkout 和事故操作按仓库说明会确定性失败。<br><strong>场景：</strong>从 git archive 构建 auth 在 COPY 失败；Electron tag 在前端阶段退出；事故时 --git 立即报废弃。</div>
+    <div class="evidence">Dockerfile.authservice:17-18；.gitignore:56
+.github/workflows/electron-build.yml:48-51；electron/build.sh:7-10；web/package.json 无 build
+electron/README.md:27-30；electron/package.json:6-12
+deploy/ops/README.md:37、58、75；go-live.md:62-74、126；rollback.sh:95</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>退役制品彻底移除或修正 clean build；Electron 明确进入 web/default；runbook 删除 --git/8180 并引用 --to 与进程内支付。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>所有文档命令在 clean archive CI 中执行；拓扑从单一清单生成。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>clean archive 完成辅助 build/package smoke，文档命令 lint 与 Nginx 拓扑测试通过。 <strong>工作量：</strong>0.5–1 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F22. 辅助构建链存在高危/严重依赖，且无审计门</h4><span class="badge badge-medium">Medium</span><span class="badge badge-suspected">Suspected</span></div>
+    <div class="finding-meta"><span>置信度：Medium</span><span>类别：Dependency / Supply Chain</span><span>影响：Electron、Orbit、Web 构建/开发链</span></div>
+    <div class="problem"><strong>问题：</strong>npm/bun audit 报告 Electron 的 form-data/tar/tmp、Orbit 的 happy-dom/vite/vitest，以及 Web 的 form-data/hono/vite 风险；CI 没有 dependency audit。<br><strong>为什么重要：</strong>漏洞存在已确认，但多数位于构建/dev/test 路径，具体可利用性需按暴露面验证，因此状态为 Suspected。<br><strong>场景：</strong>不可信测试输入、暴露 dev UI 或被污染归档触发对应漏洞。</div>
+    <div class="evidence">electron/package-lock.json — audit 3 High / 3 Moderate
+bulb-orbit/v2/package-lock.json — audit 2 Critical / 1 High / 3 Moderate
+bun audit — form-data、hono、vite High/Moderate；Hono/Vite 多为 dev 链
+.github/workflows/ci.yml — 无 audit job</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>升级锁文件至修复版本并跑 build/test/package；按 runtime/build/dev 分类建立有期限例外。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>CI 审计门 + 自动依赖更新 + SBOM diff + exploitability 记录。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>三个 workspace 在既定阈值上 audit 为零，Electron clean package 与 Orbit 测试/构建通过。 <strong>工作量：</strong>0.5–1 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F23. SUB 订单与购买快照不在同一事务</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Transaction / Data Integrity</span><span>影响：孤儿订单、对账噪声、无法激活</span></div>
+    <div class="problem"><strong>问题：</strong>CreateOrder 成功后再 SavePendingPurchase，源码也注明真实实现应同事务。快照失败会留下 provider 为空且无法激活的 pending 订单。<br><strong>为什么重要：</strong>对账会持续扫描并失败，支付/订单台账与购买意图失配。<br><strong>场景：</strong>第二次 INSERT 因 DB 故障失败，第一条订单仍永久 pending。</div>
+    <div class="evidence">internal/tokenplan/subscription.go:38-45、87-116
+internal/mtwire/subscription_bridge.go:132-153、271-274
+internal/mtwire/sub_reconcile.go:47-99</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>在同一 GORM transaction 写订单与快照；或失败时 CAS 到明确 failed 并记录原因。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>订单聚合拥有单一持久边界，并由 outbox 创建外部支付凭据。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>真实 DB 强制快照写失败，不得存在 pending 孤儿。 <strong>工作量：</strong>1–2 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F24. 11 个 Provider 的 Claude 转换直接 panic</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Backend API / Stability</span><span>影响：/v1/messages、重试路由</span></div>
+    <div class="problem"><strong>问题：</strong>多个 adaptor 的 ConvertClaudeRequest 使用 panic("implement me")，调用方却按普通 error 设计。<br><strong>为什么重要：</strong>协议/模型错误映射会进入全局 Recovery 返回 500，绕过类型化 unsupported 与正常 retry/fallback。<br><strong>场景：</strong>Claude 请求被选到 Mistral/Baidu 等未实现渠道，触发 panic。</div>
+    <div class="evidence">relay/channel/{baidu,palm,cohere,cloudflare,zhipu,xunfei,mokaai,mistral,tencent,jina,dify}/adaptor.go
+relay/claude_handler.go:161-164
+go vet ./common ./relay/... 发现对应 unreachable code</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>返回类型化 unsupported protocol error；渠道选择前按能力矩阵过滤，生产路径不得 panic。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>provider capability 由声明式契约生成路由/测试。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>表驱动遍历 adaptor，不支持 Claude 的渠道返回 error 且永不 panic。 <strong>工作量：</strong>0.5 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F25. CreatePay 补偿测试没有执行真实 Handler 分支</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Testing Authenticity</span><span>影响：Trial 永久限购键补偿信心</span></div>
+    <div class="problem"><strong>问题：</strong>生产补偿位于 HandlePurchase 的 CreatePay 错误分支，测试却明确跳过 HTTP/CreatePay，并手工调用 ReleasePurchaseClaim。<br><strong>为什么重要：</strong>生产代码删除、错序或漏调用补偿时，测试仍然绿色。<br><strong>场景：</strong>重构 Handler 忘记释放 Trial claim，现有测试不经过该代码仍通过。</div>
+    <div class="evidence">internal/mtwire/http.go:309-327 — 真实补偿
+internal/mtwire/risk_purchase_compensation_test.go:157-199 — 手工调用、跳过 Handler</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>为支付创建注入接口，通过真实 Router 令 CreatePay 返回错误并观察 claim 是否释放。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>状态机级契约测试覆盖每个生产错误边，而不是复制实现步骤。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>HTTP 请求触发 CreatePay 失败，claim 释放且响应保留原错误。 <strong>工作量：</strong>0.5–1 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F26. Default 前端声明的质量门全部失效且 CI 未执行</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Type Safety / CI</span><span>影响：Default 前端回归发现能力</span></div>
+    <div class="problem"><strong>问题：</strong>typecheck 因测试类型、字面量类型和 Base UI props 失败；lint 报 638 errors/237 warnings；format:check 因不存在的 web/default/.gitignore 失败。CI 只跑 bun test 和 rsbuild build，而 build 不执行类型检查。<br><strong>为什么重要：</strong>仓库提供的检查无法作为本地门，CI 又绕开它们，类型/规范回归可以绿灯合并。<br><strong>场景：</strong>TooltipTrigger 传不支持的 asChild，生产 build 成功但 typecheck 已指出错误。</div>
+    <div class="evidence">web/default/package.json:6-19 — typecheck/lint/format scripts
+动态验证：bun run typecheck exit 1；bun run lint 638 errors / 237 warnings；format:check 因 .gitignore 缺失退出
+.github/workflows/ci.yml:85-93 — 只 test + build</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>清零真实 type errors；修正 format ignore path；建立 lint baseline 后 CI 执行 build:check、lint、format:check。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>预提交和 CI 共享单一 quality 命令，禁止 build 与 typecheck 语义漂移。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>故意加入类型错误/格式错误，CI 对应 job 必须失败。 <strong>工作量：</strong>1–3 天（含历史清账）。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F27. Default 初始页面仍急加载约 9.73 MB JavaScript</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Performance / Dependency Weight</span><span>影响：首屏下载、解析、低端设备</span></div>
+    <div class="problem"><strong>问题：</strong>虽启用生产路由自动分块和 vendor split，生成的 index.html 仍急加载约 9.73 MB JS（约 3.31 MB gzip）；总 dist 约 57 MB。<br><strong>为什么重要：</strong>高延迟/移动端首屏需要下载并解析大量与当前路由无关代码。<br><strong>场景：</strong>登录/落地页同时加载 5.8 MB 与 3.2 MB 主 chunk，弱网交互显著延迟。</div>
+    <div class="evidence">web/default/rsbuild.config.ts:27-53、93-100 — splitChunks + route splitting
+bun run build 成功：dist 57,026.4 kB / 16,545.2 kB gzip
+dist/index.html 急加载 vendor + 5,828.3 kB + 3,217.5 kB 等，合计约 9.73 MB JS</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>用 bundle analyzer 找到两个巨型入口 chunk；把图表、编辑器、three、AI playground、管理抽屉按路由/交互动态加载；设置初始 JS 预算。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>CI 按关键路由跟踪 raw/gzip/brotli 与性能基线，超预算阻断。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>构建后解析 index.html，初始 JS/gzip 不超过团队阈值；关键路由 Playwright 验证懒加载。 <strong>工作量：</strong>2–5 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F28. i18n 同步报告“零缺失”，但工具从不扫描代码调用</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：i18n / Documentation Accuracy</span><span>影响：en/zh/fr/ja/ru/vi UI</span></div>
+    <div class="problem"><strong>问题：</strong>sync-i18n 只在 locale JSON 之间选“最丰富”基准并比较，从不提取源码 t(...)；只读字面量扫描发现 4,131 个调用键中 162 个不在 en，且 en 中另有 135 个键未覆盖一个或多个非英语 locale。<br><strong>为什么重要：</strong>报告可显示 0 missing，实际 UI 却回退为英文/中文 defaultValue。<br><strong>场景：</strong>Sample data、支付二维码与告警设置等新文案在法/日/俄/越界面显示 fallback。</div>
+    <div class="evidence">web/default/scripts/sync-i18n.mjs:216-310 — 只读 locale 文件，不扫描 src
+web/default/src/i18n/config.ts:41-55 — fallbackLng=en，六语言
+只读静态扫描：4131 个单引号字面量键，162 个缺 en；135 个 en 键未覆盖全部 fr/ja/ru/vi
+示例：sample-data-badge.tsx:33、37</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>按项目 i18n skill 用 add-missing-keys 工具一次性补齐六语言；CI 新增源码键提取，并让缺 en/任一 locale 失败。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>统一静态键策略，动态键显式 allowlist，报告同时覆盖 source→base→all locales。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>新增一个 t('new key') 不改 locale，CI 必须失败；补齐六语言后通过。 <strong>工作量：</strong>1–2 天。</div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header"><h4>F29. 多个巨型组件/控制器集中数千行职责</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Maintainability / Architecture</span><span>影响：渠道配置、参数覆盖、后端渠道控制</span></div>
+    <div class="problem"><strong>问题：</strong>ChannelMutateDrawer 4,179 行（主组件从 483 行延续到文件末尾），ParamOverrideEditorDialog 3,319 行，controller/channel.go 2,170 行；单文件同时承担表单状态、网络、解析、规则、对话框与渲染。<br><strong>为什么重要：</strong>修改任一业务规则都触碰巨大共享上下文，审查、测试、按需加载和团队并行成本上升。<br><strong>场景：</strong>新增 provider 字段需要在一个 3,000+ 行组件内协调验证、默认值、序列化和 UI 分支。</div>
+    <div class="evidence">web/default/src/features/channels/components/drawers/channel-mutate-drawer.tsx — 4179 行
+web/default/src/features/channels/components/dialogs/param-override-editor-dialog.tsx — 3319 行
+controller/channel.go — 2170 行</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>先按稳定业务概念拆 schema/normalization、provider fields、file import、network mutation、presentational sections；保持单一调用入口。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>provider capability/schema 驱动表单；后端按查询、变更、测试、导入领域拆 controller/service。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>先补序列化/验证契约测试，再逐段抽取；行为快照保持一致。 <strong>工作量：</strong>1–3 周渐进式。</div>
+  </div>
+
+  <div class="finding severity-low">
+    <div class="finding-header"><h4>F30. Base UI TooltipTrigger 使用 Radix 的 asChild API</h4><span class="badge badge-low">Low</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Accessibility / Type Safety</span><span>影响：Sample data 角标交互语义</span></div>
+    <div class="problem"><strong>问题：</strong>项目 Tooltip 基于 @base-ui/react，调用点却传 asChild；Base UI 应使用 render 组合。TypeScript 已明确报该 prop 不存在。<br><strong>为什么重要：</strong>运行时可能产生额外触发元素/属性落空，键盘与 tooltip 语义不可靠。<br><strong>场景：</strong>SampleDataBadge 在生产构建通过，但 typecheck 失败且触发器组合不符合当前 UI primitive 契约。</div>
+    <div class="evidence">web/default/src/features/pricing/components/sample-data-badge.tsx:22-35
+web/default/src/components/ui/tooltip.tsx:39-40 — Base UI Trigger props
+bun run typecheck：asChild 不可赋给 TooltipTrigger props</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>改用 &lt;TooltipTrigger render={&lt;Badge ... /&gt;} /&gt; 或按项目 Base UI 封装提供明确 composition API。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>为 shadcn/Base UI wrapper 增加类型/键盘交互测试，禁止混用 Radix API。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>typecheck 通过，Tab/Enter/hover 均能显示 tooltip 且 DOM 只有预期交互元素。 <strong>工作量：</strong>&lt;1 小时。</div>
+  </div>
+
+  <div class="finding severity-low">
+    <div class="finding-header"><h4>F31. malformed JSON 被静默当成默认微信支付请求</h4><span class="badge badge-low">Low</span><span class="badge badge-confirmed">Confirmed</span></div>
+    <div class="finding-meta"><span>置信度：High</span><span>类别：Backend API / Input Validation</span><span>影响：套餐购买入口</span></div>
+    <div class="problem"><strong>问题：</strong>HandlePurchase 忽略 ShouldBindJSON 错误，因为 body 被视为“可选”；语法错误的非空 JSON 与空 body 无法区分，都会默认 wxpay。<br><strong>为什么重要：</strong>客户端本想指定 alipay 但请求截断时，服务端可能创建错误渠道订单，而不是返回 400。<br><strong>场景：</strong>发送截断的 provider JSON，绑定失败后 body.Provider 为空，继续按微信下单。</div>
+    <div class="evidence">internal/mtwire/http.go:267-276 — _ = c.ShouldBindJSON(&amp;body)，随后默认 wxpay</div>
+    <div class="fix-box"><div class="fix-label">最小修复</div><code>仅 EOF 代表可选空 body；其他 bind error 返回 400 INVALID_REQUEST。</code></div>
+    <div class="fix-box"><div class="fix-label">长期修复</div>统一可选 JSON body helper，区分 absent、malformed、invalid enum。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><strong>回归测试：</strong>空 body 默认 wxpay；截断/错误类型 JSON 返回 400 且不得创建订单。 <strong>工作量：</strong>&lt;0.5 天。</div>
+  </div>
+
+  <h3 class="section-title" id="architecture">🏗 架构与模块边界</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> main/router/middleware/controller/service/model 分层，internal 领域模块、relay provider、Default/Classic/Electron/Orbit、发布拓扑。</p><p><strong>Exclusions / limits:</strong> 未从生产 tracing 还原运行时调用图。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 3 个发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F23 SUB 订单与快照跨事务边界</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F29 巨型组件/控制器集中多领域职责</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F21 辅助制品与主拓扑漂移</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证良好</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 主 Go 路径总体遵循 Router → Controller → Service → Model</div><div class="check-item"><span class="check">✓</span> internal/risk、payment、tokenplan 等有接口注入和领域边界</div><div class="check-item"><span class="check">✓</span> Default 前端 feature 目录比 Classic 的横向共享更清晰</div></div></div></div>
+
+  <h3 class="section-title" id="security">🔒 安全</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> Cookie/Token/RBAC、session 生命周期、SSRF、HTML 注入、Nginx、发布权限、secret pattern。</p><p><strong>Exclusions / limits:</strong> gitleaks/semgrep 不可用；未做真实网络渗透和 DNS rebinding 实验。</p></div></div>
+  <div class="card"><div class="card-header">发现摘要 <span class="small">· 6 个</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F08 旧高权限 Cookie 不可及时撤销</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F09 Cookie 可明文传输</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F13/F14 发布供应链高权限执行面</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F15 DNS Rebinding TOCTOU</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr><tr><td>F18 Classic 存储型 XSS</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证安全措施</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 生产测试 Compose 对主要 DB/会话密钥采用 :? fail-closed</div><div class="check-item"><span class="check">✓</span> 主要 Nginx vhost 拒绝 /api/internal/</div><div class="check-item"><span class="check">✓</span> 下载/解压存在响应体与解压后大小上限</div><div class="check-item"><span class="check">✓</span> secret 模式扫描未发现可确认的真实私钥/token</div></div></div></div>
+
+  <h3 class="section-title" id="stability">⚡ 稳定性与错误处理</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> 额度/退款/支付/权益状态机、panic、日志、健康、恢复、补偿与 race 测试。</p><p><strong>Exclusions / limits:</strong> 未在生产流量与真实支付平台上注入故障。</p></div></div>
+  <div class="card"><div class="card-header">发现摘要 <span class="small">· 11 个相关发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F01 在线恢复破坏跨存储一致性</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F02–F07 资金/权益并发与持久化失效</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F17 日志无界，F19 健康误判，F24 provider panic</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证稳健措施</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> go test ./... 与重点 internal -race 通过</div><div class="check-item"><span class="check">✓</span> internal/risk 对本次 SetNX 成功键做精确补偿</div><div class="check-item"><span class="check">✓</span> SUB 激活已有幂等 source_order_id 和收益 idem_key</div><div class="check-item"><span class="check">✓</span> HTTP 请求体过大可映射 413</div></div></div></div>
+
+  <h3 class="section-title" id="performance">🚀 性能与可扩展性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> Medium</p><p><strong>Inspected evidence:</strong> Default/Orbit 构建体积、路由分块、Redis/内存缓存、批处理写、并发热路径。</p><p><strong>Exclusions / limits:</strong> 无生产吞吐、CPU/heap、DB query plan 或浏览器 RUM。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 2 个主要发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F27 初始页面急加载约 9.73 MB JS</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F04 用不持久批处理换吞吐，故障语义不成立</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证性能措施</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> Default 生产启用 TanStack 路由自动分块</div><div class="check-item"><span class="check">✓</span> Redis AOF/缓存与批量统计体现吞吐意识</div><div class="check-item"><span class="check">✓</span> Orbit 构建通过，仅有 541.66 kB chunk 警告</div></div></div></div>
+
+  <h3 class="section-title" id="testing">🧪 测试质量</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> Go 全树/重点 race/coverage、Default 88 测试、Orbit 31 测试、CI 收集范围与失败路径断言。</p><p><strong>Exclusions / limits:</strong> 未跑需要真实外部服务的集成/E2E。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 3 个发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F12 CI 漏 533 个 Go 测试与多个交付面</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F25 补偿测试手工调用而非生产 Handler</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F26 前端检查门失效且未进 CI</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证测试资产</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> go test ./... 全部通过</div><div class="check-item"><span class="check">✓</span> internal/risk 91.5%、tokenplan 95.3% statement coverage</div><div class="check-item"><span class="check">✓</span> Default bun test 88/88，Orbit 31/31</div><div class="check-item"><span class="check">✓</span> 多个支付/风险测试使用确定性 CAS/屏障思路</div></div></div></div>
+
+  <h3 class="section-title" id="maintainability">📐 可维护性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> 文件/函数体量、lint/format/knip、i18n、文档漂移、模块组织。</p><p><strong>Exclusions / limits:</strong> 未做逐函数认知复杂度统计。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 4 个发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F21 文档/辅助制品漂移</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F26 lint/format/typecheck 基线失效</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F28 i18n 工具假干净</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F29 数千行组件/控制器</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证可维护性亮点</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> AGENTS.md 对 DB、JSON、i18n、测试语义有明确约束</div><div class="check-item"><span class="check">✓</span> 新 internal 模块普遍用接口和 constructor 注入</div><div class="check-item"><span class="check">✓</span> Default 使用 feature-oriented 目录与统一 UI wrapper</div></div></div></div>
+
+  <h3 class="section-title" id="design">📋 设计原则合规</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> SRP、DRY、KISS、Fail-Fast、最小权限、原子状态迁移、依赖边界。</p><p><strong>Exclusions / limits:</strong> 原则计数按独立发现归类，不是自动静态度量。</p></div></div>
+  <div class="card"><div class="card-header">主要违例</div><div class="card-body" style="padding:0"><table><thead><tr><th>原则</th><th>对应发现</th><th>严重度</th></tr></thead><tbody><tr><td>原子性 / 状态完整</td><td>F02–F07、F23</td><td><span class="badge badge-high">High</span></td></tr><tr><td>Fail-Fast / 不吞错误</td><td>F10、F16、F24、F31</td><td><span class="badge badge-high">High</span></td></tr><tr><td>最小权限 / 安全默认</td><td>F08、F09、F13、F14、F17</td><td><span class="badge badge-high">High</span></td></tr><tr><td>SRP</td><td>F29</td><td><span class="badge badge-medium">Medium</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证遵循</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 风险引擎把 KV、Repo、Clock 抽象为可测试依赖</div><div class="check-item"><span class="check">✓</span> 多数错误使用领域 AppError 而非裸字符串</div><div class="check-item"><span class="check">✓</span> 生产测试 Compose 的敏感变量采用显式 fail-closed</div></div></div></div>
+
+  <h3 class="section-title" id="release">🚢 发布与部署</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> 8 个 workflow、Dockerfile/Compose、VERSION、备份/恢复/回滚/健康、Electron/auth/Classic。</p><p><strong>Exclusions / limits:</strong> 未推送镜像或执行真实服务器切换。</p></div></div>
+  <div class="card"><div class="card-header">发现摘要 <span class="small">· 10 个相关发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F01 恢复链 Critical</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F10/F11 备份与回滚不可靠</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F12 Classic/CI 交付门失配</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F13/F14 供应链执行面</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F19–F22 健康、版本、辅助制品、依赖门</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Mixed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证发布措施</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 主 Dockerfile 基础镜像 pin digest、使用多阶段构建</div><div class="check-item"><span class="check">✓</span> 稳定镜像生成 provenance/SBOM 并 cosign</div><div class="check-item"><span class="check">✓</span> restore 有强确认、源副本与 pre-backup</div><div class="check-item"><span class="check">✓</span> 部署有 :prev 镜像和源码归档概念</div></div></div></div>
+
+  <h3 class="section-title" id="documentation">📚 文档准确性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> ops README/go-live/migrate、Electron README、Compose/Nginx 注释、i18n report。</p><p><strong>Exclusions / limits:</strong> 未验证全部外语 README 与外链。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 2 个发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F21 文档指向已删除参数/服务/脚本</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F28 i18n 报告对源码缺键给出假阴性</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证文档亮点</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 复杂风险 TTL 与恢复危险性有充分上下文</div><div class="check-item"><span class="check">✓</span> migrate-note 明确 AutoMigrate 前向、无 down 的限制</div><div class="check-item"><span class="check">✓</span> AGENTS.md 明确跨数据库与可选 scalar DTO 规则</div></div></div></div>
+
+  <h3 class="section-title" id="configuration">⚙️ 配置安全</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> common 初始化、Compose、环境变量、Nginx、Cookie、批处理/Redis 默认。</p><p><strong>Exclusions / limits:</strong> 未读取服务器真实 .env 或 Cloudflare 当前配置。</p></div></div>
+  <div class="card"><div class="card-header">发现摘要</div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F09 不安全/不持久会话默认</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F04 默认开启不持久批量计费</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F19 健康拓扑配置漂移</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证安全默认</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> test Compose 对 MYSQL_ROOT_PASSWORD/SESSION_SECRET/CRYPTO_SECRET 使用 :?</div><div class="check-item"><span class="check">✓</span> app 在 test Compose 仅绑定 127.0.0.1:3100</div><div class="check-item"><span class="check">✓</span> TLS 协议限定 1.2/1.3</div></div></div></div>
+
+  <h3 class="section-title" id="observability">🩺 可观测性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> request ID、文件/stdout 日志、status/readiness、healthcheck、部署版本探针和对账告警。</p><p><strong>Exclusions / limits:</strong> 未连接真实日志查询、指标和告警系统。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 3 个发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F17 敏感且无界日志</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F19 健康假红/假绿</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F20 二进制版本身份错误</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证可观测措施</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> Request ID 写入响应与普通日志</div><div class="check-item"><span class="check">✓</span> 管理员写操作存在审计日志</div><div class="check-item"><span class="check">✓</span> reconcile/critical alert 具备去重键</div></div></div></div>
+
+  <h3 class="section-title" id="data-integrity">🧱 数据完整性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> 额度、订单、支付回调、权益、代理分润、备份/恢复、Redis 永久键、GORM 事务。</p><p><strong>Exclusions / limits:</strong> 未对真实生产数据运行 reconcile 或恢复演练。</p></div></div>
+  <div class="card"><div class="card-header">发现摘要 <span class="small">· 10 个相关发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F01 恢复点跨 MySQL/Redis 不一致</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F02–F07 额度/退款/支付/权益不变量</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F16 错误折扣快照</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F23 SUB 跨事务孤儿订单</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证数据保护</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> payment/收益使用 CAS 与唯一幂等键</div><div class="check-item"><span class="check">✓</span> Redis 启用 AOF 与 named volume</div><div class="check-item"><span class="check">✓</span> backup MySQL 使用 --single-transaction</div><div class="check-item"><span class="check">✓</span> GORM 代码整体保持三数据库兼容思路</div></div></div></div>
+
+  <h3 class="section-title" id="privacy">🛡 隐私与数据治理</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> Medium</p><p><strong>Inspected evidence:</strong> 支付 webhook、AI 请求/响应 debug、日志权限/保留、IP/buyer identity。</p><p><strong>Exclusions / limits:</strong> 未逐 provider 枚举数据字段，也未审计完整用户导出/删除生命周期。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 2 个发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F17 支付签名/body、身份与 prompt 进入日志</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F18 注入内容可读取 Classic 用户上下文</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证隐私措施</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 设备指纹使用 SHA-256 截断，不记录原始 IP 作为键</div><div class="check-item"><span class="check">✓</span> 部分响应错误已有长度限制/脱敏函数</div><div class="check-item"><span class="check">✓</span> Cookie 设置 HttpOnly 与 SameSite=Strict</div></div></div></div>
+
+  <h3 class="section-title" id="accessibility">⌨️ 可访问性与 UX 正确性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> Medium</p><p><strong>Inspected evidence:</strong> Base UI/shadcn 组合、Tooltip、类型错误、部分 aria/交互源码。</p><p><strong>Exclusions / limits:</strong> 未运行屏幕阅读器、axe 或完整键盘 E2E，因此不作“整体无障碍通过”结论。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 1 个发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F30 Base UI Trigger 混用 Radix asChild</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证 UX 措施</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 多数外链使用 noopener noreferrer</div><div class="check-item"><span class="check">✓</span> Default UI wrapper 统一 data-slot 与焦点样式</div><div class="check-item"><span class="check">✓</span> 示例数据角标主动标注 mock 数据，避免误导决策</div></div></div></div>
+
+  <h3 class="section-title" id="supply-chain">🔗 供应链与可复现性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> GitHub Actions pin/权限、Docker digest/SBOM/cosign、Go/Bun/npm lock、audit/why、远程安装脚本。</p><p><strong>Exclusions / limits:</strong> trivy/osv/syft/cosign 本机不可用；漏洞实际利用性按路径单独标注。</p></div></div>
+  <div class="card"><div class="card-header">发现摘要 <span class="small">· 3 个</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F13 可变 Actions 处理发布凭据</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F14 root curl | sh</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F22 辅助链依赖 advisories</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证供应链措施</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 主 Dockerfile 的 Bun/Go/Debian 基础镜像 pin digest</div><div class="check-item"><span class="check">✓</span> alpha/release Actions 已完整 SHA pin</div><div class="check-item"><span class="check">✓</span> go mod verify 通过；Web/Release 使用 frozen lock</div><div class="check-item"><span class="check">✓</span> 稳定镜像生成 SBOM/provenance 并签名</div></div></div></div>
+
+  <h3 class="section-title" id="cost">💸 成本与资源经济性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> Medium</p><p><strong>Inspected evidence:</strong> 上游调用前额度、批处理、退款、日志磁盘、前端传输体积。</p><p><strong>Exclusions / limits:</strong> 无真实云账单、token 分布、磁盘增长与 CDN/RUM 数据。</p></div></div>
+  <div class="card"><div class="card-header">发现摘要</div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>成本后果</th><th>严重程度</th></tr></thead><tbody><tr><td>F02 并发透支</td><td>未付上游请求成本</td><td><span class="badge badge-high">High</span></td></tr><tr><td>F04 批量 delta 丢失</td><td>少扣费/少计量</td><td><span class="badge badge-high">High</span></td></tr><tr><td>F17 无界日志</td><td>磁盘与事故成本</td><td><span class="badge badge-medium">Medium</span></td></tr><tr><td>F27 巨型首屏</td><td>带宽/用户等待</td><td><span class="badge badge-medium">Medium</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证成本控制</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 请求体/下载/解压存在上限</div><div class="check-item"><span class="check">✓</span> 备份已有 KEEP 保留策略</div><div class="check-item"><span class="check">✓</span> Redis/内存批处理目标明确减少热行写放大</div></div></div></div>
+
+  <h3 class="section-title" id="ai-safety">🤖 AI / LLM 安全</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> Medium</p><p><strong>Inspected evidence:</strong> AI relay 请求边界、provider 能力转换、prompt/response 日志、请求大小与计费。</p><p><strong>Exclusions / limits:</strong> 项目不是自主工具 Agent；未运行 prompt injection/model behavior 红队或内容安全评估。</p></div></div>
+  <div class="card"><div class="card-header">相关发现</div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F17 DEBUG 记录完整 prompt/response</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F24 不支持的协议以 panic 失败</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F02/F04 计费边界可能与上游成本失配</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证 AI 边界</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 多协议请求 DTO 和转换层相对显式</div><div class="check-item"><span class="check">✓</span> 请求体存在统一存储/大小错误处理</div><div class="check-item"><span class="check">✓</span> 计费 hook 有 request ID 与幂等来源概念</div></div></div></div>
+
+  <h3 class="section-title" id="fallback">🪂 降级与防御性代码</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> risk Redis fail-open、计费 refund、支付 CAS、下单补偿、provider unsupported、部署失败分支。</p><p><strong>Exclusions / limits:</strong> 未对所有第三方 provider 注入 timeout/5xx。</p></div></div>
+  <div class="card"><div class="card-header">发现摘要</div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>失败模式</th><th>严重程度</th></tr></thead><tbody><tr><td>F03/F04</td><td>补偿或批量写失败后静默丢状态</td><td><span class="badge badge-high">High</span></td></tr><tr><td>F05/F06</td><td>CAS 失败错误地视为成功</td><td><span class="badge badge-high">High</span></td></tr><tr><td>F10/F16</td><td>备份/DB 错误被吞</td><td><span class="badge badge-high">High</span></td></tr><tr><td>F24</td><td>unsupported 以 panic 失败</td><td><span class="badge badge-medium">Medium</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证降级措施</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 风控基础设施错误会留痕并 fail-open，避免全站 /v1 变 500</div><div class="check-item"><span class="check">✓</span> Trial claim 已提供 ReleasePurchaseClaim 与管理释放通道</div><div class="check-item"><span class="check">✓</span> 多数 provider 错误能包装为 NewAPIError 并携带状态</div></div></div></div>
+
+  <h3 class="section-title" id="testing-authenticity">🎭 测试真实性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> 测试是否经过生产入口、CI 收集集合、并发断言与 build/typecheck 分离。</p><p><strong>Exclusions / limits:</strong> 未逐个评估 1,200 个 Go Test/Benchmark/Fuzz。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 3 个发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>虚假信心来源</th><th>严重程度</th></tr></thead><tbody><tr><td>F12</td><td>PR 门不运行大量已有测试/交付面</td><td><span class="badge badge-high">High</span></td></tr><tr><td>F25</td><td>测试手工执行补偿，不经过 Handler</td><td><span class="badge badge-medium">Medium</span></td></tr><tr><td>F26</td><td>build 绿但类型/lint/format 红</td><td><span class="badge badge-medium">Medium</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证真实测试</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> risk 的 SetNX/补偿并发测试使用真实竞争不变量</div><div class="check-item"><span class="check">✓</span> payment/repo 多数使用真实 GORM 测试库</div><div class="check-item"><span class="check">✓</span> 本次动态命令禁用缓存或运行 race 交叉验证重点模块</div></div></div></div>
+
+  <h3 class="section-title" id="type-safety">🔤 类型安全</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> tsgo、Go vet、DTO、Base UI props、可选字段约定。</p><p><strong>Exclusions / limits:</strong> Classic 为 JavaScript，无法提供同等静态保证；全树 vet 受 embed dist 与既有 relay 问题限制。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 2 个发现</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F26 tsgo 当前失败</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F30 Base UI props 不匹配</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证类型实践</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> Go request DTO 多数使用明确结构体与领域 enum</div><div class="check-item"><span class="check">✓</span> Default React 使用 TypeScript strict build 图</div><div class="check-item"><span class="check">✓</span> 项目规则明确要求可选 scalar 使用指针保留显式零值</div></div></div></div>
+
+  <h3 class="section-title" id="frontend-state">🖥 前端状态管理</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> Medium</p><p><strong>Inspected evidence:</strong> TanStack 路由/查询、Zustand、表单抽屉、localStorage 内容缓存、i18n fallback。</p><p><strong>Exclusions / limits:</strong> 未通过浏览器录制竞态、导航和断网恢复。</p></div></div>
+  <div class="card"><div class="card-header">相关发现</div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>状态风险</th><th>严重程度</th></tr></thead><tbody><tr><td>F18</td><td>不可信 HTML 缓存到 localStorage 后持续注入</td><td><span class="badge badge-medium">Medium</span></td></tr><tr><td>F28</td><td>语言 fallback 掩盖缺键状态</td><td><span class="badge badge-medium">Medium</span></td></tr><tr><td>F29</td><td>巨型表单组件混合服务器/本地/UI 状态</td><td><span class="badge badge-medium">Medium</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证状态实践</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> Default 采用 TanStack Query 管理服务器缓存</div><div class="check-item"><span class="check">✓</span> 路由按 feature 组织并支持自动代码分割</div><div class="check-item"><span class="check">✓</span> 多数表单使用 react-hook-form/Zod 能力</div></div></div></div>
+
+  <h3 class="section-title" id="backend-api">🔌 后端 API</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> 路由鉴权、JSON 绑定、错误映射、状态/支付回调、provider adaptor、SSRF 下载/代理。</p><p><strong>Exclusions / limits:</strong> 未向每个公开 endpoint 发送真实请求。</p></div></div>
+  <div class="card"><div class="card-header">发现摘要</div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F08 Cookie 授权状态陈旧</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F15 SSRF 拨号边界</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr><tr><td>F16 错误被吞并改变财务语义</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F24 provider panic</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr><tr><td>F31 malformed JSON 默认下单</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证 API 实践</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 管理/用户/relay 路由有明确认证分组</div><div class="check-item"><span class="check">✓</span> 统一 NewAPIError/AppError 提供多数错误映射</div><div class="check-item"><span class="check">✓</span> 请求体过大与无效 provider 有显式错误</div></div></div></div>
+
+  <h3 class="section-title" id="dependency-weight">📦 依赖重量</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> Medium</p><p><strong>Inspected evidence:</strong> package manifests/locks、bun pm why、knip、构建 chunks、npm/bun audit。</p><p><strong>Exclusions / limits:</strong> 未测 Go 二进制/Electron 安装包尺寸，knip 对生成路由可能有假阳性。</p></div></div>
+  <div class="card"><div class="card-header">发现摘要</div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>严重程度</th><th>状态</th></tr></thead><tbody><tr><td>F22 辅助链 advisories</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-suspected">Suspected</span></td></tr><tr><td>F27 初始 JS 与总 dist 过重</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证依赖实践</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> Bun workspace 与 Go module 有锁/校验机制</div><div class="check-item"><span class="check">✓</span> Default 已配置 vendor/route splitting</div><div class="check-item"><span class="check">✓</span> Docker build 输出 SBOM</div></div></div></div>
+
+  <h3 class="section-title" id="code-consistency">🧹 代码一致性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> High</p><p><strong>Inspected evidence:</strong> gofmt、go vet、oxlint、format、项目 JSON wrapper/UI 组合规则、重复 provider 实现。</p><p><strong>Exclusions / limits:</strong> 仅报告影响行为或治理可信度的问题，未把全部 style 告警逐项列出。</p></div></div>
+  <div class="card"><div class="card-header">相关发现</div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>一致性缺口</th><th>严重程度</th></tr></thead><tbody><tr><td>F24</td><td>11 个 provider 用 panic 占位而调用契约要求 error</td><td><span class="badge badge-medium">Medium</span></td></tr><tr><td>F26</td><td>声明的格式/lint/type 门无法执行</td><td><span class="badge badge-medium">Medium</span></td></tr><tr><td>F29</td><td>部分模块规模远超常规 feature 边界</td><td><span class="badge badge-medium">Medium</span></td></tr><tr><td>F30</td><td>Base 与 Radix 组合 API 混用</td><td><span class="badge badge-low">Low</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证一致性</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 新后端测试普遍采用 testify require/assert</div><div class="check-item"><span class="check">✓</span> Default 使用统一组件 alias 与 cn 工具</div><div class="check-item"><span class="check">✓</span> git diff --check 与 shell bash -n 通过</div></div></div></div>
+
+  <h3 class="section-title" id="comment-coverage">💬 注释覆盖与准确性</h3>
+  <div class="card"><div class="card-header">🧭 覆盖说明</div><div class="card-body"><p><strong>Coverage:</strong> Medium</p><p><strong>Inspected evidence:</strong> 风控、计费、恢复、迁移、Nginx 与复杂状态机注释对照实现。</p><p><strong>Exclusions / limits:</strong> 未对全部导出符号做文档率统计。</p></div></div>
+  <div class="card"><div class="card-header">已确认 <span class="small">· 2 类漂移</span></div><div class="card-body" style="padding:0"><table><thead><tr><th>发现</th><th>漂移</th><th>严重程度</th></tr></thead><tbody><tr><td>F21</td><td>退役 auth/--git 仍存在于操作说明与部分 Nginx 注释</td><td><span class="badge badge-medium">Medium</span></td></tr><tr><td>F28</td><td>i18n 报告语义与源码覆盖不一致</td><td><span class="badge badge-medium">Medium</span></td></tr></tbody></table></div></div>
+  <div class="card"><div class="card-header">✅ 已验证注释亮点</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> Trial device TTL 与 CGNAT 权衡解释充分</div><div class="check-item"><span class="check">✓</span> 风控 claim 补偿明确记录不变量和失败窗口</div><div class="check-item"><span class="check">✓</span> backup/restore 对不可逆风险和强确认有醒目说明</div></div></div></div>
+
+  <h3 class="section-title" id="principles">📏 设计原则汇总</h3>
+  <div class="card"><div class="card-header">原则违例</div><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+    <thead><tr><th>原则</th><th>独立发现数</th><th>最高严重度</th><th>主要区域</th></tr></thead>
+    <tbody>
+      <tr><td>事务原子性 / 状态迁移完整</td><td>8</td><td><span class="badge badge-high">High</span></td><td>额度、退款、支付、权益、订单</td></tr>
+      <tr><td>Fail-Fast / 不吞错误</td><td>7</td><td><span class="badge badge-high">High</span></td><td>备份、折扣查询、CAS、provider、JSON</td></tr>
+      <tr><td>安全默认 / 最小权限</td><td>6</td><td><span class="badge badge-high">High</span></td><td>Cookie、RBAC、Actions、root installer、日志</td></tr>
+      <tr><td>Principle of Least Surprise</td><td>7</td><td><span class="badge badge-high">High</span></td><td>续费、恢复、健康、版本、文档</td></tr>
+      <tr><td>有界资源</td><td>3</td><td><span class="badge badge-medium">Medium</span></td><td>日志、Bundle、进程内 batch</td></tr>
+      <tr><td>SRP / 清晰边界</td><td>3</td><td><span class="badge badge-medium">Medium</span></td><td>巨型组件、控制器、订单聚合</td></tr>
+      <tr><td>测试行为而非实现</td><td>3</td><td><span class="badge badge-high">High</span></td><td>CI 范围、补偿 Handler、前端门</td></tr>
+      <tr><td>DRY / 单一真源</td><td>3</td><td><span class="badge badge-medium">Medium</span></td><td>发布版本、拓扑、文档命令</td></tr>
+    </tbody>
+  </table></div></div></div>
+  <div class="card"><div class="card-header">✅ 已遵循的原则</div><div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span> 依赖倒置 — internal 领域服务普遍以 Repo/Gateway/Clock 接口注入</div><div class="check-item"><span class="check">✓</span> 幂等优先 — payment、subscription、earning 多处用唯一业务键/CAS</div><div class="check-item"><span class="check">✓</span> 配置显式 — 生产测试栈主要 secret 缺失即失败</div><div class="check-item"><span class="check">✓</span> 防御深度 — Nginx 内网路径拒绝、应用认证、支付验签多层并存</div><div class="check-item"><span class="check">✓</span> 可测试性 — risk/payment/tokenplan 拥有大量确定性 table/race 测试</div></div></div></div>
+
+  <h3 class="section-title" id="fix-order">🎯 修复顺序</h3>
+  <div class="card"><div class="card-header"><span>🛑 P0 · 立即冻结相关发布/交易</span><span class="badge badge-critical">0–72 小时</span></div><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+    <thead><tr><th>#</th><th>修复</th><th>工作量</th><th>不修风险</th></tr></thead><tbody>
+      <tr><td>1</td><td>F01 恢复链：停流、配对 MySQL/Redis、自动验证和演练</td><td>1–2 天</td><td>恢复期间/之后数据与限购状态不可逆分裂</td></tr>
+      <tr><td>2</td><td>F02–F04：原子预扣 + 持久退款/批量写，不再依赖易失内存</td><td>2–4 天起</td><td>透支、错扣、少扣和上游成本损失</td></tr>
+      <tr><td>3</td><td>F05–F07：支付/AGT 状态迁移与续费权益守恒</td><td>2–4 天起</td><td>已付款不入账或已付权益丢失</td></tr>
+      <tr><td>4</td><td>F08/F09：会话撤销、Secure Cookie、密钥 fail-closed</td><td>0.5–1 天</td><td>高权限会话无法撤销或被窃取</td></tr>
+      <tr><td>5</td><td>F10/F11：备份失败即停、不可变 staging/制品回滚</td><td>1–2 天</td><td>无恢复点升级与混合版本</td></tr>
+    </tbody>
+  </table></div></div></div>
+  <div class="card"><div class="card-header"><span>⚡ P1 · 发布前完成</span><span class="badge badge-high">本周</span></div><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+    <thead><tr><th>#</th><th>修复</th><th>工作量</th><th>风险</th></tr></thead><tbody>
+      <tr><td>6</td><td>F12 修 Classic lock/build，并让 CI 覆盖所有交付面与 go test ./...</td><td>1–2 天</td><td>绿 CI 无法代表可发布</td></tr>
+      <tr><td>7</td><td>F13/F14 SHA pin Actions、移除 curl | sh、收紧权限</td><td>0.5 天</td><td>发布供应链接管</td></tr>
+      <tr><td>8</td><td>F15 实际 Dial 绑定 SSRF 校验 IP</td><td>2–4 天</td><td>潜在内网/元数据访问</td></tr>
+      <tr><td>9</td><td>F16 DB 错误 fail-closed，财务快照记录定价来源</td><td>0.5–1 天</td><td>持久错误分润</td></tr>
+      <tr><td>10</td><td>F17/F18 日志脱敏/保留和 Classic HTML 净化</td><td>1–2 天</td><td>隐私泄露、XSS、磁盘故障</td></tr>
+    </tbody>
+  </table></div></div></div>
+  <div class="card"><div class="card-header"><span>📅 P2 · 计划治理</span><span class="badge badge-medium">1–3 个迭代</span></div><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+    <thead><tr><th>#</th><th>修复</th><th>工作量</th></tr></thead><tbody>
+      <tr><td>11</td><td>F19/F20 readiness 与版本身份单一构建入口</td><td>1 天</td></tr>
+      <tr><td>12</td><td>F21/F22 清理退役制品/文档并建立依赖审计门</td><td>1–2 天</td></tr>
+      <tr><td>13</td><td>F23/F24 订单事务与 provider capability 契约</td><td>1–2 天</td></tr>
+      <tr><td>14</td><td>F25/F26 真实 Handler 测试与前端门禁清账</td><td>1–3 天</td></tr>
+      <tr><td>15</td><td>F27/F28 Bundle 预算和源码→六语言 i18n 门</td><td>2–5 天</td></tr>
+      <tr><td>16</td><td>F29 渐进拆分巨型组件/控制器；F30/F31 小修</td><td>1–3 周渐进式</td></tr>
+    </tbody>
+  </table></div></div></div>
+
+  <h3 class="section-title" id="quick-wins">⚡ 快速收益</h3>
+  <div class="win-grid">
+    <div class="win-card"><div class="win-title">备份失败立即中止</div><div class="win-meta">F10 · 30–60 分钟 · 高风险下降</div></div>
+    <div class="win-card"><div class="win-title">修正 ldflags 完整 import path</div><div class="win-meta">F20 · 1–2 小时 · 恢复版本取证</div></div>
+    <div class="win-card"><div class="win-title">SHA pin 稳定/nightly Actions</div><div class="win-meta">F13 · 1–2 小时 · 复用 alpha 已有 SHA</div></div>
+    <div class="win-card"><div class="win-title">删除 webhook body/signature 日志</div><div class="win-meta">F17 · 2–4 小时 · 立即缩小隐私面</div></div>
+    <div class="win-card"><div class="win-title">malformed JSON 返回 400</div><div class="win-meta">F31 · &lt;0.5 天 · 消除错误渠道订单</div></div>
+    <div class="win-card"><div class="win-title">Base UI 改用 render</div><div class="win-meta">F30 · &lt;1 小时 · 清除一个真实 type error</div></div>
+  </div>
+
+  <div style="text-align:center;padding:40px 0 20px;color:var(--text-secondary);font-size:12px">
+    由 Claude 本地 skill “fuck-my-shit-mountain” 工作流生成 · 审计对象 HEAD 93155552f101bfd963742e1e6c8b14c8dd17b199 · 仅新增报告与元数据，未修改应用源码
+  </div>
+</div>
+
+<script>
+  const sections = document.querySelectorAll('[id]');
+  const navLinks = document.querySelectorAll('.sidebar-nav a');
+  const observer = new IntersectionObserver((entries) => {
+    let activeId = null;
+    entries.forEach(entry => {
+      if (entry.isIntersecting) activeId = entry.target.id;
+    });
+    if (activeId) {
+      navLinks.forEach(a => {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + activeId);
+      });
+    }
+  }, { rootMargin: '-10% 0px -60% 0px' });
+  sections.forEach(s => observer.observe(s));
+  navLinks.forEach(a => {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+</body>
+</html>

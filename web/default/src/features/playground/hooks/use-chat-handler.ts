@@ -21,8 +21,8 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { sendChatCompletion } from '../api'
-import { usePlaygroundCredential } from '../context/credential-context'
 import { ERROR_MESSAGES } from '../constants'
+import { usePlaygroundCredential } from '../context/credential-context'
 import {
   applyStreamingChunk,
   buildChatCompletionPayload,

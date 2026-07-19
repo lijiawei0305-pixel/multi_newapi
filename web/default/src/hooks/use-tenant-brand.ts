@@ -16,8 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
+
+import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { getCookie } from '@/lib/cookies'
 import { applySiteBranding } from '@/lib/dom-utils'
 import { resolveTenant } from '@/lib/tenant'
@@ -26,7 +28,6 @@ import {
   THEME_PRESET_VALUES,
   type ThemePreset,
 } from '@/lib/theme-customization'
-import { useThemeCustomization } from '@/context/theme-customization-provider'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 /**

@@ -3,23 +3,22 @@ package mtwire
 import (
 	"context"
 	"errors"
-	"strconv"
 	"time"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/payment"
+	"gorm.io/gorm"
 )
 
 // AGT 代理套餐是全站客单价最高的 SKU（¥990–9990），却曾是唯一「无对账兜底」的付费订单类型：RCG/SUB
 // 均有主动查单 + 超时置终态 + 卡单可见 + 失败告警，AGT 一层都没有——真实失败场景（如 api_v3_key 轮换
 // 配错致回调全部验签失败）下，RCG/SUB 会被对账循环持续查单/救回并在卡单页可见、失败即告警，而 AGT 会
 // 静默永停 pending，无任何页面可见、无任何告警，唯一发现途径是手工 SELECT。本文件把 AGT 补齐到与 SUB
-// **完全对等**的保护，语义/阈值与 sub_reconcile.go 一一对齐（AGT 无 SUB 的「已激活未结算」二次驱动路径
-// ——其激活为 provision 先行、CAS 后置的原子链，故只需 pending 单查单一条路径）。
+// **完全对等**的保护，语义/阈值与 sub_reconcile.go 一一对齐。另扫描陈旧 activating：该状态本身是
+// 已确认付款的持久事实，直接恢复开通，不再向网关重复判断未付。
 
 // agtReconcileExpireAge：pending AGT 单「过期兜底」阈值（对齐 subReconcileExpireAge）。微信 Native 二维码
-// 有效期 2h——下单超此仍未付或网关查无此单，即永不会被支付，置终态 agtOrderExpired 停止无谓重试与告警。
-// 注意：查到已付仍幂等激活（无论多旧都补，绝不漏真实付款）。
+// 有效期 2h——下单超此仍未付或网关查无此单，置本地扫描终态 agtOrderExpired 停止无谓重试与告警。
+// 后续可信已付回调仍可恢复；查到已付也无论多旧都幂等激活。
 const agtReconcileExpireAge = 2 * time.Hour
 
 // agtOrderPaidQuery 进程内向微信/支付宝主动查单该 AGT 订单是否已支付（对账兜底用）；单测替换为桩。
@@ -47,13 +46,12 @@ type ReconcileAgtResult struct {
 	Failed    map[string]string // 查单/激活的**瞬时**错误 → 留待下次再扫（不含已过期的终态单）
 }
 
-// ReconcileStuckAgentPlans 扫 pending 代理套餐卡单，逐笔向平台主动查单确认是否已付（ActivatePaidAgentPlanOrder
-// 幂等）：已付 → 补激活；确认未付且超时 / 网关查无此单 → 终态过期；瞬时错误（网络/超时/限流）仍在窗口内 →
-// 留 Failed 下轮重试，**绝不因瞬时错误误杀已付单**。before 通常取 now-5min，过滤刚下单、正常流程仍在途的单。
+// ReconcileStuckAgentPlans 扫 pending 与陈旧 activating 代理套餐卡单。pending 逐笔向平台主动查单；
+// activating 已持久记录可信已付事实，直接恢复开通。before 通常取 now-5min，过滤正常在途认领。
 func (a *App) ReconcileStuckAgentPlans(ctx context.Context, before time.Time) (ReconcileAgtResult, error) {
 	var rows []agentPlanOrderRow
 	if err := a.DB.WithContext(ctx).
-		Where("status = ? AND updated_at < ?", agtOrderPending, before).
+		Where("status IN ? AND updated_at < ?", []string{agtOrderPending, agtOrderActivating}, before).
 		Find(&rows).Error; err != nil {
 		return ReconcileAgtResult{}, err
 	}
@@ -61,6 +59,14 @@ func (a *App) ReconcileStuckAgentPlans(ctx context.Context, before time.Time) (R
 	now := before.Add(reconcileMinAge)              // before 恒为 now-reconcileMinAge（cron/manual 一致），反推当前时刻
 	expireCutoff := now.Add(-agtReconcileExpireAge) // 下单早于此 = 已超 2h（二维码失效）
 	for _, row := range rows {
+		if row.Status == agtOrderActivating {
+			if err := activatePaidAgtHook(a, ctx, row.OrderNo); err != nil {
+				res.Failed[row.OrderNo] = "resume activation: " + err.Error()
+			} else {
+				res.Activated = append(res.Activated, row.OrderNo)
+			}
+			continue
+		}
 		expired := row.CreatedAt.Before(expireCutoff) // 下单已超 2h：二维码失效、永不会被支付
 		paid, err := agtOrderPaidQuery(a, ctx, row.OrderNo, row.Provider)
 		switch {
@@ -74,8 +80,12 @@ func (a *App) ReconcileStuckAgentPlans(ctx context.Context, before time.Time) (R
 			// （刻意）：真废单在网关持续不可查期间一直占卡单页并重复告警——可见的噪音优于无声的钱损；凭据
 			// 修复后下一轮即收敛（已付→激活 / 确认未付→过期 / 查无此单→过期）。
 			if expired && errors.Is(err, payment.ErrOrderNotExist) {
-				a.expireStuckAgentPlanOrder(ctx, &row)
-				res.Expired = append(res.Expired, row.OrderNo)
+				won, expireErr := a.expireStuckAgentPlanOrder(ctx, &row)
+				if expireErr != nil {
+					res.Failed[row.OrderNo] = "expire: " + expireErr.Error()
+				} else if won {
+					res.Expired = append(res.Expired, row.OrderNo)
+				}
 			} else {
 				res.Failed[row.OrderNo] = "query: " + err.Error()
 			}
@@ -88,8 +98,12 @@ func (a *App) ReconcileStuckAgentPlans(ctx context.Context, before time.Time) (R
 			res.Activated = append(res.Activated, row.OrderNo)
 		case expired:
 			// 确认未付且已超时 → 终态过期（二维码失效、永不会付），停止扫描与告警。
-			a.expireStuckAgentPlanOrder(ctx, &row)
-			res.Expired = append(res.Expired, row.OrderNo)
+			won, expireErr := a.expireStuckAgentPlanOrder(ctx, &row)
+			if expireErr != nil {
+				res.Failed[row.OrderNo] = "expire: " + expireErr.Error()
+			} else if won {
+				res.Expired = append(res.Expired, row.OrderNo)
+			}
 		default:
 			// 未付但仍在有效窗口（未超时）：留待下次。
 			res.Unpaid = append(res.Unpaid, row.OrderNo)
@@ -98,31 +112,40 @@ func (a *App) ReconcileStuckAgentPlans(ctx context.Context, before time.Time) (R
 	return res, nil
 }
 
-// expireStuckAgentPlanOrder 把一笔卡死的 pending 代理套餐单置终态 agtOrderExpired（条件 CAS：仅在仍 pending
-// 时更新，防与并发真实激活竞态——即便本函数与一笔迟到的真实回调激活同时发生，CAS 也只有一方成功）。
-// best-effort：写失败仅下轮再来，绝不影响对账其余单。
-// CAS 赢家同时释放该单携带的 slug 预留（audit 发现#5 预留式的回收半边：弃单不得永久占用 slug）。
-// 释放原语自带「已激活不删 + 兄弟 pending 单引用不删」双守卫；失败仅记日志——占位行仍在、fail-closed，
-// 且订单已终态、本轮后无人再触发，故日志即审计线索（C4：不可逆占用必须有可审计的释放路径）。
-func (a *App) expireStuckAgentPlanOrder(ctx context.Context, ord *agentPlanOrderRow) {
-	res := a.DB.WithContext(ctx).Model(&agentPlanOrderRow{}).
-		Where("order_no = ? AND status = ?", ord.OrderNo, agtOrderPending).
-		Updates(map[string]any{"status": agtOrderExpired, "updated_at": time.Now()})
-	if res.Error != nil || res.RowsAffected == 0 {
-		return // 写失败下轮再来；或输给并发真实激活（预留归赢家，不释放）
+// expireStuckAgentPlanOrder atomically wins pending->expired and releases the
+// guarded slug reservation. Keeping both writes in one transaction closes the
+// former callback interleave where expiry won the status CAS, a paid callback
+// then claimed expired->activating, and the old expiry worker still deleted the
+// reservation underneath that durable paid claim.
+func (a *App) expireStuckAgentPlanOrder(ctx context.Context, ord *agentPlanOrderRow) (bool, error) {
+	won := false
+	err := a.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&agentPlanOrderRow{}).
+			Where("order_no = ? AND status = ?", ord.OrderNo, agtOrderPending).
+			Updates(map[string]any{"status": agtOrderExpired, "updated_at": time.Now()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		if err := releaseAgentSlugReservationTx(tx, ord.AgentTenantID); err != nil {
+			return err
+		}
+		won = true
+		return nil
+	})
+	if err != nil {
+		return false, err
 	}
-	if err := a.releaseAgentSlugReservation(ctx, ord.AgentTenantID); err != nil {
-		common.SysLog("agt reconcile: release slug reservation tenant " +
-			strconv.FormatInt(ord.AgentTenantID, 10) + " for expired order " + ord.OrderNo +
-			" failed: " + err.Error())
-	}
+	return won, nil
 }
 
-// listStuckAgentPlans 只读列出卡在 pending（早于 before）的代理套餐订单，供 admin「支付对账」页展示。
+// listStuckAgentPlans 只读列出卡在 pending/activating（早于 before）的代理套餐订单，供 admin 查看。
 func (a *App) listStuckAgentPlans(ctx context.Context, before time.Time) ([]agentPlanOrderRow, error) {
 	var rows []agentPlanOrderRow
 	err := a.DB.WithContext(ctx).
-		Where("status = ? AND updated_at < ?", agtOrderPending, before).
+		Where("status IN ? AND updated_at < ?", []string{agtOrderPending, agtOrderActivating}, before).
 		Find(&rows).Error
 	return rows, err
 }

@@ -1,11 +1,14 @@
 package model
 
 import (
+	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -203,8 +206,18 @@ func InitOptionMap() {
 }
 
 func loadOptionsFromDatabase() {
-	options, _ := AllOption()
+	options, err := AllOption()
+	if err != nil {
+		common.SysLog("failed to load options from database: " + err.Error())
+		return
+	}
 	for _, option := range options {
+		common.OptionMapRWMutex.RLock()
+		current, loaded := common.OptionMap[option.Key]
+		common.OptionMapRWMutex.RUnlock()
+		if loaded && current == option.Value {
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
@@ -221,18 +234,22 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
-	// Save to database first
-	option := Option{
-		Key: key,
+	if err := ValidateOptionValue(key, value); err != nil {
+		return err
 	}
-	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
-	option.Value = value
-	// Save is a combination function.
-	// If save value does not contain primary key, it will execute Create,
-	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
-	// Update OptionMap
+	if DB == nil {
+		return fmt.Errorf("option database is unavailable")
+	}
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		option := Option{Key: key}
+		if err := tx.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+			return err
+		}
+		option.Value = value
+		return tx.Save(&option).Error
+	}); err != nil {
+		return err
+	}
 	return updateOptionMap(key, value)
 }
 
@@ -244,6 +261,14 @@ func UpdateOption(key string, value string) error {
 func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
+	}
+	for key, value := range values {
+		if err := ValidateOptionValue(key, value); err != nil {
+			return err
+		}
+	}
+	if DB == nil {
+		return fmt.Errorf("option database is unavailable")
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		for k, v := range values {
@@ -269,14 +294,103 @@ func UpdateOptionsBulk(values map[string]string) error {
 	return nil
 }
 
+// ValidateOptionValue validates values that have structured or scalar runtime
+// representations without publishing them. Persistence always happens only
+// after this succeeds, preventing malformed settings from surviving a restart.
+func ValidateOptionValue(key string, value string) error {
+	parts := strings.SplitN(key, ".", 2)
+	if len(parts) == 2 {
+		handled, err := config.GlobalConfig.ValidateUpdate(parts[0], map[string]string{parts[1]: value})
+		if handled {
+			if err != nil {
+				return fmt.Errorf("invalid value for option %s: %w", key, err)
+			}
+			return nil
+		}
+	}
+
+	var err error
+	switch key {
+	case "Chats", "PayMethods":
+		var decoded []map[string]string
+		err = common.Unmarshal([]byte(value), &decoded)
+	case "AutoGroups":
+		var decoded []string
+		err = common.Unmarshal([]byte(value), &decoded)
+	case "WaffoPayMethods":
+		var decoded []constant.WaffoPayMethod
+		err = common.Unmarshal([]byte(value), &decoded)
+	case "TopupGroupRatio", "ModelRatio", "ModelPrice", "CacheRatio", "CreateCacheRatio", "CompletionRatio", "ImageRatio", "AudioRatio", "AudioCompletionRatio":
+		var decoded map[string]float64
+		err = common.Unmarshal([]byte(value), &decoded)
+	case "GroupRatio":
+		err = ratio_setting.CheckGroupRatio(value)
+	case "GroupGroupRatio":
+		var decoded map[string]map[string]float64
+		err = common.Unmarshal([]byte(value), &decoded)
+	case "UserUsableGroups":
+		var decoded map[string]string
+		err = common.Unmarshal([]byte(value), &decoded)
+	case "ModelRequestRateLimitGroup":
+		err = setting.CheckModelRequestRateLimitGroup(value)
+	case "AutomaticDisableStatusCodes", "AutomaticRetryStatusCodes":
+		_, err = operation_setting.ParseHTTPStatusCodeRanges(value)
+	}
+	if err != nil {
+		return fmt.Errorf("invalid value for option %s: %w", key, err)
+	}
+
+	if strings.HasSuffix(key, "Permission") {
+		if _, err := strconv.Atoi(value); err != nil {
+			return fmt.Errorf("invalid integer for option %s: %w", key, err)
+		}
+	}
+	if strings.HasSuffix(key, "Enabled") || key == "DefaultCollapseSidebar" || key == "DefaultUseAutoGroup" || key == "SMTPForceAuthLogin" || key == "SMTPInsecureSkipVerify" || key == "AlipaySandbox" || key == "WaffoSandbox" || key == "CreemTestMode" {
+		if _, err := strconv.ParseBool(value); err != nil {
+			return fmt.Errorf("invalid boolean for option %s: %w", key, err)
+		}
+	}
+
+	intOptions := map[string]struct{}{
+		"SMTPPort": {}, "MinTopUp": {}, "StripeMinTopUp": {}, "WaffoMinTopUp": {},
+		"WaffoPancakeMinTopUp": {}, "LinuxDOMinimumTrustLevel": {}, "QuotaForNewUser": {},
+		"QuotaForInviter": {}, "QuotaForInvitee": {}, "QuotaRemindThreshold": {}, "PreConsumedQuota": {},
+		"ModelRequestRateLimitCount": {}, "ModelRequestRateLimitDurationMinutes": {},
+		"ModelRequestRateLimitSuccessCount": {}, "RetryTimes": {}, "DataExportInterval": {},
+		"StreamCacheQueueLength": {},
+	}
+	if _, ok := intOptions[key]; ok {
+		if _, err := strconv.Atoi(value); err != nil {
+			return fmt.Errorf("invalid integer for option %s: %w", key, err)
+		}
+	}
+	floatOptions := map[string]struct{}{
+		"Price": {}, "USDExchangeRate": {}, "StripeUnitPrice": {}, "WaffoUnitPrice": {},
+		"WaffoPancakeUnitPrice": {}, "ChannelDisableThreshold": {}, "QuotaPerUnit": {},
+	}
+	if _, ok := floatOptions[key]; ok {
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("invalid number for option %s: %w", key, err)
+		}
+		if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return fmt.Errorf("invalid non-finite number for option %s", key)
+		}
+	}
+	return nil
+}
+
 func updateOptionMap(key string, value string) (err error) {
+	if err := ValidateOptionValue(key, value); err != nil {
+		return err
+	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
-	if handleConfigUpdate(key, value) {
-		return nil // 已由配置系统处理
+	if handled, err := handleConfigUpdate(key, value); handled {
+		return err
 	}
 
 	// 处理传统配置项...
@@ -624,26 +738,22 @@ func updateOptionMap(key string, value string) (err error) {
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理
-func handleConfigUpdate(key, value string) bool {
+func handleConfigUpdate(key, value string) (bool, error) {
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 {
-		return false // 不是分层配置
+		return false, nil // 不是分层配置
 	}
 
 	configName := parts[0]
 	configKey := parts[1]
 
-	// 获取配置对象
-	cfg := config.GlobalConfig.Get(configName)
-	if cfg == nil {
-		return false // 未注册的配置
-	}
-
-	// 更新配置
 	configMap := map[string]string{
 		configKey: value,
 	}
-	config.UpdateConfigFromMap(cfg, configMap)
+	handled, err := config.GlobalConfig.ApplyUpdate(configName, configMap)
+	if !handled || err != nil {
+		return handled, err
+	}
 
 	// 特定配置的后处理
 	if configName == "performance_setting" {
@@ -657,5 +767,5 @@ func handleConfigUpdate(key, value string) bool {
 		system_setting.UpdateAndSyncTheme()
 	}
 
-	return true // 已处理
+	return true, nil // 已处理
 }

@@ -99,7 +99,7 @@ err = client.LoadAliPayPublicKey(alipayPublicKey)
 
 // 构造支付请求
 p := alipay.TradePagePay{}
-p.NotifyURL = "https://your-domain.com/api/payment/alipay/notify"
+p.NotifyURL = "https://your-domain.com/api/pay/alipay/notify"
 p.ReturnURL = "https://your-domain.com/order/status"
 p.Subject = "月度套餐"
 p.OutTradeNo = "ORDER20240101120000001"

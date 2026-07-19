@@ -66,9 +66,9 @@ func ConfirmPaymentCompliance(c *gin.Context) {
 	}
 
 	logger.LogInfo(c.Request.Context(), fmt.Sprintf(
-		"payment compliance confirmed user_id=%d ip=%s terms_version=%s confirmed_at=%d",
+		"payment compliance confirmed user_id=%d ip_%s terms_version=%s confirmed_at=%d",
 		userId,
-		clientIP,
+		logger.PayloadMetadata([]byte(clientIP)),
 		operation_setting.CurrentComplianceTermsVersion,
 		now,
 	))

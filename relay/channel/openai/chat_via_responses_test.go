@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -84,6 +85,62 @@ func TestOaiResponsesToChatStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
 		`"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5`,
 		`data: [DONE]`,
 	)
+}
+
+func TestOaiResponsesToChatStreamErrorFirstRemainsUnaccepted(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"provider rejected\",\"code\":\"invalid_request\"}}}\n\n"
+	c, recorder, resp, info := newResponsesChatTestContext(t, body, true)
+
+	usage, apiErr := OaiResponsesToChatStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.True(t, service.IsExplicitUpstreamRejection(apiErr))
+	require.False(t, service.IsUpstreamAccepted(c))
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesToChatStreamErrorEnvelopeWithoutTypeRemainsUnaccepted(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := "data: {\"error\":{\"message\":\"provider rejected\",\"code\":\"invalid_request\"}}\n\n"
+	c, recorder, resp, info := newResponsesChatTestContext(t, body, true)
+
+	usage, apiErr := OaiResponsesToChatStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.True(t, service.IsExplicitUpstreamRejection(apiErr))
+	require.False(t, service.IsUpstreamAccepted(c))
+	require.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesToChatStreamErrorAfterOutputStaysAccepted(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"hello"}`,
+		`data: {"type":"response.failed","response":{"error":{"message":"provider failed later","code":"server_error"}}}`,
+		``,
+	}, "\n")
+	c, recorder, resp, info := newResponsesChatTestContext(t, body, true)
+
+	usage, apiErr := OaiResponsesToChatStreamHandler(c, info, resp)
+
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	require.False(t, service.IsExplicitUpstreamRejection(apiErr))
+	require.True(t, service.IsUpstreamAccepted(c))
+	require.True(t, types.IsSkipRetryError(apiErr))
+	require.Contains(t, recorder.Body.String(), "hello")
 }
 
 func TestOaiResponsesToChatBufferedStreamHandlerReturnsJSONFromSSE(t *testing.T) {

@@ -16,19 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  Clapperboard,
+  Download,
+  Loader2,
+  RotateCcw,
+  VideoOff,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Clapperboard, Download, Loader2, RotateCcw, VideoOff } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   PromptInput,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
 } from '@/components/ai-elements/prompt-input'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 
 import { PROMPT_INPUT_SHELL_CLASS } from '../../constants'
@@ -61,7 +67,9 @@ export function VideoWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
     const params = {
       model,
       prompt: prompt.trim(),
-      ...(duration !== '' && !isNaN(Number(duration)) && Number(duration) > 0
+      ...(duration !== '' &&
+      !Number.isNaN(Number(duration)) &&
+      Number(duration) > 0
         ? { duration: Number(duration) }
         : {}),
     }
@@ -92,17 +100,22 @@ export function VideoWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
       {/* 结果 / 状态区域（置顶，占据主空间） */}
       <div className='flex min-h-0 flex-1 flex-col overflow-y-auto'>
         {status === 'idle' && (
-          <div className='flex flex-1 flex-col items-center justify-center gap-4 py-6 text-muted-foreground'>
+          <div className='text-muted-foreground flex flex-1 flex-col items-center justify-center gap-4 py-6'>
             <ModelIntroHero model={introModel ?? null} />
-            <p className='text-xs'>{t('Enter a prompt and click "Generate" to start creating a video')}</p>
+            <p className='text-xs'>
+              {t(
+                'Enter a prompt and click "Generate" to start creating a video'
+              )}
+            </p>
           </div>
         )}
 
         {isGenerating && (
-          <div className='bg-muted/50 flex items-center gap-3 rounded-lg border border-border p-4'>
+          <div className='bg-muted/50 border-border flex items-center gap-3 rounded-lg border p-4'>
             <Loader2 className='text-primary size-5 shrink-0 animate-spin' />
             <span className='text-foreground text-sm'>
-              {t('Generating…')}{progress ? ` (${progress})` : ''}
+              {t('Generating…')}
+              {progress ? ` (${progress})` : ''}
             </span>
           </div>
         )}
@@ -147,16 +160,18 @@ export function VideoWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
         )}
 
         {isSuccess && videoUrl && playbackError && (
-          <div className='flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-destructive'>
+          <div className='border-destructive/30 bg-destructive/10 text-destructive flex items-start gap-3 rounded-lg border p-4'>
             <VideoOff className='mt-0.5 size-4 shrink-0' />
             <div className='flex flex-col gap-1.5'>
               <span className='text-sm font-medium'>
-                {t('Failed to load the video; the link may have expired or the format is unsupported')}
+                {t(
+                  'Failed to load the video; the link may have expired or the format is unsupported'
+                )}
               </span>
               <Button
                 variant='outline'
                 size='sm'
-                className='w-fit border-destructive/30 text-destructive hover:bg-destructive/10'
+                className='border-destructive/30 text-destructive hover:bg-destructive/10 w-fit'
                 onClick={handleReset}
               >
                 <RotateCcw className='mr-1.5 size-3.5' />
@@ -167,14 +182,16 @@ export function VideoWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
         )}
 
         {isError && (
-          <div className='flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-destructive'>
+          <div className='border-destructive/30 bg-destructive/10 text-destructive flex items-start gap-3 rounded-lg border p-4'>
             <VideoOff className='mt-0.5 size-4 shrink-0' />
             <div className='flex flex-col gap-1.5'>
-              <span className='text-sm font-medium'>{t('Generation failed')}: {error}</span>
+              <span className='text-sm font-medium'>
+                {t('Generation failed')}: {error}
+              </span>
               <Button
                 variant='outline'
                 size='sm'
-                className='w-fit border-destructive/30 text-destructive hover:bg-destructive/10'
+                className='border-destructive/30 text-destructive hover:bg-destructive/10 w-fit'
                 onClick={handleReset}
               >
                 <RotateCcw className='mr-1.5 size-3.5' />
@@ -222,7 +239,9 @@ export function VideoWorkspace({ apiKey, model, introModel }: WorkspaceProps) {
           <PromptInputFooter className='border-border/60 bg-muted/20 dark:bg-muted/10 border-t px-3 py-2.5 backdrop-blur'>
             <div className='flex flex-1 items-center gap-2'>
               <Clapperboard className='text-muted-foreground size-4' />
-              <span className='text-muted-foreground text-sm'>{t('Video generation')}</span>
+              <span className='text-muted-foreground text-sm'>
+                {t('Video generation')}
+              </span>
             </div>
             {/* 仅由 PromptInput 的 form onSubmit 驱动提交，勿再挂 onClick，
                 否则单击会双发 create 请求（双建任务 / 潜在双计费）。 */}

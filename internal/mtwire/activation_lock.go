@@ -13,9 +13,9 @@ import "sync"
 // 为什么按 owner 而非 orderNo：新代理的建租户冲突点是「owner 派生的 slug」,同一 owner 的**不同**
 // 订单并发激活也会撞同一 slug;按 owner 串行一并覆盖(finding 建议「对 owner 加去重锁」)。
 //
-// 为什么进程内锁够用：部署为单实例(见 CLAUDE.md 单栈),回调均落同一进程;跨实例场景由
-// tenants.slug 唯一键作最终兜底。固定条带 → 内存有界、无需清理(避免 per-key map 无限增长);
-// 同一 ownerID 恒落同一条带 → 必串行,不同 owner 偶尔共用一条带 → 仅无害的短暂串行。
+// 为什么仍保留进程内锁：它减少同实例的重复 DB/副作用工作；跨实例权威互斥由订单
+// pending→activating 条件 UPDATE 完成，租户唯一键与会员 grant 台账作最终幂等兜底。固定条带 → 内存
+// 有界、无需清理；同一 ownerID 恒落同一条带 → 必串行，不同 owner 偶尔共用条带仅短暂串行。
 const agentActivationLockStripes = 256
 
 var agentActivationLocks [agentActivationLockStripes]sync.Mutex

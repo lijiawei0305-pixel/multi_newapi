@@ -16,13 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { memo } from 'react'
 import { ChevronRight, Copy } from 'lucide-react'
+import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
+
+import { StatusBadge } from '@/components/status-badge'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
-import { StatusBadge } from '@/components/status-badge'
+
 import { DEFAULT_TOKEN_UNIT } from '../constants'
 import {
   getDynamicDisplayGroupRatio,
@@ -107,17 +109,19 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               {props.model.model_name}
             </h3>
             <div className='mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs sm:mt-1 sm:gap-x-3'>
-              {dynamicSummary ? (
-                dynamicSummary.isSpecialExpression ? (
-                  <span className='min-w-0'>
-                    <span className='text-amber-700 dark:text-amber-300'>
-                      {t('Special billing expression')}
-                    </span>
-                    <code className='text-muted-foreground/70 mt-0.5 line-clamp-1 block font-mono text-[11px] break-all'>
-                      {dynamicSummary.rawExpression}
-                    </code>
+              {dynamicSummary?.isSpecialExpression && (
+                <span className='min-w-0'>
+                  <span className='text-amber-700 dark:text-amber-300'>
+                    {t('Special billing expression')}
                   </span>
-                ) : dynamicSummary.primaryEntries.length > 0 ? (
+                  <code className='text-muted-foreground/70 mt-0.5 line-clamp-1 block font-mono text-[11px] break-all'>
+                    {dynamicSummary.rawExpression}
+                  </code>
+                </span>
+              )}
+              {dynamicSummary &&
+                !dynamicSummary.isSpecialExpression &&
+                dynamicSummary.primaryEntries.length > 0 && (
                   <>
                     {dynamicSummary.primaryEntries.map((entry) => (
                       <span
@@ -132,12 +136,15 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
                       </span>
                     ))}
                   </>
-                ) : (
+                )}
+              {dynamicSummary &&
+                !dynamicSummary.isSpecialExpression &&
+                dynamicSummary.primaryEntries.length === 0 && (
                   <span className='text-muted-foreground text-xs'>
                     {t('Dynamic Pricing')}
                   </span>
-                )
-              ) : isTokenBased ? (
+                )}
+              {!dynamicSummary && isTokenBased && (
                 <>
                   <span className='text-muted-foreground whitespace-nowrap'>
                     {t('Input')}{' '}
@@ -183,7 +190,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
                     </span>
                   )}
                 </>
-              ) : (
+              )}
+              {!dynamicSummary && !isTokenBased && (
                 <span className='text-muted-foreground whitespace-nowrap'>
                   <span className='text-foreground font-mono font-semibold'>
                     {formatRequestPrice(

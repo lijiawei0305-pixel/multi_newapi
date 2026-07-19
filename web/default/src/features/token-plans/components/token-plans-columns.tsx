@@ -16,12 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { ColumnDef } from '@tanstack/react-table'
 import { useMemo } from 'react'
-import { type ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
+
 import { BadgeCell } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
+
 import type { AdminTokenPlan } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 

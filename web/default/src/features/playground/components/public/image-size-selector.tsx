@@ -16,27 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
+
+import { cn } from '@/lib/utils'
+
+import { IMAGE_SIZE_OPTIONS } from './image-size-options'
 
 // gpt-image 系列支持的三种尺寸。ratio/orientation 用于形状与标签展示，
 // w/h 用于按真实宽高比绘制缩略矩形（避免各处硬编码，改上游支持时只动这里）。
-export interface ImageSizeOption {
-  value: string
-  ratio: string
-  orientation: string
-  w: number
-  h: number
-}
-
-export const IMAGE_SIZE_OPTIONS: ImageSizeOption[] = [
-  { value: '1024x1024', ratio: '1:1', orientation: 'Square', w: 1024, h: 1024 },
-  { value: '1536x1024', ratio: '3:2', orientation: 'Landscape', w: 1536, h: 1024 },
-  { value: '1024x1536', ratio: '2:3', orientation: 'Portrait', w: 1024, h: 1536 },
-]
-
-export const DEFAULT_IMAGE_SIZE = '1024x1024'
-
 // 按真实宽高比绘制的缩略矩形：长边固定占满，短边等比缩放，直观表达尺寸形状。
 // 用 currentColor + fillOpacity，随选中态（primary）/未选中态（muted）自然变色。
 function AspectRatioGlyph({

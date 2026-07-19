@@ -1,73 +1,79 @@
 # New API Electron Desktop App
 
-This directory contains the Electron wrapper for New API, providing a native desktop application with system tray support for Windows, macOS, and Linux.
+This directory contains the Electron wrapper for New API. The packaged desktop app includes the Go backend and serves the same Default and Classic frontend themes as the server build.
 
 ## Prerequisites
 
-### 1. Go Binary (Required)
-The Electron app requires the compiled Go binary to function. You have two options:
-
-**Option A: Use existing binary (without Go installed)**
-```bash
-# If you have a pre-built binary (e.g., new-api-macos)
-cp ../new-api-macos ../new-api
-```
-
-**Option B: Build from source (requires Go)**
-TODO
-
-### 3. Electron Dependencies
-```bash
-cd electron
-npm install
-```
+- Go (the version required by the root `go.mod`)
+- Bun for the frontend workspace
+- Node.js and npm for the Electron package (`electron/package-lock.json` is authoritative)
+- The native packaging tools required by electron-builder for the target platform
 
 ## Development
 
-Run the app in development mode:
+Development mode expects the Go backend and a frontend development server to be started separately. A clean checkout first needs the directories referenced by Go's embedded assets and the shared frontend dependencies:
+
 ```bash
-npm start
+for dir in web/default/dist web/classic/dist; do
+  mkdir -p "$dir"
+  test -f "$dir/index.html" || printf '<!doctype html>\n' > "$dir/index.html"
+done
+cd web
+bun install --frozen-lockfile --linker=isolated
 ```
 
-This will:
-- Start the Go backend on port 3000
-- Open an Electron window with DevTools enabled
-- Create a system tray icon (menu bar on macOS)
-- Store database in `../data/new-api.db`
+Then, from the repository root, use three terminals:
 
-## Building for Production
-
-### Quick Build
 ```bash
-# Ensure Go binary exists in parent directory
-ls ../new-api  # Should exist
+# Terminal 1: backend on port 3000
+go run .
 
-# Build for current platform
-npm run build
+# Terminal 2: Default frontend on port 5173
+cd web/default
+bun run dev
 
-# Platform-specific builds
-npm run build:mac    # Creates .dmg and .zip
-npm run build:win    # Creates .exe installer
-npm run build:linux  # Creates .AppImage and .deb
+# Terminal 3: Electron wrapper
+cd electron
+npm ci
+npm run dev-app
 ```
 
-### Build Output
-- Built applications are in `electron/dist/`
-- macOS: `.dmg` (installer) and `.zip` (portable)
-- Windows: `.exe` (installer) and portable exe
+`npm run dev-app` is the development Electron script. The Classic theme is included in production builds; for standalone Classic frontend development, run `bun run dev` from `web/classic` instead.
+
+## Production build
+
+Run the repository build driver from the repository root:
+
+```bash
+./electron/build.sh
+```
+
+`build.sh` is the supported end-to-end path. It:
+
+1. installs the frontend workspace with Bun;
+2. builds both `web/default` and `web/classic` with the same `VITE_REACT_APP_VERSION`;
+3. builds the Go backend with that version embedded through linker flags;
+4. runs the backend with `--version` and aborts if the result differs from the requested version;
+5. installs Electron dependencies with `npm ci` and packages the current platform.
+
+By default, the version is derived from `git describe --tags --always --dirty`. To request an explicit release version, pass it to the same driver:
+
+```bash
+VERSION=v1.2.3 ./electron/build.sh
+```
+
+Do not bypass the driver with `npm run build:*` for a release: those scripts only run electron-builder and do not build or version-check the Default frontend, Classic frontend, or Go backend.
+
+Packaged artifacts are written to `electron/dist/`:
+
+- macOS: `.dmg` and `.zip`
+- Windows: NSIS installer and portable executable
 - Linux: `.AppImage` and `.deb`
 
-## Configuration
+## Runtime configuration
 
-### Port
-Default port is 3000. To change, edit `main.js`:
-```javascript
-const PORT = 3000; // Change to desired port
-```
+The wrapper uses port 3000 for the embedded backend. Runtime data is stored below Electron's per-user application data directory:
 
-### Database Location
-- **Development**: `../data/new-api.db` (project directory)
-- **Production**:
-  - macOS: `~/Library/Application Support/New API/data/`
-  - Windows: `%APPDATA%/New API/data/`
-  - Linux: `~/.config/New API/data/`
+- macOS: `~/Library/Application Support/New API/`
+- Windows: `%APPDATA%/New API/`
+- Linux: `~/.config/New API/`

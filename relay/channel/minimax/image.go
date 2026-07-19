@@ -1,14 +1,15 @@
 package minimax
 
 import (
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
@@ -21,7 +22,7 @@ type MiniMaxImageRequest struct {
 	Prompt          string `json:"prompt"`
 	AspectRatio     string `json:"aspect_ratio,omitempty"`
 	ResponseFormat  string `json:"response_format,omitempty"`
-	N               int    `json:"n,omitempty"`
+	N               *int   `json:"n,omitempty"`
 	PromptOptimizer *bool  `json:"prompt_optimizer,omitempty"`
 	AigcWatermark   *bool  `json:"aigc_watermark,omitempty"`
 }
@@ -45,15 +46,15 @@ func oaiImage2MiniMaxImageRequest(request dto.ImageRequest) MiniMaxImageRequest 
 		Model:          request.Model,
 		Prompt:         request.Prompt,
 		ResponseFormat: responseFormat,
-		N:              1,
 		AigcWatermark:  request.Watermark,
 	}
 
 	if request.Model == "" {
 		minimaxRequest.Model = "image-01"
 	}
-	if request.N != nil && *request.N > 0 {
-		minimaxRequest.N = int(*request.N)
+	if request.N != nil {
+		n := common.SaturatingUintToInt(*request.N)
+		minimaxRequest.N = &n
 	}
 	if aspectRatio := aspectRatioFromImageRequest(request); aspectRatio != "" {
 		minimaxRequest.AspectRatio = aspectRatio
@@ -176,37 +177,65 @@ func responseMiniMax2OpenAIImage(response *MiniMaxImageResponse, info *relaycomm
 }
 
 func miniMaxImageHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
-	}
-	service.CloseResponseBodyGracefully(resp)
-
+	defer service.CloseResponseBodyGracefully(resp)
 	var minimaxResponse MiniMaxImageResponse
-	if err := common.Unmarshal(responseBody, &minimaxResponse); err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	if err := common.DecodeJsonWithLimit(resp.Body, &minimaxResponse, common.UpstreamJSONBodyLimit()); err != nil {
+		service.MarkUpstreamAccepted(c)
+		if errors.Is(err, common.ErrReadLimitExceeded) {
+			common.SysError("accepted MiniMax image response exceeded the local response limit; retry suppressed")
+		} else {
+			common.SysError(fmt.Sprintf("accepted MiniMax image response decode failed: error_type=%T", err))
+		}
+		if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+			_ = buffered.Fail(err)
+		}
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
 	if minimaxResponse.BaseResp.StatusCode != 0 {
 		return nil, types.WithOpenAIError(types.OpenAIError{
 			Message: minimaxResponse.BaseResp.StatusMsg,
 			Type:    "minimax_image_error",
 			Code:    fmt.Sprintf("%d", minimaxResponse.BaseResp.StatusCode),
-		}, resp.StatusCode)
+		}, http.StatusBadGateway)
 	}
+	service.MarkUpstreamAccepted(c)
 
 	openAIResponse, err := responseMiniMax2OpenAIImage(&minimaxResponse, info)
 	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+		common.SysError(fmt.Sprintf("accepted MiniMax image response conversion failed: error_type=%T", err))
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
-	jsonResponse, err := common.Marshal(openAIResponse)
-	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+	budget := service.NewImageResponseEncodedBudget()
+	if err := budget.ReserveEncodedBytes(int64(len(openAIResponse.Metadata))); err != nil {
+		common.SysError(fmt.Sprintf("accepted MiniMax image metadata exceeded cumulative encoded budget: error_type=%T", err))
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
-
+	usableData := make([]dto.ImageData, 0, len(openAIResponse.Data))
+	for _, image := range openAIResponse.Data {
+		if image.Url == "" && image.B64Json == "" {
+			continue
+		}
+		if image.B64Json == "" {
+			usableData = append(usableData, image)
+			continue
+		}
+		if err := budget.ConsumeBase64(image.B64Json); err != nil {
+			common.SysError(fmt.Sprintf("accepted MiniMax image response exceeded cumulative encoded budget: error_type=%T", err))
+			return nil, channel.AcceptedResponseDeliveryError()
+		}
+		usableData = append(usableData, image)
+	}
+	if len(usableData) == 0 {
+		return nil, channel.AcceptedResponseDeliveryError()
+	}
+	openAIResponse.Data = usableData
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(resp.StatusCode)
-	if _, err := c.Writer.Write(jsonResponse); err != nil {
-		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+	if err := channel.WriteImageResponse(c.Writer, openAIResponse); err != nil {
+		if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+			_ = buffered.Fail(err)
+		}
+		return &dto.Usage{}, nil
 	}
 
 	return &dto.Usage{}, nil

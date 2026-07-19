@@ -11,7 +11,7 @@
 
 | 项 | 约定 |
 | --- | --- |
-| Base URL | 同源；控制台/前台 `/api/**`，模型调用 `/v1/**`，支付回调 `/pay/** /auth/**` |
+| Base URL | 同源；控制台/前台 `/api/**`，模型调用 `/v1/**`，支付回调 `/api/pay/wechat/notify`、`/api/pay/alipay/notify`（主站进程内验签） |
 | 租户识别 | **按 Host**：`<slug>.wedreamhub.com` 或自定义域名 → 后端 `TenantResolver` 注入租户上下文。前端无需传 tenant_id；后端按 Host + 会话/Token 推断 |
 | 鉴权（控制台） | 复用 new-api 会话（Cookie/Session）或 Bearer access token；角色 `admin` / `agent_owner` / `user` |
 | 鉴权（模型调用） | `Authorization: Bearer <api-token>`，Token 绑租户 |
@@ -19,7 +19,7 @@
 | 金额/币种 | **额度/调用计量 = USD**（`*_usd`、quota）；**充值实付/代理收益/套餐售价 = CNY ¥**（`*_cny`、price、spread）。前端按字段名区分，勿混算 |
 | 时间 | ISO-8601 UTC（`2026-06-28T12:00:00Z`）；展示侧本地化 |
 | 分页 | `?page=1&page_size=20` → `{ "data": [...], "total": N, "page": 1, "page_size": 20 }` |
-| 幂等 | 支付回调按 `order_no` 幂等；购买/充值下单返回 `order_no` |
+| 幂等 | 支付回调按 `order_no` 幂等；购买/充值下单返回 `order_no`；异步 Task/Midjourney/SwapFace 的 `Idempotency-Key` 与人工恢复契约见 [task-submission-idempotency.md](task-submission-idempotency.md) |
 
 ### 1.1 错误码注册表（前端按 code 做文案/分支，**唯一事实源**）
 

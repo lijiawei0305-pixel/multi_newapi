@@ -7,12 +7,18 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
 func SetRouter(router *gin.Engine, assets ThemeAssets) {
+	// Process liveness and dependency readiness are intentionally outside the
+	// API rate limiter and frontend fallback so infrastructure probes remain
+	// deterministic during incidents.
+	router.GET("/health/live", controller.HealthLive)
+	router.GET("/health/ready", controller.HealthReady)
 	SetApiRouter(router)
 	SetDashboardRouter(router)
 	SetRelayRouter(router)

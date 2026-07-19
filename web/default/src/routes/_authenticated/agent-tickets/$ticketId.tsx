@@ -17,21 +17,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { agentContextQueryOptions } from '@/lib/agent-context'
-import { AgentTicketDetail } from '@/features/tickets'
 
-export const Route = createFileRoute('/_authenticated/agent-tickets/$ticketId')({
-  beforeLoad: async ({ context, params }) => {
-    const ctx = await context.queryClient.fetchQuery(agentContextQueryOptions)
-    if (!ctx.is_agent_owner || !ctx.on_own_site) {
-      throw redirect({ to: '/403' })
-    }
-    if (!Number.isInteger(Number(params.ticketId))) {
-      throw redirect({ to: '/agent-tickets' })
-    }
-  },
-  component: RouteComponent,
-})
+import { AgentTicketDetail } from '@/features/tickets'
+import { agentContextQueryOptions } from '@/lib/agent-context'
+
+export const Route = createFileRoute('/_authenticated/agent-tickets/$ticketId')(
+  {
+    beforeLoad: async ({ context, params }) => {
+      const ctx = await context.queryClient.fetchQuery(agentContextQueryOptions)
+      if (!ctx.is_agent_owner || !ctx.on_own_site) {
+        throw redirect({ to: '/403' })
+      }
+      if (!Number.isInteger(Number(params.ticketId))) {
+        throw redirect({ to: '/agent-tickets' })
+      }
+    },
+    component: RouteComponent,
+  }
+)
 
 function RouteComponent() {
   const { ticketId } = Route.useParams()

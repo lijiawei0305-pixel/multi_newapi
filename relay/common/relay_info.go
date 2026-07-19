@@ -122,18 +122,18 @@ type RelayInfo struct {
 	SendResponseCount      int
 	ReceivedResponseCount  int
 	FinalPreConsumedQuota  int // 最终预消耗的配额
-	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
-	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
-	// 必须在提交前锁定全额。
-	ForcePreConsume bool
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 免费模型时为 nil。
 	Billing BillingSettler
 	// BillingSource indicates whether this request is billed from wallet quota or subscription.
 	// "" or "wallet" => wallet; "subscription" => subscription
-	BillingSource string
+	BillingSource           string
+	DeferBillingCommission  bool
+	BillingCommissionPolicy string
 	// SubscriptionId is the user_subscriptions.id used when BillingSource == "subscription"
-	SubscriptionId int
+	SubscriptionId         int
+	SubscriptionResetEpoch int64
+	SubscriptionOccurredAt int64
 	// SubscriptionPreConsumed is the amount pre-consumed on subscription item (quota units or 1)
 	SubscriptionPreConsumed int64
 	// SubscriptionPostDelta is the post-consume delta applied to amount_used (quota units; can be negative).
@@ -143,6 +143,20 @@ type RelayInfo struct {
 	SubscriptionPlanTitle string
 	// RequestId is used for idempotent pre-consume/refund
 	RequestId string
+	// BillingAdjustmentSequence separates repeated realtime/WSS quota events
+	// that share one request id.
+	BillingAdjustmentSequence int64
+	// TaskSubmissionRecoveryPrepared means the pre-upstream recovery row exists.
+	// Protected means the request may have reached upstream and therefore must
+	// not be retried or refunded automatically.
+	TaskSubmissionRecoveryPrepared  bool
+	TaskSubmissionRecoveryProtected bool
+	TaskSubmissionRecoveryKind      string
+	// IdempotencyFingerprint is a stable one-way digest of the authenticated
+	// tenant/host/user/token/route/method/key identity. The raw Idempotency-Key
+	// is never persisted or logged.
+	TaskSubmissionIdempotencyFingerprint string
+	TaskSubmissionClaimOwned             bool
 	// SubscriptionAmountTotal / SubscriptionAmountUsedAfterPreConsume are used to compute remaining in logs.
 	SubscriptionAmountTotal               int64
 	SubscriptionAmountUsedAfterPreConsume int64
@@ -523,6 +537,9 @@ func cloneRequestHeaders(c *gin.Context) map[string]string {
 	}
 	headers := make(map[string]string, len(c.Request.Header))
 	for key := range c.Request.Header {
+		if strings.EqualFold(key, "Idempotency-Key") {
+			continue
+		}
 		value := strings.TrimSpace(c.Request.Header.Get(key))
 		if value == "" {
 			continue
@@ -689,7 +706,7 @@ type TaskSubmitReq struct {
 	Image          string                 `json:"image,omitempty"`
 	Images         []string               `json:"images,omitempty"`
 	Size           string                 `json:"size,omitempty"`
-	Duration       int                    `json:"duration,omitempty"`
+	Duration       *int                   `json:"duration,omitempty"`
 	Seconds        string                 `json:"seconds,omitempty"`
 	InputReference string                 `json:"input_reference,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
@@ -717,15 +734,16 @@ func (t *TaskSubmitReq) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	if len(aux.Duration) > 0 {
+	t.Duration = nil
+	if len(aux.Duration) > 0 && string(aux.Duration) != "null" {
 		var durationInt int
 		if err := common.Unmarshal(aux.Duration, &durationInt); err == nil {
-			t.Duration = durationInt
+			t.Duration = common.GetPointer(durationInt)
 		} else {
 			var durationStr string
 			if err := common.Unmarshal(aux.Duration, &durationStr); err == nil && durationStr != "" {
 				if v, err := strconv.Atoi(durationStr); err == nil {
-					t.Duration = v
+					t.Duration = common.GetPointer(v)
 				}
 			}
 		}

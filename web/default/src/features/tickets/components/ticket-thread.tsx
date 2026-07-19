@@ -17,9 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+
 import { Badge } from '@/components/ui/badge'
 import { fmtDateTime } from '@/lib/agent-format'
 import { cn } from '@/lib/utils'
+
 import { authorRoleLabel } from '../lib'
 import type { TicketMessage } from '../types'
 
@@ -68,7 +70,7 @@ export function TicketThread(props: { messages: TicketMessage[] }) {
                   {fmtDateTime(m.created_at)}
                 </span>
               </div>
-              <p className='text-sm whitespace-pre-wrap break-words'>
+              <p className='text-sm break-words whitespace-pre-wrap'>
                 {m.content}
               </p>
             </div>

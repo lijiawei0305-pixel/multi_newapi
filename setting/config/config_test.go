@@ -2,6 +2,9 @@ package config
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type testConfigWithMap struct {
@@ -93,4 +96,38 @@ func TestUpdateConfigFromMap_ScalarFieldsUnchanged(t *testing.T) {
 	if cfg.Modes["m"] != "v" {
 		t.Errorf("Modes should be unchanged, got %v", cfg.Modes)
 	}
+}
+
+func TestUpdateConfigFromMapInvalidInputIsAtomic(t *testing.T) {
+	cfg := &testConfigWithMap{
+		Modes: map[string]string{"model-a": "tiered_expr"},
+		Exprs: map[string]string{"model-a": "p * 5"},
+		Name:  "before",
+	}
+
+	err := UpdateConfigFromMap(cfg, map[string]string{
+		"modes": `{"broken":`,
+		"name":  "after",
+	})
+
+	require.Error(t, err)
+	assert.Equal(t, "before", cfg.Name)
+	assert.Equal(t, map[string]string{"model-a": "tiered_expr"}, cfg.Modes)
+	assert.Equal(t, map[string]string{"model-a": "p * 5"}, cfg.Exprs)
+}
+
+func TestConfigManagerValidatesBeforePublishing(t *testing.T) {
+	manager := NewConfigManager()
+	cfg := &testConfigWithMap{Modes: map[string]string{"old": "value"}, Name: "before"}
+	manager.Register("test", cfg)
+
+	handled, err := manager.ValidateUpdate("test", map[string]string{"modes": `[]`})
+	require.True(t, handled)
+	require.Error(t, err)
+	assert.Equal(t, map[string]string{"old": "value"}, cfg.Modes)
+
+	handled, err = manager.ApplyUpdate("test", map[string]string{"unknown": "value"})
+	require.True(t, handled)
+	require.Error(t, err)
+	assert.Equal(t, "before", cfg.Name)
 }

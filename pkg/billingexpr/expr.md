@@ -138,6 +138,10 @@ Two editing modes:
 
 The editor outputs a billing expression string and an optional request rule expression string. These are combined via `combineBillingExpr(billingExpr, requestRuleExpr)` before storage.
 
+The Default and Classic frontends' token-cost previews parse an allowlisted numeric subset of the language (token variables, `tier`, arithmetic, comparisons, ternaries, and the documented math helpers). They never evaluate an expression as JavaScript. Estimator inputs map directly to the normalized backend environment: billable input `p`, billable output `c`, full input length `len`, plus each optional sub-category variable. The estimator does not guess whether an upstream uses OpenAI/GPT or Claude usage semantics; derive `p`, `c`, and `len` with the normalization rules below before previewing. The displayed quota is `expression output / 1,000,000 * QuotaPerUnit`, before the group multiplier.
+
+Request-dependent functions such as `param`, `header`, and time helpers require backend request context and therefore report that they cannot be previewed locally. The preview also rejects syntax that cannot be reproduced safely with JavaScript number semantics, including modulo, integer literals outside JavaScript's safe-integer range, unknown expression versions, member/property access, and unsupported functions. Unsupported or invalid nodes are checked across every branch, including branches not selected by the current sample inputs. The backend compiler remains the authority for save-time validation and billing execution.
+
 ### 2. Storage
 
 **File**: `setting/billing_setting/tiered_billing.go`

@@ -1,12 +1,12 @@
 package xai
 
 import (
-	"io"
 	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -40,17 +40,45 @@ func xAIStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var responseTextBuilder strings.Builder
 	var toolCount int
 	var containStreamUsage bool
+	var streamErr *types.NewAPIError
+	seenValidResponse := false
+	completed := false
 
 	helper.SetEventStreamHeaders(c)
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
+		var errorResponse dto.OpenAITextResponse
+		if err := common.UnmarshalJsonStr(data, &errorResponse); err == nil {
+			if openAIError := errorResponse.GetOpenAIError(); openAIError != nil &&
+				(strings.TrimSpace(openAIError.Message) != "" || strings.TrimSpace(openAIError.Type) != "" || strings.TrimSpace(openAIError.Param) != "" || openAIError.Code != nil) {
+				apiErr := types.WithOpenAIError(*openAIError, http.StatusBadGateway)
+				if seenValidResponse {
+					service.MarkUpstreamAccepted(c)
+					streamErr = relaychannel.AcceptedResponseDeliveryError()
+				} else {
+					streamErr = service.MarkExplicitUpstreamRejection(apiErr)
+				}
+				sr.Stop(streamErr)
+				return
+			}
+		}
 		var xAIResp *dto.ChatCompletionsStreamResponse
 		if err := common.UnmarshalJsonStr(data, &xAIResp); err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
-			sr.Error(err)
+			service.MarkUpstreamAccepted(c)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
 			return
 		}
-
+		if xAIResp == nil {
+			service.MarkUpstreamAccepted(c)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
+			return
+		}
+		service.MarkUpstreamAccepted(c)
+		seenValidResponse = true
+		completed = completed || xAIResp.IsFinished()
 		// 把 xAI 的usage转换为 OpenAI 的usage
 		if xAIResp.Usage != nil {
 			containStreamUsage = true
@@ -60,10 +88,20 @@ func xAIStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		}
 
 		openaiResponse := streamResponseXAI2OpenAI(xAIResp, usage)
-		_ = openai.ProcessStreamResponse(*openaiResponse, &responseTextBuilder, &toolCount)
+		if openaiResponse == nil {
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
+			return
+		}
+		if err := openai.ProcessStreamResponse(*openaiResponse, &responseTextBuilder, &toolCount); err != nil {
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
+			return
+		}
 		if err := helper.ObjectData(c, openaiResponse); err != nil {
 			common.SysLog(err.Error())
-			sr.Error(err)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
 		}
 	})
 
@@ -71,16 +109,24 @@ func xAIStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		usage.CompletionTokens += toolCount * 7
 	}
-
-	helper.Done(c)
-	service.CloseResponseBodyGracefully(resp)
+	if streamErr != nil {
+		return usage, streamErr
+	}
+	finishedNormally := completed || info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonDone
+	if info.StreamStatus == nil || !info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors() || !seenValidResponse || !finishedNormally {
+		service.MarkUpstreamAccepted(c)
+		return usage, relaychannel.AcceptedResponseDeliveryError()
+	}
+	if err := helper.StringData(c, "[DONE]"); err != nil {
+		return usage, relaychannel.AcceptedResponseDeliveryError()
+	}
 	return usage, nil
 }
 
 func xAIHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}

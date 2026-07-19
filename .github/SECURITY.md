@@ -85,9 +85,14 @@ When deploying and using New API, we recommend following these security best pra
 
 Please ensure the following security-related environment variables and settings are properly configured:
 
-- `SESSION_SECRET` - Use a strong random string
+- `DEPLOYMENT_ENV=production` - Unset or unknown values fail closed as production; use `development` only for explicit local HTTP development
+- `SESSION_COOKIE_SECURE=true` - Required for every internet-facing deployment behind HTTPS
+- `SESSION_SECRET` - Use a strong random session-signing secret; it is required in production
+- `CRYPTO_SECRET` - Use a different strong random encryption/HMAC secret; it is required in production and must not equal `SESSION_SECRET`
 - `SQL_DSN` - Ensure database connection uses secure configuration
 - `REDIS_CONN_STRING` - If using Redis, ensure secure connection
+
+Never place these secrets in tracked files or process command-line arguments. Inject them from the deployment secret store or a permission-restricted environment file.
 
 For detailed configuration instructions, please refer to the project documentation.
 

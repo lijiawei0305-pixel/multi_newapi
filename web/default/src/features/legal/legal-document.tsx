@@ -25,7 +25,8 @@ import { RichContent } from '@/components/rich-content'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { isHttpUrl, isLikelyHtml } from '@/lib/content-format'
+import { isLikelyHtml } from '@/lib/content-format'
+import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
 
 import type { LegalDocumentResponse } from './types'
 
@@ -51,7 +52,7 @@ export function LegalDocument({
 
   const rawContent = data?.data?.trim() ?? ''
   const hasContent = rawContent.length > 0
-  const isUrl = hasContent && isHttpUrl(rawContent)
+  const contentUrl = hasContent ? normalizeHttpNavigationUrl(rawContent) : null
   const success = data?.success ?? false
 
   if (isLoading) {
@@ -89,7 +90,7 @@ export function LegalDocument({
     )
   }
 
-  if (isUrl) {
+  if (contentUrl) {
     return (
       <PublicLayout>
         <div className='mx-auto max-w-2xl py-12'>
@@ -106,7 +107,7 @@ export function LegalDocument({
               <Button
                 render={
                   <a
-                    href={rawContent}
+                    href={contentUrl}
                     target='_blank'
                     rel='noopener noreferrer'
                   />

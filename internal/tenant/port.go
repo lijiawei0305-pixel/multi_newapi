@@ -43,7 +43,7 @@ type CreateTenantInput struct {
 // --- 消费者定义的依赖接口（本包声明，main 装配具体实现）---
 
 // TenantRepo 是租户持久化抽象。本轮提供内存假实现（MemRepo）；
-// 真实 GORM 实现 + slug/domain 唯一约束顺延（见报告 TODO）。
+// 生产 GORM 实现及 slug/domain 唯一约束位于 gormrepo 子包。
 type TenantRepo interface {
 	// CreateTenant 入库并回填 t.ID；slug 冲突返回 ErrSlugDuplicate。
 	CreateTenant(ctx context.Context, t *Tenant) error

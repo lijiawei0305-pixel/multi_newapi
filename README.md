@@ -131,14 +131,18 @@ docker pull calciumion/new-api:latest
 # Using SQLite (default)
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 
-# Using MySQL
+# Using MySQL (set SQL_DSN in your shell; do not put a password in tracked files)
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
+  -e SQL_DSN="${SQL_DSN:?export SQL_DSN first}" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -312,8 +316,10 @@ docker run --name new-api -d --restart always \
 
 | Variable Name | Description | Default Value |
 |--------|------|--------|
-| `SESSION_SECRET` | Session secret (required for multi-machine deployment) | - |
-| `CRYPTO_SECRET` | Encryption secret (required for Redis) | - |
+| `DEPLOYMENT_ENV` | Security mode. Unset or unknown values are treated as `production`; local source/HTTP development must explicitly use `development` | `production` (fail-closed) |
+| `SESSION_COOKIE_SECURE` | Require HTTPS-only session cookies. Production requires `true`; use `false` only with explicit local `DEPLOYMENT_ENV=development` | `false` |
+| `SESSION_SECRET` | Explicit session-signing secret. Required in production | - |
+| `CRYPTO_SECRET` | Explicit encryption/HMAC secret. Required in production and must differ from `SESSION_SECRET` | - |
 | `SQL_DSN` | Database connection string | - |
 | `REDIS_CONN_STRING` | Redis connection string | - |
 | `RELAY_IDLE_CONN_TIMEOUT` | Idle keep-alive timeout for relay HTTP clients, seconds. Defaults to Go standard library behavior; set `0` to disable | `90` |
@@ -329,6 +335,9 @@ docker run --name new-api -d --restart always \
 | `PYROSCOPE_MUTEX_RATE` | Pyroscope mutex sampling rate | `5` |
 | `PYROSCOPE_BLOCK_RATE` | Pyroscope block sampling rate | `5` |
 | `HOSTNAME` | Hostname tag for Pyroscope | `new-api` |
+
+> [!IMPORTANT]
+> Omitting `DEPLOYMENT_ENV` does **not** enable an insecure development fallback. A local source install served over HTTP must explicitly set `DEPLOYMENT_ENV=development`. Internet-facing deployments must keep production mode, terminate HTTPS, set `SESSION_COOKIE_SECURE=true`, and provide two different randomly generated `SESSION_SECRET` and `CRYPTO_SECRET` values. Never commit those secrets.
 
 📖 **Complete configuration:** [Environment Variables Documentation](https://docs.newapi.pro/en/docs/installation/config-maintenance/environment-variables)
 
@@ -360,16 +369,20 @@ docker-compose up -d
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
-**Using MySQL:**
+**Using MySQL:** Set `SQL_DSN` in your shell first; never put a database password in a tracked command or file.
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
+  -e SQL_DSN="${SQL_DSN:?export SQL_DSN first}" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -395,8 +408,9 @@ docker run --name new-api -d --restart always \
 ### ⚠️ Multi-machine Deployment Considerations
 
 > [!WARNING]
-> - **Must set** `SESSION_SECRET` - Otherwise login status inconsistent
-> - **Shared Redis must set** `CRYPTO_SECRET` - Otherwise data cannot be decrypted
+> - **Production must set** `SESSION_COOKIE_SECURE=true` and serve through HTTPS.
+> - **Every production instance must set** the same explicit `SESSION_SECRET` and `CRYPTO_SECRET`, and the two values must be different.
+> - **Local HTTP/source development must explicitly set** `DEPLOYMENT_ENV=development`; do not use that mode for an internet-facing deployment.
 
 ### 🔄 Channel Retry and Cache
 

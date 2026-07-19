@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
@@ -64,7 +65,7 @@ func TestResetStatusCode(t *testing.T) {
 	}
 }
 
-func TestRelayErrorHandlerTruncatesInvalidJSONBodyInLog(t *testing.T) {
+func TestRelayErrorHandlerLogsMetadataForInvalidJSONBody(t *testing.T) {
 	withDebugEnabled(t, false)
 
 	body := strings.Repeat("b", common.LocalLogContentLimit+256)
@@ -89,9 +90,10 @@ func TestRelayErrorHandlerTruncatesInvalidJSONBodyInLog(t *testing.T) {
 
 	require.NotNil(t, newAPIError)
 	require.Equal(t, "bad response status code 500", newAPIError.Error())
-	require.Contains(t, logBuffer.String(), "[truncated")
-	require.Contains(t, logBuffer.String(), fmt.Sprintf("original_length=%d", len(body)))
-	require.NotContains(t, logBuffer.String(), strings.Repeat("b", common.LocalLogContentLimit+1))
+	digest := sha256.Sum256([]byte(body))
+	require.Contains(t, logBuffer.String(), fmt.Sprintf("size=%d", len(body)))
+	require.Contains(t, logBuffer.String(), fmt.Sprintf("sha256=%x", digest))
+	require.NotContains(t, logBuffer.String(), body)
 }
 
 func TestRelayErrorHandlerKeepsStructuredErrorMessage(t *testing.T) {
@@ -122,7 +124,7 @@ func TestRelayErrorHandlerKeepsOpenAIErrorMessage(t *testing.T) {
 	require.Equal(t, message, newAPIError.Error())
 }
 
-func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {
+func TestRelayErrorHandlerDoesNotExposeInvalidJSONBodyInDebugLog(t *testing.T) {
 	withDebugEnabled(t, true)
 
 	body := strings.Repeat("e", common.LocalLogContentLimit+256)
@@ -146,8 +148,10 @@ func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {
 	newAPIError := RelayErrorHandler(context.Background(), resp, false)
 
 	require.NotNil(t, newAPIError)
-	require.NotContains(t, logBuffer.String(), "[truncated")
-	require.Contains(t, logBuffer.String(), body)
+	digest := sha256.Sum256([]byte(body))
+	require.Contains(t, logBuffer.String(), fmt.Sprintf("size=%d", len(body)))
+	require.Contains(t, logBuffer.String(), fmt.Sprintf("sha256=%x", digest))
+	require.NotContains(t, logBuffer.String(), body)
 }
 
 func withDebugEnabled(t *testing.T, enabled bool) {

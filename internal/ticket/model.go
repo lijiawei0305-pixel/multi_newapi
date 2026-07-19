@@ -67,9 +67,9 @@ type SupportTicket struct {
 	Title         string
 	Status        TicketStatus
 	Priority      TicketPriority
-	MessageCount  int          // 冗余：消息总数（含开帖），供列表徽标
-	LastReplyAt   time.Time    // 最后回复时间（收件箱排序键）
-	LastReplyRole AuthorRole   // 最后回复者角色（「等待谁回复」提示）
+	MessageCount  int        // 冗余：消息总数（含开帖），供列表徽标
+	LastReplyAt   time.Time  // 最后回复时间（收件箱排序键）
+	LastReplyRole AuthorRole // 最后回复者角色（「等待谁回复」提示）
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }

@@ -1,16 +1,18 @@
 package openai
 
 import (
-	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -18,7 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) *dto.Usage {
+func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
 	// the status code has been judged before, if there is a body reading failure,
 	// it should be regarded as a non-recoverable error, so it should not return err for external retry.
 	// Analogous to nginx's load balancing, it will only retry if it can't be requested or
@@ -29,12 +31,37 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 	usage := &dto.Usage{}
 	usage.PromptTokens = info.GetEstimatePromptTokens()
 	usage.TotalTokens = info.GetEstimatePromptTokens()
-	for k, v := range resp.Header {
-		if !service.ShouldCopyUpstreamHeader(c, k, v) {
-			continue
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "json") {
+		responseBody, readErr := common.ReadAllWithLimit(resp.Body)
+		if readErr != nil {
+			service.MarkUpstreamAccepted(c)
+			if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+				_ = buffered.Fail(readErr)
+			}
+			common.SysError(fmt.Sprintf("accepted OpenAI TTS JSON read failed: error_type=%T", readErr))
+			return nil, channel.AcceptedResponseDeliveryError()
 		}
-		c.Writer.Header().Set(k, v[0])
+		var errorResponse dto.SimpleResponse
+		if decodeErr := common.Unmarshal(responseBody, &errorResponse); decodeErr != nil {
+			service.MarkUpstreamAccepted(c)
+			if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+				_ = buffered.Fail(decodeErr)
+			}
+			common.SysError(fmt.Sprintf("accepted OpenAI TTS JSON decode failed: error_type=%T", decodeErr))
+			return nil, channel.AcceptedResponseDeliveryError()
+		}
+		if oaiError := errorResponse.GetOpenAIError(); meaningfulOpenAIError(oaiError) {
+			return nil, types.WithOpenAIError(*oaiError, http.StatusBadGateway)
+		}
+		service.MarkUpstreamAccepted(c)
+		err := errors.New("accepted OpenAI TTS response was JSON without audio")
+		if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+			_ = buffered.Fail(err)
+		}
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
+	service.MarkUpstreamAccepted(c)
+	service.CopyUpstreamResponseHeaders(c, c.Writer.Header(), resp.Header)
 	c.Writer.WriteHeader(resp.StatusCode)
 
 	if info.IsStream {
@@ -56,19 +83,17 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 		})
 	} else {
 		common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
-		// 读取响应体到缓冲区
-		bodyBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			logger.LogError(c, fmt.Sprintf("failed to read TTS response body: %v", err))
-			c.Writer.WriteHeaderNow()
-			return usage
-		}
-
-		// 写入响应到客户端
+		// Stream directly into the reserved hybrid response spool. This avoids a
+		// second full-size []byte for long audio while preserving the accepted
+		// response even when duration inspection later fails.
 		c.Writer.WriteHeaderNow()
-		_, err = c.Writer.Write(bodyBytes)
-		if err != nil {
-			logger.LogError(c, fmt.Sprintf("failed to write TTS response: %v", err))
+		written, copyErr := io.Copy(c.Writer, resp.Body)
+		if copyErr != nil {
+			logger.LogError(c, fmt.Sprintf("failed to spool accepted TTS response: %v", copyErr))
+			if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+				_ = buffered.Fail(copyErr)
+			}
+			return nil, channel.AcceptedResponseDeliveryError()
 		}
 
 		// 计算音频时长并更新 usage
@@ -80,17 +105,27 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 		var duration float64
 		var durationErr error
 
-		if audioFormat == "pcm" {
+		if copyErr != nil {
+			durationErr = copyErr
+		} else if audioFormat == "pcm" {
 			// PCM 格式没有文件头，根据 OpenAI TTS 的 PCM 参数计算时长
 			// 采样率: 24000 Hz, 位深度: 16-bit (2 bytes), 声道数: 1
 			const sampleRate = 24000
 			const bytesPerSample = 2
 			const channels = 1
-			duration = float64(len(bodyBytes)) / float64(sampleRate*bytesPerSample*channels)
+			duration = float64(written) / float64(sampleRate*bytesPerSample*channels)
 		} else {
 			ext := "." + audioFormat
-			reader := bytes.NewReader(bodyBytes)
-			duration, durationErr = common.GetAudioDuration(c.Request.Context(), reader, ext)
+			buffered, ok := c.Writer.(*common.BufferedResponseWriter)
+			if !ok {
+				durationErr = fmt.Errorf("buffered TTS response inspection is unavailable")
+			} else {
+				durationErr = buffered.InspectBody(func(reader io.ReadSeeker) error {
+					var err error
+					duration, err = common.GetAudioDuration(c.Request.Context(), reader, ext)
+					return err
+				})
+			}
 		}
 
 		usage.PromptTokensDetails.TextTokens = usage.PromptTokens
@@ -98,7 +133,7 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 		if durationErr != nil {
 			logger.LogWarn(c, fmt.Sprintf("failed to get audio duration: %v", durationErr))
 			// 如果无法获取时长，则设置保底的 CompletionTokens，根据body大小计算
-			sizeInKB := float64(len(bodyBytes)) / 1000.0
+			sizeInKB := float64(written) / 1000.0
 			estimatedTokens := int(math.Ceil(sizeInKB)) // 粗略估算每KB约等于1 token
 			usage.CompletionTokens = estimatedTokens
 			usage.CompletionTokenDetails.AudioTokens = estimatedTokens
@@ -111,16 +146,37 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 
-	return usage
+	return usage, nil
 }
 
 func OpenaiSTTHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, responseFormat string) (*types.NewAPIError, *dto.Usage) {
 	defer service.CloseResponseBodyGracefully(resp)
 
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
-		return types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError), nil
+		service.MarkUpstreamAccepted(c)
+		if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+			_ = buffered.Fail(err)
+		}
+		common.SysError(fmt.Sprintf("accepted OpenAI transcription response read failed: error_type=%T", err))
+		return channel.AcceptedResponseDeliveryError(), nil
 	}
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	if strings.Contains(contentType, "json") || responseFormat == "json" || responseFormat == "verbose_json" {
+		var errorResponse dto.SimpleResponse
+		if decodeErr := common.Unmarshal(responseBody, &errorResponse); decodeErr != nil {
+			service.MarkUpstreamAccepted(c)
+			if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+				_ = buffered.Fail(decodeErr)
+			}
+			common.SysError(fmt.Sprintf("accepted OpenAI transcription JSON decode failed: error_type=%T", decodeErr))
+			return channel.AcceptedResponseDeliveryError(), nil
+		}
+		if oaiError := errorResponse.GetOpenAIError(); meaningfulOpenAIError(oaiError) {
+			return types.WithOpenAIError(*oaiError, http.StatusBadGateway), nil
+		}
+	}
+	service.MarkUpstreamAccepted(c)
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 

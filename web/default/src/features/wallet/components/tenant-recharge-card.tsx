@@ -16,19 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { cn } from '@/lib/utils'
+
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useSystemConfig } from '@/hooks/use-system-config'
-import { getPaymentIcon } from '../lib'
+import { cn } from '@/lib/utils'
+
 import {
   useTenantRecharge,
   type RechargeProvider,
 } from '../hooks/use-tenant-recharge'
+import { getPaymentIcon } from '../lib'
 import { RechargeQrDialog } from './dialogs/recharge-qr-dialog'
 
 /**
@@ -103,7 +105,7 @@ export function TenantRechargeCard({
   // No enabled && configured channel → hide the whole card.
   if (providers.length === 0) return null
 
-  const amountNum = parseFloat(amount) || 0
+  const amountNum = Number.parseFloat(amount) || 0
   const belowMin = amountNum < minCny
   const busy = submitting !== null
 
@@ -130,7 +132,9 @@ export function TenantRechargeCard({
   return (
     <div className='space-y-3 border-b pb-4 sm:pb-6'>
       <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
-        {t('Recharge (WeChat / Alipay)', { defaultValue: '充值（微信 / 支付宝）' })}
+        {t('Recharge (WeChat / Alipay)', {
+          defaultValue: '充值（微信 / 支付宝）',
+        })}
       </Label>
 
       {/* 人民币整数预设档位（所见即所付） */}
@@ -183,8 +187,7 @@ export function TenantRechargeCard({
       <div className='flex gap-2'>
         {providers.includes('wxpay') &&
           providerButton('wxpay', t('WeChat Pay'))}
-        {providers.includes('alipay') &&
-          providerButton('alipay', t('Alipay'))}
+        {providers.includes('alipay') && providerButton('alipay', t('Alipay'))}
       </div>
 
       <Button

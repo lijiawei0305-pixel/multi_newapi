@@ -162,7 +162,7 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
-		logger.LogDebug(c, "Gemini request body: %s", jsonData)
+		logger.LogPayload(c, "Gemini request body", jsonData)
 
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
@@ -176,17 +176,20 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
-		logger.LogError(c, "Do gemini request failed: "+err.Error())
+		logger.LogError(c, fmt.Sprintf("Do gemini request failed: error_type=%T", err))
 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 
 	var httpResp *http.Response
-	if resp != nil {
-		httpResp = resp.(*http.Response)
+	httpResp, newAPIError = resolveSynchronousHTTPResponse(resp, info)
+	if newAPIError != nil {
+		return newAPIError
+	}
+	if httpResp != nil {
 		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
-		if httpResp.StatusCode != http.StatusOK {
+		if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			// reset status code 重置状态码
 			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
@@ -194,13 +197,20 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 	}
 
-	usage, openaiErr := adaptor.DoResponse(c, resp.(*http.Response), info)
+	usage, openaiErr := adaptor.DoResponse(c, httpResp, info)
+	recordSynchronousUpstreamResult(c, httpResp, openaiErr)
 	if openaiErr != nil {
 		service.ResetStatusCode(openaiErr, statusCodeMappingStr)
 		return openaiErr
 	}
+	resolvedUsage, usageErr := acceptedResponseUsage(c, usage)
+	if usageErr != nil {
+		return usageErr
+	}
 
-	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+	if billingErr := service.PostTextConsumeQuota(c, info, resolvedUsage, nil); billingErr != nil {
+		return billingErr
+	}
 	return nil
 }
 
@@ -268,7 +278,7 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo) (newAPI
 			return newAPIErrorFromParamOverride(err)
 		}
 	}
-	logger.LogDebug(c, "Gemini embedding request body: %s", jsonData)
+	logger.LogPayload(c, "Gemini embedding request body", jsonData)
 	body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
@@ -280,27 +290,37 @@ func GeminiEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo) (newAPI
 
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
-		logger.LogError(c, "Do gemini request failed: "+err.Error())
+		logger.LogError(c, fmt.Sprintf("Do gemini request failed: error_type=%T", err))
 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 	var httpResp *http.Response
-	if resp != nil {
-		httpResp = resp.(*http.Response)
-		if httpResp.StatusCode != http.StatusOK {
+	httpResp, newAPIError = resolveSynchronousHTTPResponse(resp, info)
+	if newAPIError != nil {
+		return newAPIError
+	}
+	if httpResp != nil {
+		if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 			return newAPIError
 		}
 	}
 
-	usage, openaiErr := adaptor.DoResponse(c, resp.(*http.Response), info)
+	usage, openaiErr := adaptor.DoResponse(c, httpResp, info)
+	recordSynchronousUpstreamResult(c, httpResp, openaiErr)
 	if openaiErr != nil {
 		service.ResetStatusCode(openaiErr, statusCodeMappingStr)
 		return openaiErr
 	}
+	resolvedUsage, usageErr := acceptedResponseUsage(c, usage)
+	if usageErr != nil {
+		return usageErr
+	}
 
-	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+	if billingErr := service.PostTextConsumeQuota(c, info, resolvedUsage, nil); billingErr != nil {
+		return billingErr
+	}
 	return nil
 }

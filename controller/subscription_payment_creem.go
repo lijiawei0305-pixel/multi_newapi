@@ -11,7 +11,6 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/thanhpk/randstr"
 )
@@ -30,7 +29,7 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 	// Keep body for debugging consistency (like RequestCreemPay)
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 订阅支付请求读取失败 error=%q", err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 订阅支付请求读取失败 error_type=%T", err))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "read query error"})
 		return
 	}
@@ -54,7 +53,10 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 		common.ApiErrorMsg(c, "该套餐未配置 CreemProductId")
 		return
 	}
-	if setting.CreemWebhookSecret == "" && !setting.CreemTestMode {
+	// Subscription fulfillment always requires an authenticated callback. Test
+	// mode changes the upstream endpoint, but must not turn signature checking
+	// into an optional part of the payment contract.
+	if setting.CreemWebhookSecret == "" {
 		common.ApiErrorMsg(c, "Creem Webhook 未配置")
 		return
 	}
@@ -86,42 +88,43 @@ func SubscriptionRequestCreemPay(c *gin.Context) {
 	referenceId := "sub_ref_" + common.Sha1([]byte(reference+time.Now().String()+user.Username))
 
 	// create pending order first
-	order := &model.SubscriptionOrder{
-		UserId:          userId,
-		PlanId:          plan.Id,
-		Money:           plan.PriceAmount,
-		TradeNo:         referenceId,
-		PaymentMethod:   model.PaymentMethodCreem,
-		PaymentProvider: model.PaymentProviderCreem,
-		CreateTime:      time.Now().Unix(),
-		Status:          common.TopUpStatusPending,
-	}
-	if err := order.Insert(); err != nil {
+	order, err := model.CreatePendingSubscriptionOrder(userId, plan.Id, referenceId, model.PaymentMethodCreem, model.PaymentProviderCreem, model.SubscriptionCheckoutPolicy{
+		Currency:         "USD",
+		CurrencySource:   model.SubscriptionCurrencySourceProviderCallback,
+		AmountMultiplier: "1",
+		CheckoutMode:     model.SubscriptionCheckoutModeOneTime,
+	})
+	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
 		return
 	}
 
 	// Reuse Creem checkout generator by building a lightweight product reference.
-	currency := "USD"
-	switch operation_setting.GetGeneralSetting().QuotaDisplayType {
-	case operation_setting.QuotaDisplayTypeCNY:
-		currency = "CNY"
-	case operation_setting.QuotaDisplayTypeUSD:
-		currency = "USD"
-	default:
-		currency = "USD"
-	}
 	product := &CreemProduct{
-		ProductId: plan.CreemProductId,
+		ProductId: order.ExpectedProductId,
 		Name:      plan.Title,
 		Price:     plan.PriceAmount,
-		Currency:  currency,
+		Currency:  order.ExpectedCurrency,
 		Quota:     0,
 	}
 
-	checkoutUrl, err := genCreemLink(c.Request.Context(), referenceId, product, user.Email, user.Username)
+	checkoutUrl, checkoutId, err := genCreemLink(c.Request.Context(), referenceId, product, user.Email, user.Username, map[string]string{
+		"new_api_subscription_product_id":    order.ExpectedProductId,
+		"new_api_subscription_snapshot_hash": order.SnapshotHash,
+	})
 	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 订阅支付链接创建失败 trade_no=%s product_id=%s error=%q", referenceId, product.ProductId, err.Error()))
+		if expireErr := model.ExpireSubscriptionOrder(referenceId, model.PaymentProviderCreem); expireErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 订阅订单过期标记失败 trade_no=%s error_type=%T", referenceId, expireErr))
+		}
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 订阅支付链接创建失败 trade_no=%s product_id=%s error_type=%T", referenceId, product.ProductId, err))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
+		return
+	}
+	if err := model.SetSubscriptionOrderCheckoutId(referenceId, model.PaymentProviderCreem, checkoutId); err != nil {
+		if expireErr := model.ExpireSubscriptionOrder(referenceId, model.PaymentProviderCreem); expireErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Creem 订阅订单过期标记失败 trade_no=%s error_type=%T", referenceId, expireErr))
+		}
+		logger.LogError(c.Request.Context(), fmt.Sprintf("Creem checkout 标识保存失败 trade_no=%s error_type=%T", referenceId, err))
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}

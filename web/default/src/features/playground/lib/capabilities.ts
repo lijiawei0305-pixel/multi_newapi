@@ -16,9 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import i18n from '@/i18n/config'
 import { ENDPOINT_TYPES } from '@/features/pricing/constants'
 import type { PricingModel } from '@/features/pricing/types'
+import i18n from '@/i18n/config'
 
 import type { CatalogFilter, PlaygroundCapability } from '../types'
 
@@ -71,7 +71,9 @@ export function getModelCapabilities(m: PricingModel): PlaygroundCapability[] {
  * model to chat, or they'd render a usable chat workspace for a model that
  * can't chat and let the user fire a request that only errors out.
  */
-export function getPrimaryCapability(m: PricingModel): PlaygroundCapability | null {
+export function getPrimaryCapability(
+  m: PricingModel
+): PlaygroundCapability | null {
   const types = m.supported_endpoint_types ?? []
 
   if (types.includes(VIDEO_ENDPOINT_TYPE)) return 'video'

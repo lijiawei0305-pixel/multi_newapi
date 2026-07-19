@@ -1,4 +1,3 @@
-// @ts-nocheck
 /* WeDream 落地页样式 —— 移植自 bulb-orbit/index.html 的 <style>（8–641），仅顶部 reset 收敛到 .wd-landing-root 作用域。
    以「挂载时注入 <style>、卸载即移除」的方式使用（见 index.tsx），确保只在 /landing-react 路由存在，不永久污染全站。 */
 export const LANDING_CSS = `

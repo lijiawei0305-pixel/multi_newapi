@@ -2,7 +2,7 @@ package controller
 
 import (
 	"context"
-	"io"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -161,8 +161,12 @@ func FetchCustomOAuthDiscovery(c *gin.Context) {
 	targetURL = strings.TrimSpace(targetURL)
 
 	parsedURL, err := url.Parse(targetURL)
-	if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+	if err != nil || parsedURL.Host == "" || parsedURL.User != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		common.ApiErrorMsg(c, "Discovery URL 无效，仅支持 http/https")
+		return
+	}
+	if err := validateControlPlaneURL(targetURL); err != nil {
+		common.ApiErrorMsg(c, "Discovery URL 不允许访问")
 		return
 	}
 
@@ -171,32 +175,35 @@ func FetchCustomOAuthDiscovery(c *gin.Context) {
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
-		common.ApiErrorMsg(c, "创建 Discovery 请求失败: "+err.Error())
+		common.ApiErrorMsg(c, "创建 Discovery 请求失败")
 		return
 	}
 	httpReq.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 20 * time.Second}
+	client, err := newControlPlaneHTTPClient(20 * time.Second)
+	if err != nil {
+		common.SysLog(fmt.Sprintf("custom OAuth discovery client failed: error_type=%T", err))
+		common.ApiErrorMsg(c, "获取 Discovery 配置失败")
+		return
+	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		common.ApiErrorMsg(c, "获取 Discovery 配置失败: "+err.Error())
+		common.SysLog(fmt.Sprintf("custom OAuth discovery request failed: error_type=%T", err))
+		common.ApiErrorMsg(c, "获取 Discovery 配置失败")
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		message := strings.TrimSpace(string(body))
-		if message == "" {
-			message = resp.Status
-		}
-		common.ApiErrorMsg(c, "获取 Discovery 配置失败: "+message)
+		common.SysLog(fmt.Sprintf("custom OAuth discovery returned status=%d", resp.StatusCode))
+		common.ApiErrorMsg(c, "获取 Discovery 配置失败")
 		return
 	}
 
 	var discovery map[string]any
-	if err = common.DecodeJson(resp.Body, &discovery); err != nil {
-		common.ApiErrorMsg(c, "解析 Discovery 配置失败: "+err.Error())
+	if err = common.DecodeJsonWithLimit(resp.Body, &discovery, common.ControlPlaneJSONMaxBytes); err != nil {
+		common.SysLog(fmt.Sprintf("custom OAuth discovery decode failed: error_type=%T", err))
+		common.ApiErrorMsg(c, "解析 Discovery 配置失败")
 		return
 	}
 

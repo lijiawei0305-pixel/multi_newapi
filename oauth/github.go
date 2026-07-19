@@ -3,9 +3,7 @@ package oauth
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -50,14 +48,14 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 		return nil, NewOAuthError(i18n.MsgOAuthInvalidCode, nil)
 	}
 
-	logger.LogDebug(ctx, "[OAuth-GitHub] ExchangeToken: code=%s...", code[:min(len(code), 10)])
+	logger.LogDebug(ctx, "[OAuth-GitHub] ExchangeToken authorization_code_%s", logger.PayloadMetadata([]byte(code)))
 
 	values := map[string]string{
 		"client_id":     common.GitHubClientId,
 		"client_secret": common.GitHubClientSecret,
 		"code":          code,
 	}
-	jsonData, err := json.Marshal(values)
+	jsonData, err := common.Marshal(values)
 	if err != nil {
 		return nil, err
 	}
@@ -74,17 +72,22 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] ExchangeToken error: %s", err.Error()))
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] ExchangeToken error_type=%T", err))
 		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthConnectFailed, map[string]any{"Provider": "GitHub"}, err.Error())
 	}
 	defer res.Body.Close()
 
 	logger.LogDebug(ctx, "[OAuth-GitHub] ExchangeToken response status: %d", res.StatusCode)
 
-	var oAuthResponse gitHubOAuthResponse
-	err = json.NewDecoder(res.Body).Decode(&oAuthResponse)
+	body, err := common.ReadAllWithLimit(res.Body, upstreamOAuthResponseMaxBytes)
 	if err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] ExchangeToken decode error: %s", err.Error()))
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] ExchangeToken read error_type=%T", err))
+		return nil, err
+	}
+	var oAuthResponse gitHubOAuthResponse
+	err = common.Unmarshal(body, &oAuthResponse)
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] ExchangeToken decode error_type=%T", err))
 		return nil, err
 	}
 
@@ -93,7 +96,7 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 		return nil, NewOAuthError(i18n.MsgOAuthTokenFailed, map[string]any{"Provider": "GitHub"})
 	}
 
-	logger.LogDebug(ctx, "[OAuth-GitHub] ExchangeToken success: scope=%s", oAuthResponse.Scope)
+	logger.LogDebug(ctx, "[OAuth-GitHub] ExchangeToken success scope_%s", logger.PayloadMetadata([]byte(oAuthResponse.Scope)))
 
 	return &OAuthToken{
 		AccessToken: oAuthResponse.AccessToken,
@@ -116,7 +119,7 @@ func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*O
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] GetUserInfo error: %s", err.Error()))
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] GetUserInfo error_type=%T", err))
 		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthConnectFailed, map[string]any{"Provider": "GitHub"}, err.Error())
 	}
 	defer res.Body.Close()
@@ -125,19 +128,20 @@ func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*O
 
 	// Check for non-200 status codes before attempting to decode
 	if res.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(res.Body)
-		bodyStr := string(body)
-		if len(bodyStr) > 500 {
-			bodyStr = bodyStr[:500] + "..."
-		}
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] GetUserInfo failed: status=%d, body=%s", res.StatusCode, bodyStr))
+		body, _ := common.ReadAllWithLimit(res.Body, upstreamOAuthResponseMaxBytes)
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] GetUserInfo failed status=%d response_%s", res.StatusCode, logger.PayloadMetadata(body)))
 		return nil, NewOAuthErrorWithRaw(i18n.MsgOAuthGetUserErr, map[string]any{"Provider": "GitHub"}, fmt.Sprintf("status %d", res.StatusCode))
 	}
 
-	var githubUser gitHubUser
-	err = json.NewDecoder(res.Body).Decode(&githubUser)
+	body, err := common.ReadAllWithLimit(res.Body, upstreamOAuthResponseMaxBytes)
 	if err != nil {
-		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] GetUserInfo decode error: %s", err.Error()))
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] GetUserInfo read error_type=%T", err))
+		return nil, err
+	}
+	var githubUser gitHubUser
+	err = common.Unmarshal(body, &githubUser)
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-GitHub] GetUserInfo decode error_type=%T", err))
 		return nil, err
 	}
 
@@ -146,8 +150,8 @@ func (p *GitHubProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*O
 		return nil, NewOAuthError(i18n.MsgOAuthUserInfoEmpty, map[string]any{"Provider": "GitHub"})
 	}
 
-	logger.LogDebug(ctx, "[OAuth-GitHub] GetUserInfo success: id=%d, login=%s, name=%s, email=%s",
-		githubUser.Id, githubUser.Login, githubUser.Name, githubUser.Email)
+	logger.LogDebug(ctx, "[OAuth-GitHub] GetUserInfo success user_id_%s login_present=%t name_present=%t email_present=%t",
+		logger.PayloadMetadata([]byte(strconv.FormatInt(githubUser.Id, 10))), githubUser.Login != "", githubUser.Name != "", githubUser.Email != "")
 
 	return &OAuthUser{
 		ProviderUserID: strconv.FormatInt(githubUser.Id, 10), // Use numeric ID as primary identifier

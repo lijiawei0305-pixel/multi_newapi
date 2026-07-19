@@ -13,6 +13,7 @@ package mtwire
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -43,7 +44,7 @@ func migrateWalletConsumeLog(db *gorm.DB) error { return db.AutoMigrate(&walletC
 // 时入账。(user_id, request_id) 唯一 + ON CONFLICT DO NOTHING 幂等：同一消耗事件重放不双计。
 // 纯记账、不产生收益、不动额度——调用方须保证已甄别掉套餐桶消耗（billingSource!=subscription）。
 func (a *App) recordWalletConsume(ctx context.Context, tenantID, userID, walletQuota int64, requestID string) {
-	if walletQuota <= 0 || tenantID <= 0 || requestID == "" {
+	if walletQuota <= 0 || tenantID <= 0 || requestID == "" || len(requestID) > 128 {
 		return
 	}
 	row := walletConsumeRow{
@@ -59,7 +60,36 @@ func (a *App) recordWalletConsume(ctx context.Context, tenantID, userID, walletQ
 		a.billing.enqueueConsume(row)
 		return
 	}
-	if err := a.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
+	if err := a.persistWalletConsume(ctx, tenantID, userID, walletQuota, requestID); err != nil {
 		common.SysError("mtwire: recordWalletConsume failed: " + err.Error())
 	}
+}
+
+func (a *App) persistWalletConsume(ctx context.Context, tenantID, userID, walletQuota int64, requestID string, occurredAt ...time.Time) error {
+	if a == nil || a.DB == nil {
+		return errors.New("wallet consume database is unavailable")
+	}
+	if walletQuota <= 0 || tenantID <= 0 || requestID == "" {
+		return nil
+	}
+	if len(requestID) > 128 {
+		return errors.New("wallet consume request id is too long")
+	}
+	createdAt := time.Now().UTC().Truncate(time.Millisecond)
+	if len(occurredAt) > 0 && !occurredAt[0].IsZero() {
+		createdAt = occurredAt[0].UTC().Truncate(time.Millisecond)
+	}
+	row := walletConsumeRow{TenantID: tenantID, UserID: userID, WalletQuota: walletQuota, RequestID: requestID, CreatedAt: createdAt}
+	if err := a.DB.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
+		return err
+	}
+	var persisted walletConsumeRow
+	if err := a.DB.WithContext(ctx).Where("user_id = ? AND request_id = ?", userID, requestID).First(&persisted).Error; err != nil {
+		return err
+	}
+	if persisted.TenantID != tenantID || persisted.WalletQuota != walletQuota ||
+		(len(occurredAt) > 0 && !occurredAt[0].IsZero() && !persisted.CreatedAt.UTC().Truncate(time.Millisecond).Equal(createdAt)) {
+		return errors.New("wallet consume idempotency payload mismatch")
+	}
+	return nil
 }

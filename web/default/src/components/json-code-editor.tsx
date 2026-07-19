@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { AlertCircle, Braces, CheckCircle2, Code2 } from 'lucide-react'
 import {
   useMemo,
   useRef,
@@ -23,11 +24,11 @@ import {
   type ComponentProps,
   type KeyboardEvent,
 } from 'react'
-import { AlertCircle, Braces, CheckCircle2, Code2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { cn } from '@/lib/utils'
+
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 
 export type JsonCodeEditorProps = Omit<ComponentProps<'div'>, 'onChange'> & {
   value: string
@@ -108,13 +109,11 @@ export function JsonCodeEditor({
         const lines = selectedBlock.split('\n')
         const nextBlock = event.shiftKey
           ? lines
-              .map((line) =>
-                line.startsWith('  ')
-                  ? line.slice(2)
-                  : line.startsWith('\t')
-                    ? line.slice(1)
-                    : line
-              )
+              .map((line) => {
+                if (line.startsWith('  ')) return line.slice(2)
+                if (line.startsWith('\t')) return line.slice(1)
+                return line
+              })
               .join('\n')
           : lines.map((line) => `  ${line}`).join('\n')
         const nextValue =

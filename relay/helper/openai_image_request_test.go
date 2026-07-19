@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,4 +70,70 @@ func TestGetAndValidOpenAIImageRequestMultipartStream(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid stream value")
 	})
+}
+
+func TestGetAndValidOpenAIImageRequestDistinguishesAbsentAndZeroN(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, test := range []struct {
+		name      string
+		body      string
+		wantError bool
+		wantText  string
+	}{
+		{name: "absent defaults to one", body: `{"model":"gpt-image-1","prompt":"hello"}`},
+		{name: "explicit zero is rejected", body: `{"model":"gpt-image-1","prompt":"hello","n":0}`, wantError: true, wantText: "n must be greater than zero"},
+		{name: "overflow-sized n is rejected", body: `{"model":"gpt-image-1","prompt":"hello","n":1073741824}`, wantError: true, wantText: "n is invalid"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(test.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			request, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesGenerations)
+			if test.wantError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), test.wantText)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, request.N)
+			assert.Equal(t, uint(1), *request.N)
+		})
+	}
+}
+
+func TestMultipartImageRequestDistinguishesAbsentAndZeroN(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, test := range []struct {
+		name      string
+		includeN  bool
+		wantError bool
+	}{
+		{name: "absent defaults to one"},
+		{name: "explicit zero is rejected", includeN: true, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			require.NoError(t, writer.WriteField("model", "gpt-image-1"))
+			require.NoError(t, writer.WriteField("prompt", "hello"))
+			if test.includeN {
+				require.NoError(t, writer.WriteField("n", "0"))
+			}
+			require.NoError(t, writer.Close())
+
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+			c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+			request, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesEdits)
+			if test.wantError {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "n must be greater than zero")
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, request.N)
+			assert.Equal(t, uint(1), *request.N)
+		})
+	}
 }

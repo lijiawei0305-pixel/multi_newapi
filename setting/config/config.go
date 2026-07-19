@@ -1,7 +1,9 @@
 package config
 
 import (
-	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -38,6 +40,30 @@ func (cm *ConfigManager) Get(name string) interface{} {
 	return cm.configs[name]
 }
 
+// ValidateUpdate validates a registered config update against an isolated
+// candidate without publishing it. The boolean reports whether name exists.
+func (cm *ConfigManager) ValidateUpdate(name string, configMap map[string]string) (bool, error) {
+	cm.mutex.RLock()
+	defer cm.mutex.RUnlock()
+	config, ok := cm.configs[name]
+	if !ok {
+		return false, nil
+	}
+	return true, validateConfigFromMap(config, configMap)
+}
+
+// ApplyUpdate validates and publishes one registered config update while
+// serializing it with config registration/export/load operations.
+func (cm *ConfigManager) ApplyUpdate(name string, configMap map[string]string) (bool, error) {
+	cm.mutex.Lock()
+	defer cm.mutex.Unlock()
+	config, ok := cm.configs[name]
+	if !ok {
+		return false, nil
+	}
+	return true, updateConfigFromMap(config, configMap)
+}
+
 // LoadFromDB 从数据库加载配置
 func (cm *ConfigManager) LoadFromDB(options map[string]string) error {
 	cm.mutex.Lock()
@@ -70,19 +96,22 @@ func (cm *ConfigManager) LoadFromDB(options map[string]string) error {
 // SaveToDB 将配置保存到数据库
 func (cm *ConfigManager) SaveToDB(updateFunc func(key, value string) error) error {
 	cm.mutex.RLock()
-	defer cm.mutex.RUnlock()
-
+	values := make(map[string]string)
 	for name, config := range cm.configs {
 		configMap, err := configToMap(config)
 		if err != nil {
+			cm.mutex.RUnlock()
 			return err
 		}
-
 		for key, value := range configMap {
-			dbKey := name + "." + key
-			if err := updateFunc(dbKey, value); err != nil {
-				return err
-			}
+			values[name+"."+key] = value
+		}
+	}
+	cm.mutex.RUnlock()
+
+	for key, value := range values {
+		if err := updateFunc(key, value); err != nil {
+			return err
 		}
 	}
 
@@ -134,7 +163,7 @@ func configToMap(config interface{}) (map[string]string, error) {
 		case reflect.Ptr:
 			// 处理指针类型：如果非 nil，序列化指向的值
 			if !field.IsNil() {
-				bytes, err := json.Marshal(field.Interface())
+				bytes, err := common.Marshal(field.Interface())
 				if err != nil {
 					return nil, err
 				}
@@ -145,7 +174,7 @@ func configToMap(config interface{}) (map[string]string, error) {
 			}
 		case reflect.Map, reflect.Slice, reflect.Struct:
 			// 复杂类型使用JSON序列化
-			bytes, err := json.Marshal(field.Interface())
+			bytes, err := common.Marshal(field.Interface())
 			if err != nil {
 				return nil, err
 			}
@@ -163,19 +192,34 @@ func configToMap(config interface{}) (map[string]string, error) {
 
 // 辅助函数：从map更新配置对象
 func updateConfigFromMap(config interface{}, configMap map[string]string) error {
-	val := reflect.ValueOf(config)
-	if val.Kind() != reflect.Ptr {
-		return nil
+	target := reflect.ValueOf(config)
+	if target.Kind() != reflect.Ptr || target.IsNil() || target.Elem().Kind() != reflect.Struct {
+		return errors.New("config must be a non-nil pointer to a struct")
 	}
-	val = val.Elem()
-
-	if val.Kind() != reflect.Struct {
-		return nil
+	candidate := reflect.New(target.Elem().Type()).Elem()
+	candidate.Set(target.Elem())
+	if err := applyConfigMap(candidate, configMap); err != nil {
+		return err
 	}
+	target.Elem().Set(candidate)
+	return nil
+}
 
-	typ := val.Type()
-	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
+func validateConfigFromMap(config interface{}, configMap map[string]string) error {
+	target := reflect.ValueOf(config)
+	if target.Kind() != reflect.Ptr || target.IsNil() || target.Elem().Kind() != reflect.Struct {
+		return errors.New("config must be a non-nil pointer to a struct")
+	}
+	candidate := reflect.New(target.Elem().Type()).Elem()
+	candidate.Set(target.Elem())
+	return applyConfigMap(candidate, configMap)
+}
+
+func applyConfigMap(candidate reflect.Value, configMap map[string]string) error {
+	typ := candidate.Type()
+	matched := make(map[string]bool, len(configMap))
+	for i := 0; i < candidate.NumField(); i++ {
+		field := candidate.Field(i)
 		fieldType := typ.Field(i)
 
 		// 跳过未导出字段
@@ -194,6 +238,7 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 		if !ok {
 			continue
 		}
+		matched[key] = true
 
 		// 根据字段类型设置值
 		if !field.CanSet() {
@@ -206,7 +251,7 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 		case reflect.Bool:
 			boolValue, err := strconv.ParseBool(strValue)
 			if err != nil {
-				continue
+				return fmt.Errorf("invalid boolean config %s: %w", key, err)
 			}
 			field.SetBool(boolValue)
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -214,10 +259,13 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 			if err != nil {
 				// 兼容 float 格式的字符串（如 "2.000000"）
 				floatValue, fErr := strconv.ParseFloat(strValue, 64)
-				if fErr != nil {
-					continue
+				if fErr != nil || math.IsNaN(floatValue) || math.IsInf(floatValue, 0) {
+					return fmt.Errorf("invalid integer config %s: %w", key, err)
 				}
 				intValue = int64(floatValue)
+			}
+			if field.OverflowInt(intValue) {
+				return fmt.Errorf("integer config %s overflows %s", key, field.Type())
 			}
 			field.SetInt(intValue)
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
@@ -225,16 +273,19 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 			if err != nil {
 				// 兼容 float 格式的字符串
 				floatValue, fErr := strconv.ParseFloat(strValue, 64)
-				if fErr != nil || floatValue < 0 {
-					continue
+				if fErr != nil || math.IsNaN(floatValue) || math.IsInf(floatValue, 0) || floatValue < 0 {
+					return fmt.Errorf("invalid unsigned integer config %s: %w", key, err)
 				}
 				uintValue = uint64(floatValue)
 			}
+			if field.OverflowUint(uintValue) {
+				return fmt.Errorf("unsigned integer config %s overflows %s", key, field.Type())
+			}
 			field.SetUint(uintValue)
 		case reflect.Float32, reflect.Float64:
-			floatValue, err := strconv.ParseFloat(strValue, 64)
-			if err != nil {
-				continue
+			floatValue, err := strconv.ParseFloat(strValue, field.Type().Bits())
+			if err != nil || math.IsNaN(floatValue) || math.IsInf(floatValue, 0) {
+				return fmt.Errorf("invalid floating-point config %s", key)
 			}
 			field.SetFloat(floatValue)
 		case reflect.Ptr:
@@ -242,33 +293,37 @@ func updateConfigFromMap(config interface{}, configMap map[string]string) error 
 			if strValue == "null" {
 				field.Set(reflect.Zero(field.Type()))
 			} else {
-				// 如果指针是 nil，需要先初始化
-				if field.IsNil() {
-					field.Set(reflect.New(field.Type().Elem()))
+				fresh := reflect.New(field.Type().Elem())
+				if !field.IsNil() {
+					fresh.Elem().Set(field.Elem())
 				}
-				// 反序列化到指针指向的值
-				err := json.Unmarshal([]byte(strValue), field.Interface())
-				if err != nil {
-					continue
+				if err := common.Unmarshal([]byte(strValue), fresh.Interface()); err != nil {
+					return fmt.Errorf("invalid pointer config %s: %w", key, err)
 				}
+				field.Set(fresh)
 			}
 		case reflect.Map:
-			// json.Unmarshal merges into existing maps (keeps old keys that are
+			// JSON unmarshalling merges into existing maps (keeps old keys that are
 			// absent from the new JSON). Allocate a fresh map so removed keys
 			// are properly cleared.
 			fresh := reflect.New(field.Type())
-			if err := json.Unmarshal([]byte(strValue), fresh.Interface()); err != nil {
-				continue
+			if err := common.Unmarshal([]byte(strValue), fresh.Interface()); err != nil {
+				return fmt.Errorf("invalid map config %s: %w", key, err)
 			}
 			field.Set(fresh.Elem())
 		case reflect.Slice, reflect.Struct:
-			err := json.Unmarshal([]byte(strValue), field.Addr().Interface())
-			if err != nil {
-				continue
+			fresh := reflect.New(field.Type())
+			if err := common.Unmarshal([]byte(strValue), fresh.Interface()); err != nil {
+				return fmt.Errorf("invalid structured config %s: %w", key, err)
 			}
+			field.Set(fresh.Elem())
 		}
 	}
-
+	for key := range configMap {
+		if !matched[key] {
+			return fmt.Errorf("unknown config key %s", key)
+		}
+	}
 	return nil
 }
 

@@ -1,0 +1,1831 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>newapi628 审计报告</title>
+<style>
+  :root {
+    --sidebar-bg: #1a1f2e;
+    --sidebar-hover: #242a3d;
+    --sidebar-active: #2d3555;
+    --bg: #f0f3f7;
+    --card-bg: #ffffff;
+    --border: #e6eaef;
+    --text: #1e2233;
+    --text-secondary: #6b7394;
+    --accent: #3370ff;
+    --accent-light: #e8f0ff;
+    --success: #34c759;
+    --warning: #ff9500;
+    --danger: #ff3b30;
+    --info: #5ac8fa;
+    --badge-critical: #ff3b30;
+    --badge-high: #ff9500;
+    --badge-medium: #3370ff;
+    --badge-low: #8e8e93;
+    --badge-info: #5ac8fa;
+    --bar-bg: #e8eaed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    display: flex;
+    min-height: 100vh;
+    font-size: 15px;
+  }
+  .sidebar { width: 240px; background: var(--sidebar-bg); color: #fff; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  .sidebar-header .sub { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 4px; }
+  .sidebar-nav { padding: 8px 0; flex: 1; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 14px 20px; color: rgba(255,255,255,.6); text-decoration: none; font-size: 14px; transition: all .15s; border-left: 3px solid transparent; }
+  .sidebar-nav a:hover { background: var(--sidebar-hover); color: #fff; }
+  .sidebar-nav a.active { background: var(--sidebar-active); color: #fff; border-left-color: var(--accent); }
+  .sidebar-nav a .icon { width: 18px; text-align: center; font-size: 14px; }
+  .sidebar-footer { padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.3); }
+  .main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+  .page-header { margin-bottom: 32px; }
+  .page-header h2 { font-size: 26px; font-weight: 700; }
+  .page-header .meta { font-size: 14px; color: var(--text-secondary); margin-top: 6px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .page-header .meta span { display: flex; align-items: center; gap: 4px; }
+  .card { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .card-body { padding: 24px; }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .score-item { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); }
+  .score-item .label { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .4px; }
+  .score-item .bar-row { display: flex; align-items: center; gap: 12px; }
+  .score-item .bar-track { flex: 1; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .score-item .bar-fill { height: 100%; border-radius: 5px; transition: width .6s ease; }
+  .score-item .value { font-size: 22px; font-weight: 700; min-width: 52px; text-align: right; }
+  .score-item .grade { font-size: 15px; font-weight: 700; min-width: 22px; text-align: center; }
+  .bar-fill.s { background: linear-gradient(90deg, #34c759, #30d158); }
+  .bar-fill.a { background: linear-gradient(90deg, #3370ff, #5e8cff); }
+  .bar-fill.b { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .bar-fill.c { background: linear-gradient(90deg, #ff3b30, #ff6b61); }
+  .bar-fill.d { background: linear-gradient(90deg, #ff6b61, #ff9f91); }
+  .bar-fill.f { background: linear-gradient(90deg, #9b1d1a, #d63031); }
+  .grade-s { color: #34c759; } .grade-a { color: #3370ff; }
+  .grade-b { color: #ff9500; } .grade-c { color: #ff3b30; }
+  .grade-d { color: #ff6b61; } .grade-f { color: #9b1d1a; }
+  .overall-row { grid-column: 1 / -1; background: linear-gradient(135deg, #1a1f2e, #2d3555); border-color: transparent; }
+  .overall-row .label { color: rgba(255,255,255,.6); }
+  .overall-row .value { color: #fff; }
+  .overall-row .grade { color: #34c759; }
+  .overall-row .bar-fill { background: linear-gradient(90deg, #34c759, #30d158); }
+  .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat-card { flex: 1; min-width: 140px; padding: 20px 24px; background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); text-align: center; }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1.3; }
+  .stat-card .desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .finding { border-left: 4px solid var(--border); margin-bottom: 20px; padding: 20px 24px; border-radius: 0 10px 10px 0; background: #fafbfc; border: 1px solid var(--border); border-left-width: 4px; }
+  .finding.severity-critical { border-left-color: var(--badge-critical); }
+  .finding.severity-high { border-left-color: var(--badge-high); }
+  .finding.severity-medium { border-left-color: var(--badge-medium); }
+  .finding.severity-low { border-left-color: var(--badge-low); }
+  .finding.severity-info { border-left-color: var(--badge-info); }
+  .finding-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .finding-header h4 { font-size: 16px; font-weight: 600; flex: 1; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; line-height: 1.6; }
+  .badge-critical { background: #ffeae9; color: var(--badge-critical); }
+  .badge-high { background: #fff3e0; color: var(--badge-high); }
+  .badge-medium { background: var(--accent-light); color: var(--badge-medium); }
+  .badge-low { background: #f2f2f5; color: var(--badge-low); }
+  .badge-info { background: #e4f5ff; color: #007aff; }
+  .badge-confirmed { background: #e8ffe8; color: #248a3d; }
+  .badge-suspected { background: #fff8e1; color: #b8860b; }
+  .badge-s { background: #e8ffe8; color: #248a3d; }
+  .badge-a { background: var(--accent-light); color: var(--accent); }
+  .badge-b { background: #fff3e0; color: var(--warning); }
+  .badge-c { background: #ffeae9; color: var(--danger); }
+  .finding-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+  .finding-meta span { display: flex; align-items: center; gap: 4px; }
+  .finding .evidence { margin: 12px 0; padding: 14px 18px; background: #f0f2f5; border-radius: 8px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .finding .problem { font-size: 14px; margin: 12px 0; color: var(--text); line-height: 1.8; }
+  .finding .fix-box { margin-top: 12px; padding: 14px 18px; background: #f0f7ff; border-radius: 8px; border: 1px solid #d6e4ff; font-size: 13px; }
+  .finding .fix-box code { display: block; margin-top: 6px; padding: 12px 16px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .fix-label { font-weight: 600; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
+  .section-title { font-size: 20px; font-weight: 700; margin: 36px 0 20px; padding-bottom: 10px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 12px 16px; font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); background: #f8fafc; }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; }
+  .check-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.6; }
+  .check-item .check { color: var(--success); font-weight: 700; }
+  .check-item .cross { color: var(--danger); font-weight: 700; }
+  .win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .win-card { padding: 16px; background: linear-gradient(135deg, #f0f7ff, #e8f0ff); border-radius: 8px; border: 1px solid #d6e4ff; }
+  .win-card .win-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .win-card .win-meta { font-size: 11px; color: var(--text-secondary); }
+  .small { font-size: 13px; color: var(--text-secondary); }
+  .code-block { margin: 8px 0; padding: 14px 18px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; overflow-x: auto; white-space: pre; line-height: 1.7; }
+  .hl { color: #f7768e; font-weight: 600; } .cm { color: #565f89; }
+  .kw { color: #bb9af7; } .fn { color: #7aa2f7; }
+  .ty { color: #ff9e64; } .op { color: #89ddff; }
+  .str { color: #9ece6a; } .nu { color: #ff9e64; }
+  @media (max-width: 768px) { .sidebar { display: none; } .main { padding: 16px; } .score-grid { grid-template-columns: 1fr; } .stats-row { flex-direction: column; } .check-list { grid-template-columns: 1fr; } .win-grid { grid-template-columns: 1fr; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c1c7d0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a8adb8; }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>newapi628</h1>
+    <div class="sub">增量深挖审计 · 2026-07-17</div>
+  </div>
+  <div class="sidebar-nav">
+    <a href="#summary"><span class="icon">📊</span> 评分面板</a>
+    <a href="#executive-summary"><span class="icon">📝</span> 总体评估</a>
+    <a href="#change-summary"><span class="icon">🔀</span> 改动概览</a>
+    <a href="#coverage"><span class="icon">🧭</span> 覆盖矩阵</a>
+    <a href="#top-risks"><span class="icon">⚠️</span> 头号风险</a>
+    <a href="#findings"><span class="icon">🔍</span> 详细发现</a>
+    <a href="#security"><span class="icon">🔒</span> Security</a>
+    <a href="#stability"><span class="icon">⚡</span> Stability</a>
+    <a href="#concurrency"><span class="icon">🔀</span> Concurrency</a>
+    <a href="#data-integrity"><span class="icon">🧱</span> Data Integrity</a>
+    <a href="#testing-authenticity"><span class="icon">🧪</span> Testing Authenticity</a>
+    <a href="#release"><span class="icon">🚢</span> Release</a>
+    <a href="#principles"><span class="icon">📋</span> 工程原则</a>
+    <a href="#fix-order"><span class="icon">🎯</span> 修复顺序</a>
+  </div>
+  <div class="sidebar-footer">Fuck My Shit Mountain v1.0</div>
+</nav>
+
+<div class="main">
+
+  <div class="page-header" id="summary">
+    <h2>newapi628 增量深挖审计报告</h2>
+    <div class="meta">
+      <span>📅 2026-07-17</span>
+      <span>🔍 增量深挖（并发 · 数据完整性 · 安全 · 稳定性 · 测试真实性）</span>
+      <span>🛠 Claude Opus 4.8 ＋ 6 路并行子代理</span>
+      <span>🔗 ae18086..cbdf76e（19 提交 / 111 文件 / 作者 WEI）</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">📊 评分面板</div>
+    <div class="card-body">
+      <div class="score-grid">
+
+        <div class="score-item">
+          <div class="label">Security</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:55%"></div></div>
+            <span class="value grade-b">5.5</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">5 个真 Critical 被真修好（含 SESSION_SECRET、页脚 XSS、兑换码溢出），但本批新装的 4 道 money 限流全挂在可伪造的 ClientIP 上、一个 HTTP 头即失效；覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Stability</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill c" style="width:45%"></div></div>
+            <span class="value grade-c">4.5</span>
+            <span class="grade grade-c">C</span>
+          </div>
+          <div class="small">全站 17 处行锁是空操作（Critical，历史遗留但本批新测为其盖绿章），叠加 Trial 三条 High 永久误封与 AGT 三条 High 吞单；覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Testing</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:55%"></div></div>
+            <span class="value grade-b">5.5</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">新增的钱相关测试经 5 次变异全部捕获、货真价实；但重构核心目的与 117 行 AGT 新码可被 4 次变异零捕获地改坏；覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Release</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill c" style="width:45%"></div></div>
+            <span class="value grade-c">4.5</span>
+            <span class="grade grade-c">C</span>
+          </div>
+          <div class="small">guard_not_prod 反转与密钥内联确被真修好，但「假成功部署」只靠一个未定义函数的崩溃挡着，且 restore.sh 会删掉正在恢复的备份；覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Performance</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill" style="width:0%;background:#c1c7d0"></div></div>
+            <span class="value" style="color:var(--text-secondary)">—</span>
+            <span class="grade" style="color:var(--text-secondary)">—</span>
+          </div>
+          <div class="small">未评估：不在所选口径内（仅记录一条观察，见 Testing 段的违禁词全量扫描 CPU 成本）。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Maintainability</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill" style="width:0%;background:#c1c7d0"></div></div>
+            <span class="value" style="color:var(--text-secondary)">—</span>
+            <span class="grade" style="color:var(--text-secondary)">—</span>
+          </div>
+          <div class="small">未评估：不在所选口径内。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Design</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill" style="width:0%;background:#c1c7d0"></div></div>
+            <span class="value" style="color:var(--text-secondary)">—</span>
+            <span class="grade" style="color:var(--text-secondary)">—</span>
+          </div>
+          <div class="small">未评估：不在所选口径内（原则符合度另见「工程原则」段）。</div>
+        </div>
+
+        <div class="score-item overall-row">
+          <div class="label">Overall（4 个已评估维度均值，未评估维度不计入）</div>
+          <div class="bar-row">
+            <div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:50%;background:linear-gradient(90deg,#ff9500,#ffb340)"></div></div>
+            <span class="value" style="color:#fff">5.0</span>
+            <span class="grade" style="color:#ff9500">B</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="executive-summary">📝 总体评估</h3>
+
+  <div class="card">
+    <div class="card-header">📋 总体评估</div>
+    <div class="card-body">
+      <p><strong>项目概况：</strong> newapi628 是基于 New API（Go 1.21+ / React / MySQL 8 / 单栈 Docker Compose）二次开发的多租户 API 代理分销平台，线上仅一套生产栈 <code>newapi_test</code> 服务三个域名。本次审计范围是 <code>ae18086..cbdf76e</code>——作者 WEI 于 07-15 至 07-17 推上 origin/main 的 19 个提交、111 个文件，内容横跨死码清除、并发重构、安全修复、计费/对账与部署脚本。这不是一批常规 bugfix，而是一次高密度的自审整改：作者独立挖出并修复了 5 个 Critical（提交进 git 的生产 SESSION_SECRET、mt-router 全部自研路由旁路限流、代理页脚存储型 XSS、兑换码 int64 溢出铸币、违禁词只覆盖 2/11 种请求格式），把 CLAUDE.md 的 C1–C7 硬约束从 <code>TODO</code> 占位填成了实条款，并纠正了 STATUS.md 里「<code>internal/risk</code> 是死码」的死活反转误判。</p>
+
+      <p style="margin-top:12px"><strong>主要风险：</strong> 三类。<strong>其一是本批引入的真回归</strong>——<code>checkTrialLimit</code> 从「先 Get 预检不写」改成「逐维 SetNX 边查边写」后，被实名/设备维度拒绝的败者已把自己的用户键（TTL=0 永久）写死，正常用户一次共用设备即被永久锁死、且提示是「已超过限购次数」这句谎话；Redis 抖一下同样永久吃掉终身 Trial。<strong>其二是本批新代码没堵住它宣称堵住的洞</strong>——AGT slug 预检只查 <code>tenants.slug</code> 不查 <code>tenant_domains.domain</code>、且是无预留的 check-then-act，两个买家可预检同一 slug、双双被扣 ¥9990、只有一个能激活；新 AGT 对账在查单故障时把已付款订单静默标成 <code>expired</code> 且 <code>Failed</code> 为空导致告警不响。<strong>其三是新装的防护根本没通电</strong>——本批给 4 个 money 端点加的 <code>CriticalRateLimit</code> 全部按 <code>c.ClientIP()</code> 计桶，而全仓从未调用 <code>SetTrustedProxies</code>、gin 默认信任 <code>0.0.0.0/0</code>、nginx 又是追加 XFF，攻击者每请求换个头即落进全新桶；反过来因桶 key 不含路由成分，任何未认证者可把任意 IP 从整个 <code>/api</code> 面踢下线。此外一条历史遗留的 Critical 被本批新测盖了绿章：全仓 17 处 <code>tx.Set("gorm:query_option", "FOR UPDATE")</code> 是 GORM v1 写法，v2（本仓 v1.25.2）静默忽略——<strong>整个仓库没有一把生效的行锁</strong>。</p>
+
+      <p style="margin-top:12px"><strong>亮点：</strong> 这批改动的工程质量显著高于其提交信息所暗示的水平，且多处经得起对抗性复核。<strong>死码清除是干净的</strong>：<code>internal/relay</code>/<code>identity</code>/<code>billing</code> 各为闭合孤岛（外部 importer 数 0，Go 语义下即零引用铁证），<code>go vet ./...</code> 输出与基线逐字节相同，被删的「安全守卫」从未接线过（线上鉴权一直是原生 UserAuth/AdminAuth，27 处）——那个覆盖死码的绿测试反而是有害的虚假保障。<strong>SetNX 重构的核心主张是成立的</strong>：200 轮 × 32 并发差分实测，旧码单轮可发出 3 份 Trial，新码严格 1 份，确实堵死了一个真实的跨账号并发绕过。<strong>npm overrides 迁根真的修好了东西</strong>：bun 只认 workspace 根的 overrides，11 条安全 pin 放在成员包里时根本没生效，<code>bun.lock</code> 实证 <code>brace-expansion 1.1.15 → 2.1.1</code> 等现已真正绑定。<strong>违禁词抽取没有绕过</strong>，且还堵掉了两个真实旧洞（旧码只扫最后一条 user 消息）。<strong>新增的钱相关测试是真测试</strong>：5 次变异（去掉 RowsAffected 守卫、翻转溢出判断、还原嵌套事务、放宽额度闸门、去掉 CAS 状态条件）全部被捕获。<strong><code>cbdf76e</code>「修复落 main 前两处红测」是正当修复</strong>，非把测试改绿：全 diff 只动两个 <code>_test.go</code>，删掉的断言指向的代码路径确已随重构消失，其语义由相邻的 SetNX 错误传播测试承接。</p>
+
+      <p style="margin-top:12px"><strong>优先修复：</strong> 按「代价/收益」排序。<strong>立刻</strong>：① 别去补 <code>deploy.sh</code> 那个 <code>warn: command not found</code>——当前「假成功部署」<em>唯一</em>的拦阻就是这个未定义函数的崩溃，补上 <code>warn()</code> 会当场把 07-16 那次「报成功却跑旧码」的事故放回来；正解是把运行中容器的版本自检从 <code>warn</code> 改成 <code>die</code>（其余零件已就位并验证正确）。② <code>checkTrialLimit</code> 加 6 行 <code>acquired</code> 回滚（<code>Del</code> 原语就在同一批加的，注释「KVCache 无删除原语」已过时）。③ <code>restore.sh</code> 在强制预备份前把恢复目标拷到临时区，否则恢复第 7 新（最旧）快照时会把它自己剪掉。<strong>本周</strong>：④ 17 处 <code>gorm:query_option</code> 机械换成 <code>clause.Locking</code>，配一个 DryRun 断言 SQL 含 <code>FOR UPDATE</code> 的守卫测试（毫秒级钉死整类）；⑤ 4 个 money 端点改用仓库<em>已有</em>的按 user_id 计桶的 <code>userRateLimitFactory</code>，并补 <code>SetTrustedProxies</code>；⑥ AGT 对账仅在 <code>ErrOrderNotExist</code> 这类确定性答复下才 expire，其余留在 <code>pending</code> 且进 <code>Failed</code> 以触发告警。</p>
+
+      <p style="margin-top:12px"><strong>总评：</strong> <strong>5.0 / B（Fair — 需要投入，但不需要推倒重来）。</strong>这批改动净值为正：它真的修好了 5 个 Critical、真的堵死了一个并发绕过、真的删干净了 1652 行伪装成正主的死码。分数被压在 B 而非 A，是因为三条并存的系统性问题——<strong>修复引入了比原 bug 更持久的新伤</strong>（Trial 永久误封无自助恢复）、<strong>修复宣称的边界与实际不符</strong>（AGT 预检、限流、注释里的「已锁定订阅」/「无删除原语」/「同基础链」多处与代码实情相反）、<strong>以及绿测试为不生效的机制背书</strong>（行锁空操作、SetNX 重构可整个还原而 CI 全绿）。值得注意的是，作者自己在 RETRO 中已识别出「清单挑选式遗漏＝漏一个即绕过」这一反复出现的模式并升级为 C2/C3/C5——而本次的 AGT 预检漏查 domain、限流漏了 trusted proxy、Trial 漏了回滚，<strong>正是同一个模式的第四、五、六次复发</strong>。建议把该模式本身固化为 C8（当前仍空着），并在合入前补上跨账号并发测试与 AGT 对账测试这两处 High 缺口。<strong>合入建议：Request changes</strong>——本批不含「必须阻断」的新 Critical（唯一 Critical 为历史遗留），但 10 条 High 中有 3 条会直接吃掉真实用户的钱或权益，应在部署前先修 ①②③。</p>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="change-summary">🔀 改动概览</h3>
+
+  <div class="card">
+    <div class="card-header">📦 变更统计</div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>项目</th><th>数值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>提交数</td><td>19</td><td>ae18086（本地 main，可快进）→ cbdf76e（origin/main）</td></tr>
+            <tr><td>作者</td><td>1</td><td>WEI &lt;weidu500l@gmail.com&gt;，2026-07-15 23:54 – 2026-07-17 15:49</td></tr>
+            <tr><td>文件数</td><td>111</td><td>Go / TSX / Shell / YAML / nginx / 文档 / .ccg 任务记录</td></tr>
+            <tr><td>新增行</td><td>2,388</td><td>—</td></tr>
+            <tr><td>删除行</td><td>564,553</td><td>其中 560,339 行为 <code>repomix-output.xml</code>（19.8MB 生成物，含泄漏密钥的第二份拷贝）；<strong>真实代码删除约 4,214 行</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">🏷 改动分类 · 与提交信息的偏差</div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>类别</th><th>规模</th><th>提交信息标称</th></tr></thead>
+          <tbody>
+            <tr><td>新功能</td><td>3 文件（AGT 对账 117 行新文件、风控后台释放端点 83 行、KV Del 原语）</td><td>2 条 <code>feat</code> + <strong>藏在 <code>chore(tasks)</code> 里 1 条</strong></td></tr>
+            <tr><td>Bug 修复</td><td>约 12 文件（页脚 XSS、guard_not_prod、slug 预检、充值 CNY、fail-open 分流）</td><td><strong>0 条 <code>fix</code></strong>——全部标成 <code>chore(tasks)</code></td></tr>
+            <tr><td>重构</td><td>约 40 文件（死码清除 35 + SetNX 重构 1）</td><td>2 条 <code>refactor</code>（诚实）</td></tr>
+            <tr><td>依赖变更</td><td>3 文件（<code>web/package.json</code>、<code>web/default/package.json</code>、<code>bun.lock</code>）</td><td>1 条 <code>chore(core)</code>（实为安全 pin 生效性修复）</td></tr>
+            <tr><td>配置 / 部署</td><td>约 14 文件（compose、Dockerfile、nginx、ops/*.sh、VERSION、manifest）</td><td>分散于多条 <code>chore</code></td></tr>
+            <tr><td>测试</td><td>约 12 文件（新增 5 个测试文件 818 行，删除约 2000 行死码测试）</td><td>1 条 <code>test</code>（诚实）</td></tr>
+            <tr><td>文档</td><td>约 25 文件（CLAUDE.md C1–C7、RETRO.md +99、STATUS.md、.ccg 任务记录）</td><td>1 条 <code>docs</code> + 12 条 <code>chore</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">📈 风险增量 · 测试增量 · 合入建议</div>
+    <div class="card-body">
+      <p><strong>风险增量：</strong>新引入 <strong>10 条</strong>（Trial 败者残留 ×2 维度、Redis 抖动吃 Trial、AGT 预检未闭合、AGT 非事务毒化、AGT 静默吞已付单、限流可伪造导致新装防护归零、回调新纳入可耗尽限流桶、deploy 版本自检不阻断、restore 删恢复目标）；<strong>修好既有 5 条 Critical + 1 条 High</strong>（SESSION_SECRET 内联、mt-router 旁路限流、页脚 XSS、兑换码溢出铸币、违禁词覆盖不全；风控 fail-closed 致 Redis 宕机全站 500）；<strong>既有风险被加重 1 条</strong>（17 处行锁空操作——本批把其中一处搬进新函数并用 270 行新测为该路径盖绿章，且注释断言「锁定订阅」）。</p>
+      <p style="margin-top:12px"><strong>测试增量：</strong>新代码<strong>有</strong>测试的：5 文件（<code>recharge_test.go</code>、<code>distribution_redemption_test.go</code>、<code>gormrepo_redemption_test.go</code>、<code>agent_plan_slug_precheck_test.go</code>、<code>subscription_metering_test.go</code>）——前四者经变异验证为真测试。新代码<strong>无</strong>测试的：2 文件（<code>agent_plan_reconcile.go</code> 117 行零直接测试、<code>risk_admin_http.go</code> 83 行零测试）。<strong>删除测试</strong>：约 2000 行（随死码整包删除，经核为真正无覆盖损失）＋ 1 个并发单赢家测试（其注释谎称已被一个纯串行 CAS 测试覆盖，实为被 gormrepo 的 40 goroutine 真测试取代，净覆盖提升）。</p>
+      <p style="margin-top:12px"><strong>合入建议：<span class="badge badge-high">Request changes</span></strong> —— 不含必须阻断的新 Critical，但 3 条 High 会直接损害真实用户（永久误封 Trial、¥9990 订单静默吞单、恢复时删掉恢复目标）。建议先修「修复顺序」段的即刻 3 项再部署；其余可合入后跟进。<strong>本地 main 可直接快进到 origin/main（无分叉）</strong>，但工作树内 <code>RETRO.md</code> 有 6 行未提交改动，pull 前需先 stash 或提交。</p>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="coverage">🧭 覆盖矩阵</h3>
+
+  <div class="card">
+    <div class="card-body">
+      <p><strong>覆盖说明：</strong>审计在 <code>origin/main</code>（cbdf76e）的独立 git worktree 上进行，非本地旧码。已建立改动地图：19 提交逐条归因、111 文件全量 <code>git diff</code>、按 6 个维度分派并行子代理（全部 opus）深挖，主审员对全部 Critical/High 结论做独立复核。<strong>实际运行的命令</strong>：<code>go build ./...</code>（补 <code>web/{default,classic}/dist</code> stub 后 exit 0）、<code>go vet ./...</code>（17 条诊断，与基线 ae18086 逐字节相同，零新增）、<code>go test ./internal/... ./model/... ./router/...</code>（35 包全 ok）、<code>go test -race ./internal/risk/... ./internal/mtwire/...</code>（全 ok）、<code>bash -n</code>（8 个脚本全过）、GORM DryRun SQL 抓取、gin ClientIP 复现、差分测试（新旧算法对拍）、变异测试（7 处变异）。<strong>排除范围</strong>：<code>.git</code>、<code>node_modules</code>、构建产物（<code>web/*/dist</code>）、<code>bulb-orbit/</code>（不在 diff 内）、已删除的 <code>repomix-output.xml</code> 内容（仅核其为生成物且无构建引用，不载入内容）。<strong>访问限制</strong>：未 ssh 生产服务器、未跑任何部署脚本、无管理员测试凭据，故部署脚本与 nginx 为静态审计，端到端行为待服务器验证；MySQL 相关并发结论基于 DryRun 与代码推导，非真实 MySQL 压测。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>维度</th><th style="width:120px">覆盖度</th><th>已检证据</th><th>排除 / 限制</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Security</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td><code>router/mt-router.go</code> 全量 diff＋gin v1.9.1 分组语义源码核对与复现；<code>middleware/rate-limit.go</code>＋<code>common/init.go</code> 限流阈值；全仓 <code>SetTrustedProxies</code> grep（0 命中）；<code>deploy/nginx/*</code> XFF 处理；<code>footer.tsx</code>＋全仓 <code>dangerouslySetInnerHTML</code> 枚举；<code>siteconfig/policy.go</code> 正则实测 7 载荷；<code>web/bun.lock</code> 逐包 pin 生效性核对；<code>moderation.go</code> 对照 <code>valid_request.go</code> 全类型覆盖 + JSON 深度实测</td>
+              <td>未做线上渗透/黑盒验证；CF 面板与真实回调源 IP 未取证（回调被限流的可利用性为推导）；未跑 SAST/依赖 CVE 扫描器</td>
+            </tr>
+            <tr>
+              <td>Stability</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td><code>risk/engine.go</code> 差分测试（新旧算法对拍，200 轮 × 32 并发）；<code>mtwire/risk.go</code> fail-open 分流路径与 <code>wire.go</code> 装配实况；<code>agent_plan_bridge.go</code>/<code>agent_plan_reconcile.go</code> 六步写序与崩溃模拟；<code>deploy/ops/*.sh</code> 逐行＋条件真值表重推＋最小 harness 复现；<code>-race</code> 全绿</td>
+              <td>未在真实 Redis/MySQL 故障下验证；容器 restart 语义（<code>on-failure</code> vs <code>unless-stopped</code>）为静态阅读，标 Suspected</td>
+            </tr>
+            <tr>
+              <td>Data Integrity</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>GORM v1.25.2 源码 <code>query_option</code> grep（0 命中）＋MySQL dialector DryRun SQL 抓取；全仓锁写法统计（17 vs 0）；<code>recharge.go</code> 幂等台账与三次 <code>OnPaid</code> 实测；<code>distribution.go</code> 溢出闸门数学核算；<code>subscription.go</code> 计量与退款事务边界；AGT 三条触发路径逐条写测试证实</td>
+              <td>并发丢失更新为 DryRun＋代码推导，未在真实 MySQL 上做 N 并发压测；<code>top_ups.amount</code> 影响面已核（无报表聚合该列）但未查历史数据</td>
+            </tr>
+            <tr>
+              <td>Testing Authenticity</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td><code>cbdf76e</code> 全 diff＋新旧断言语义对比；7 处变异测试（含还原整个 SetNX 重构、AGT 三变异、CAS 条件、溢出守卫、嵌套事务）；tracked-only 测试集（180 mtwire + 56 model）重跑排除并行污染；<code>-race</code>；<code>policy.go</code> 正则 6 向量探针</td>
+              <td>未做覆盖率统计；未对全部新测试逐一变异（挑选了最关键的 7 处）；SQLite 与生产 MySQL 的行为差异仅在锁语义上核实</td>
+            </tr>
+            <tr>
+              <td>Release</td>
+              <td><span class="badge badge-suspected">Medium</span></td>
+              <td><code>deploy.sh</code>/<code>rollback.sh</code>/<code>restore.sh</code>/<code>lib.sh</code>/<code>backup.sh</code> 逐行；<code>warn</code> 未定义以最小 harness 复现（exit 127）；<code>restore.sh</code> 剪枝删目标已复现；<code>guard_not_prod</code> 新旧真值表独立重推；<code>Dockerfile</code>/<code>compose</code>/<code>VERSION</code>/<code>manifest</code> 版本链路追踪；<code>bash -n</code> 全过</td>
+              <td><strong>未 ssh 服务器、未执行任何脚本</strong>——端到端（含 <code>:latest</code>/manifest-list 实际行为、归档重建、DB 兼容性）待下次真实部署验证；<code>shellcheck</code> 本机未安装，故未跑；nginx 配置文件自述为「重建版非线上拷贝」，需与服务器 diff 后再 reload</td>
+            </tr>
+            <tr>
+              <td>Performance</td>
+              <td><span class="badge badge-low" style="background:#f2f2f5">Not assessed</span></td>
+              <td>—</td>
+              <td>不在所选口径（增量深挖）内。仅顺带记录一条观察：违禁词改为全量历史扫描后，Aho-Corasick 每请求扫全对话，在 <code>/v1</code> 热路径（实测单请求约 31 rps 上限）上值得关注</td>
+            </tr>
+            <tr>
+              <td>Maintainability</td>
+              <td><span class="badge badge-low" style="background:#f2f2f5">Not assessed</span></td>
+              <td>—</td>
+              <td>不在所选口径内。仅记录提交信息误导（Low）与死码残渣（Low）两条，见「工程原则」段</td>
+            </tr>
+            <tr>
+              <td>Design</td>
+              <td><span class="badge badge-low" style="background:#f2f2f5">Not assessed</span></td>
+              <td>—</td>
+              <td>不在所选口径内；原则违反已在「工程原则」段单列</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="finding-stats">📊 发现统计</h3>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">38</div><div class="desc">总发现</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-critical)">1</div><div class="desc">Critical</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-high)">10</div><div class="desc">High</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">12</div><div class="desc">Medium</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-low)">13</div><div class="desc">Low</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-info)">2</div><div class="desc">Info</div></div>
+  </div>
+
+  <h3 class="section-title" id="top-risks">⚠️ 头号风险</h3>
+
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:50px">#</th><th>发现</th><th style="width:100px">严重程度</th><th style="width:110px">维度</th><th style="width:90px">归属</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>全站 17 处 <code>FOR UPDATE</code> 行锁是空操作（GORM v1 写法用在 v2 上）</td><td><span class="badge badge-critical">Critical</span></td><td>Data Integrity</td><td>历史遗留</td></tr>
+            <tr><td>2</td><td>本批新装的 4 道 money 限流全挂在可伪造的 <code>ClientIP()</code> 上，且可反向把任意 IP 踢下线</td><td><span class="badge badge-high">High</span></td><td>Security</td><td>本批加重</td></tr>
+            <tr><td>3</td><td>Trial 败者残留：被拒时用户键＋共享实名键已写死（TTL=0 永久），正常用户永久误封</td><td><span class="badge badge-high">High</span></td><td>Concurrency</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>4</td><td>Redis 瞬时错误在循环中途永久吃掉用户的终身 Trial（零订单零付款）</td><td><span class="badge badge-high">High</span></td><td>Concurrency</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>5</td><td>AGT slug 预检未闭合孤儿洞：两买家可预检同一 slug、双双扣 ¥9990、仅一人能激活</td><td><span class="badge badge-high">High</span></td><td>Data Integrity</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>6</td><td><code>provisionAgentFromOrder</code> 六步非事务写，中途失败产生永久毒化重试的孤儿租户行</td><td><span class="badge badge-high">High</span></td><td>Data Integrity</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>7</td><td>AGT 对账在查单故障时把已付款 ¥9990 订单静默标 <code>expired</code>，且 <code>Failed</code> 空→告警不响</td><td><span class="badge badge-high">High</span></td><td>Data Integrity</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>8</td><td><code>deploy.sh</code> 调用未定义的 <code>warn</code>→exit 127；版本自检仅告警不阻断→「假成功部署」未真修复</td><td><span class="badge badge-high">High</span></td><td>Release</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>9</td><td><code>restore.sh</code> 强制预备份的剪枝会删掉正在恢复的那个备份</td><td><span class="badge badge-high">High</span></td><td>Release</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>10</td><td>SetNX 重构的核心目的完全未测——把修复整个还原，180 个测试全绿</td><td><span class="badge badge-high">High</span></td><td>Testing</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>11</td><td>AGT 对账 117 行新代码零直接测试——3 个致命变异全未捕获</td><td><span class="badge badge-high">High</span></td><td>Testing</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>12</td><td><code>ReleaseTrialLimit</code> 无归属校验：给 B 释放会放掉 A 合法占用的共享键→白送 Trial</td><td><span class="badge badge-medium">Medium</span></td><td>Security</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>13</td><td>三维去重的 <code>device_id</code>/<code>real_name_id</code> 由客户端自报，且前端从不发送→反刷实际未通电</td><td><span class="badge badge-medium">Medium</span></td><td>Security</td><td>历史遗留</td></tr>
+            <tr><td>14</td><td>支付回调被新纳入可预先耗尽的限流桶（影响有界：对账 5–10 分钟兜底）</td><td><span class="badge badge-medium">Medium</span></td><td>Security</td><td><strong>本批新增</strong></td></tr>
+            <tr><td>15</td><td>MySQL root 密码在同一个刚修完密钥内联的 compose 里仍硬编码</td><td><span class="badge badge-medium">Medium</span></td><td>Security</td><td>历史遗留</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="findings">🔍 详细发现</h3>
+
+  <div class="finding severity-critical">
+    <div class="finding-header">
+      <h4>1. 全站 17 处 <code>FOR UPDATE</code> 行锁是静默空操作 —— 仓库里没有一把生效的行锁</h4>
+      <span class="badge badge-critical">Critical</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Data Integrity</span>
+      <span>📍 model/subscription.go:1181,1382 · topup.go ×6 · redemption.go:130 · user.go</span>
+      <span>🎯 PreConsumeUserSubscription / postConsumeUserSubscriptionDeltaTx</span>
+      <span>🏷 归属：历史遗留（本批把其中一处搬入新函数并以 270 行新测为该路径背书）</span>
+      <span>🔬 置信度：High（生产 dialector DryRun 抓 SQL 实证 + 主审员独立复核）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong><code>tx.Set("gorm:query_option", "FOR UPDATE")</code> 是 <strong>GORM v1</strong> 的写法。本仓依赖 <code>gorm.io/gorm v1.25.2</code>——这个模块号即 <strong>GORM v2</strong>，v2 已移除该设置项、会<strong>静默忽略</strong>它（不报错、不告警）。于是每一处「加锁读」实际都是普通快照读，在 MySQL 默认的 REPEATABLE READ 下永不阻塞。紧随其后的是「读取 → 计算 → 写回<strong>绝对值</strong>」的 read-modify-write，构成教科书式的丢失更新。<br>
+      <strong>本批的关联：</strong>本条属历史遗留，<em>不是</em>你同学引入的——他只是在把 <code>PostConsumeUserSubscriptionDelta</code> 抽成 <code>postConsumeUserSubscriptionDeltaTx</code> 时原样搬运了这个坏写法。之所以仍纳入增量审计，是因为两条「使其恶化」的事实：① 新增的 <code>subscription_metering_test.go</code>（270 行）自称把算法「逐一钉死在生产算法上」，却<strong>不含任何并发测试</strong>，且跑在 SQLite 上（<code>FOR UPDATE</code> 在那里本就无意义）——等于给一条核心安全机制为空操作的路径盖了绿章；② <code>service/billing_session.go:308</code> 的注释断言「PreConsumeUserSubscription 要求 amount&gt;0 来创建预扣记录并<strong>锁定订阅</strong>」——它没有锁。
+    </div>
+    <div class="evidence">【主审员独立复核 · 机制层面已是铁证】
+$ grep -E 'gorm.io/gorm' go.mod
+	gorm.io/gorm v1.25.2                        ← 此模块号即 GORM v2
+
+$ grep -rn "query_option" $(go env GOMODCACHE)/gorm.io/gorm@v1.25.2 | wc -l
+0                                               ← 整个 GORM 源码从不读取这个 key
+
+$ grep -rn 'gorm:query_option' --include='*.go' . | wc -l
+17                                              ← 17 处「假锁」
+$ grep -rn 'clause.Locking'    --include='*.go' . | wc -l
+0                                               ← 0 处真锁
+
+【子代理 · MySQL dialector DryRun 抓取实际 SQL】
+gorm:query_option  -&gt; SELECT * FROM `user_subscriptions` WHERE id = ? ORDER BY `id` LIMIT 1
+clause.Locking     -&gt; SELECT * FROM `user_subscriptions` WHERE id = ? ORDER BY `id` LIMIT 1 FOR UPDATE
+                                                                                            ^^^^^^^^^^
+
+【本批新增的那处：model/subscription.go:1382】
+	var sub UserSubscription
+	if err := tx.Set("gorm:query_option", "FOR UPDATE").      ← 空操作
+		Where("id = ?", userSubscriptionId).First(&amp;sub).Error; err != nil { return err }
+	newUsed := sub.AmountUsed + delta                          ← 基于陈旧快照计算
+	...
+	sub.AmountUsed = newUsed
+	return tx.Save(&amp;sub).Error                                 ← 写回绝对值，覆盖并发者
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>某用户订阅额度 100（<code>amount_used=0</code>），并发发出 3 个 <code>/v1</code> 请求——这是 API 分销平台的<strong>常态</strong>而非极端情况，且 <code>service/funding_source.go:88</code> 对每个请求独立调用 <code>PreConsumeUserSubscription</code>、无其它串行化。每个计费事务约 30ms（本项目压测记录：「每请求多次 fsync 写 MySQL → ~30ms」），重叠几乎必然。三个事务读到同一份 <code>amount_used=0</code> 快照 → 各自判断 <code>remain=100 ≥ 40</code> → 各自写回绝对值 40。<strong>最终 <code>amount_used=40</code> 而非 120。</strong><br>
+      <strong>用户可见影响：</strong>80 个单位的 API 用量已交付但从未计量——平台承担上游账单却收不到钱；同时套餐额度上限完全失效（用户可无限超用）。损失随用户并发度放大：<strong>并发最高的大客户漏得最多</strong>。同类空操作还覆盖充值（<code>topup.go</code> ×6）与兑换码（<code>redemption.go:130</code>）。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（机械替换 17 处 + 毫秒级守卫测试钉死整类）</div>
+      <code>import "gorm.io/gorm/clause"
+
+// 17 处统一替换：
+- tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", id).First(&amp;sub)
++ tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).First(&amp;sub)
+
+// 更优（计数器本身改原子条件 UPDATE，彻底消灭 read-modify-write）：
+res := tx.Model(&amp;UserSubscription{}).
+    Where("id = ? AND (amount_total = 0 OR amount_used + ? &lt;= amount_total)", id, delta).
+    UpdateColumn("amount_used", gorm.Expr("GREATEST(amount_used + ?, 0)", delta))</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 1h（17 处机械替换 + DryRun 守卫测试）／+2h（条件 UPDATE 重写 + 真实 MySQL 并发测试） &nbsp;·&nbsp; <strong>回归测试建议：</strong> ① 廉价守卫（推荐先做）：<code>gorm.Config{DryRun:true}</code> 下断言每个加锁 helper 生成的 SQL <code>strings.Contains(stmt.SQL.String(), "FOR UPDATE")</code>——毫秒级、一次钉死整类；② 真实 MySQL（非 SQLite）并发测试：16 goroutine 并发 <code>PreConsumeUserSubscription</code> 同一订阅，断言 <code>amount_used == N*amount</code> 且上限永不被突破；③ CI 加一条 grep 规则封禁 <code>gorm:query_option</code>。
+    </div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>2. 本批新装的 4 道 money 限流全部挂在可伪造的 <code>ClientIP()</code> 上 —— 防护归零，且可反向武器化</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Security</span>
+      <span>📍 router/mt-router.go:87,98,105,115 · middleware/rate-limit.go:24 · deploy/nginx/*.conf</span>
+      <span>🎯 CriticalRateLimit / GlobalAPIRateLimit / gin ClientIP</span>
+      <span>🏷 归属：IP 可伪造为上游历史问题；<strong>本批基于「已受保护」的前提装上防护并写下断言，属加重</strong></span>
+      <span>🔬 置信度：High（gin 引擎实测复现 + 主审员独立复核三段链路）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>本批给 <code>purchase</code> / <code>wallet/recharge</code> / <code>redeem</code> / <code>withdrawals</code> 四个 money 端点加了 <code>CriticalRateLimit()</code>，注释断言其可「防登录态爆破撞他人未用码（每秒数千次）」。但限流桶的 key 是 <code>"rateLimit:" + mark + c.ClientIP()</code>——而 <strong>全仓从未调用 <code>SetTrustedProxies</code></strong>，gin 遂保持默认 <code>defaultTrustedCIDRs = 0.0.0.0/0 + ::/0</code>（信任<em>所有</em>代理）＋<code>ForwardedByClientIP:true</code>＋<code>RemoteIPHeaders:["X-Forwarded-For","X-Real-IP"]</code>。gin 的 <code>validateHeader</code> 从右往左遍历 XFF，当每一跳都「可信」时返回 <strong>最左边、即客户端自己填写的那个值</strong>。三个 nginx vhost 又全部使用 <code>$proxy_add_x_forwarded_for</code>（<strong>追加</strong>而非覆写），且全仓没有 <code>real_ip_header</code> / <code>set_real_ip_from</code>。链路闭合：攻击者填什么，服务端就信什么。
+    </div>
+    <div class="evidence">【主审员独立复核 · 三段链路逐段确认】
+$ grep -rn "SetTrustedProxies\|TrustedPlatform" --include='*.go' . | grep -vc '/gin@'
+0                                        ← 从未调用 → gin 默认信任 0.0.0.0/0
+
+$ grep -n "rateLimit:" middleware/rate-limit.go
+24:	key := "rateLimit:" + mark + c.ClientIP()          ← 纯 IP，且 mark 对所有 /api/** 恒为 "GA"（不含路由成分）
+131:	key := fmt.Sprintf("rateLimit:%s:user:%d", mark, userId)   ← 按 user 计桶的实现【已存在，未被使用】
+
+$ grep -rn "X-Forwarded-For\|real_ip_header\|set_real_ip_from" deploy/nginx/
+api-443-to-origin.wedreamhub.com.conf:30:  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;   ← 追加
+wildcard.wedreamhub.com.conf:29:           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;   ← 追加
+tokendream.wedreamhub.com.conf:27:         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;   ← 追加
+（无 real_ip_header / set_real_ip_from —— nginx 侧不做任何 XFF 归一）
+
+【子代理 · 真实 gin 引擎复现】
+RemoteAddr=127.0.0.1, X-Forwarded-For: "9.9.9.9, 203.0.113.7"
+  =&gt; ClientIP() == "9.9.9.9"              ← 返回攻击者自填的最左值
+
+【实际生效阈值（common/init.go:117-127，compose 无覆盖）】
+GlobalAPIRateLimit   : 开，360 / 180s / IP
+CriticalRateLimit    : 开，20  / 1200s / IP
+</div>
+    <div class="problem">
+      <strong>失败场景（两个方向都成立）：</strong><br>
+      <strong>① 防御归零。</strong>攻击者每个请求带一个随机 <code>X-Forwarded-For</code> → 每次落进全新的桶 → 20/20min 的闸门<strong>形同不存在</strong>。本批注释所称的「防兑换码爆破」保护实际为零，而兑换码即钱（<code>RedeemCodeAndCredit</code> 直接入账）。<br>
+      <strong>② 反向武器化（更隐蔽）。</strong>桶 key <strong>不含任何路由成分</strong>（<code>mark</code> 对所有 <code>/api/**</code> 恒为 <code>"GA"</code>）。任意<strong>未认证</strong>攻击者挑一个受害者 IP <code>V</code>，向任意 <code>/api/*</code> 路径发 360 个带 <code>X-Forwarded-For: V</code> 的请求，即可耗尽 <code>rateLimit:GAV</code>，把 <code>V</code> 从<strong>整个 <code>/api</code> 面</strong>踢下线 180 秒；持续刷即无限期。<code>V</code> 可以是微信/支付宝回调源 IP（→ 见发现 #14）、<code>127.0.0.1</code>（→ 饿死证书签发脚本对 <code>/api/internal/domain</code> 的调用），或任意一个具体客户。<br>
+      <strong>用户可见影响：</strong>money 端点上被宣传的反滥用控制不工作；任何第三方无需认证即可对任意选定 IP 定向拒绝 <code>/api</code> 服务。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（两处独立改动；按 user 计桶的实现仓库里已有，直接换）</div>
+      <code>// ① main.go，紧跟 server := gin.New() 之后：只信任本机 nginx 这一跳
+_ = server.SetTrustedProxies([]string{"127.0.0.1/32", "::1/128"})
+// 若 Cloudflare 位于源站前，改用权威头更稳：
+// server.TrustedPlatform = "CF-Connecting-IP"
+
+// ② router/mt-router.go：这 4 个端点全在 UserAuth() 之后 —— 按用户计桶，而非按 IP。
+//    middleware/rate-limit.go:122 的 userRateLimitFactory 已存在，其自身注释即写明
+//    "resistant to proxy rotation attacks. Must be used AFTER authentication middleware"。
+//    导出一个 CriticalUserRateLimit() 包装它，替换这 4 处即可。
+- tenantGroup.POST("/redeem", middleware.UserAuth(), middleware.CriticalRateLimit(), app.HandleRedeem)
++ tenantGroup.POST("/redeem", middleware.UserAuth(), middleware.CriticalUserRateLimit(), app.HandleRedeem)</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 1–2h（<code>SetTrustedProxies</code> 本身 5 分钟，但需在 staging 确认 <code>X-Real-IP</code>/CF 链路仍能解析出真实客户端 IP 后再上线，否则会把所有人的 IP 归一成 nginx 的） &nbsp;·&nbsp; <strong>回归测试建议：</strong> ① 表驱动断言 <code>X-Forwarded-For: 9.9.9.9, &lt;真实&gt;</code> 时 <code>ClientIP()</code> 返回 nginx 观测到的对端而非最左值；② 中间件测试断言同一认证用户经两个不同伪造 XFF 发起的请求<strong>共用同一个</strong> CriticalRateLimit 桶。
+    </div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>3. Trial 败者残留：被拒时用户键与共享实名键均已写死（TTL=0 永久）—— 代码注释的核心安全断言被实测证伪</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Concurrency</span>
+      <span>📍 internal/risk/engine.go:159-163（注释）· :181-192（循环）</span>
+      <span>🎯 checkTrialLimit</span>
+      <span>🏷 归属：<strong>本批新增（真回归）</strong> —— 旧码走 Get 预检时一个字节都不写</span>
+      <span>🔬 置信度：High（新旧算法差分测试实证，其余变量全部锁定在 HEAD）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>重构把三维去重从「先 <code>Get</code> 预检全部维度（<strong>零写入</strong>）→ 再 <code>SetNX</code> 决胜」改成「逐维 <code>SetNX</code>，任一维返回 false 即拒」。单赢家性质确实因此成立（见「已验证」段——这个重构的核心主张是对的）。但循环是<strong>边查边写</strong>：在第 2/3 维被拒时，前面维度的键<strong>已经写进去了</strong>，且 Trial 的 <code>PurchaseDedupTTL=0</code> 意味着<strong>永久</strong>。循环顺序是 <code>[userK, realK, devK]</code>，因此：在 <code>realK</code> 被拒 → <code>userK</code> 已写；在 <code>devK</code> 被拒 → <code>userK</code> <strong>和跨用户共享的 <code>realK</code></strong> 都已写。<br>
+      <code>engine.go:163</code> 的注释称「<strong>单一身份的正常用户永不被误封</strong>（只有已与既得 Trial 撞库/撞设备的账号会被连带收紧）」，<code>engine.go:159-161</code> 称残留只限「<strong>自身用户维度</strong>」——<strong>两句都被实测证伪</strong>。
+    </div>
+    <div class="evidence">【子代理 · 差分探针：只替换 checkTrialLimit，其余全部锁在 HEAD】
+
+PROBE-P1  A 先用设备 D 领到 Trial；B（不同账号）也从设备 D 尝试 → 被拒；B 回家换干净设备 D2 重试：
+  旧: 败者 userK 残留=false | B 换干净设备重试 = 放行（拿到 Trial）      ← 正确
+  新: 败者 userK 残留=true  | B 换干净设备重试 = 拒绝（PURCHASE_LIMIT_EXCEEDED）  ← 永久锁死
+
+PROBE-P1b 自然人 R 在已被占用的设备上尝试 → 被拒；R 换新账号 + 新设备重试：
+  旧: 败者污染共享 realK=false | 自然人 R 用新账号+新设备 = 放行（拿到 Trial）
+  新: 败者污染共享 realK=true  | 自然人 R 用新账号+新设备 = 拒绝（PURCHASE_LIMIT_EXCEEDED）
+
+【代码：engine.go:181-192 —— 写在检查之前，且无任何回滚】
+	for _, k := range []string{userK, realK, devK} {
+		if k == "" { continue }
+		ok, err := e.kv.SetNX(ctx, k, "1", ttl)     ← 先写 userK（ttl=0 永久）
+		if err != nil { return err }                 ← 中途报错：userK 已写，不回滚（见发现 #4）
+		if !ok { return ErrPurchaseLimitExceeded }   ← 在 realK/devK 判负：userK 已写死，不回滚
+	}
+
+【engine.go:270 的自述：DeviceID = "设备指纹（UA+IP 等归一）"】
+  → 该口径对无辜用户天然碰撞：同一办公室 NAT 出口 + 同一版本 Chrome 即同指纹
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>用户 A 与 B 是共用一台家用电脑的家人（或同一办公室 NAT 后使用相同 Chrome UA 的两位同事——按 <code>engine.go:270</code> 的指纹口径，这<strong>按构造就会碰撞</strong>）。A 从设备 D 购买 Trial 成功 → <code>userK:A</code> + <code>devK:D</code> 写入。B 从 D 尝试 → <code>SetNX(userK:B)</code>=true（<strong>已写入</strong>）→ <code>SetNX(devK:D)</code>=false → 拒绝。B 回家换自己的笔记本重试 → <code>SetNX(userK:B)</code>=false → <strong>永久拒绝</strong>。B 从未获得过任何 Trial。旧代码下 B 此时是能正常领到的。<br>
+      共享实名维度更狠：实名键按<strong>自然人</strong>而非账号计，被污染后该自然人在<strong>其创建的每一个账号、使用的每一台设备</strong>上都永久失去 Trial 资格。<br>
+      <strong>用户可见影响：</strong>无辜用户因一次瞬时的设备/实名碰撞，<strong>永久且不可逆</strong>地丧失终身 Trial 资格，且<strong>无任何自助恢复途径</strong>。展示给他的提示是「已超过该套餐的限购次数」——<strong>这是一句谎话，他一次都没买过</strong>。恢复需要管理员手工调用新端点，并猜中当时那次尝试的实名/设备原值。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（6 行；<code>Del</code> 原语就在本批新增，见发现 #16）</div>
+      <code>var acquired []string
+for _, k := range []string{userK, realK, devK} {
+    if k == "" { continue }
+    ok, err := e.kv.SetNX(ctx, k, "1", ttl)
+    if err != nil || !ok {
+        if len(acquired) &gt; 0 { _ = e.kv.Del(ctx, acquired...) }  // 只回滚本次调用真正占到的键
+        if err != nil { return err }
+        return ErrPurchaseLimitExceeded
+    }
+    acquired = append(acquired, k)
+}
+return nil
+
+// 竞态安全性已核：只删本次真正 SetNX 成功的键，不碰他人的；
+// 单赢家性质保持不变 —— 最后一个非空维度的持有者恒定胜出（无人能在不持有前序全部维度的情况下抵达它）。
+// 最坏情况只是并发同侪的一次「瞬时且自愈」的误拒，严格优于今天的永久烧毁。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 约 30 分钟（含测试） &nbsp;·&nbsp; <strong>回归测试建议：</strong> <code>TestCheckPurchaseLimit_TrialLoserLeavesNoResidue</code>——A 占用 <code>dev-1</code>；B 在 <code>dev-1</code> 被拒；断言 B 在 <code>dev-2</code> 上<strong>被放行</strong>，且 <code>Get(trialKey("user","B"))</code> 未命中。配套 <code>TestCheckPurchaseLimit_TrialLoserDoesNotPoisonRealName</code>——预占 <code>devK</code>，拒绝 <code>(realname R, device D)</code>，断言 <code>Get(trialKey("realname","R"))</code> 未命中。
+    </div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>4. Redis 瞬时错误在循环中途永久吃掉用户的终身 Trial —— 零订单、零付款、零补偿</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Concurrency / Stability</span>
+      <span>📍 internal/risk/engine.go:185-188 · internal/tokenplan/subscription.go:61-82</span>
+      <span>🎯 checkTrialLimit 的 err != nil 分支</span>
+      <span>🏷 归属：<strong>本批新增（真回归）</strong> —— 旧码此处反而是<em>发放</em>的</span>
+      <span>🔬 置信度：High（注入第 2 次 SetNX 报错的探针实证）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong><code>if err != nil { return err }</code> 位于前序维度<strong>已写入之后</strong>，且无任何补偿。这是发现 #3 同一根因的另一条触发路径，但影响更荒谬：用户不是被反刷规则拒绝，而是被一次<strong>基础设施抖动</strong>永久剥夺权益。<br>
+      值得注意的是新旧行为的方向性差异：<strong>旧码把实名/设备维度的 SetNX 错误整个丢弃</strong>（<code>_, _ = e.kv.SetNX(...)</code>），所以抖动时用户<em>拿到了</em> Trial；<strong>新码正确地传播了错误</strong>（这一点是改进）——但没有配套回滚，于是变成「购买失败 <em>且</em> 权益烧毁」，比旧码更坏。
+    </div>
+    <div class="evidence">【子代理 · kvErrOnNth{at: 2} —— 只让第 2 次 SetNX 报错一次】
+
+PROBE-P6:
+  旧: 错误透传=false | userK 残留=true | Redis 恢复后重试=拒绝   ← 用户【拿到了】Trial（err 被丢弃）
+  新: 错误透传=true  | userK 残留=true | Redis 恢复后重试=拒绝   ← 用户【什么都没拿到】，但已被烧毁
+
+【调用链：internal/tokenplan/subscription.go:61-82】
+	61:  CheckPurchaseLimit(...)        ← 写永久键
+	72:  order, err := s.payment.CreateOrder(ctx, OrderInput{...})
+	73:  if err != nil { return nil, err }   ← 订单创建失败，无任何限购键回滚
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>用户点击「购买 Trial」。<code>SetNX(userK)</code> 成功。Redis 打嗝一条命令 → <code>SetNX(realK)</code> 报错 → HTTP 500。<code>CreateOrder</code>（<code>subscription.go:72</code>）<strong>根本没执行</strong>。用户 5 秒后 Redis 恢复了再试 → <code>PURCHASE_LIMIT_EXCEEDED</code>，<strong>永久</strong>。<br>
+      <strong>用户可见影响：</strong>一次一秒的 Redis 抖动，即永久吊销所有当时正在结账流程中的用户的 Trial 资格——无订单、无付款、无自助恢复。客服唯一的补救是那个新端点，前提是他们能想明白为什么。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（即发现 #3 修复中的 <code>err != nil</code> 分支，同一处解决）</div>
+      <code>if err != nil || !ok {
+    if len(acquired) &gt; 0 { _ = e.kv.Del(ctx, acquired...) }
+    if err != nil { return err }              // ← 错误仍如实传播（保留新码相对旧码的这项改进）
+    return ErrPurchaseLimitExceeded
+}</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 已含在发现 #3 的修复内 &nbsp;·&nbsp; <strong>回归测试建议：</strong> <code>TestCheckPurchaseLimit_TrialMidLoopErrorRollsBack</code>——只让第 2 次 SetNX 报错，断言 <code>errBoom</code> 如实传播<strong>且</strong>健康状态下的重试能成功。注意现有的 <code>TestCheckPurchaseLimit_TrialSetNXErrorPropagates</code> 用的是 <code>context.Background()</code>（无身份）→ <code>realK</code>/<code>devK</code> 为空 → <strong>只会写一个维度</strong>，因此部分写入路径从未被触及。
+    </div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>5. AGT slug 预检未闭合孤儿洞 —— 两个买家可预检同一 slug、双双被扣 ¥9990、仅一人能激活</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Data Integrity</span>
+      <span>📍 internal/mtwire/agent_plan_bridge.go:373-414 · internal/tenant/service.go:25-49 · gormrepo.go:26,42</span>
+      <span>🎯 precheckAgentPurchaseSlug vs tenant.Service.Create</span>
+      <span>🏷 归属：<strong>本批新增</strong> —— 该修复宣称堵住的洞并未堵住</span>
+      <span>🔬 置信度：High（三条触发路径逐条写测试证实）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>预检的<strong>位置是对的</strong>——<code>http_agentplan.go:310</code>，在 <code>create()</code> 与 <code>agentPlanPayURL()</code> 之前，确属付款前 fail-closed。但它的唯一性检查<strong>只查 <code>tenants.slug</code></strong>，而激活走的 <code>tenant.Service.Create</code> 要同时满足<strong>两个</strong>唯一索引：<code>tenants.slug</code>（<code>gormrepo.go:26</code>）<em>和</em> <code>tenant_domains.domain</code>（<code>gormrepo.go:42</code>）。且它是<strong>无预留的 check-then-act</strong>——窗口不是毫秒级，而是买家<strong>整个付款会话</strong>（数分钟）。「预检通过 ⇒ 激活必成」这个命题被三条路径证伪。
+    </div>
+    <div class="evidence">【触发 (a)：两买家同 slug —— 无需任何管理员操作，纯并发】
+BOTH prechecks passed -&gt; both orders created -&gt; BOTH BUYERS CHARGED ¥9990
+buyer A activation =&gt; &lt;nil&gt;
+buyer B activation =&gt; SLUG_DUPLICATE: slug 已被占用     ← B 付了钱，什么也没得到
+order AGTRACEA: status="activated", buyer 901 owns 1 tenants
+order AGTRACEB: status="pending",   buyer 902 owns 0 tenants
+buyer B retry #2 =&gt; SLUG_DUPLICATE: slug 已被占用 (permanent)
+
+【触发 (b)：域名唯一性从未被预检】
+admin pointed beta.wedreamhub.com -&gt; tenant 1 (whose slug is 'alpha')   ← 经 AddSubdomain
+PRECHECK PASSED -&gt; order created, buyer charged
+activation attempt #1 =&gt; SLUG_DUPLICATE   [INSERT INTO tenant_domains ... duplicated key]
+tenants with slug='beta' after failed activation: 1                      ← 毒丸（见发现 #6）
+activation attempt #2 (retry) =&gt; SLUG_DUPLICATE   [INSERT INTO tenants ... duplicated key]
+order status after retries: "pending"; tenants owned by buyer: 0
+  → 仅影响 GrantLevel &gt;= 1 的档位（SkipSubdomain: ord.GrantLevel &lt; 1）——恰是 ¥2999–9990 的 SKU
+
+【预检代码：agent_plan_bridge.go:373-414】
+	var n int64
+	if err := a.DB.WithContext(ctx).Table("tenants").
+		Where("slug = ?", slug).Count(&amp;n).Error; err != nil { return err }
+	if n &gt; 0 { return tenant.ErrSlugDuplicate }     ← 只查 tenants.slug，不查 tenant_domains.domain
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>买家 B 用 slug <code>shop</code> 支付 ¥9990 购买 OEM 档。订单永远停在 <code>pending</code>。新的对账循环查到网关 → <code>paid=true</code> → <code>activatePaidAgtHook</code> → <code>SLUG_DUPLICATE</code> → 进 <code>res.Failed</code> → <strong>每 5 分钟重试一次，永远重试，永不过期</strong>（只有<em>未付款</em>订单才会过期）。<br>
+      <strong>用户可见影响：</strong>买家损失 ¥9990 且一无所获，恢复需要人工改库。<strong>本批带来的一项真实改进</strong>：该订单现在至少会出现在管理员卡单页并触发「对账失败告警」，运维能看见了（在此之前 AGT 是四层保护全缺的）。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（补域名检查只是收窄；真正闭合需要预留）</div>
+      <code>// ① 立刻：让预检与激活的校验口径一致（收窄触发 (b)，但关不掉 (a)）
+if err := tenant.NewSlugValidator().Validate(slug); err != nil { return err }
+var n int64
+if err := a.DB.Table("tenants").Where("slug = ?", slug).Count(&amp;n).Error; err != nil { return err }
+if n == 0 {
+    if err := a.DB.Table("tenant_domains").
+        Where("domain = ?", tenant.DomainForSlug(slug)).Count(&amp;n).Error; err != nil { return err }
+}
+if n &gt; 0 { return tenant.ErrSlugDuplicate }
+
+// ② 真正的修复 —— 预留式：在 HandlePurchaseAgentPlan 内先插入
+//    tenants 行（status=pending_payment，owner_user_id 已设），让【唯一索引在钱动之前仲裁】；
+//    激活时经既有的 "revive" 分支把它翻成 active。这同时消灭发现 #6（行已归属买家）。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 1h（仅补域名检查）／约 1 天（预留式重设计，才真正闭合） &nbsp;·&nbsp; <strong>回归测试建议：</strong> 扩充 <code>agent_plan_slug_precheck_test.go</code>：两个 owner 预检同一 slug → 第二个必须被拒（或其激活必须成功）；再补一条「预检通过 ⇒ 开通必成」的属性测试，用 <code>AddSubdomain</code> 造出的域名冲突做种子。
+    </div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>6. <code>provisionAgentFromOrder</code> 新代理分支六步非事务写 —— 中途失败产生永久毒化重试的孤儿租户行</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Data Integrity</span>
+      <span>📍 internal/mtwire/agent_plan_bridge.go:266-305 · :340（agentTenantByOwner）· internal/tenant/service.go:35-47</span>
+      <span>🎯 provisionAgentFromOrder 新代理分支</span>
+      <span>🏷 归属：<strong>本批新增</strong>（agent_plan_bridge.go +106）</span>
+      <span>🔬 置信度：High（模拟 CreateTenant 之后崩溃的测试实证）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>该分支是<strong>六步无事务写</strong>：<code>TenantService.Create</code>（其本身又是两次写：<code>CreateTenant</code> 然后 <code>CreateDomain</code>）、<code>SetOwnerUserID</code>、<code>UPDATE users SET tenant_id=0</code>、<code>SetAgentType</code>、<code>EnsureWallet</code>、<code>upsertMembership</code>。没有任何一层把它们包进事务。<strong>致命的顺序问题</strong>：<code>owner_user_id</code> 是在 tenant 行插入<strong>之后</strong>才设置的，而重试查找 <code>agentTenantByOwner</code>（<code>:340</code>）正是<strong>按 <code>owner_user_id</code> 查</strong>——于是一个「已创建但尚未归属」的 tenant 行对重试<strong>不可见</strong>，却<strong>同时占着</strong>重试所需的那个 slug。
+    </div>
+    <div class="evidence">【子代理 · 模拟 CreateTenant 之后崩溃／DB 抖动】
+orphan tenant slug=agent901 owner_user_id=0 exists (crash after CreateTenant)
+retry activation =&gt; SLUG_DUPLICATE: slug 已被占用 (want nil if recoverable)
+order status: "pending"
+  → 确定性不可恢复：agentTenantByOwner 查不到（owner 未设）
+                     agentDeletedTenantByOwner 查不到
+                     落新代理分支 → CreateTenant → SLUG_DUPLICATE → 永远循环
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>买家支付 ¥9990。回调 → <code>CreateTenant</code> 成功 → 进程被一次部署重建（<code>deploy.sh</code> 执行 <code>up -d --force-recreate</code>——<strong>例行事件</strong>），或 <code>CreateDomain</code>/<code>SetOwnerUserID</code> 撞上一次瞬时 DB 错误。孤儿行 <code>slug=agent901, owner_user_id=0</code> 就此长存。此后每一次重试都必然 <code>SLUG_DUPLICATE</code>。新的对账循环则每 5 分钟忠实地重试它，直到永远。<br>
+      这也解释了发现 #5 的触发 (b) 为何会<strong>自我毒化</strong>：<em>第一次</em>失败的激活自己就制造了那个孤儿行，于是即便管理员事后移除了冲突的域名，重试仍会撞在 <code>tenants.slug</code> 上。<br>
+      <strong>用户可见影响：</strong>买家损失 ¥990–9990，且不人工删库就<strong>无法恢复</strong>。单笔订单的窗口很小，但这是全站最贵的 SKU，而「回调期间恰好部署」是常规事件。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（包进一个事务，或让重试幂等地「认领」孤儿行）</div>
+      <code>t, err := a.TenantService.Create(ctx, in)
+if errors.Is(err, tenant.ErrSlugDuplicate) {
+    // 认领一个我们自己半途创建的、尚无归属的行；仅当 owner_user_id 未设时才认领
+    var row struct{ ID int64 }
+    if e := a.DB.Table("tenants").Select("id").
+        Where("slug = ? AND (owner_user_id = 0 OR owner_user_id IS NULL)", slug).
+        Take(&amp;row).Error; e == nil {
+        t = &amp;tenant.Tenant{ID: row.ID, Slug: slug}
+        err = nil
+    }
+}
+if err != nil { return 0, err }
+
+// 若采纳发现 #5 的「预留式」重设计，本条与 #5 一并消失。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 2–4h &nbsp;·&nbsp; <strong>回归测试建议：</strong> 用派生 slug 播种一个无归属的 tenant 行，断言 <code>ActivatePaidAgentPlanOrder</code> 成功且订单达到 <code>activated</code>。（这正是子代理跑过的那个临时测试——它在当前代码上<strong>失败</strong>。）
+    </div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>7. AGT 对账在查单故障时把<strong>已付款</strong>订单静默标为 <code>expired</code>，且 <code>Failed</code> 为空导致告警不触发 —— 论证是循环的</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Data Integrity</span>
+      <span>📍 internal/mtwire/agent_plan_reconcile.go:70-81 · :23-26（注释）· :113 · payment_inprocess.go:236-238</span>
+      <span>🎯 ReconcileStuckAgentPlans</span>
+      <span>🏷 归属：<strong>本批新增</strong>（新文件 117 行；逻辑照抄既有 sub_reconcile.go:83，故相对 SUB 非回归）</span>
+      <span>🔬 置信度：High（真实已付 ¥9990 订单 + 瞬时查单错误的测试实证）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong><code>ancient</code>（创建超过 26h）会在<strong>任何</strong>错误下过期该订单，包括<strong>瞬时</strong>错误。其辩护注释（<code>:23-26</code>）称「<em>若曾被支付，前面数百轮查单/回调必已捕获激活</em>」——但<strong>这个分支只在查单正在失败时才会进入</strong>，所以「前面数百轮查单捕获过」恰恰是<em>没有发生</em>的那件事。<strong>该论证假定了它自身触发条件所否定的前提</strong>。<br>
+      更糟的是 <code>res.Failed</code> 为空 → <code>alertReconcileHealth</code> <strong>永不触发</strong>；<code>listStuckAgentPlans</code>（<code>:113</code>）只选 <code>status = pending</code> → 订单从卡单页<strong>消失</strong>。终态、不可见、不再重试、无告警。
+    </div>
+    <div class="evidence">【代码：agent_plan_reconcile.go:70-81】
+	paid, err := agtOrderPaidQuery(a, ctx, row.OrderNo, row.Provider)
+	switch {
+	case err != nil:
+		if ancient || (expired &amp;&amp; errors.Is(err, payment.ErrOrderNotExist)) {
+		   ^^^^^^^ 任何错误 + 超 26h 即过期，不区分「确定未付」与「查不动」
+			a.expireStuckAgentPlanOrder(ctx, row.OrderNo)
+			res.Expired = append(res.Expired, row.OrderNo)
+
+【子代理 · 真实已付 ¥9990 订单 + 瞬时错误（非 ErrOrderNotExist）】
+reconcile result: Expired=[AGTANCIENT] Failed=map[] Unpaid=[]
+PAID ¥9990 order status after reconcile = "expired"      ← 已付款订单被写死为终态
+still listed on admin stuck-orders page: 0 rows          ← 从卡单页消失
+next reconcile round scans it? Scanned=0 Failed=0        ← 永不重试，Failed 空 → 告警不响
+
+【可达性：payment_inprocess.go:236-238 —— 凭据不全时【每一次】查单都报错】
+	func (m *providerManager) QueryOrder(...) (bool, error) {
+		if !m.credsComplete(provider) { return false, errProviderDisabled }
+  → 而已发出的二维码仍在继续收钱
+  → 这正是该文件头（:12-13）自述的动机场景：「api_v3_key 轮换配错致回调全部验签失败」
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>管理员在 T 时刻轮换微信商户凭据（或临时关掉某渠道）。T-30h 已付款、但回调验签失败的那些订单被查单 → <code>errProviderDisabled</code> → <code>ancient</code> → <code>expired</code>。<strong>¥9990 × N 静默注销</strong>。运维只会看到一行 info 日志 <code>reconcile AGT: … expired=N</code>——读起来像「N 个废弃购物车」。<br>
+      <strong>用户可见影响：</strong>买家每人损失 ¥990–9990，且在<strong>任何</strong>管理界面都查不到痕迹；唯一的发现途径是人工把商户平台流水与数据库逐笔对账。<br>
+      <strong>公允说明：</strong>该逻辑是既有 <code>sub_reconcile.go:83</code> 的忠实复制，相对 SUB 并非回归；且净值上，新对账仍优于此前「AGT 静默永停 pending」的状态。但它是<strong>新代码</strong>，且被应用到了全站最贵的 SKU 上。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（只在确定性答复下才过期；且永不静默过期）</div>
+      <code>case err != nil:
+    // 只有「此单从未存在」这种【确定性】答复才允许过期
+    if expired &amp;&amp; errors.Is(err, payment.ErrOrderNotExist) {
+        a.expireStuckAgentPlanOrder(ctx, row.OrderNo)
+        res.Expired = append(res.Expired, row.OrderNo)
+    } else {
+        res.Failed[row.OrderNo] = "query: " + err.Error()  // ancient 且查不动 → 保持可见 + 触发告警
+    }
+
+// 另建 agtOrderUnresolved 状态（或保持 pending + query_failures 计数），
+// 令「超龄且查不动」的订单继续留在卡单页；任何「经 ≥1 次查单失败后被 expire」的订单必须触发 Critical 告警。
+// 另在 ActivatePaidAgentPlanOrder 补 case ord.Status == agtOrderExpired 分支：告警而非返回裸 ErrOrderInvalid，
+// 以关掉 2h 边界上的迟到回调竞态。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 3–4h（并镜像回 <code>sub_reconcile.go</code>） &nbsp;·&nbsp; <strong>回归测试建议：</strong> 超龄订单 + 瞬时查单错误 → 断言<strong>不得</strong>进入 <code>expired</code>、必须仍被 <code>listStuckAgentPlans</code> 列出、且下一轮仍被扫描。
+    </div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>8. 「假成功部署」并未真正修复 —— 唯一的拦阻是一个未定义函数的崩溃，补上它就会把事故放回来</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Release</span>
+      <span>📍 deploy/ops/deploy.sh:37-40（helper 定义）· :158-165（阻断闸门）· :168-178（版本自检）</span>
+      <span>🎯 deploy.sh 版本身份自检</span>
+      <span>🏷 归属：<strong>本批新增</strong>（deploy.sh +70；<code>warn</code> 调用与自检均为本批引入）</span>
+      <span>🔬 置信度：High（最小 harness 复现 exit 127）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>这是本次审计最反直觉的一条——<strong>两个 bug 正在互相抵消，单独修掉任何一个都会捅出线上事故</strong>。<br>
+      <strong>Bug A：</strong><code>deploy.sh</code> 只定义了 <code>log/ok/die/remote</code> 四个 helper，<strong>从不 source <code>lib.sh</code></strong>（它跑在 Mac 上，<code>lib.sh</code> 是服务器侧的）。但 <code>:174-175</code> 调用了 <code>warn</code>——该函数<strong>只在 <code>lib.sh:58</code> 存在</strong>。配合 <code>:21</code> 的 <code>set -euo pipefail</code>，<code>warn</code> 返回 127 → 脚本当场被 <code>set -e</code> 杀死，后续的 <code>healthcheck.sh</code> / <code>部署成功</code> / <code>exit 0</code> 全不执行，<strong>连解释「哪里出了问题」的诊断文本都印不出来</strong>。<br>
+      <strong>Bug B：</strong>那个版本自检<strong>被设计成只告警不阻断</strong>（<code>:168</code> 的注释白纸黑字：「不等 = 版本身份未正确烤入…→ 告警但不阻断（健康已过）」）。而<strong>真正的阻断闸门</strong>（<code>:158-165</code>）<strong>本批未改</strong>，仍是<strong>比对 tag ID</strong>——正是被记录为产生假通过的那个机制（BuildKit OCI manifest-list 下 tag ID 会漂移 → <code>NEW_ID != PREV_ID</code> → 闸门放行 → 报告成功而容器跑着旧镜像）。<br>
+      <strong>合起来</strong>：今天「假成功」<em>唯一</em>的拦阻，是 <code>warn</code> 未定义导致的崩溃。<strong>谁若看到 <code>warn: command not found</code> 觉得碍眼、顺手补一行 <code>warn()</code>，就会当场静默恢复原事故。</strong>
+    </div>
+    <div class="evidence">【deploy.sh:37-40 —— 只有四个 helper，无 warn，且从不 source lib.sh】
+	log()    { printf '\033[1;34m[deploy]\033[0m %s\n' "$*"; }
+	ok()     { printf '\033[1;32m[ ok ]\033[0m %s\n' "$*"; }
+	die()    { printf '\033[1;31m[fail]\033[0m %s\n' "$*" &gt;&amp;2; exit 1; }
+	remote() { ssh "$SSH_HOST" "$@"; }
+
+$ grep -n "warn\|source" deploy/ops/deploy.sh
+174:	  warn "⚠ 版本身份自检失败：/api/status 报告 '$REPORTED' ≠ 期望 '$APP_VERSION'。"
+175:	  warn "   → 版本串未正确烤入镜像，请排查 Dockerfile ldflags 与服务器 VERSION 盖戳（步骤 5.5）。"
+（仅两处调用，无定义、无 source。bash -n 通过 —— 这是纯运行期缺陷）
+
+【子代理 · 最小 harness 复现（取 :21 / :37-39 / :171-176）】
+  warn: command not found
+  exit=127
+  → if 之后的所有行（healthcheck / 部署成功 / exit 0）永不执行
+
+【:158-165 —— 唯一的【阻断】闸门，本批未改，仍是 tag 比对（即事故机制本身）】
+	NEW_ID="$(remote  "docker image inspect -f '{{.Id}}' $APP_IMG:latest 2&gt;/dev/null || true")"
+	PREV_ID="$(remote "docker image inspect -f '{{.Id}}' $APP_IMG:prev   2&gt;/dev/null || true")"
+	if [ -n "$PREV_ID" ] &amp;&amp; [ "$NEW_ID" = "$PREV_ID" ]; then ... die "构建未产出新镜像..."
+
+【:178 —— 无条件报告【期望的】版本，而非【实际在跑的】版本】
+	ok "部署成功 ✅ 版本 ${APP_VERSION}（tag=${TAG}，归档 ${ARCHIVE_DIR}/src-${TS}.tgz）"
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>BuildKit 把 <code>:latest</code> 留在旧镜像上（新镜像悬空 <code>&lt;none&gt;</code>），容器从旧 <code>:latest</code> 重建。<code>:160</code> 的 tag 闸门放行（ID 不同）。<code>:171</code> 的版本自检<strong>正确地检测到了不匹配</strong> → <strong>按设计</strong>只告警，然后落到 <code>ok "部署成功 ✅ 版本 &lt;新版本&gt;"</code> + <code>exit 0</code>。今天它改为在 127 处崩掉。<br>
+      <strong>用户可见影响：</strong>部署报告「部署成功 ✅ 版本 cd7d30d-…-20260716-150816」，而三个线上域名全部在跑上一个构建。<strong>Bug 修复和安全补丁看起来发布了，实际没有。</strong>（当前形态下无停机——容器是健康的；运维看到的是 <code>warn: command not found</code> 加一个无上下文的 127，最可能的反应是「部署脚本有 bug，但站是好的」→ <strong>生产继续跑旧码</strong>。）
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（<strong>不要</strong>补 <code>warn</code>——把自检改成阻断闸门。所有零件已就位并验证正确）</div>
+      <code>if [ "$REPORTED" != "$APP_VERSION" ]; then
+  log "构建尾日志："; remote "tail -n 40 $SERVER_REPO/deploy-build.log 2&gt;/dev/null || true"
+  die "版本身份不符：运行中的 app 报告 '$REPORTED' ≠ 本次 '$APP_VERSION' —— 改动未上线（旧容器/旧镜像续跑）。"
+fi
+
+# 可选加强：直接断言容器的镜像 ID，而非 tag
+# docker inspect -f '{{.Image}}' "$(docker ps -qf name=${STACK}-${APP_SVC})"</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 15 分钟 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 故障注入演练——先正常部署一次，再把构建强制 no-op（步骤 6 前 <code>docker tag &lt;旧&gt; $APP_IMG:latest</code>）重跑 <code>deploy.sh</code>，断言退出码 ≠ 0 <strong>且</strong> stdout 中<strong>不含</strong>「部署成功」。另建议给 <code>scripts/preflight.sh</code> 加一条「grep 每个 <code>deploy/ops/*.sh</code> 中被调用但未定义的函数」的 lint，或在 CI 装 <code>shellcheck</code>（本机<strong>未安装</strong>，这正是本条得以出厂的原因）——<code>bash -n</code> 抓不到它。
+    </div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>9. <code>restore.sh</code> 新改成不可跳过的强制预备份，会删掉你正在恢复的那个备份</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Release</span>
+      <span>📍 deploy/ops/restore.sh:25,33-36,39 · backup.sh:67 · lib.sh:41(KEEP=7),104-109</span>
+      <span>🎯 restore.sh 强制 pre-backup → backup.sh 的 prune_keep</span>
+      <span>🏷 归属：<strong>本批新增</strong> —— 本批删掉了 <code>NO_PRE_BACKUP=1</code> 逃生口，使该隐患变为不可规避</span>
+      <span>🔬 置信度：High（已复现）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>本批把恢复前备份从可跳过改成<strong>强制</strong>（并删除了 <code>NO_PRE_BACKUP=1</code>，注释理由是「连给现态拍照都做不到，就不该覆盖它」——出发点是对的）。但 <code>backup.sh:67</code> 随后会以 <code>KEEP=7</code> 剪枝，而 <code>[ -f "$BACKUP" ]</code> 的存在性检查在 <code>:25</code>、<strong>发生在预备份删掉它之前</strong>。于是恢复<strong>排名 ≥ KEEP</strong> 的任何目标时，那个目标会被这次强制预备份挤出保留窗口而删除。
+    </div>
+    <div class="evidence">【restore.sh:33-36 —— 强制、无逃生口】
+	# （不提供 NO_PRE_BACKUP 逃生：连给现态拍照都做不到，就不该覆盖它。）
+	log "恢复前强制备份当前态（保险）…"
+	"$(dirname "$0")/backup.sh" || die "恢复前备份失败——已中止，绝不在无保险快照时覆盖生产库 $DB_NAME。"
+
+【lib.sh:104-109 —— 剪枝：留最新 7 份，其余 rm】
+	ls -1t $pattern 2&gt;/dev/null | tail -n +"$((KEEP + 1))" | while IFS= read -r f; do
+	  [ -n "$f" ] &amp;&amp; { rm -f -- "$f"; log "清理旧备份：$f"; }
+
+【子代理 · 复现】
+7 份既有备份 + 1 次强制预备份 → 最旧的那份（= 恢复目标）被剪掉
+→ restore.sh:39 的 gunzip -c "$BACKUP" 报 No such file → pipefail → 中止
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong><code>./restore.sh /root/backups/db-&lt;第7新&gt;.sql.gz</code>。在已文档化的每日 02:30 cron 备份（<code>backup.sh:17</code>）+ <code>KEEP=7</code> 下，<strong>第 7 新即最旧的一份</strong>——也就是「数据损坏从一周前开始，恢复我们手上最旧的快照」这条<strong>最经典的灾难恢复路径</strong>。执行序列：guard → <code>confirm_typed</code>（运维手打 <code>newapi_test</code> 确认）→ 强制 <code>backup.sh</code> → 剪枝<strong>删掉目标</strong> → <code>gunzip -c</code> → 「No such file」→ 中止。<br>
+      <strong>用户可见影响：</strong>恢复失败，<strong>而且你正要恢复的那个快照永久没了</strong>。生产库本身未被触碰（中止发生在导入之前），所以损失的是一个恢复点而非线上数据——但在灾难恢复情境下，那个恢复点可能是损坏前状态的<strong>唯一</strong>拷贝。此前的代码提供 <code>NO_PRE_BACKUP=1</code> 可规避，本批把它删了，因此该隐患现在<strong>不可规避</strong>。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（在预备份前把恢复目标拷到临时区）</div>
+      <code># restore.sh，:36 之前
+# 保护恢复目标：pre-backup 的 prune_keep 可能把它挤出保留窗口（KEEP=$KEEP）。
+SAFE="$(mktemp -d)/$(basename "$BACKUP")"; cp -a "$BACKUP" "$SAFE"
+trap 'rm -rf "$(dirname "$SAFE")"' EXIT
+"$(dirname "$0")/backup.sh" || die "恢复前备份失败——已中止…"
+BACKUP="$SAFE"
+
+# 备选：令 prune_keep 跳过 $RESTORE_TARGET；或本次调用用 KEEP=$((KEEP+1)) backup.sh</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 20 分钟 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 在临时目录造 <code>KEEP</code> 份假的 <code>db-*.sql.gz</code>，把导入步骤打桩后对最旧一份执行恢复，断言目标文件在执行后<strong>依然存在</strong>。
+    </div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>10. SetNX 重构的核心目的完全未测 —— 把整个修复还原回旧代码，180 个测试全绿</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Testing Authenticity</span>
+      <span>📍 internal/risk/engine_test.go:321-339（TrialConcurrentSingleWinner）· engine.go:166-194</span>
+      <span>🎯 测试固定了一个从未坏过的性质</span>
+      <span>🏷 归属：<strong>本批新增</strong>（重构落地时未补对应测试）</span>
+      <span>🔬 置信度：High（变异测试证明——还原修复后测试仍全绿）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>提交 <code>3dd6b4f</code> 存在的<strong>唯一目的</strong>，是关掉一个<strong>跨账号</strong>的并发 Trial 绕过（其自身注释：「同设备/同实名的<strong>多账号</strong>并发可各自拿到一份 Trial（绕过反刷）」）。但守卫它的测试 <code>TestCheckPurchaseLimit_TrialConcurrentSingleWinner</code> 把 <strong>全部 64 个 goroutine 都固定在 <code>userID=7</code></strong>——而旧代码对<strong>同一用户</strong>本来就能给出「恰好 1 个赢家」（它的 <code>SetNX(userK)</code> 决胜锁在这个场景下工作正常）。<strong>bug 只在 userID 不同、共享设备/实名时才可达。</strong>于是这个测试测的是一个从未坏过的性质。
+    </div>
+    <div class="evidence">【变异 1：把 3dd6b4f 之前的 checkTrialLimit 原样还原（= 完全撤销这个修复）】
+$ go test -race ./internal/risk/...
+ok  github.com/QuantumNous/new-api/internal/risk  1.906s
+  → 全部 9 个 TestCheckPurchaseLimit_* 通过，含 -race 的 "SingleWinner"
+  → 撤销修复，【零个测试失败】
+
+【测试为何抓不到：engine_test.go:321-339】
+	// TestCheckPurchaseLimit_TrialConcurrentSingleWinner — 64 goroutines
+	if e.CheckPurchaseLimit(trialCtx("ID-A", "dev-1"), 7, trialPlan()) == nil { ... }
+	                                                    ^ 全部 64 个都是 userID=7
+
+【而修复真正带来的性质（差分实测，见发现 #3 同一探针）】
+  旧: 单轮最多授予 3 份 Trial（32 并发 × 200 轮，不同 userID 共享一台设备）
+  新: 单轮最多授予 1 份     ← 这才是该改动的价值，但无任何测试固定它
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>任何人还原或重构 <code>checkTrialLimit</code>，即重开多账号 Trial 农场（共享设备/实名 → N 份免费 Trial），而 <strong>CI 保持全绿</strong>。考虑到本报告的发现 #3/#4 恰恰建议修改这段循环，这个缺口的现实意义很大：<strong>修 #3 时没有任何测试能告诉你有没有把 #10 的性质弄坏</strong>。<br>
+      <strong>用户可见影响：</strong>无直接影响；但这是本批最有价值的那个修复的<strong>唯一</strong>守卫缺失。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（补一个跨账号并发测试——即该重构真正新增的那条性质）</div>
+      <code>func TestCheckPurchaseLimit_TrialCrossAccountConcurrentSingleWinner(t *testing.T) {
+    e := NewEngine(NewMemKVCache(nil))
+    var success int64; var wg sync.WaitGroup
+    for i := 0; i &lt; 64; i++ {            // 【不同】的 userID，【相同】的设备
+        wg.Add(1)
+        go func(uid int64) { defer wg.Done()
+            if e.CheckPurchaseLimit(trialCtx("", "dev-1"), uid, trialPlan()) == nil {
+                atomic.AddInt64(&amp;success, 1) }
+        }(int64(1000 + i))
+    }
+    wg.Wait()
+    if success != 1 { t.Fatalf("shared device granted %d Trials, want 1", success) }
+}
+// 以 -count=20 -race 运行。已验证：该形态在旧实现上失败、在新实现上通过。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 30 分钟 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 对 <code>RealNameID</code> 跨账号共享补同形测试；加 <code>-count=50</code> 循环以捕获依赖调度的偶发。<strong>强烈建议与发现 #3 的修复一起做</strong>——先补此测试，再改循环，才能确认回滚没有破坏单赢家性质。
+    </div>
+  </div>
+
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>11. AGT 对账 117 行新代码零直接测试 —— 三个致命变异全部未被捕获</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Testing Authenticity</span>
+      <span>📍 internal/mtwire/agent_plan_reconcile.go:56-117 · reconcile_orchestrate_test.go:44-51（把它打桩掉了）</span>
+      <span>🎯 ReconcileStuckAgentPlans / expireStuckAgentPlanOrder / listStuckAgentPlans</span>
+      <span>🏷 归属：<strong>本批新增</strong>（新文件，全站最贵 SKU ¥990–9990）</span>
+      <span>🔬 置信度：High（3 处变异对 180 个 mtwire 测试全部零捕获）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong><code>agent_plan_reconcile.go:56-117</code> 全部是新代码。唯一引用它的测试 <code>reconcile_orchestrate_test.go:44-51</code> <strong>把它整个打桩掉了</strong>（<code>reconcileAgtFn = func(...) (ReconcileAgtResult, error) { ... }</code>）——测的是编排层的聚合，不是 AGT 逻辑本身。SUB 有专属的 <code>sub_reconcile_test.go</code>，AGT <strong>没有对应物</strong>。而这段未测逻辑并不简单：<code>if ancient || (expired &amp;&amp; errors.Is(err, payment.ErrOrderNotExist))</code> 加一个四路 switch；<code>:64</code> 的 <code>now := before.Add(reconcileMinAge)</code> 靠<strong>反演调用方的偏移量</strong>来重建「现在」（未来任何调用方传入不同的 <code>before</code> 都会让它静默出错）；<code>expireStuckAgentPlanOrder</code>（<code>:104</code>）还<strong>丢弃了自己的错误</strong>（<code>_ = ...</code>），过期失败无声无息。
+    </div>
+    <div class="evidence">【子代理 · 3 处变异 vs 全部 180 个 tracked mtwire 测试】
+
+┌──────────────────────────────────────────┬──────────────────────────────────┬─────────────┐
+│ 变异                                      │ 真实世界后果                       │ 结果         │
+├──────────────────────────────────────────┼──────────────────────────────────┼─────────────┤
+│ agtReconcileExpireAge: 2h → -100000h     │ 每个新建的 pending AGT 订单立刻被强制过期 │ ok 0.473s 未捕获 │
+│ listStuckAgentPlans → return nil, nil     │ AGT 从管理员 /stuck 页面永久消失      │ ok 0.475s 未捕获 │
+│ case paid: → case paid && false:          │ 【已付款】的 ¥990–9990 订单永不激活    │ ok 0.485s 未捕获 │
+└──────────────────────────────────────────┴──────────────────────────────────┴─────────────┘
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>正是该文件自己的文件头所描述的场景（<code>api_v3_key</code> 轮换 → 回调全部验签失败）。为拯救那些订单而建的对账兜底<strong>本身未经验证</strong>：一个常量或分支写错，就会静默过期已付款订单、或让它们从管理页消失——失败形态是<strong>钱已收、订单已死、无告警</strong>（与发现 #7 是同一段代码的两个侧面：#7 是当前逻辑<em>已经</em>错了，#11 是<em>没有任何测试能发现它错了</em>）。<br>
+      <strong>用户可见影响：</strong>无直接影响；但全站最贵 SKU 的资金安全网处于无验证状态。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（镜像 <code>sub_reconcile_test.go</code>，覆盖 6 个分支）</div>
+      <code>// 打桩 agtOrderPaidQuery / activatePaidAgtHook，播种 mt_agent_plan_orders 行，断言：
+(a) 已付                     → Activated，订单 activated
+(b) 未付 且 新鲜             → Unpaid，仍 pending
+(c) 未付 且 &gt;2h              → Expired
+(d) ErrOrderNotExist 且 &lt;2h  → Failed，【仍 pending】（不得误杀）
+(e) 瞬时错误 且 &gt;26h         → 【不得 Expired】（配合发现 #7 的修复）
+(f) 已付 且 超龄             → 仍 Activated
+
+// 另断言 listStuckAgentPlans 会返回播种的 pending AGT 行，且不返回 activated/expired 的行。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 3–4h &nbsp;·&nbsp; <strong>回归测试建议：</strong> 补一条断言 <code>RCG</code>/<code>SUB</code>/<code>AGT</code> 三种 kind 能在同一个 <code>/stuck</code> 响应中共存的测试；另把 <code>expireStuckAgentPlanOrder</code> 的 <code>_ =</code> 改为记录并计入 <code>Failed</code>。
+    </div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>12. <code>ReleaseTrialLimit</code> 删除跨用户共享键时无归属校验 —— 给 B 释放会放掉 A 合法占用的键</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Security / Concurrency</span>
+      <span>📍 internal/risk/engine.go:203-212 · internal/mtwire/risk_admin_http.go:37-42,78-80</span>
+      <span>🎯 ReleaseTrialLimit / HandleAdminReleaseTrialLimit</span>
+      <span>🏷 归属：<strong>本批新增</strong></span>
+      <span>🔬 置信度：High（测试实证）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>键的值是字面量 <code>"1"</code>（<code>engine.go:185</code>）——<strong>不记录占用者</strong>。<code>ReleaseTrialLimit</code> 纯粹用<strong>调用方传入</strong>的 <code>pi</code> 拼出 <code>realK</code>/<code>devK</code> 并删除，无从校验调用方是否真的持有它们。<code>risk_admin_http.go:37-42</code> 又把 <code>realname_id</code>/<code>device_id</code> 直接取自请求体，与 <code>user_id</code> <strong>零绑定</strong>。而实名/设备维度<strong>是跨用户共享的</strong>。
+    </div>
+    <div class="evidence">PROBE-P3 | 释放 B 后 A 合法占用的 devK_D 仍在=false | 无关新账号 C 从设备 D 领取=放行（拿到 Trial）
+
+【engine.go:203-212 —— 键全部来自调用方自报的 pi，无归属校验】
+	func (e *Engine) ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity) error {
+		keys := []string{trialKey("user", strconv.FormatInt(userID, 10))}
+		if pi.RealNameID != "" { keys = append(keys, trialKey("realname", pi.RealNameID)) }
+		if pi.DeviceID   != "" { keys = append(keys, trialKey("device",   pi.DeviceID))   }
+		return e.kv.Del(ctx, keys...)
+	}
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>A 从设备 D 合法消耗了 Trial（<code>userK:A</code> + <code>devK:D</code> 已写）。B 在设备 D 上被拒。B 找客服说「我点开收银台没付款，Trial 被吃了」——<strong>这是一个真实存在且被文档化的失败模式</strong>（<code>risk_admin_http.go:26-29</code> 正是为它而建，见发现 #13），所以客服<strong>会相信</strong>。客服用 B <strong>自报的</strong> <code>device_id</code> 释放 B → <code>Del(userK:B, devK:D)</code>。但 <code>devK:D</code> 是 A 的，不是 B 的。于是全新账号 C 从设备 D 白拿一份 Trial——尽管该设备已消耗过。<strong>反刷的设备/实名维度可以被通过客服洗掉。</strong><br>
+      审计日志（<code>:78-80</code>）虽记录了动作，但没有任何东西把这些值与该用户绑定，<strong>事后也无法复核其正确性</strong>。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（值里记归属，条件释放；顺便恢复 <code>Get</code> 的用途——重构后它在 engine 里已无非测试调用方）</div>
+      <code>// checkTrialLimit：记录占用者
+owner := strconv.FormatInt(userID, 10)
+ok, err := e.kv.SetNX(ctx, k, owner, ttl)
+
+// ReleaseTrialLimit：只删该 userID 真正占用的共享维度
+for _, k := range sharedKeys {
+    if v, found, err := e.kv.Get(ctx, k); err == nil &amp;&amp; found &amp;&amp; v == owner {
+        _ = e.kv.Del(ctx, k)
+    }
+}
+// Get 与 Del 之间的残余 TOCTOU 对这条「管理员触发、低频」的路径是良性的；
+// 若要彻底关闭，用一个 Lua CAS-del。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 约 1h（值格式变更 + 释放逻辑 + 测试） &nbsp;·&nbsp; <strong>回归测试建议：</strong> <code>TestReleaseTrialLimit_DoesNotFreeAnotherUsersSharedKey</code>——A 占 <code>devK:D</code>；B 被拒；以 <code>DeviceID:"D"</code> 释放 B；断言 <code>devK:D</code> <strong>仍被持有</strong>且 C 在 D 上被拒。
+    </div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>13. 三维去重的 <code>device_id</code>/<code>real_name_id</code> 由客户端自报，且前端从不发送 —— 反刷控件实际未通电</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Security</span>
+      <span>📍 internal/mtwire/http.go:207-213,236 · internal/mtwire/risk_purchase.go:26-29 · internal/risk/engine.go:270</span>
+      <span>🎯 purchaseRequest → risk.PurchaseIdentity</span>
+      <span>🏷 归属：历史遗留（但决定了本批全部 Trial 相关发现的可利用性，故必须一并说明）</span>
+      <span>🔬 置信度：High（全仓 <code>web/</code> grep 无任何前端发送这两个字段）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>两个字段直接来自请求体、未经任何校验，且 <code>purchaseRequest</code> 自述「全部可选」、<code>HandlePurchase</code> 做的是 <code>_ = c.ShouldBindJSON(&amp;body) // body 可选</code>。<code>engine.go:270</code> 把 <code>DeviceID</code> 描述为服务端指纹（「UA+IP 等归一」），<strong>但代码里没有任何地方在服务端派生它</strong>。而 <code>engine.go:167-183</code> 对空维度直接 <code>continue</code> 跳过。
+    </div>
+    <div class="evidence">【全仓 web/ grep：无任何前端代码发送 device_id / real_name_id】
+（唯一命中是 model-deployments 弹窗里无关的 ctr.device_id）
+
+【internal/mtwire/http.go:207-213】
+	type purchaseRequest struct {
+		DeviceID   string `json:"device_id"`      ← 客户端自报，零校验
+		RealNameID string `json:"real_name_id"`   ← 客户端自报，零校验
+		Provider   string `json:"provider"`
+	}
+</div>
+    <div class="problem">
+      <strong>失败场景（两个后果）：</strong><br>
+      <strong>① 今天：</strong>由于官方 UI 两个字段都不发，<code>realK</code>/<code>devK</code> 处于<strong>休眠</strong>——Trial 去重实际等价于「只按 user_id」，本批辛苦加固的「用户∪实名∪设备三维去重」<strong>对真实流量根本没有运行</strong>。这也是发现 #3/#4/#12 定为 High/Medium 而非 Critical 的原因：它们目前只能经直接 API 调用触达。<br>
+      <strong>② 攻击者可以自行「通电」：</strong>发 <code>device_id: "&lt;每次随机的 uuid&gt;"</code> 即免费绕过（全新设备串永不碰撞）；反过来发 <code>real_name_id: "&lt;受害者的&gt;"</code> 就能针对受害者身份写一个永久键（结合发现 #3 的无回滚 → <strong>定向永久剥夺任意实名用户的 Trial 资格</strong>）。<br>
+      <strong>用户可见影响：</strong>反滥用维度由「被监管的一方」自行申报。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（服务端派生，忽略请求体）</div>
+      <code>// HandlePurchase：忽略 body.DeviceID，服务端派生
+deviceID := fingerprint(c.Request.UserAgent(), c.ClientIP(), deviceCookie(c))
+// RealNameID 必须来自 c.GetInt("id") 对应的已验证实名记录，绝不取自请求
+// 并从 purchaseRequest 中删掉这两个 JSON 字段
+
+// 注意：此处的 c.ClientIP() 同样受发现 #2 影响 —— 需先补 SetTrustedProxies，
+// 否则指纹的 IP 分量同样可被伪造。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 约半天（服务端身份派生是大头；需要一个关于指纹来源的产品决策） &nbsp;·&nbsp; <strong>回归测试建议：</strong> <code>TestHandlePurchase_IgnoresClientSuppliedDeviceID</code>——请求体带 <code>device_id</code>，断言抵达风控引擎的是服务端派生值；另断言「已验证实名已持有 Trial 的用户，用空 body 购买时仍被拒」。
+    </div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>14. 支付回调被新纳入可被攻击者预先耗尽的限流桶（影响有界：对账 5–10 分钟兜底）</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Security / Stability</span>
+      <span>📍 router/mt-router.go:76,183-190 · middleware/rate-limit.go:56 · reconcile_loop.go:16-18,40-56</span>
+      <span>🎯 payGroup 重挂到 apiBase 后继承 GlobalAPIRateLimit</span>
+      <span>🏷 归属：<strong>本批新增</strong>（此前 payGroup 是兄弟组，无任何限流）</span>
+      <span>🔬 置信度：High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>本批把 <code>payGroup</code> 重挂到 <code>apiBase</code>，于是 <code>/api/pay/wechat/notify</code> 与 <code>/api/pay/alipay/notify</code> 继承了 <code>GlobalAPIRateLimit()</code>（360/180s/IP）。作者注释（<code>:186</code>）明确知晓这一继承（「baseline GlobalAPIRateLimit 已由 apiBase 覆盖」）并视其为好事。但支付回调由微信/支付宝平台服务器从<strong>有限的 IP 池</strong>发起——结合发现 #2 的 XFF 伪造，攻击者可<strong>预先耗尽</strong>某个回调源 IP 的桶。429 时 <code>middleware/rate-limit.go:56</code> 直接 <code>c.Abort()</code>，<code>HandleWechatNotify</code> <strong>根本不执行</strong>，订单停在 <code>pending</code>。
+    </div>
+    <div class="problem">
+      <strong>失败场景与影响（已核实为有界，故非 High）：</strong>攻击者获知某个微信支付回调源 IP，用伪造 XFF 持续把 <code>rateLimit:GA&lt;wechat_ip&gt;</code> 灌满。该 IP 的所有真实回调 429；微信视非 200 为失败并按退避策略重试，持续攻击下重试也被 429。<strong>但不会丢钱</strong>：<code>reconcile_loop.go</code> 每 5 分钟（<code>reconcileTickInterval</code>）对超过 <code>reconcileMinAge=5m</code> 的卡单主动查单并入账，RCG/SUB/AGT 均覆盖。<strong>现实影响是入账延迟约 5–10 分钟 + 客服压力</strong>（「付了钱余额没到」），仅当每轮卡单超过 <code>reconcileCreatedLimit=200</code> 时才开始堆积。值得注意的是<strong>前端会先放弃</strong>：<code>use-tenant-recharge.ts:31-32</code> 轮询 <code>STATUS_POLL_TIMEOUT_MS=180000</code>（3 分钟）即提示「Please try again later.」，而此时付款其实是好的。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（回调不进共享的按 IP 桶——它们已有体积门 + handler 内验签，且量由真实订单封顶）</div>
+      <code>// router/mt-router.go —— 把回调注册到一个不带 GlobalAPIRateLimit 的组
+payGroup := router.Group("/api/pay")           // 刻意【不】走 apiBase
+payGroup.Use(middleware.RouteTag("api"), middleware.BodyStorageCleanup())
+payGroup.POST("/wechat/notify", anonymousRequestBodyLimit, app.HandleWechatNotify)
+payGroup.POST("/alipay/notify", anonymousRequestBodyLimit, app.HandleAlipayNotify)
+
+// 修好发现 #2 的 SetTrustedProxies 可消除「攻击者驱动」的那一半，
+// 但「真实付款突发」的那一半仍在 —— 两者都应处理。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 30 分钟 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 从单一 IP 向 <code>/api/pay/wechat/notify</code> 连发 400 个请求，断言无一返回 429；另断言回调被丢弃后 <code>runReconcileOnce</code> 仍能把卡单入账。
+    </div>
+  </div>
+
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>15. MySQL root 密码在「刚修完密钥内联」的同一个 compose 文件里仍然硬编码</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Security / Release</span>
+      <span>📍 deploy/docker-compose.test.yml:14,78 · deploy/ops/lib.sh:37</span>
+      <span>🎯 SQL_DSN / MYSQL_ROOT_PASSWORD / DB_PASS</span>
+      <span>🏷 归属：历史遗留（但与本批 C1 的自述前提直接矛盾，故在范围内）</span>
+      <span>🔬 置信度：High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>本批把 <code>SESSION_SECRET</code> 的 git 内联字面量改成 fail-closed 的 <code>${SESSION_SECRET:?…}</code>——<strong>这个修复是真的、已复核</strong>（见「已验证」段）。但<strong>同一个文件</strong>（其注释正论证着「内联 = 把根密钥写进 git」）仍在三处内联数据库凭据，且三处值相同、为低熵人工字符串、均已提交 git。<strong>本报告不打印其值</strong>（<code>&lt;redacted&gt;</code>）。
+    </div>
+    <div class="evidence">deploy/docker-compose.test.yml:14  SQL_DSN: "root:&lt;redacted&gt;@tcp(mysql:3306)/new-api-test"
+deploy/docker-compose.test.yml:78  MYSQL_ROOT_PASSWORD: "&lt;redacted&gt;"
+deploy/ops/lib.sh:37               DB_PASS="${DB_PASS:-&lt;redacted&gt;}"     ← backup.sh / restore.sh 用
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>单独不可远程利用——<code>mysql</code> 服务<strong>未发布任何 <code>ports:</code></strong>（只有 <code>app</code> 在 <code>:11</code> 绑 <code>127.0.0.1:3100</code>），故 MySQL 仅在 Compose 网络内可达。利用需要一个相邻立足点：app 容器的 SSRF/RCE、日后有人加了 <code>ports:</code>、或同时拥有仓库读权限与宿主访问权。<strong>逻辑上的不一致才是重点</strong>：<code>SESSION_SECRET</code> 的修复<strong>明确假定仓库读者不可信</strong>——这个假设与「把 DB root 密码留在仓库里」不能同时成立。<br>
+      <strong>用户可见影响：</strong>今天无。纵深防御缺口：单个容器沦陷即可直接升级为唯一生产库的 root。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（同 <code>SESSION_SECRET</code> 的模式；<strong>轮换需谨慎排序</strong>）</div>
+      <code>SQL_DSN: "root:${MYSQL_ROOT_PASSWORD:?必须在服务器 .env 设为随机值}@tcp(mysql:3306)/new-api-test"
+MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?必须在服务器 .env 设为随机值}"
+# lib.sh:37 → DB_PASS="${DB_PASS:?…}"
+
+# ⚠ 轮换顺序：旧值已烤进现存的 mysql_test_data 卷 —— 必须先在库内 ALTER USER 改密，
+#   再更新 .env；只改 compose 会把 app 锁在门外。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 45 分钟（须与线上 <code>ALTER USER</code> 排序配合） &nbsp;·&nbsp; <strong>回归测试建议：</strong> 给 preflight 加密钥扫描器（gitleaks / trufflehog），规则覆盖 <code>MYSQL_ROOT_PASSWORD</code> / <code>SQL_DSN</code> / <code>*_SECRET</code> 字面量。
+    </div>
+  </div>
+
+  <div class="finding severity-low">
+    <div class="finding-header">
+      <h4>16. 「<code>KVCache</code> 无删除原语」的注释已过时 —— <code>Del</code> 就是同一批加的，且该注释正被用来论证一个 6 行可修的缺陷「不可避免」</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Concurrency / 文档准确性</span>
+      <span>📍 internal/risk/engine.go:161-163（注释）· internal/risk/port.go:107-110（Del，同一批新增）</span>
+      <span>🎯 checkTrialLimit 的辩护注释</span>
+      <span>🏷 归属：<strong>本批新增</strong>（两个提交相隔 25 分钟）</span>
+      <span>🔬 置信度：High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong><code>engine.go:161</code> 称「<em>KVCache 无删除原语，无法对败者已占的维度做补偿删除</em>」，并<strong>以此为前提</strong>论证发现 #3/#4 的残留是可接受的取舍。但 <code>Del</code> 在 <code>port.go:110</code> 由提交 <code>714aa6d</code> 加入——<strong>比 <code>3dd6b4f</code> 晚 25 分钟</strong>，三个实现（<code>memkv</code>/<code>rediskv</code>/接口）齐备。<code>port.go:108</code> 自己还写着 <code>Del</code> 是「补上此前结构性缺失的<strong>释放原语</strong>」。在 HEAD 上两者并存，该注释<strong>已是假的</strong>。<br>
+      作者把这个原语只用于管理员手工兜底端点，<strong>没有用于同一提交的论证所称「不可能」的自动补偿</strong>。
+    </div>
+    <div class="problem">
+      <strong>失败场景：</strong>非运行期故障，而是一个<strong>承重的推理故障</strong>：发现 #3/#4 三条 High 全部由这条现已为假的前提在代码里「合法化」，未来的读者会据此认为该残留不可避免，而非一个 6 行的修复。<br>
+      <strong>用户可见影响：</strong>无直接影响；但它使上述三条 High 长期存续。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// 删掉 engine.go:161-163 的假前提，并实现发现 #3 的回滚。
+// 若确实要推迟回滚，注释必须写「Del 已可用，回滚待补」，而不是「无删除原语」。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 5 分钟（仅注释）／已含在发现 #3 的修复内 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 不适用（由发现 #3 的回滚测试覆盖）。
+    </div>
+  </div>
+
+  <h3 class="section-title" id="security">🔒 Security</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+      <p style="margin-top:8px"><strong>已检证据：</strong><code>router/mt-router.go</code> 全量 diff，并对照 gin v1.9.1 的 <code>routergroup.go:65-90</code> 源码核实分组继承语义、以复刻工程实测；<code>middleware/rate-limit.go</code> + <code>common/init.go:117-127</code> 实际阈值；全仓 <code>SetTrustedProxies</code>/<code>TrustedPlatform</code> grep（0 命中）；<code>deploy/nginx/*.conf</code> 的 XFF 处理（3 处 <code>$proxy_add_x_forwarded_for</code>，无 <code>real_ip_header</code>）；真实 gin 引擎 <code>ClientIP()</code> 伪造复现；<code>footer.tsx</code> + 全仓 <code>dangerouslySetInnerHTML</code> 逐处枚举（5 处）；<code>siteconfig/policy.go</code> 的 <code>footerDangerRe</code> 对 7 个真实向量实跑；<code>web/bun.lock</code> 逐包核对 11 条 pin 的生效性；<code>moderation.go</code> 的 type switch 对照 <code>relay/helper/valid_request.go:25-51</code> 的全部返回类型 + JSON 嵌套深度实测（4000 过 / 6000 拒）；<code>wire.go:196-199</code> 风控实际装配。</p>
+      <p style="margin-top:8px"><strong>排除 / 限制：</strong>未做线上渗透或黑盒验证（无管理员测试凭据）；微信/支付宝真实回调源 IP 未取证，故「回调可被定向 429」的可利用性为链路推导而非实测；未运行 SAST 或依赖 CVE 扫描器（pin 生效性以 <code>bun.lock</code> 解析结果为准）；Cloudflare 面板配置不可见，故 <code>SetTrustedProxies</code> 的正确取值需在 staging 确认。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 8 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th><th style="width:100px">归属</th></tr></thead>
+          <tbody>
+            <tr><td>#2 新装的 4 道 money 限流全挂在可伪造的 <code>ClientIP()</code> 上；桶 key 无路由成分 → 可把任意 IP 踢下整个 <code>/api</code> 面</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批加重</td></tr>
+            <tr><td>#12 <code>ReleaseTrialLimit</code> 删共享键无归属校验 → 可经客服社工洗掉设备/实名维度</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#13 <code>device_id</code>/<code>real_name_id</code> 客户端自报且前端从不发送 → 三维反刷未通电；可定向写受害者实名键</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>历史遗留</td></tr>
+            <tr><td>#14 支付回调新纳入可预先耗尽的限流桶（影响有界，对账 5–10 分钟兜底）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#15 MySQL root 密码在刚修完密钥内联的同一 compose 里仍硬编码（3 处）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>历史遗留</td></tr>
+            <tr><td>#17 <code>apiBase</code> 与 <code>apiRouter</code> 并非「同基础链」；<code>BodyStorageCleanup</code> 在自研 <code>/api/**</code> 上跑两次（<code>CleanupFileSources</code> 非幂等 → 二次调用会 panic，当前不可达）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#18 <code>checkCallHook</code> 的 4xx/5xx 分类器为「状态校验/IP 白名单」硬编码了 fail-open（当前是死分支，未装配；一旦有人接线即成静默放行）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#19 <code>classic</code> 主题页脚仍未消毒（<code>Footer.jsx:228</code> 裸 <code>dangerouslySetInnerHTML</code>）；当前仅平台管理员可写、非代理可达</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>历史遗留</td></tr>
+            <tr><td>#20 <code>validateFooter</code> 黑名单可绕（7 向量实测 4 个穿透：<code>&lt;img/src=x/onerror=&gt;</code>、实体编码伪协议等）；设计上仅作纵深，DOMPurify 是权威防线</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证安全（对抗性复核后确认为真修好 / 无问题）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> <strong>gin 兄弟组旁路的前提为真</strong>——已核 gin v1.9.1 源码 + 复刻工程实测：<code>Group()</code> 创建时快照父链，<code>Use()</code> 不按 URL 前缀继承。修复方向正确</div>
+        <div class="check-item"><span class="check">✓</span> <strong>15 个自研组全部一致改挂 <code>apiBase</code></strong>，无遗漏；<code>git grep 'router.Group("/api'</code> 已只剩一处</div>
+        <div class="check-item"><span class="check">✓</span> <strong>无路由冲突 panic 风险</strong>——路径逐字节不变；上游与自研的 <code>/api</code> 一级段完全不相交；无 <code>/api/:param</code> 通配</div>
+        <div class="check-item"><span class="check">✓</span> <strong>无双重 gzip</strong>——engine 级 gzip 已注释掉，<code>web-router.go</code> 的 gzip 在 <code>SetMtRouter</code> 之后才 Use，已注册的组看不到它</div>
+        <div class="check-item"><span class="check">✓</span> <strong><code>SESSION_SECRET</code> 头号 Critical 真修好</strong>——内联字面量改 <code>${SESSION_SECRET:?}</code> fail-closed；<code>CRYPTO_SECRET</code> 分权是<strong>实的不是摆设</strong>（其唯一消费者 <code>GenerateHMAC</code> 仅用于 Redis token 缓存键，故「轮换仅需重登 + 缓存重算、无数据损失」的说法<strong>准确</strong>）</div>
+        <div class="check-item"><span class="check">✓</span> <strong><code>repomix-output.xml</code> 删除是安全修复</strong>——19.8MB 生成物，是泄漏密钥的第二份拷贝；全仓 5 处引用全为散文，零构建/CI 引用</div>
+        <div class="check-item"><span class="check">✓</span> <strong>npm overrides 迁根真的修好了东西</strong>——bun 只认 workspace 根的 overrides，11 条 pin 放在成员包里时<strong>根本没生效</strong>。<code>bun.lock</code> 实证已绑定：<code>brace-expansion 1.1.15 → 2.1.1</code>、<code>minimist 1.2.0/1.2.6 → 1.2.8</code>（原型污染 CVE）、<code>mermaid/dompurify 3.4.7 → 3.4.11</code>。无任何依赖被静默解除 pin</div>
+        <div class="check-item"><span class="check">✓</span> <strong>页脚 XSS 在权威层真修好</strong>——<code>footer.tsx:143</code> 的 <code>DOMPurify.sanitize</code> 正确应用于 <code>footerHtml</code> 的<strong>唯一</strong> sink，且能中和已持久化进 localStorage 的旧 payload（无需删库即可止血）</div>
+        <div class="check-item"><span class="check">✓</span> <strong>违禁词抽取无绕过</strong>——type switch 覆盖 <code>valid_request.go</code> 能返回的每个具体类型；未覆盖的仅 realtime 的 <code>*dto.BaseRequest</code>（不含文本）。且<strong>堵掉了两个真实旧洞</strong>（旧码只扫最后一条 <code>role=="user"</code> 消息 → system/assistant/靠前轮次的违禁词从未被扫）</div>
+        <div class="check-item"><span class="check">✓</span> <strong>违禁词无 DoS</strong>——dto helper 全部 comma-ok 取值，panic 安全；<code>geminiChatTexts</code> 的自递归受 <code>encoding/json</code> 的 <code>maxNestingDepth=10000</code> 封顶（实测 4000 过 / 6000 拒），约 5000 帧小函数 ≈ 1–2MB，对 1GB goroutine 栈无威胁</div>
+        <div class="check-item"><span class="check">✓</span> <strong>「fail-open 放过封禁用户/非白名单 IP」的怀疑不成立</strong>——<code>wire.go:196-199</code> 是唯一装配点，既未注入 <code>StatusChecker</code> 也未注入 <code>IPAllowlist</code>，两个分支是死代码；租户状态校验在 <code>CheckCall</code> <strong>之前</strong>、走 DB 路径，本批未触碰</div>
+        <div class="check-item"><span class="check">✓</span> <strong>风控 fail-open 改动本身是对的</strong>——RPM 限流遇 Redis 故障放行符合其自身 best-effort 契约，且补上了此前缺失的排障日志</div>
+        <div class="check-item"><span class="check">✓</span> <code>/api/internal/</code> 在 nginx 侧仍被 <code>return 404</code> 挡在公网外（两个 vhost 一致）</div>
+        <div class="check-item"><span class="check">✓</span> 后台释放端点鉴权是真的——<code>mt-router.go:219-222</code> 挂了 <code>middleware.AdminAuth()</code>；Redis 关闭时 nil 接口断言返回 <code>ok=false</code>，明确报错不 panic</div>
+        <div class="check-item"><span class="check">✓</span> 前后端保留词表<strong>当前逐字一致</strong>（9 词全同，格式规则同）；字节 vs UTF-16 长度差异在纯 ASCII 字符集下无实际分歧</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="stability">⚡ Stability</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+      <p style="margin-top:8px"><strong>已检证据：</strong><code>risk/engine.go</code> 新旧算法差分测试（200 轮 × 32 并发，只替换 <code>checkTrialLimit</code>、其余锁定 HEAD）；<code>mtwire/risk.go</code> fail-open 分流全路径 + <code>wire.go</code> 实际装配；<code>agent_plan_bridge.go</code> 六步写序 + 崩溃模拟；<code>agent_plan_reconcile.go</code> 四路分支 + 已付订单 + 瞬时错误实测；<code>deploy/ops/*.sh</code> 逐行 + 条件真值表独立重推 + 最小 harness 复现；<code>go test -race</code> 全绿；<code>go vet ./...</code> 与基线逐字节相同。</p>
+      <p style="margin-top:8px"><strong>排除 / 限制：</strong>未在真实 Redis/MySQL 故障注入下验证（差分与探针均用内存 KV / SQLite）；容器 <code>restart</code> 语义（<code>on-failure</code> vs <code>unless-stopped</code> 在守护进程重启下的差异）为静态阅读且版本相关，标 <strong>Suspected</strong>，需在服务器实测；部署脚本为静态审计，未 ssh、未执行。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 个发现（另见 Concurrency / Data Integrity / Release 三段）</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th><th style="width:100px">归属</th></tr></thead>
+          <tbody>
+            <tr><td>#4 Redis 瞬时错误在循环中途永久吃掉终身 Trial（零订单零付款）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#14 支付回调可被定向 429（有界：对账兜底，前端 3 分钟先放弃并误报失败）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#21 <code>app</code> 仍是 <code>restart: on-failure</code>，而 mysql/redis 本批已升 <code>unless-stopped</code> —— 干净退出（SIGTERM flush 分支）不会被拉起，数据服务自愈而它服务的 app 不自愈</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-suspected">Suspected</span></td><td>本批新增</td></tr>
+            <tr><td>#22 Redis/MySQL 本次 <code>up -d</code> 会 recreate，compose 注释以 <code>risk:trial:*=0</code> 的实测推断「故无损失」——但同一 Redis 还持有 token 缓存与额度缓存（该文件自述 Redis 为额度权威、MySQL 滞后 5s），结论被过度泛化。实际影响有界（≤5s 扣费漂移，方向对用户有利 + 短暂错误窗），但不是「无损失」也非零停机</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证稳健</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> <strong>死码清除是干净的</strong>——<code>go vet ./...</code> 输出与基线 ae18086 <strong>逐字节相同</strong>（17 条诊断全在未触碰的 <code>common/</code> 与原生 <code>relay/channel/</code>），零新增</div>
+        <div class="check-item"><span class="check">✓</span> <code>go build ./...</code>（补 dist stub 后）exit 0；<code>go test ./internal/... ./router/... ./model/...</code> 35 包全 ok；<code>-race</code> 全绿；<strong>无既有失败</strong></div>
+        <div class="check-item"><span class="check">✓</span> <strong>SetNX 重构的核心主张成立</strong>——差分实测：旧码单轮最多授予 3 份 Trial，新码严格 1 份。三次 SetNX 非集合原子，但<strong>最后一个非空维度的持有者恒定胜出</strong>（无人能在不持有前序全部维度时抵达它）→ 无零赢家、无多赢家交错。RETRO 所称约 8% 并发绕过是真的，该提交确实关掉了它</div>
+        <div class="check-item"><span class="check">✓</span> <strong><code>memkv</code> 与 <code>rediskv</code> 的 <code>SetNX ttl=0</code> 语义一致</strong>——memkv 仅在 <code>ttl&gt;0</code> 时设 <code>expireAt</code>，零值被 <code>live()</code> 视作永不过期（注入时钟模拟 100 年后仍成立）；redis 侧 <code>expiration=0</code> 即 <code>SET NX</code> 无 <code>EX</code>。<strong>测试不是绿在谎言上</strong></div>
+        <div class="check-item"><span class="check">✓</span> <code>SetNX</code> 错误在每个维度都正确传播（新码在此处<strong>优于</strong>旧码——旧码把实名/设备维度的错误整个丢弃）</div>
+        <div class="check-item"><span class="check">✓</span> <code>set -euo pipefail</code> 在 <code>deploy.sh:21</code> 与 <code>lib.sh:15</code> 齐备（后者被所有 source 它的脚本继承）；8 个脚本 <code>bash -n</code> 全过</div>
+        <div class="check-item"><span class="check">✓</span> <strong>无 <code>rm -rf "$VAR/"</code> 灾难</strong>——<code>SERVER_REPO</code> 用 <code>${SERVER_REPO:-/root/newapi-test}</code>，<code>:-</code> 对<strong>空值也会替换</strong>，故不会退化成 <code>/web/...</code>；<code>prune_keep</code> 用 <code>rm -f --</code> 且有 <code>[ -n "$f" ]</code> 守卫</div>
+        <div class="check-item"><span class="check">✓</span> <code>expireStuckAgentPlanOrder</code> 的 CAS（<code>WHERE order_no=? AND status='pending'</code>）正确，不会覆盖并发的真实激活</div>
+        <div class="check-item"><span class="check">✓</span> nginx 配置无问题——<code>client_max_body_size 200m</code> 在（曾怀疑被删，是我错了）；<code>proxy_pass 3000→3100</code> 与单栈收敛一致；新增的 <code>location ^~ /auth/</code> 不遮蔽任何现有路由</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="concurrency">🔀 Concurrency</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+      <p style="margin-top:8px"><strong>已检证据：</strong>本维度是本次审计投入最重的一块。<code>internal/risk/engine.go</code> 的 <code>checkTrialLimit</code> 新旧实现<strong>差分对拍</strong>（其余变量全部锁定在 HEAD、隔离副本重跑以排除并行污染）；200 轮 × 32 goroutine 屏障齐发的跨账号共享设备场景；<code>kvErrOnNth</code> 注入指定次序的 KV 错误；<code>memkv</code> 注入时钟模拟 100 年；<code>go test -race</code>；全部 <code>CheckPurchaseLimit</code> 调用方 grep（<code>internal/tokenplan/subscription.go:61-82,99-101</code>）；<code>gormrepo_redemption_test.go</code> 的 40 goroutine 真实 CAS 竞争；变异测试（还原整个重构 / 去掉 CAS 状态条件）。</p>
+      <p style="margin-top:8px"><strong>排除 / 限制：</strong>并发结论基于内存 KV 与 SQLite，未在真实 Redis / MySQL 集群下压测；<code>FOR UPDATE</code> 空操作导致的丢失更新为 DryRun SQL + 代码推导（机制层面已是铁证：GORM 源码 0 命中该 key），<strong>未做真实 MySQL 的 N 并发实测</strong>——该实测建议作为修复 #1 的验收步骤。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 5 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th><th style="width:100px">归属</th></tr></thead>
+          <tbody>
+            <tr><td>#3 Trial 败者残留：用户维度 + 跨用户共享的实名维度均被写死（TTL=0 永久）→ 正常用户永久误封、提示还是谎话</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#4 Redis 瞬时错误中途报错，前序维度已写且不回滚 → 永久吃掉终身 Trial</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#12 <code>ReleaseTrialLimit</code> 无归属校验（值仅为 <code>"1"</code>，不记占用者）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#16 「<code>KVCache</code> 无删除原语」的辩护注释已过时（<code>Del</code> 是 25 分钟后同批加的），却在为三条 High 的存续背书</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#23 Trial 键在订单创建<strong>之前</strong>写入，<code>CreateOrder</code> 失败/用户放弃均不回滚（<code>subscription.go:61-82</code>）→ 支付方故障或单纯犹豫关单即永久消耗；后台端点只是「每案手工」的创可贴，非修复。根治：把消耗移到 <code>ActivateFromPayment</code>（支付已确认处）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>历史遗留（本批以后台端点补偿）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证（并发性质对抗性复核结论）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> <strong>单赢家性质在新码下严格成立</strong>——逐个交错路径已推演，200 轮 × 32 并发实测：旧 3 份 / 新 1 份。<strong>本报告的 #3/#4 是这个修复的「代价」，不是撤销它的理由</strong>——建议的回滚补丁保住收益、去掉代价</div>
+        <div class="check-item"><span class="check">✓</span> 建议的 <code>acquired</code> 回滚<strong>竞态安全</strong>——只删本次真正 SetNX 成功的键；最坏情况是并发同侪的一次瞬时且自愈的误拒，严格优于今天的永久烧毁</div>
+        <div class="check-item"><span class="check">✓</span> 兑换码<strong>生产路径</strong>的并发单赢家有真测试——<code>gormrepo_redemption_test.go:141</code> 40 goroutine 打真实 repo，<code>-race</code> 通过；变异（去掉 CAS 的 <code>AND status='enabled'</code>）<strong>每次都被抓</strong>（winners=6 / 9，want 1）</div>
+        <div class="check-item"><span class="check">✓</span> 退款路径的嵌套事务缺陷<strong>是真修好了</strong>——旧码在外层事务内调用自开事务的 <code>PostConsumeUserSubscriptionDelta</code>（第二条连接 → 额度写可提交而外层 <code>status="refunded"</code> 回滚 → 重试可二次退款）。改走外层 <code>tx</code> 后退款与标记原子。变异（改回嵌套调用）<strong>以死锁超时被抓</strong></div>
+        <div class="check-item"><span class="check">✓</span> <code>reconcileMinAge</code> 的耦合当前成立——两个调用方都恰好传 <code>time.Now().Add(-reconcileMinAge)</code>（脆弱但正确）</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="data-integrity">🧱 Data Integrity</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+      <p style="margin-top:8px"><strong>已检证据：</strong>GORM v1.25.2 源码 <code>query_option</code> grep（0 命中，主审员独立复核）+ <strong>MySQL dialector DryRun 抓实际 SQL</strong>；全仓锁写法统计（17 假 vs 0 真）；<code>recharge.go</code> 幂等台账（<code>mt_recharge_credit_ledger</code> 主键，与 quota 增量同事务）+ 三次 <code>OnPaid</code> 实测；<code>distribution.go</code> 溢出闸门数学核算（<code>1e6 × 1000 × QuotaPerUnit = 5e14</code>，距 int64 上限三个数量级）；<code>subscription.go</code> 计量与退款事务边界；AGT 三条触发路径逐条写测试证实；<code>money.go</code> 的 decimal 换算 vs <code>gormrepo.go:305</code> 的 float64 换算对 5000 个面额值全量比对；签名变更的全部调用方核对（<code>go build</code> 编译器强制）。</p>
+      <p style="margin-top:8px"><strong>排除 / 限制：</strong>并发丢失更新为 DryRun + 代码推导，<strong>未在真实 MySQL 上做 N 并发压测</strong>（机制层面已确凿，但建议以真实压测作为修复 #1 的验收）；<code>top_ups.amount</code> 的取整偏差已核实影响面（无报表聚合该列、无二次入账路径）但未核查历史数据；未审计已存在的生产数据是否已因空锁产生漏计。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 6 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th><th style="width:100px">归属</th></tr></thead>
+          <tbody>
+            <tr><td>#1 全站 17 处 <code>FOR UPDATE</code> 是空操作（GORM v1 写法用在 v2）→ 并发 <code>/v1</code> 丢失更新、额度上限失效</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>历史遗留（本批新测为其背书）</td></tr>
+            <tr><td>#5 AGT slug 预检未闭合孤儿洞（只查 <code>tenants.slug</code>、不查 <code>tenant_domains.domain</code>；无预留的 check-then-act）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#6 <code>provisionAgentFromOrder</code> 六步非事务写 → 孤儿租户行永久毒化重试</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#7 AGT 对账查单故障时静默 expire 已付款订单，<code>Failed</code> 空 → 告警不响、卡单页消失、永不重试</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#24 兑换码建码与入账用两套换算（建码 <code>decimal.Truncate</code> 精确 / 入账 <code>int64(amt*quotaPerUnit)</code> float64）→ 5000 个面额值中 76 个发散 1 unit（$0.000002）。<code>distribution.go:39-40</code> 自称「共用同一换算，保证额度严格守恒」、<code>money.go:3-5</code> 自称「所有换算必须经由 usdToQuotaRound」——<strong>两句都被证伪</strong>。金额可忽略，但两个显式不变量声明与代码不符，且发散边界只靠运气约束</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#25 CNY 模式充值把 USD 四舍五入存进 <code>top_ups.amount</code>（¥100 @7.3 → 实入账 $13.70，账单历史记 $14；¥11 → 实 $1.51 记 $2，偏 33%）。<strong>已核不会二次入账</strong>（原生完成路径被 <code>PaymentProvider</code> + <code>Status</code> 双重挡住），且无报表聚合该列 → 纯展示偏差</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证（钱相关路径的对抗性复核结论）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> <strong>7.3 倍那类 round-trip 放大在 CNY 充值中不存在</strong>——<code>resolveRechargeAmount</code> 每条路径只换算一次（CNY 模式返回 <code>(cny/rate, cny)</code>，<code>actualPaid</code> 是原始 CNY 而非反算回去的 <code>usd×rate</code>），无 price→ratio→price 往返；入账用订单存的 <code>AmountUSD</code>，下单到回调之间改汇率也不会污染金额</div>
+        <div class="check-item"><span class="check">✓</span> <strong>充值幂等在重复回调下成立</strong>——<code>mt_recharge_credit_ledger(order_no PK)</code> 与 quota 增量、TopUp 行<strong>同事务</strong>写入；重复经唯一约束错误识别（而非 <code>RowsAffected</code>，正确规避了 <code>clientFoundRows</code> DSN 陷阱）。<code>TestRechargeQuotaSinkIdempotent</code> 三次 <code>OnPaid</code> 断言只入账一次，<strong>是真测试</strong></div>
+        <div class="check-item"><span class="check">✓</span> <strong>软删除用户的充值修复是可靠的</strong>——scoped Update → Unscoped 兜底 → <code>errRechargeUserMissing</code> 回滚阶梯行为与注释相符；测试证明整个事务（台账+quota+TopUp）回滚而非静默「入账」</div>
+        <div class="check-item"><span class="check">✓</span> <strong>兑换码 int64 溢出铸币修复正确</strong>——面额上界 <code>1e6</code> × 批量 <code>1000</code> × <code>QuotaPerUnit</code> = 5e14，距 int64 上限三个数量级；<code>total/int64(Count) != perCode</code> 的溢出检测有效（两操作数由前置守卫保证为正，<code>Count≥1</code> 无除零）；JSON 无法携带 NaN/Inf 故 <code>decimal.NewFromFloat</code> 不 panic。三闸纵深合理</div>
+        <div class="check-item"><span class="check">✓</span> <code>RedeemCodeAndCredit</code> 新增的 <code>RowsAffected == 0</code> 是<strong>真修复</strong>——关掉了「码已作废但没入账」的悬空态，且正确返回错误以回滚 CAS，令码保持 <code>enabled</code> 可再兑</div>
+        <div class="check-item"><span class="check">✓</span> <strong>无界 <code>amount_cny</code> 不可利用</strong>——入账只在网关确认真实付款后发生；<code>amountMatchesCNY</code> 阻止用 ¥1 支付 ¥1e18 的订单；溢出只会得到 <code>q&lt;=0 → return nil</code>（不入账）或一个小正数，<strong>永不白送钱</strong></div>
+        <div class="check-item"><span class="check">✓</span> <strong>签名变更由编译器强制</strong>——<code>agentTenantByOwner</code>（3→4 返回）、<code>runReconcileAll</code>（3→4）、<code>reconcileHasFacts</code>/<code>recordReconcileRun</code>/<code>alertReconcileHealth</code>（+<code>agt</code> 参数）全部调用方已更新，<code>go build ./...</code> 干净；无调用方传错单位</div>
+        <div class="check-item"><span class="check">✓</span> AGT <code>suspended</code> 守卫是自洽的商业决策而非 bug——预检与 <code>provisionAgentFromOrder:221</code> 对称拒绝，订单留 <code>pending</code> 供管理员解封/退款，且有告警</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="testing-authenticity">🧪 Testing Authenticity</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+      <p style="margin-top:8px"><strong>已检证据：</strong><code>cbdf76e</code> 全 diff + 新旧断言语义逐条对比（<code>git show ae18086:&lt;testfile&gt;</code> 重建原始断言）；<strong>7 处变异测试</strong>（还原整个 SetNX 重构、AGT 三变异、CAS 状态条件、溢出守卫、嵌套事务、额度闸门）；以 <code>git ls-files</code> 构建 tracked-only 测试集（180 mtwire + 56 model）重跑以排除并行 agent 污染；<code>-race</code>；<code>policy.go</code> 的 <code>footerDangerRe</code> 对 6 向量探针；GORM DryRun 验证 SQLite 与生产 MySQL 的锁语义差异。</p>
+      <p style="margin-top:8px"><strong>排除 / 限制：</strong>未做覆盖率统计；未对每一个新测试逐一变异（挑选了 7 处最关键的）；SQLite 与 MySQL 的行为差异仅在锁语义这一点上核实，其它 dialect 差异未穷尽。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">🎯 对 <code>cbdf76e</code>「修复落 main 前两处红测」的判决</div>
+    <div class="card-body">
+      <p><strong>判决：<span class="badge badge-confirmed">修复正当</span> —— 红测<strong>不是</strong>在掩盖 bug，测试<strong>没有</strong>被改绿。</strong>提交信息自称「均 test-only」<strong>属实</strong>：全 diff 恰好只动两个 <code>_test.go</code>（+14/−8），无生产代码混入。</p>
+      <p style="margin-top:12px"><strong>风控那半：</strong>被删的断言是 <code>kvErrOn{get:true}</code> → 断言 <code>errBoom</code> 经 <code>kv.Get</code> 传播。而重构 <code>3dd6b4f</code> <strong>整个删掉了 Get 预检</strong>——<code>grep "kv\.Get" internal/risk/</code> 返回<strong>零个生产调用方</strong>。该测试守卫的是一条<strong>已经不存在</strong>的代码路径，它<em>不可能</em>通过。其底层语义（KV 错误时 fail-closed）由相邻的 <code>TestCheckPurchaseLimit_TrialSetNXErrorPropagates</code> 承接。<strong>不是断言被削弱。</strong></p>
+      <p style="margin-top:12px"><strong>对账那半：</strong><code>App.Migrate</code> 在 <code>wire.go:377</code> <strong>无条件</strong>调用 <code>migrateAgentPlanBridge(a.DB)</code>（紧邻 <code>:373</code> 的 SUB bridge）。测试的内存 DB 只是缺了一张生产恒会创建的表。补上它是 <strong>schema 对齐，不是断言弯曲</strong>。</p>
+      <p style="margin-top:12px"><strong>但真正的故事是这两个提交<em>没有</em>测的东西</strong>——发现 #10 与 #11 两条 High，均由变异测试证明。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 6 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th><th style="width:100px">归属</th></tr></thead>
+          <tbody>
+            <tr><td>#10 SetNX 重构的核心目的完全未测——还原整个修复，180 测试全绿（守卫测试把 64 个 goroutine 全钉在 <code>userID=7</code>，而 bug 只在跨账号可达）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#11 AGT 对账 117 行新代码零直接测试——3 个致命变异全未捕获（唯一引用它的测试把它整个打桩掉了）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#26 <code>cbdf76e</code> 自己的 <code>/stuck</code> 测试对 AGT 零断言——提交信息以「C5：AGT 须在 /stuck 可见」为由，但该测试<strong>不播种任何 AGT 订单</strong>、只解码 heartbeat，<code>orders</code> 数组从未被检查。变异 <code>listStuckAgentPlans → nil</code>（即 C5 违反本身）→ 180 测试全绿。它让测试「跑」在新 schema 上，却没断言新行为</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#27 <code>subscription_metering_test.go</code>（270 行）自称「逐一钉死在生产算法上」，却<strong>零并发测试</strong>且跑在 SQLite 上（<code>FOR UPDATE</code> 在那里本就无意义）→ 为一条核心安全机制是空操作的路径盖绿章（见 #1）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#28 页脚 XSS 测试表只编码了正则自己的黑名单——6 个用例逐一映射到 <code>footerDangerRe</code> 的各个分支（<strong>照着实现写的，不是照着对抗性语料写的</strong>）。实测 4/6 真实向量穿透服务端校验（<code>&lt;img/src=x/onerror=&gt;</code>、<code>&lt;body/onload=&gt;</code>、实体编码伪协议、反引号属性）。<strong>DOMPurify 全部拦下，故非线上 XSS</strong>，但纵深层的虚假信心是真的</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#29 <code>repo_test.go:95-97</code> 的注释谎称删掉的 200 goroutine 并发单赢家测试「现由 <code>TestMemRepoUseRedemptionCAS</code> 直接覆盖」——<strong>那个测试是纯串行的</strong>（两次背靠背调用，零 goroutine）。<strong>实际无覆盖损失</strong>（被删测试驱动的是死码 <code>walletService.Redeem</code>，且生产路径被 gormrepo 的 40 goroutine 真测试更好地覆盖），但理由是假的</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证（新测试经变异证明为真测试）</div>
+    <div class="card-body">
+      <p class="small" style="margin-bottom:10px">对 5 个实质性新测试文件的「是否只是绿勾」怀疑——<strong>已被 5 次变异逐一驳回，全部捕获</strong>：</p>
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 去掉 <code>RowsAffected == 0</code> 守卫 → <code>TestRedeemCodeAndCredit_MissingUserRow</code> <strong>捕获</strong></div>
+        <div class="check-item"><span class="check">✓</span> 溢出守卫 <code>/</code> 翻成 <code>*</code> → <code>TestRedeemCodeAndCredit_RejectsOverflowCredit</code> <strong>捕获</strong></div>
+        <div class="check-item"><span class="check">✓</span> 退款改回嵌套事务调用 → <strong>以死锁超时捕获</strong>（<code>panic: test timed out after 1m30s</code>）——该测试确实守卫着 <code>postConsumeUserSubscriptionDeltaTx</code> 这个修复</div>
+        <div class="check-item"><span class="check">✓</span> 额度闸门 <code>remain &lt; amount</code> → <code>remain &lt;= amount</code> → <code>TestPreConsume_ExactlyFull_Allowed</code> <strong>捕获</strong></div>
+        <div class="check-item"><span class="check">✓</span> 去掉 CAS 的 <code>AND status='enabled'</code> → <strong>每次都捕获</strong>（winners=6 / 9，want 1）</div>
+        <div class="check-item"><span class="check">✓</span> <code>recharge_test.go</code>——3× <code>OnPaid</code> 只入账一次；软删除用户仍入账 + 恰好 1 条 Critical 告警 + 重试不重复告警；缺失用户 → fail-loud 且台账=0/topup=0 回滚</div>
+        <div class="check-item"><span class="check">✓</span> <code>distribution_redemption_test.go</code>——<strong>精确的溢出铸币利用载荷</strong>被拒、owner quota 分文不动、零码落库、<strong>且界内合法请求仍放行</strong></div>
+        <div class="check-item"><span class="check">✓</span> <code>agent_plan_slug_precheck_test.go</code>——软删除租户重新激活断言 <code>tenant count == 1</code>（无孤儿）；L1 子域名重建并可再解析；suspended owner → <code>AGENT_SUSPENDED</code></div>
+        <div class="check-item"><span class="check">✓</span> 这些文件<strong>在钱的边界上不用 mock</strong>，打的是真实 repository，覆盖错误/回滚/幂等/跨租户路径</div>
+        <div class="check-item"><span class="check">✓</span> <strong>删掉的约 2000 行死码测试无覆盖损失</strong>——<code>relay</code>/<code>billing</code>/<code>identity</code> 整包已消失；<code>stats</code> 仅剩仍被 <code>mtwire/report.go</code> import 的错误命名空间；<code>wallet</code> 的 <code>service.go</code>/<code>quota_wallet.go</code> 零装配点且无残留引用</div>
+        <div class="check-item"><span class="check">✓</span> <strong>无既有失败</strong>：<code>go test ./internal/... ./model/...</code> 35 包全 ok；<code>go test -race ./internal/risk/... ./internal/mtwire/...</code> 全 ok</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="release">🚢 Release</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span></p>
+      <p style="margin-top:8px"><strong>已检证据：</strong><code>deploy.sh</code> / <code>rollback.sh</code> / <code>restore.sh</code> / <code>lib.sh</code> / <code>backup.sh</code> / <code>reconcile.sh</code> / <code>demo.sh</code> 逐行阅读；<code>warn</code> 未定义以最小 harness 复现（exit 127）；<code>restore.sh</code> 剪枝删目标已复现；<code>guard_not_prod</code> 新旧真值表<strong>独立重推</strong>（不信注释）；<code>Dockerfile:43-45</code> → <code>common.Version</code> → <code>controller/misc.go:52</code> → <code>/api/status</code> 版本链路全程追踪；<code>docker-compose.test.yml</code> 逐项 diff；<code>deploy/nginx/*.conf</code> 全量；<code>bash -n</code> 8 个脚本全过。</p>
+      <p style="margin-top:8px"><strong>排除 / 限制：</strong><strong>未 ssh 服务器、未执行任何部署脚本</strong>（按 W4 与审计边界）——端到端行为（<code>:latest</code> 在 manifest-list 下的实际漂移、归档重建、回滚后的 DB 兼容性）<strong>待下次真实部署验证</strong>；<code>shellcheck</code> 本机未安装故未运行（这正是 <code>warn</code> 未定义得以出厂的原因）；nginx 配置文件<strong>自述为「重建版而非线上拷贝」</strong>（文件头 <code>:12</code>），reload 前须与服务器实机 <code>diff</code>；容器 restart 语义为静态阅读（标 Suspected）。<strong>因此本维度评分保守，且「零发现」结论不适用。</strong></p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 9 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th><th style="width:100px">归属</th></tr></thead>
+          <tbody>
+            <tr><td>#8 「假成功部署」未真修复——<code>warn</code> 未定义致 exit 127 是<strong>唯一</strong>拦阻；版本自检按设计只告警不阻断；阻断闸门仍是产生事故的 tag 比对。<strong>补 <code>warn()</code> 会当场恢复事故</strong></td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#9 <code>restore.sh</code> 强制预备份的剪枝会删掉正在恢复的备份（恢复第 7 新即最旧那份时必然触发）；本批删掉了 <code>NO_PRE_BACKUP=1</code> 逃生口 → 不可规避</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#30 回滚只回退代码/镜像，<strong>从不回退数据库</strong>，而 app 每次启动即 <code>AutoMigrate</code>（<code>model/main.go:271</code>）→ schema 已前移。旧镜像跑在新 schema 上：加列通常可容忍，但改名/删列/新增无默认值的 NOT NULL 列会让写入在运行期崩。<code>deploy.sh:94-100</code> <em>确实</em>做了部署前备份，但<strong>没有任何回滚路径引用它</strong>，脚本头与 README 也只字未提 schema</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>历史遗留（本批未修）</td></tr>
+            <tr><td>#31 <code>rollback_tarball</code> 先 <code>rm -rf</code> 前端源码树<strong>再</strong>解包，且只检查归档「存在」不校验完整性；归档由 <code>deploy.sh:122</code> 流式管道写入、无原子改名 → ssh 中断留下截断文件，<code>--list</code> 仍把它当合法回滚点展示。事故中执行 <code>--to &lt;ts&gt;</code> → 删掉两棵源码树 → <code>tar xzf</code> 失败 → <code>$SERVER_REPO</code> 处于不可构建状态</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#32 部署前备份失败被 <code>A &amp;&amp; B || C</code> 吞掉并<strong>误报成「backup.sh 尚未上传」</strong>（返回 0，部署继续）。本批的 <code>:?</code> 改动使该路径<strong>新变得可达</strong>：若运维在服务器 <code>.env</code> 补齐两把密钥前就部署，compose 对每个子命令都插值 → <code>backup.sh</code> 的 <code>dc exec</code> 直接失败 → 无备份、静默继续；同理会静默停掉每夜 cron 备份</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增（可达性）</td></tr>
+            <tr><td>#33 自动回滚失败被 <code>|| echo</code> 吞掉，<code>deploy.sh:191</code> 仍无条件 <code>die "部署失败已回滚"</code>——包括回滚因无 <code>:prev</code> 或 compose 拒绝而根本没成功时。运维最后看到的一行断言回滚成功，而它没有</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>历史遗留（在本批关键路径上）</td></tr>
+            <tr><td>#34 <code>README.md:37/58/75</code> 仍在三处记载已被删除的 <code>--git</code> 回滚模式，且<strong>完全没提</strong>新增的 <code>--to</code>/<code>--list</code>（<code>grep -- "--to\|--list"</code> 零命中）。事故中照 runbook 操作会直接撞 <code>die</code>，白烧时间</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#35 <code>guard_target</code> 比较的两个操作数<strong>都可被环境覆盖</strong>（<code>STACK</code> 与 <code>EXPECTED_STACK</code> 皆 <code>${VAR:-默认}</code>）→ <code>STACK=x EXPECTED_STACK=x ./restore.sh</code> 即通过。它能抓单侧拼写错（其声明目的），但不是白名单；<code>lib.sh:9-13</code> 的文件头把它说成安全红线，属过度宣称</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#36 <code>deploy-manifest.json</code> 可被写成非法 JSON——<code>deploy.sh:61-63</code> 只剥单引号（正确挡住了 shell 注入），但 <code>"</code> 与 <code>\</code> 幸存：git <code>user.name</code> 含双引号即产出无法解析的 manifest，而它正是「现在跑的是什么」这一问题的唯一制品（当前 <code>user.name</code> 安全）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+            <tr><td>#21 / #22 见 Stability 段（app restart 策略不对称、Redis/MySQL recreate 注释论证不成立）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-suspected">Suspected</span> / <span class="badge badge-confirmed">Confirmed</span></td><td>本批新增</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证（对两个最高价值问题的独立重推结论）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> <strong><code>guard_not_prod</code> 的反转是真修对了</strong>——独立重推真值表（不信注释）：<strong>旧</strong>逻辑 <code>[ "$STACK" != "$PROD_STACK" ] || die</code>，而 <code>PROD_STACK=newapi_YFNf</code> 已于 07-03 删除、真实生产是 <code>newapi_test</code> → 在唯一的真实生产栈上<strong>完全不触发</strong>、拼写错也放行、只对一个不存在的栈名 die。<strong>新</strong>逻辑 <code>[ "$STACK" = "$EXPECTED_STACK" ] || die</code> 是正确的<strong>正向白名单</strong>：<code>newapi_test</code> 放行、拼写错 <code>newapi_tset</code> <strong>现在会被拦</strong>、未设时回落默认亦正确。且正确传播到全部三个声称的脚本</div>
+        <div class="check-item"><span class="check">✓</span> <code>restore.sh</code> 的配套加固可靠——<code>confirm_typed</code> 确实<strong>忽略 <code>ASSUME_YES</code></strong>（不同于 <code>confirm</code>），并在非交互 stdin 下 <code>read -r ans || die</code> fail-closed</div>
+        <div class="check-item"><span class="check">✓</span> <strong>版本身份的每个零件本身都是对的</strong>——<code>VERSION</code> 不再是 0 字节（<code>v0.0.0-dev</code>）；<code>Dockerfile:43-45</code> 有空串兜底并经 ldflags 注入 <code>common.Version</code>；<code>controller/misc.go:52</code> 把它送上 <code>/api/status</code>（<code>"version"</code> 恰好出现一次，故 <code>deploy.sh:170</code> 的贪婪 <code>sed</code> 提取正确）；<code>deploy.sh:130</code> 在<strong>解包后、构建前</strong>盖戳（顺序正确）；<code>APP_VERSION</code> 含 <code>$TS</code> 故每次部署唯一 → 旧容器必然报告不匹配；自检打的是 <code>127.0.0.1:$APP_PORT/api/status</code>（<strong>确实在问运行中的容器</strong>，不是 tag）。<strong>断的只是接线：<code>warn</code> 而非 <code>die</code>（见 #8）</strong></div>
+        <div class="check-item"><span class="check">✓</span> <code>deploy-manifest.json</code> <strong>确实被烤进镜像</strong>（<code>Dockerfile:56</code> <code>COPY</code>，未被 <code>.dockerignore</code> 排除），非摆设——但无任何自动化读取它，仅助事后取证、不参与门禁</div>
+        <div class="check-item"><span class="check">✓</span> <code>rollback.sh:68-69</code> 的 <code>[ -f … ] &amp;&amp; cp -f …</code> <strong>不会触发 <code>set -e</code></strong>（<code>&amp;&amp;</code> 左操作数失败是豁免的，且非最后一条语句）——已实证</div>
+        <div class="check-item"><span class="check">✓</span> nginx 变更无害——<code>/api/internal/</code> 仍 <code>return 404</code>；新增 <code>location ^~ /auth/</code> 与已上线的 wildcard 逐字节相同且不遮蔽任何路由（app 只有 <code>/api/authz</code>）；<code>Host 127.0.0.1 → $host</code> 是 Host 租户解析所必需</div>
+        <div class="check-item"><span class="cross">✗</span> <strong><code>deploy.sh</code> 打包范围<strong>未改善</strong></strong>——仍是 <code>tar -C "$LOCAL_REPO" .</code>（整棵工作树），已知的「并行 WIP 被盲部署」风险<strong>依旧存在</strong>。本批提升了<em>可见性</em>（<code>GIT_DIRTY</code> 检测、版本串加 <code>-dirty</code> 后缀、脏树告警），但<strong>不设闸</strong>：<code>:80</code> 是 <code>log</code> 而非 <code>confirm</code>，且 <code>deploy.sh</code> 在推向唯一生产栈前<strong>没有任何确认提示</strong>。可溯源性变好，安全性未变</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="principles">📋 工程原则符合度</h3>
+
+  <div class="card">
+    <div class="card-header">违反项（仅列造成真实风险者，不作风格之争）</div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>原则</th><th style="width:70px">违反数</th><th style="width:100px">严重程度</th><th>区域与说明</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Fail-Fast / 显式失败</strong></td><td>4</td><td><span class="badge badge-high">High</span></td><td>本批最要害的模式。<code>deploy.sh:174</code> 版本自检只告警不阻断（#8）；<code>deploy.sh:97</code> 备份失败被 <code>A&amp;&amp;B||C</code> 吞成「尚未上传」（#32）；<code>deploy.sh:189</code> 回滚失败被 <code>||echo</code> 吞后仍宣称「已回滚」（#33）；<code>agent_plan_reconcile.go:104</code> <code>expireStuckAgentPlanOrder</code> 丢弃自身错误（<code>_ =</code>）。<strong>共性：都是「安全网自己静默失效」</strong></td></tr>
+            <tr><td><strong>原子性 / 全有或全无</strong></td><td>3</td><td><span class="badge badge-high">High</span></td><td><code>checkTrialLimit</code> 多键占用无回滚（#3/#4）；<code>provisionAgentFromOrder</code> 六步非事务（#6）；Trial 键在订单创建前写入且失败不回滚（#23）</td></tr>
+            <tr><td><strong>注释/文档必须与代码一致</strong></td><td>6</td><td><span class="badge badge-medium">Medium</span></td><td>多处注释断言与代码实情<strong>相反</strong>，且都是<em>承重</em>的：「单一身份的正常用户永不被误封」（实测证伪，#3）、「KVCache 无删除原语」（<code>Del</code> 同批已加，#16）、「锁定订阅」（锁是空操作，#1）、「共用同一换算保证额度严格守恒」（两套换算，#24）、「与 apiRouter 同基础链」（链不同且 <code>BodyStorageCleanup</code> 双跑，#17）、「现由 CAS 测试直接覆盖」（那是串行测试，#29）</td></tr>
+            <tr><td><strong>循环论证 / 前提自洽</strong></td><td>1</td><td><span class="badge badge-high">High</span></td><td><code>agent_plan_reconcile.go:23-26</code>「若曾被支付，前面数百轮查单必已捕获激活」——但该分支<strong>只在查单失败时进入</strong>，论证假定了其触发条件所否定的前提（#7）</td></tr>
+            <tr><td><strong>不信任客户端输入</strong></td><td>2</td><td><span class="badge badge-medium">Medium</span></td><td>反刷维度 <code>device_id</code>/<code>real_name_id</code> 由被监管方自报（#13）；后台释放端点的 <code>realname_id</code>/<code>device_id</code> 与 <code>user_id</code> 零绑定（#12）</td></tr>
+            <tr><td><strong>DRY（有真实漂移风险者）</strong></td><td>1</td><td><span class="badge badge-info">Info</span></td><td>保留词表在 <code>internal/tenant/slug.go</code> 与 <code>web/default/src/features/agent-plans/index.tsx</code> 各存一份。<strong>当前逐字一致</strong>（已核 9 词全同、格式规则同），且后端权威 fail-closed，属可接受的纵深；但<strong>无任何测试把两边钉住</strong>，后端加词即静默漂移（前端放行 → 用户在付款环节才撞错）。<code>tenant.ReservedSlugs()</code> 已导出「供配置读取/单测断言」，却没被用于此</td></tr>
+            <tr><td><strong>提交原子性 / 可追溯</strong></td><td>6</td><td><span class="badge badge-low">Low</span></td><td>见下方 #37</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="finding severity-low" style="margin-top:16px">
+    <div class="finding-header">
+      <h4>37. 提交信息主动误导 —— Critical 安全修复被标成「chore(tasks): 添加任务上下文」</h4>
+      <span class="badge badge-low">Low</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Maintainability / 可追溯性</span>
+      <span>📍 77a8b73 · cd7d30d · 4595cd4 · c907e47 · 2a9bc32 · 72a00a2</span>
+      <span>🏷 归属：本批新增</span>
+      <span>🔬 置信度：High（逐提交统计已取证）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>19 个提交里 12 个标 <code>chore</code>，但其中 6 个装着 4–11 个真实代码文件。<strong>没有一个提交标 <code>fix</code></strong>——尽管这批的主体就是 bug 修复。
+    </div>
+    <div class="evidence">$ git show --stat 77a8b73        # 标题：「🔧 chore(tasks): 添加页脚XSS修复任务上下文」
+ .ccg/tasks/fix-footer-xss-sanitize/context.jsonl   |  7 ++
+ .ccg/tasks/fix-footer-xss-sanitize/task.json       | 20 ++++
+ CLAUDE.md                                          |  2 +-
+ RETRO.md                                           |  6 ++
+ internal/siteconfig/errors.go                      |  3 ++      ← 新错误码
+ internal/siteconfig/policy.go                      | 42 +++++++    ← 服务端校验
+ internal/siteconfig/policy_test.go                 | 11 ++       ← 单测
+ web/default/src/components/layout/components/footer.tsx | 13 +-  ← DOMPurify 消毒
+        → 整个 Footer XSS 的 Critical 修复，标题写的是「添加任务上下文」
+
+$ git show --stat cd7d30d        # 标题：「🔧 chore(tasks): 更新充值CNY任务跟踪」
+ internal/mtwire/agent_plan_reconcile.go            | 117 +++++++++++   ← 全新文件（C5 修复主体）
+ internal/mtwire/reconcile_orchestrate.go           |  40 ++++---
+ internal/mtwire/reconcile_http.go                  |  25 ++--
+ ...（另含 2 个前端文件）
+        → 整套 AGT 对账新功能，标题写的是「更新任务跟踪」
+
+【逐提交代码文件数统计】
+cd7d30d chore(tasks): 更新充值CNY任务跟踪          → 11 个代码文件
+4595cd4 chore(core):  更新充值任务阶段日志          →  6 个代码文件
+c907e47 chore(tasks): 添加slug预校验任务上下文       →  5 个代码文件
+2a9bc32 chore(tasks): 添加 fix-guard-not-prod 任务上下文 → 5 个代码文件
+77a8b73 chore(tasks): 添加页脚XSS修复任务上下文      →  4 个代码文件
+72a00a2 chore(tasks): 更新开发阶段记录              →  4 个代码文件
+839c7c2 删除xml                                    → 无 conventional 前缀，删 56 万行
+</div>
+    <div class="problem">
+      <strong>失败场景：</strong>扫 <code>git log --oneline</code> 做 review 的人会把这些当纯文档提交<strong>跳过</strong>——而它们恰恰是全批最该被 review 的（Critical 安全修复、¥9990 SKU 的新对账逻辑）。<code>git bisect</code> / <code>git log --grep</code> 的考古会失效；若日后按 conventional commits 生成 release notes，一个 Critical 安全修复会被<strong>整个省略</strong>。对一个正在认真维护 RETRO.md + CLAUDE.md 棘轮审计链的项目，「哪个提交修了那个 XSS」这个问题目前<strong>无法用 git log 回答</strong>。<br>
+      <strong>用户可见影响：</strong>无运行期影响。定 Low，但有加重情节：它误导的恰是安全审计链本身。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（历史已推送，不建议改写；只需约束今后）</div>
+      <code># 今后：一个提交一件事，类型如实
+fix(siteconfig): 页脚 HTML 经 DOMPurify 消毒 + ValidatePatch 补 Footer 校验（Critical XSS）
+feat(mtwire):    AGT 订单接入对账编排（主动查单/超时终态/卡单可见/告警，C5）
+chore(tasks):    更新 .ccg 任务记录            ← 只装 .ccg/ 与文档
+
+# 可选：加一条 commit-msg hook，当 diff 含 internal/**/*.go 却标 chore(tasks) 时告警</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预计工作量：</strong> 0（仅今后约束）／30 分钟（加 commit-msg hook） &nbsp;·&nbsp; <strong>回归测试建议：</strong> CI 加一条检查：若 diff 触及 <code>internal/</code> 或 <code>web/*/src/</code> 而提交类型为 <code>chore</code>/<code>docs</code>，则失败。
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已遵循的原则</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> <strong>纵深防御</strong>——页脚 XSS 修在渲染端（权威 DOMPurify）+ 端点（策略校验）两层；兑换码溢出建三闸（面额上界 + 乘法溢出检测 + 入账兜底）</div>
+        <div class="check-item"><span class="check">✓</span> <strong>修在正确的抽象层</strong>——风控 fail-open 修在边界层（<code>mtwire/risk.go</code>）而非 Engine，一处覆盖 <code>CheckCall</code> 的全部基础设施错误源，且保住了 Engine「原样上浮」的契约与其单测</div>
+        <div class="check-item"><span class="check">✓</span> <strong>棘轮只进不退</strong>——CLAUDE.md 的 C1–C7 从 <code>TODO</code> 占位填成实条款（含为什么 + 正确做法），无一条硬约束被删除或放宽</div>
+        <div class="check-item"><span class="check">✓</span> <strong>据实纠错</strong>——主动纠正了 STATUS.md 里「<code>internal/risk</code> 是 superseded 死代码勿重造」的<strong>死活反转</strong>误判（该模块实为活的，经 <code>wire.go:198</code> 注入）</div>
+        <div class="check-item"><span class="check">✓</span> <strong>判死活只认工具链</strong>——C7 明确规定以 <code>go list -deps ./router/</code> 的 import 图为准，「绝不信 doc.go / 绿测试 / 注释这类表象」。本次审计独立复核了这个判据的正确性</div>
+        <div class="check-item"><span class="check">✓</span> <strong>诚实的自我记录</strong>——RETRO.md 对每条都写明「纯静态审查、未跑测试、代码仅在本地工作树」等限制，未夸大验证程度（唯一例外见下方 Quick Wins 的工具链认知纠正）</div>
+        <div class="check-item"><span class="check">✓</span> <strong>不过度修复</strong>——违禁词修复保持与上游对等基准一致（redeem 未加 Turnstile，因上游 topup 也只有 CriticalRateLimit），有意识地不引入不对称</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="fix-order">🎯 建议修复顺序</h3>
+
+  <div class="card">
+    <div class="card-header">
+      <span>⚡ 立刻（部署前必做 —— 每条都在直接损害真实用户或掩盖事故）</span>
+      <span class="badge badge-high">高优先级</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:40px">#</th><th>修复</th><th style="width:90px">工作量</th><th>不修的风险</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><strong>把 <code>deploy.sh</code> 的版本自检从 <code>warn</code> 改成 <code>die</code></strong>（#8）。<strong>⚠ 千万别只补 <code>warn()</code> 定义</strong>——那会静默恢复原事故</td>
+              <td>15 分钟</td>
+              <td>今天「假成功部署」唯一的拦阻是一个未定义函数的崩溃。任何人「顺手修掉」那个 <code>command not found</code>，生产就会在报告「部署成功 ✅」的同时继续跑旧码</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><strong><code>checkTrialLimit</code> 加 <code>acquired</code> 回滚</strong>（#3 + #4 + #16，一处解决三条 High）。<strong>先补 #10 的跨账号并发测试再改</strong>，否则无从确认没弄坏单赢家性质</td>
+              <td>30 分钟 + 30 分钟测试</td>
+              <td>正常用户因一次共用设备/实名碰撞或一次 Redis 抖动被<strong>永久</strong>锁死终身 Trial，无自助恢复，且提示是「已超过限购次数」这句谎话</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><strong><code>restore.sh</code> 在强制预备份前把恢复目标 <code>cp</code> 到临时区</strong>（#9）</td>
+              <td>20 分钟</td>
+              <td>恢复最旧快照（=最经典的灾难恢复路径）时，恢复失败<strong>且那个恢复点被永久删除</strong>——可能是损坏前状态的唯一拷贝</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span>📅 本周（钱和防护的正确性）</span>
+      <span class="badge badge-medium">中优先级</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:40px">#</th><th>修复</th><th style="width:90px">工作量</th><th>不修的风险</th></tr></thead>
+          <tbody>
+            <tr><td>4</td><td><strong>17 处 <code>gorm:query_option</code> → <code>clause.Locking</code></strong>，并<strong>先</strong>加 DryRun 断言 SQL 含 <code>FOR UPDATE</code> 的守卫测试（#1 + #27）</td><td>1h + 2h</td><td>并发 <code>/v1</code> 丢失计量（3 并发只记 1 次），套餐额度上限失效；并发越高的大客户漏得越多。同类空操作还覆盖充值与兑换码</td></tr>
+            <tr><td>5</td><td><strong>4 个 money 端点改用已有的 <code>userRateLimitFactory</code>（按 user 计桶）+ 补 <code>SetTrustedProxies</code></strong>（#2 → 并顺带缓解 #13、#14）</td><td>1–2h（含 staging 验证 CF/X-Real-IP 链路）</td><td>本批新装的兑换码/充值/购买/提现限流<strong>一个 HTTP 头即失效</strong>；且任何未认证者可把任意 IP 从整个 <code>/api</code> 面踢下线</td></tr>
+            <tr><td>6</td><td><strong>AGT 对账只在 <code>ErrOrderNotExist</code> 下 expire，其余进 <code>Failed</code> 保持可见 + 告警</strong>（#7），并镜像回 <code>sub_reconcile.go</code></td><td>3–4h</td><td>凭据轮换配错时，已付款的 ¥9990 订单被静默注销、卡单页看不到、告警不响，唯一发现途径是人工逐笔对账</td></tr>
+            <tr><td>7</td><td><strong>补 AGT 对账测试（6 分支）</strong>（#11）+ <strong><code>/stuck</code> 断言 AGT 可见</strong>（#26）</td><td>3–4h + 45 分钟</td><td>全站最贵 SKU 的资金安全网无任何验证——3 个致命变异当前零捕获</td></tr>
+            <tr><td>8</td><td><strong><code>provisionAgentFromOrder</code> 包事务或认领孤儿行</strong>（#6）</td><td>2–4h</td><td>回调期间部署（例行事件）即产生永久毒化重试的孤儿租户行，买家 ¥9990 不人工删库不可恢复</td></tr>
+            <tr><td>9</td><td><strong>AGT 预检补 <code>tenant_domains.domain</code> 检查</strong>（#5 的收窄）；<strong>预留式重设计</strong>排入下个迭代（才真正闭合）</td><td>1h ／ 约 1 天</td><td>两个买家可预检同一 slug、双双被扣 ¥9990、只有一个能激活</td></tr>
+            <tr><td>10</td><td><strong><code>ReleaseTrialLimit</code> 键值改记归属、条件释放</strong>（#12）</td><td>1h</td><td>反刷的设备/实名维度可经客服社工洗掉，每次社工产出额外免费 Trial</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span>🗓 排期（纵深、卫生与需你拍板的事项）</span>
+      <span class="badge badge-low">低优先级</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:40px">#</th><th>修复</th><th style="width:90px">工作量</th></tr></thead>
+          <tbody>
+            <tr><td>11</td><td><strong>需你拍板</strong>：作者在 RETRO 留了<strong>两条待你确认的规则</strong>——「金额×数量的 int64 乘法必须做溢出检测 + 面额/数量类入参一律双边界」与「基础设施错误与业务策略拒绝必须分流，best-effort 组件遇基础设施错误一律 fail-open 且留痕」。<strong>CLAUDE.md C8 仍空着</strong>。<strong>本审计的建议</strong>：C8 更值得留给<em>本批复发三次</em>的那个元模式——「清单挑选式遗漏＝漏一个即绕过」（AGT 预检漏查 domain、限流漏 trusted proxy、Trial 漏回滚，正是作者自己在 C2/C3/C5 中识别出的同一模式的第 4/5/6 次复发）</td><td>你决定</td></tr>
+            <tr><td>12</td><td><code>restore.sh</code>/<code>rollback.sh</code>：回滚前校验归档完整性（<code>tar tzf</code>）再删源码树；<code>deploy.sh</code> 归档改「写 <code>.part</code> → 校验 → 原子改名」（#31）</td><td>20 分钟</td></tr>
+            <tr><td>13</td><td>部署前备份失败改 fail-closed（#32）；自动回滚失败如实报告（#33）；两者都是「安全网静默失效」（#8 同族）</td><td>30 分钟</td></tr>
+            <tr><td>14</td><td>回滚显式告警「不回退数据库、schema 已前移」+ 把部署前备份文件名写进 <code>deploy-manifest.json</code>（#30）</td><td>30 分钟 ／ 半天</td></tr>
+            <tr><td>15</td><td>MySQL root 密码移入 <code>.env</code> fail-closed（#15）——<strong>须先在库内 <code>ALTER USER</code> 再改 <code>.env</code></strong>，否则把 app 锁在门外</td><td>45 分钟</td></tr>
+            <tr><td>16</td><td><code>device_id</code>/<code>real_name_id</code> 改服务端派生（#13）——需先定指纹来源的产品决策；否则三维反刷始终不通电</td><td>半天</td></tr>
+            <tr><td>17</td><td><code>validateFooter</code> 黑名单改允许列表解析（bluemonday / <code>x/net/html</code>）+ 把 4 个穿透向量加进测试表（#20、#28）；<code>classic</code> 主题页脚补 DOMPurify（#19）</td><td>2–3h + 20 分钟</td></tr>
+            <tr><td>18</td><td>删掉 <code>apiBase</code> 冗余的 <code>BodyStorageCleanup</code> + 修正「同基础链」注释（#17）；顺手让 <code>CleanupFileSources</code> 幂等（<code>sources, ok := ...</code>）</td><td>15 分钟</td></tr>
+            <tr><td>19</td><td>清掉死码残渣（<code>wallet/model.go</code> 的 <code>CreditSource</code>/<code>EarningEntry</code> 等、<code>stats/errors.go</code> 的 <code>ErrCrossTenant</code>）+ 修正 <code>payment/model.go:114</code> 指向已删类型的注释；修正 <code>repo_test.go:95</code> 的假理由（#29）</td><td>20 分钟</td></tr>
+            <tr><td>20</td><td>修正 6 处与代码相反的承重注释（#16、#24、#1 的「锁定订阅」、#17 的「同基础链」等）；<code>README.md</code> 的 <code>--git</code> → <code>--to</code>/<code>--list</code>（#34）；<code>EXPECTED_STACK</code> 改 <code>readonly</code> 常量（#35）；manifest 剥 <code>"</code>/<code>\</code>（#36）</td><td>1h</td></tr>
+            <tr><td>21</td><td>兑换码建码/入账统一走 <code>usdToQuotaRound</code>（#24）；CNY 充值停止把 USD 取整存库（#25）</td><td>1–2h + 1h</td></tr>
+            <tr><td>22</td><td>保留词表加一条把前后端钉住的测试（用已导出的 <code>tenant.ReservedSlugs()</code> 生成或断言前端常量）</td><td>30 分钟</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="quick-wins">⚡ 速赢</h3>
+
+  <div class="win-grid">
+    <div class="win-card">
+      <div class="win-title">⚠️ 别修那个 <code>warn: command not found</code></div>
+      <div class="win-meta">看着像 5 秒的手滑，实为唯一挡住「假成功部署」的东西。改成 <code>die</code>，别补 <code>warn()</code>。这是本报告最重要的一句话。</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">CI 加一条 grep：封禁 <code>gorm:query_option</code></div>
+      <div class="win-meta">一行 grep 规则永久钉死整个「假锁」类别（当前 17 处，0 处真锁）。比逐处 review 便宜三个数量级。</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">DryRun 守卫测试断言 SQL 含 FOR UPDATE</div>
+      <div class="win-meta"><code>gorm.Config{DryRun:true}</code> + <code>strings.Contains(stmt.SQL.String(), "FOR UPDATE")</code>——毫秒级，无需 MySQL，一次覆盖全部加锁 helper。</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">📌 本机 Go 工具链是可用的（纠正认知）</div>
+      <div class="win-meta">RETRO 反复写「本机无 Go 工具链、待服务器验证」——<strong>已过时</strong>。实测 go1.26.3 在 <code>/opt/homebrew/bin/go</code>；补两个 <code>web/{default,classic}/dist/index.html</code> stub 即可跑完 build+vet+test+race，约 2 分钟。<strong>本报告三条 High 在本地几秒就能测出</strong>——这正是它们靠纯静态审查上了 main 的原因。</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">装 shellcheck</div>
+      <div class="win-meta"><code>bash -n</code> 抓不到「调用了未定义函数」。<code>warn</code> 那条 High 正是这么出厂的。<code>brew install shellcheck</code> + 进 preflight。</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">跨账号并发测试（30 分钟）</div>
+      <div class="win-meta">本批最有价值的那个修复目前<strong>零守卫</strong>——整个还原它，180 测试全绿。而你正要动那段循环去修 #3。先补测试再改。</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">commit-msg hook：chore 不许带 .go</div>
+      <div class="win-meta">Critical XSS 修复现在标着「chore(tasks): 添加任务上下文」。<code>git log</code> 已无法回答「哪个提交修了那个 XSS」。</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">pull 前先 stash</div>
+      <div class="win-meta">本地 main 可直接快进到 origin/main（无分叉），但工作树里 <code>RETRO.md</code> 有 6 行未提交改动，会挡住 pull。</div>
+    </div>
+  </div>
+
+  <div style="text-align:center;padding:40px 0 20px;color:var(--text-secondary);font-size:12px">
+    Fuck My Shit Mountain · 增量深挖审计 · newapi628 · 2026-07-17<br>
+    范围 ae18086..cbdf76e（19 提交 / 111 文件 / 作者 WEI）· 主审 Claude Opus 4.8 ＋ 6 路并行子代理（全 opus）<br>
+    全部 Critical / High 结论均经主审员独立复核；所有运行时证据取自 origin/main 的独立 worktree（审计结束后已还原干净）<br>
+    本报告不含任何密钥、令牌或私钥的真实值（一律 <code>&lt;redacted&gt;</code>）
+  </div>
+
+</div>
+
+<script>
+  const sections = document.querySelectorAll('[id]');
+  const navLinks = document.querySelectorAll('.sidebar-nav a');
+
+  const observer = new IntersectionObserver((entries) => {
+    let activeId = null;
+    entries.forEach(entry => {
+      if (entry.isIntersecting) activeId = entry.target.id;
+    });
+    if (activeId) {
+      navLinks.forEach(a => {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + activeId);
+      });
+    }
+  }, { rootMargin: '-10% 0px -60% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+
+  navLinks.forEach(a => {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+
+</body>
+</html>

@@ -48,7 +48,9 @@ interface ApiEnvelope<T> {
 
 /** 列出全部代理套餐（管理员）。 */
 export async function getAdminAgentPlans(): Promise<AdminAgentPlan[]> {
-  const res = await api.get<ApiEnvelope<AdminAgentPlan[]>>('/api/admin/agent-plans')
+  const res = await api.get<ApiEnvelope<AdminAgentPlan[]>>(
+    '/api/admin/agent-plans'
+  )
   return res.data?.data ?? []
 }
 

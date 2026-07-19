@@ -168,7 +168,7 @@ export default function SettingsPaymentGateway(props) {
                 <a
                   href='https://dashboard.stripe.com/developers'
                   target='_blank'
-                  rel='noreferrer'
+                  rel='noopener noreferrer'
                 >
                   点击此处
                 </a>
@@ -176,7 +176,7 @@ export default function SettingsPaymentGateway(props) {
                 <a
                   href='https://dashboard.stripe.com/test/developers'
                   target='_blank'
-                  rel='noreferrer'
+                  rel='noopener noreferrer'
                 >
                   测试环境
                 </a>

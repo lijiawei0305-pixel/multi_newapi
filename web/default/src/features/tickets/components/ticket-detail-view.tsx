@@ -20,6 +20,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -31,6 +32,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { fmtDateTime } from '@/lib/agent-format'
+
 import type { TicketApiAdapter } from '../audience'
 import { STATUS_VALUES, statusMeta, ticketErrorMessage } from '../lib'
 import { ticketKeys } from '../query-keys'
@@ -212,7 +214,9 @@ export function TicketDetailView(props: {
             {props.adapter.showTenantColumn && (
               <span className='text-muted-foreground'>
                 {t('Tenant')}:{' '}
-                {ticket.tenant_id === 0 ? t('Platform') : `#${ticket.tenant_id}`}
+                {ticket.tenant_id === 0
+                  ? t('Platform')
+                  : `#${ticket.tenant_id}`}
               </span>
             )}
             {props.adapter.showUserFilter && (

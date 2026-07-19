@@ -46,6 +46,10 @@ var auditContentTemplates = map[string]string{
 	"channel.upstream_apply_all": "Applied upstream model changes to ${count} channels",
 
 	"redemption.create": "Created ${count} redemption codes named ${name} (${quota} each)",
+
+	"task_submission.resolve_unknown":  "Left uncertain task submission ${request_id} unresolved after investigation",
+	"task_submission.resolve_rejected": "Resolved uncertain task submission ${request_id} as provider-rejected",
+	"task_submission.resolve_accepted": "Resolved uncertain task submission ${request_id} as provider-accepted",
 }
 
 // auditContentEN 按 action 模板渲染英文兜底文本；未登记的 action 退回 action 本身。

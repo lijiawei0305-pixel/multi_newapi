@@ -1,6 +1,7 @@
 package common
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -46,8 +47,12 @@ func InitEnv() {
 		os.Exit(0)
 	}
 
-	if os.Getenv("SESSION_SECRET") != "" {
-		ss := os.Getenv("SESSION_SECRET")
+	ProductionDeployment = productionDeploymentForEnvironment(os.Getenv("DEPLOYMENT_ENV"))
+	SessionCookieSecure = strings.EqualFold(strings.TrimSpace(os.Getenv("SESSION_COOKIE_SECURE")), "true")
+	sessionSecret := strings.TrimSpace(os.Getenv("SESSION_SECRET"))
+	cryptoSecret := strings.TrimSpace(os.Getenv("CRYPTO_SECRET"))
+	if sessionSecret != "" {
+		ss := sessionSecret
 		if ss == "random_string" {
 			log.Println("WARNING: SESSION_SECRET is set to the default value 'random_string', please change it to a random string.")
 			log.Println("警告：SESSION_SECRET被设置为默认值'random_string'，请修改为随机字符串。")
@@ -56,10 +61,13 @@ func InitEnv() {
 			SessionSecret = ss
 		}
 	}
-	if os.Getenv("CRYPTO_SECRET") != "" {
-		CryptoSecret = os.Getenv("CRYPTO_SECRET")
+	if cryptoSecret != "" {
+		CryptoSecret = cryptoSecret
 	} else {
 		CryptoSecret = SessionSecret
+	}
+	if err := ValidateSessionSecurity(ProductionDeployment, SessionCookieSecure, sessionSecret, cryptoSecret); err != nil {
+		log.Fatal(err)
 	}
 	if os.Getenv("SQLITE_PATH") != "" {
 		SQLitePath = os.Getenv("SQLITE_PATH")
@@ -70,11 +78,11 @@ func InitEnv() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if _, err := os.Stat(*LogDir); os.IsNotExist(err) {
-			err = os.Mkdir(*LogDir, 0777)
-			if err != nil {
-				log.Fatal(err)
-			}
+		if err := os.MkdirAll(*LogDir, 0700); err != nil {
+			log.Fatal(err)
+		}
+		if err := os.Chmod(*LogDir, 0700); err != nil {
+			log.Fatal(err)
 		}
 	}
 
@@ -130,6 +138,58 @@ func InitEnv() {
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
 	initConstantEnv()
+}
+
+// productionDeploymentForEnvironment keeps insecure local HTTP development an
+// explicit opt-in. An omitted or misspelled deployment mode is treated as
+// production so a real deployment cannot silently fall back to random secrets
+// and a non-Secure session cookie.
+func productionDeploymentForEnvironment(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "development", "dev", "local", "test":
+		return false
+	default:
+		return true
+	}
+}
+
+// ValidateSessionSecurity keeps explicitly selected local/source installs
+// configurable while making the default production contract fail closed.
+func ValidateSessionSecurity(production bool, cookieSecure bool, sessionSecret string, cryptoSecret string) error {
+	if !production {
+		return nil
+	}
+	if !cookieSecure {
+		return errors.New("production requires SESSION_COOKIE_SECURE=true")
+	}
+	if err := validateProductionSecret("SESSION_SECRET", sessionSecret); err != nil {
+		return err
+	}
+	if err := validateProductionSecret("CRYPTO_SECRET", cryptoSecret); err != nil {
+		return err
+	}
+	if strings.TrimSpace(sessionSecret) == strings.TrimSpace(cryptoSecret) {
+		return errors.New("production requires SESSION_SECRET and CRYPTO_SECRET to be different")
+	}
+	return nil
+}
+
+// validateProductionSecret enforces the minimum deployment contract for
+// secrets used to authenticate session cookies or derive application HMAC
+// keys. Local development remains governed by the explicit opt-out above.
+func validateProductionSecret(name string, value string) error {
+	secret := strings.TrimSpace(value)
+	if secret == "" {
+		return fmt.Errorf("production requires an explicit %s", name)
+	}
+	switch strings.ToLower(secret) {
+	case "random_string", "change-me", "changeme", "replace-me", "replace_me":
+		return fmt.Errorf("production rejects placeholder %s", name)
+	}
+	if len([]byte(secret)) < 32 {
+		return fmt.Errorf("production requires %s to be at least 32 bytes", name)
+	}
+	return nil
 }
 
 func initConstantEnv() {

@@ -16,14 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
-import { useForm } from 'react-hook-form'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
+import { useEffect, useMemo, useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
-import { useSystemConfig } from '@/hooks/use-system-config'
+
+import { ErrorState } from '@/components/error-state'
+import { LanguageSwitcher } from '@/components/language-switcher'
+import { LoadingState } from '@/components/loading-state'
 import {
   Card,
   CardContent,
@@ -34,9 +36,9 @@ import {
 } from '@/components/ui/card'
 import { Form } from '@/components/ui/form'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ErrorState } from '@/components/error-state'
-import { LanguageSwitcher } from '@/components/language-switcher'
-import { LoadingState } from '@/components/loading-state'
+import { useSystemConfig } from '@/hooks/use-system-config'
+import { cn } from '@/lib/utils'
+
 import { buildSetupPayload, getSetupStatus, submitSetup } from './api'
 import { AdminStep } from './components/admin-step'
 import { CompleteStep } from './components/complete-step'
@@ -323,27 +325,28 @@ export function SetupWizard() {
               {STEPS.map((step, index) => {
                 const isActive = currentStep === index
                 const isCompleted = currentStep > index
+                let stepClass = 'border-muted bg-card'
+                let stepNumberClass =
+                  'border-muted-foreground/40 text-muted-foreground'
+                if (isActive) {
+                  stepClass = 'border-primary ring-primary/20 ring-2'
+                  stepNumberClass =
+                    'border-primary bg-primary text-primary-foreground'
+                } else if (isCompleted) {
+                  stepClass = 'border-primary/40 bg-primary/5'
+                  stepNumberClass =
+                    'border-primary bg-primary text-primary-foreground'
+                }
                 return (
                   <li
                     key={step.titleKey}
-                    className={cn(
-                      'rounded-xl border p-3',
-                      isActive
-                        ? 'border-primary ring-primary/20 ring-2'
-                        : isCompleted
-                          ? 'border-primary/40 bg-primary/5'
-                          : 'border-muted bg-card'
-                    )}
+                    className={cn('rounded-xl border p-3', stepClass)}
                   >
                     <div className='flex items-start gap-3'>
                       <span
                         className={cn(
                           'flex size-6 items-center justify-center rounded-md border text-xs font-semibold',
-                          isActive
-                            ? 'border-primary bg-primary text-primary-foreground'
-                            : isCompleted
-                              ? 'border-primary bg-primary text-primary-foreground'
-                              : 'border-muted-foreground/40 text-muted-foreground'
+                          stepNumberClass
                         )}
                       >
                         {index + 1}
@@ -362,14 +365,14 @@ export function SetupWizard() {
               })}
             </ol>
 
-            {isLoading ? (
-              <LoadingState message={t('Loading setup status…')} />
-            ) : isError ? (
+            {isLoading && <LoadingState message={t('Loading setup status…')} />}
+            {!isLoading && isError && (
               <ErrorState
                 title={t('We could not load the setup status.')}
                 onRetry={() => refetch()}
               />
-            ) : (
+            )}
+            {!isLoading && !isError && (
               <Form {...form}>
                 <form
                   className='space-y-6'

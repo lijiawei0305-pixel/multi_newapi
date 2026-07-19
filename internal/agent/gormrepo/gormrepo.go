@@ -14,11 +14,14 @@ package gormrepo
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agent"
 )
 
@@ -66,17 +69,26 @@ func (walletRow) TableName() string { return "agent_wallets" }
 
 type earningRow struct {
 	ID         int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	TenantID   int64     `gorm:"column:tenant_id;not null;index:idx_agent_earnings_tenant"`
+	TenantID   int64     `gorm:"column:tenant_id;not null;index:idx_agent_earnings_tenant;uniqueIndex:idx_agent_earnings_source,priority:1"`
 	UserID     int64     `gorm:"column:user_id;not null;default:0"`
-	SourceType string    `gorm:"column:source_type;type:varchar(32);not null"`
-	SourceID   string    `gorm:"column:source_id;type:varchar(128);not null"`
+	SourceType string    `gorm:"column:source_type;type:varchar(32);not null;uniqueIndex:idx_agent_earnings_source,priority:2"`
+	SourceID   string    `gorm:"column:source_id;type:varchar(128);not null;uniqueIndex:idx_agent_earnings_source,priority:3"`
 	IdemKey    string    `gorm:"column:idem_key;type:varchar(200);not null;uniqueIndex:idx_agent_earnings_idem"`
+	ClaimID    string    `gorm:"column:claim_id;type:varchar(64);not null;default:''"`
 	Amount     float64   `gorm:"column:amount;type:decimal(20,8);not null"`
 	Remark     string    `gorm:"column:remark;type:varchar(255);not null;default:''"`
 	CreatedAt  time.Time `gorm:"column:created_at"`
 }
 
 func (earningRow) TableName() string { return "agent_earning_logs" }
+
+func normalizeEarningEntry(entry agent.EarningEntry) agent.EarningEntry {
+	entry.Amount = math.Round(entry.Amount*1e8) / 1e8
+	if !entry.CreatedAt.IsZero() {
+		entry.CreatedAt = entry.CreatedAt.UTC().Truncate(time.Millisecond)
+	}
+	return entry
+}
 
 // ---- 表 4：agent_withdrawals —— 提现单（状态机 pending→approved/rejected） ----
 
@@ -117,7 +129,53 @@ func New(db *gorm.DB) *Repo { return &Repo{db: db, now: time.Now} }
 
 // AutoMigrate 建/补 4 张代理表结构（含唯一/普通索引）。由 mtwire.Migrate 在 master 节点调用。
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&profileRow{}, &walletRow{}, &earningRow{}, &withdrawalRow{})
+	values := []interface{}{&profileRow{}, &walletRow{}, &earningRow{}, &withdrawalRow{}}
+	if db.Dialector.Name() == "sqlite" {
+		return migrateAgentSQLiteAdditively(db, values...)
+	}
+	return db.AutoMigrate(values...)
+}
+
+// migrateAgentSQLiteAdditively avoids glebarez/sqlite's table-rebuild path.
+// That parser cannot handle the decimal(20,8) DDL emitted for these financial
+// tables and fails on a second startup with "invalid DDL, unbalanced brackets".
+// Agent schema evolution is additive: create missing tables, add missing
+// columns in place, and create missing indexes without rewriting old rows or
+// their legacy idempotency keys.
+func migrateAgentSQLiteAdditively(db *gorm.DB, values ...interface{}) error {
+	for _, value := range values {
+		statement := &gorm.Statement{DB: db}
+		if err := statement.Parse(value); err != nil {
+			return err
+		}
+		if !db.Migrator().HasTable(value) {
+			if err := db.Migrator().CreateTable(value); err != nil {
+				return err
+			}
+		} else {
+			for _, columnName := range statement.Schema.DBNames {
+				field := statement.Schema.FieldsByDBName[columnName]
+				if field.IgnoreMigration || db.Migrator().HasColumn(value, columnName) {
+					continue
+				}
+				dataType := db.Migrator().FullDataTypeOf(field)
+				arguments := []interface{}{clause.Table{Name: statement.Table}, clause.Column{Name: columnName}}
+				arguments = append(arguments, dataType.Vars...)
+				if err := db.Exec("ALTER TABLE ? ADD ? "+dataType.SQL, arguments...).Error; err != nil {
+					return fmt.Errorf("add %s.%s: %w", statement.Table, columnName, err)
+				}
+			}
+		}
+		for _, index := range statement.Schema.ParseIndexes() {
+			if db.Migrator().HasIndex(value, index.Name) {
+				continue
+			}
+			if err := db.Migrator().CreateIndex(value, index.Name); err != nil {
+				return fmt.Errorf("create %s index %s: %w", statement.Table, index.Name, err)
+			}
+		}
+	}
+	return nil
 }
 
 // ---- AgentRepo：代理资料 ----
@@ -239,18 +297,25 @@ func (r *Repo) GetWallet(ctx context.Context, tenantID int64) (*agent.AgentWalle
 // AppendEarning 幂等入账：先以 idem_key 唯一约束 INSERT（冲突即已入账，applied=false 且不动钱包），
 // 首次入账才在同事务 upsert 钱包（withdrawable / total_earned 原子累加）。
 func (r *Repo) AppendEarning(ctx context.Context, e agent.EarningEntry) (bool, error) {
+	e = normalizeEarningEntry(e)
+	if err := e.Validate(); err != nil {
+		return false, err
+	}
 	now := r.now()
+	createdAtProvided := !e.CreatedAt.IsZero()
 	if e.CreatedAt.IsZero() {
 		e.CreatedAt = now
 	}
 	applied := false
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		claimID := common.GetUUID()
 		log := earningRow{
 			TenantID:   e.TenantID,
 			UserID:     e.UserID,
 			SourceType: string(e.SourceType),
 			SourceID:   e.SourceID,
 			IdemKey:    e.IdempotencyKey(),
+			ClaimID:    claimID,
 			Amount:     e.Amount,
 			Remark:     e.Remark,
 			CreatedAt:  e.CreatedAt,
@@ -260,8 +325,17 @@ func (r *Repo) AppendEarning(ctx context.Context, e agent.EarningEntry) (bool, e
 		if res.Error != nil {
 			return res.Error
 		}
-		if res.RowsAffected == 0 {
-			return nil // 幂等：同来源不重复入账，applied 保持 false
+		var persisted earningRow
+		if err := tx.Where("tenant_id = ? AND source_type = ? AND source_id = ?", e.TenantID, string(e.SourceType), e.SourceID).
+			First(&persisted).Error; err != nil {
+			return err
+		}
+		if persisted.UserID != e.UserID || normalizeEarningEntry(agent.EarningEntry{Amount: persisted.Amount}).Amount != e.Amount || persisted.Remark != e.Remark ||
+			(createdAtProvided && !persisted.CreatedAt.UTC().Truncate(time.Millisecond).Equal(e.CreatedAt)) {
+			return fmt.Errorf("%w: earning idempotency payload mismatch", agent.ErrEarningInvalid)
+		}
+		if persisted.ClaimID != claimID {
+			return nil // exact idempotent replay; applied remains false
 		}
 		// 首次入账：钱包原子累加（行不存在则创建）。
 		w := walletRow{
@@ -310,15 +384,22 @@ func (r *Repo) AppendEarningsBatch(ctx context.Context, entries []agent.EarningE
 		accs := make(map[int64]*tenantAcc)
 		order := make([]int64, 0, len(entries)) // 稳定 UPSERT 顺序（便于复现/审计）
 		for _, e := range entries {
+			e = normalizeEarningEntry(e)
+			if err := e.Validate(); err != nil {
+				return err
+			}
+			createdAtProvided := !e.CreatedAt.IsZero()
 			if e.CreatedAt.IsZero() {
 				e.CreatedAt = now
 			}
+			claimID := common.GetUUID()
 			log := earningRow{
 				TenantID:   e.TenantID,
 				UserID:     e.UserID,
 				SourceType: string(e.SourceType),
 				SourceID:   e.SourceID,
 				IdemKey:    e.IdempotencyKey(),
+				ClaimID:    claimID,
 				Amount:     e.Amount,
 				Remark:     e.Remark,
 				CreatedAt:  e.CreatedAt,
@@ -328,8 +409,17 @@ func (r *Repo) AppendEarningsBatch(ctx context.Context, entries []agent.EarningE
 			if res.Error != nil {
 				return res.Error
 			}
-			if res.RowsAffected == 0 {
-				continue // 幂等：同 idem_key 已入账，不重复动钱包
+			var persisted earningRow
+			if err := tx.Where("tenant_id = ? AND source_type = ? AND source_id = ?", e.TenantID, string(e.SourceType), e.SourceID).
+				First(&persisted).Error; err != nil {
+				return err
+			}
+			if persisted.UserID != e.UserID || normalizeEarningEntry(agent.EarningEntry{Amount: persisted.Amount}).Amount != e.Amount || persisted.Remark != e.Remark ||
+				(createdAtProvided && !persisted.CreatedAt.UTC().Truncate(time.Millisecond).Equal(e.CreatedAt)) {
+				return fmt.Errorf("%w: earning idempotency payload mismatch", agent.ErrEarningInvalid)
+			}
+			if persisted.ClaimID != claimID {
+				continue
 			}
 			a, ok := accs[e.TenantID]
 			if !ok {
@@ -337,7 +427,7 @@ func (r *Repo) AppendEarningsBatch(ctx context.Context, entries []agent.EarningE
 				accs[e.TenantID] = a
 				order = append(order, e.TenantID)
 			}
-			a.sum += e.Amount
+			a.sum = math.Round((a.sum+e.Amount)*1e8) / 1e8
 			a.userID = e.UserID
 			applied++
 		}

@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -23,6 +24,8 @@ import (
 	promotionrepo "github.com/QuantumNous/new-api/internal/promotion/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // recordingTenantService 是 tenant.TenantService 测试桩：EnsureSubdomain 记录每次调用的 slug 并返回
@@ -75,7 +78,7 @@ func newAgentPlanUpgradeTestApp(t *testing.T, initialLevel int, subErr error) (*
 	if err := promotionrepo.AutoMigrate(db); err != nil {
 		t.Fatalf("promotion migrate: %v", err)
 	}
-	if err := db.AutoMigrate(&agentMembershipRow{}); err != nil {
+	if err := db.AutoMigrate(&agentMembershipRow{}, &agentMembershipGrantRow{}); err != nil {
 		t.Fatalf("membership migrate: %v", err)
 	}
 
@@ -103,6 +106,36 @@ func newAgentPlanUpgradeTestApp(t *testing.T, initialLevel int, subErr error) (*
 	}
 	app.TenantService = rts
 	return app, ownerID, tid, rts
+}
+
+func TestUpsertMembershipAccumulatesExpiryExactlyOncePerOrder(t *testing.T) {
+	app, ownerID, tenantID, _ := newAgentPlanUpgradeTestApp(t, 1, nil)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)
+	first := upgradeOrder(ownerID)
+	first.OrderNo = "AGT-renew-1"
+	first.ValidDays = 30
+
+	require.NoError(t, app.upsertMembership(ctx, tenantID, first, now))
+	var membership agentMembershipRow
+	require.NoError(t, app.DB.Take(&membership, "tenant_id = ?", tenantID).Error)
+	assert.Equal(t, now.AddDate(0, 0, 30), membership.ExpireAt)
+
+	// 同一 source order 重放不得再次延长。
+	require.NoError(t, app.upsertMembership(ctx, tenantID, first, now.AddDate(0, 0, 1)))
+	require.NoError(t, app.DB.Take(&membership, "tenant_id = ?", tenantID).Error)
+	assert.Equal(t, now.AddDate(0, 0, 30), membership.ExpireAt)
+
+	// 尚未到期时续费从 current expiry 起算，而不是覆盖成 retry-time + 30d。
+	second := *first
+	second.OrderNo = "AGT-renew-2"
+	require.NoError(t, app.upsertMembership(ctx, tenantID, &second, now.AddDate(0, 0, 2)))
+	require.NoError(t, app.DB.Take(&membership, "tenant_id = ?", tenantID).Error)
+	assert.Equal(t, now.AddDate(0, 0, 60), membership.ExpireAt)
+
+	var grants int64
+	require.NoError(t, app.DB.Model(&agentMembershipGrantRow{}).Count(&grants).Error)
+	assert.Equal(t, int64(2), grants)
 }
 
 // upgradeOrder 造一笔已支付的 OEM 档（GrantLevel=1）升级订单。

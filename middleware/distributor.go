@@ -169,11 +169,14 @@ func Distribute() func(c *gin.Context) {
 	}
 }
 
-// channelSupportsRequestPath reports whether a channel can serve the request path.
-// Only Advanced Custom (type 58) channels are path-checked; all other channel types
-// always pass. A type-58 channel is usable only when one of its routes matches.
+// channelSupportsRequestPath reports whether a channel can serve the endpoint.
+// Besides Advanced Custom route declarations, Anthropic Messages requests must
+// use an adaptor with an implemented Claude conversion contract.
 func channelSupportsRequestPath(channel *model.Channel, requestPath string) bool {
 	if channel == nil {
+		return false
+	}
+	if constant.IsClaudeMessagesPath(requestPath) && !constant.ChannelTypeSupportsClaudeMessages(channel.Type) {
 		return false
 	}
 	if channel.Type != constant.ChannelTypeAdvancedCustom {

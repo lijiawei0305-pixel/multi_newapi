@@ -1,6 +1,7 @@
 package ionet
 
 import (
+	"context"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type HTTPClient interface {
 
 // HTTPRequest represents an HTTP request
 type HTTPRequest struct {
+	Context context.Context
 	Method  string
 	URL     string
 	Headers map[string]string

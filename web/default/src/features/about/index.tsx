@@ -23,7 +23,8 @@ import { useTranslation } from 'react-i18next'
 import { PublicLayout } from '@/components/layout'
 import { RichContent } from '@/components/rich-content'
 import { Skeleton } from '@/components/ui/skeleton'
-import { isHttpUrl, isLikelyHtml } from '@/lib/content-format'
+import { isLikelyHtml } from '@/lib/content-format'
+import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
 
 import { getAboutContent } from './api'
 
@@ -121,7 +122,7 @@ export function About() {
 
   const rawContent = data?.data?.trim() ?? ''
   const hasContent = rawContent.length > 0
-  const isUrl = hasContent && isHttpUrl(rawContent)
+  const contentUrl = hasContent ? normalizeHttpNavigationUrl(rawContent) : null
 
   if (isLoading) {
     return (
@@ -144,14 +145,15 @@ export function About() {
     )
   }
 
-  if (isUrl) {
+  if (contentUrl) {
     return (
       <PublicLayout showMainContainer={false}>
         <iframe
-          src={rawContent}
+          src={contentUrl}
           className='h-[calc(100vh-3.5rem)] w-full border-0'
           title={t('About')}
           sandbox='allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts'
+          referrerPolicy='no-referrer'
         />
       </PublicLayout>
     )

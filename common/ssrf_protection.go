@@ -33,20 +33,20 @@ var DefaultSSRFProtection = &SSRFProtection{
 // 参考 IANA IPv4 Special-Purpose Address Registry
 // https://www.iana.org/assignments/iana-ipv4-special-registry/
 var privateIPv4Nets = []net.IPNet{
-	{IP: net.IPv4(0, 0, 0, 0), Mask: net.CIDRMask(8, 32)},       // 0.0.0.0/8 ("This network" / 未指定)
-	{IP: net.IPv4(10, 0, 0, 0), Mask: net.CIDRMask(8, 32)},      // 10.0.0.0/8 (私有)
-	{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)},   // 100.64.0.0/10 (运营商级 NAT / CGNAT)
-	{IP: net.IPv4(127, 0, 0, 0), Mask: net.CIDRMask(8, 32)},     // 127.0.0.0/8 (回环)
-	{IP: net.IPv4(169, 254, 0, 0), Mask: net.CIDRMask(16, 32)},  // 169.254.0.0/16 (链路本地)
-	{IP: net.IPv4(172, 16, 0, 0), Mask: net.CIDRMask(12, 32)},   // 172.16.0.0/12 (私有)
-	{IP: net.IPv4(192, 0, 0, 0), Mask: net.CIDRMask(24, 32)},    // 192.0.0.0/24 (IETF 协议分配)
-	{IP: net.IPv4(192, 0, 2, 0), Mask: net.CIDRMask(24, 32)},    // 192.0.2.0/24 (TEST-NET-1)
-	{IP: net.IPv4(192, 168, 0, 0), Mask: net.CIDRMask(16, 32)},  // 192.168.0.0/16 (私有)
-	{IP: net.IPv4(198, 18, 0, 0), Mask: net.CIDRMask(15, 32)},   // 198.18.0.0/15 (基准测试)
-	{IP: net.IPv4(198, 51, 100, 0), Mask: net.CIDRMask(24, 32)}, // 198.51.100.0/24 (TEST-NET-2)
-	{IP: net.IPv4(203, 0, 113, 0), Mask: net.CIDRMask(24, 32)},  // 203.0.113.0/24 (TEST-NET-3)
-	{IP: net.IPv4(224, 0, 0, 0), Mask: net.CIDRMask(4, 32)},     // 224.0.0.0/4 (组播)
-	{IP: net.IPv4(240, 0, 0, 0), Mask: net.CIDRMask(4, 32)},     // 240.0.0.0/4 (保留)
+	{IP: net.IPv4(0, 0, 0, 0), Mask: net.CIDRMask(8, 32)},          // 0.0.0.0/8 ("This network" / 未指定)
+	{IP: net.IPv4(10, 0, 0, 0), Mask: net.CIDRMask(8, 32)},         // 10.0.0.0/8 (私有)
+	{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)},      // 100.64.0.0/10 (运营商级 NAT / CGNAT)
+	{IP: net.IPv4(127, 0, 0, 0), Mask: net.CIDRMask(8, 32)},        // 127.0.0.0/8 (回环)
+	{IP: net.IPv4(169, 254, 0, 0), Mask: net.CIDRMask(16, 32)},     // 169.254.0.0/16 (链路本地)
+	{IP: net.IPv4(172, 16, 0, 0), Mask: net.CIDRMask(12, 32)},      // 172.16.0.0/12 (私有)
+	{IP: net.IPv4(192, 0, 0, 0), Mask: net.CIDRMask(24, 32)},       // 192.0.0.0/24 (IETF 协议分配)
+	{IP: net.IPv4(192, 0, 2, 0), Mask: net.CIDRMask(24, 32)},       // 192.0.2.0/24 (TEST-NET-1)
+	{IP: net.IPv4(192, 168, 0, 0), Mask: net.CIDRMask(16, 32)},     // 192.168.0.0/16 (私有)
+	{IP: net.IPv4(198, 18, 0, 0), Mask: net.CIDRMask(15, 32)},      // 198.18.0.0/15 (基准测试)
+	{IP: net.IPv4(198, 51, 100, 0), Mask: net.CIDRMask(24, 32)},    // 198.51.100.0/24 (TEST-NET-2)
+	{IP: net.IPv4(203, 0, 113, 0), Mask: net.CIDRMask(24, 32)},     // 203.0.113.0/24 (TEST-NET-3)
+	{IP: net.IPv4(224, 0, 0, 0), Mask: net.CIDRMask(4, 32)},        // 224.0.0.0/4 (组播)
+	{IP: net.IPv4(240, 0, 0, 0), Mask: net.CIDRMask(4, 32)},        // 240.0.0.0/4 (保留)
 	{IP: net.IPv4(255, 255, 255, 255), Mask: net.CIDRMask(32, 32)}, // 255.255.255.255/32 (受限广播)
 }
 
@@ -223,6 +223,53 @@ func (p *SSRFProtection) isDomainAllowed(domain string) bool {
 	return !listed
 }
 
+// ValidateDialTarget validates the hostname and port without resolving it.
+// Resolution is deliberately left to the caller that will perform the actual
+// dial, so validation and connection can share the same IP answer.
+func (p *SSRFProtection) ValidateDialTarget(host string, port int) error {
+	host = strings.TrimSpace(strings.TrimSuffix(host, "."))
+	if host == "" {
+		return fmt.Errorf("host is empty")
+	}
+	if !p.isAllowedPort(port) {
+		return fmt.Errorf("port %d is not allowed", port)
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return p.ValidateResolvedIP(host, ip)
+	}
+	if !p.isDomainAllowed(host) {
+		if p.DomainFilterMode {
+			return fmt.Errorf("domain not in whitelist: %s", host)
+		}
+		return fmt.Errorf("domain in blacklist: %s", host)
+	}
+	return nil
+}
+
+// ValidateResolvedIP checks an IP returned for the hostname immediately
+// before dialing it. Private/special addresses are always governed by
+// AllowPrivateIp; the configured IP list applies to domains only when the
+// corresponding setting is enabled.
+func (p *SSRFProtection) ValidateResolvedIP(host string, ip net.IP) error {
+	if ip == nil {
+		return fmt.Errorf("DNS resolution returned an invalid IP for %s", host)
+	}
+	if isPrivateIP(ip) && !p.AllowPrivateIp {
+		return fmt.Errorf("private IP address not allowed: %s resolves to %s", host, ip.String())
+	}
+	if net.ParseIP(host) == nil && !p.ApplyIPFilterForDomain {
+		return nil
+	}
+	listed := isIPListed(ip, p.IpList)
+	if p.IpFilterMode && !listed {
+		return fmt.Errorf("ip not in whitelist: %s resolves to %s", host, ip.String())
+	}
+	if !p.IpFilterMode && listed {
+		return fmt.Errorf("ip in blacklist: %s resolves to %s", host, ip.String())
+	}
+	return nil
+}
+
 // isIPWhitelisted 检查IP是否在白名单中
 
 func isIPListed(ip net.IP, list []string) bool {
@@ -279,30 +326,11 @@ func (p *SSRFProtection) ValidateURL(urlStr string) error {
 		return fmt.Errorf("invalid port: %s", portStr)
 	}
 
-	if !p.isAllowedPort(port) {
-		return fmt.Errorf("port %d is not allowed", port)
+	if err := p.ValidateDialTarget(host, port); err != nil {
+		return err
 	}
-
-	// 如果 host 是 IP，则跳过域名检查
-	if ip := net.ParseIP(host); ip != nil {
-		if !p.IsIPAccessAllowed(ip) {
-			if isPrivateIP(ip) {
-				return fmt.Errorf("private IP address not allowed: %s", ip.String())
-			}
-			if p.IpFilterMode {
-				return fmt.Errorf("ip not in whitelist: %s", ip.String())
-			}
-			return fmt.Errorf("ip in blacklist: %s", ip.String())
-		}
+	if net.ParseIP(host) != nil {
 		return nil
-	}
-
-	// 先进行域名过滤
-	if !p.isDomainAllowed(host) {
-		if p.DomainFilterMode {
-			return fmt.Errorf("domain not in whitelist: %s", host)
-		}
-		return fmt.Errorf("domain in blacklist: %s", host)
 	}
 
 	// 若未启用对域名应用IP过滤，则到此通过
@@ -316,17 +344,29 @@ func (p *SSRFProtection) ValidateURL(urlStr string) error {
 		return fmt.Errorf("DNS resolution failed for %s: %v", host, err)
 	}
 	for _, ip := range ips {
-		if !p.IsIPAccessAllowed(ip) {
-			if isPrivateIP(ip) && !p.AllowPrivateIp {
-				return fmt.Errorf("private IP address not allowed: %s resolves to %s", host, ip.String())
-			}
-			if p.IpFilterMode {
-				return fmt.Errorf("ip not in whitelist: %s resolves to %s", host, ip.String())
-			}
-			return fmt.Errorf("ip in blacklist: %s resolves to %s", host, ip.String())
+		if err := p.ValidateResolvedIP(host, ip); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// NewSSRFProtectionFromFetchSetting builds the same policy used by URL
+// pre-validation for an actual dial-time check.
+func NewSSRFProtectionFromFetchSetting(allowPrivateIp bool, domainFilterMode bool, ipFilterMode bool, domainList, ipList, allowedPorts []string, applyIPFilterForDomain bool) (*SSRFProtection, error) {
+	allowedPortInts, err := parsePortRanges(allowedPorts)
+	if err != nil {
+		return nil, fmt.Errorf("invalid port configuration: %v", err)
+	}
+	return &SSRFProtection{
+		AllowPrivateIp:         allowPrivateIp,
+		DomainFilterMode:       domainFilterMode,
+		DomainList:             domainList,
+		IpFilterMode:           ipFilterMode,
+		IpList:                 ipList,
+		AllowedPorts:           allowedPortInts,
+		ApplyIPFilterForDomain: applyIPFilterForDomain,
+	}, nil
 }
 
 // ValidateURLWithFetchSetting 使用FetchSetting配置验证URL
@@ -337,19 +377,9 @@ func ValidateURLWithFetchSetting(urlStr string, enableSSRFProtection, allowPriva
 	}
 
 	// 解析端口范围配置
-	allowedPortInts, err := parsePortRanges(allowedPorts)
+	protection, err := NewSSRFProtectionFromFetchSetting(allowPrivateIp, domainFilterMode, ipFilterMode, domainList, ipList, allowedPorts, applyIPFilterForDomain)
 	if err != nil {
-		return fmt.Errorf("request reject - invalid port configuration: %v", err)
-	}
-
-	protection := &SSRFProtection{
-		AllowPrivateIp:         allowPrivateIp,
-		DomainFilterMode:       domainFilterMode,
-		DomainList:             domainList,
-		IpFilterMode:           ipFilterMode,
-		IpList:                 ipList,
-		AllowedPorts:           allowedPortInts,
-		ApplyIPFilterForDomain: applyIPFilterForDomain,
+		return fmt.Errorf("request reject - %v", err)
 	}
 	return protection.ValidateURL(urlStr)
 }

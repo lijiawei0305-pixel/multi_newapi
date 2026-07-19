@@ -3700,6 +3700,9 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "计费输入 Token": "Оплачиваемые входные токены",
+    "计费输出 Token": "Оплачиваемые выходные токены",
+    "完整输入长度": "Полная длина входа"
   }
 }

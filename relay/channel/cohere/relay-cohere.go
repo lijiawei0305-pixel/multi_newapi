@@ -1,14 +1,13 @@
 package cohere
 
 import (
-	"encoding/json"
-	"io"
+	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -24,12 +23,13 @@ func requestOpenAI2Cohere(textRequest dto.GeneralOpenAIRequest) *CohereRequest {
 		ChatHistory: []ChatHistory{},
 		Message:     "",
 		Stream:      lo.FromPtrOr(textRequest.Stream, false),
-		MaxTokens:   textRequest.GetMaxTokens(),
 	}
 	if common.CohereSafetySetting != "NONE" {
 		cohereReq.SafetyMode = common.CohereSafetySetting
 	}
-	if cohereReq.MaxTokens == 0 {
+	if textRequest.MaxCompletionTokens != nil || textRequest.MaxTokens != nil {
+		cohereReq.MaxTokens = textRequest.GetMaxTokens()
+	} else {
 		cohereReq.MaxTokens = 4000
 	}
 	for _, msg := range textRequest.Messages {
@@ -55,16 +55,16 @@ func requestOpenAI2Cohere(textRequest dto.GeneralOpenAIRequest) *CohereRequest {
 }
 
 func requestConvertRerank2Cohere(rerankRequest dto.RerankRequest) *CohereRerankRequest {
-	topN := lo.FromPtrOr(rerankRequest.TopN, 1)
-	if topN <= 0 {
-		topN = 1
+	topN := 1
+	if rerankRequest.TopN != nil {
+		topN = *rerankRequest.TopN
 	}
 	cohereReq := CohereRerankRequest{
 		Query:           rerankRequest.Query,
 		Documents:       rerankRequest.Documents,
 		Model:           rerankRequest.Model,
 		TopN:            topN,
-		ReturnDocuments: true,
+		ReturnDocuments: lo.FromPtrOr(rerankRequest.ReturnDocuments, true),
 	}
 	return &cohereReq
 }
@@ -81,6 +81,7 @@ func stopReasonCohere2OpenAI(reason string) string {
 }
 
 func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	defer service.CloseResponseBodyGracefully(resp)
 	responseId := helper.GetResponseID(c)
 	createdTime := common.GetTimestamp()
 	usage := &dto.Usage{}
@@ -98,91 +99,95 @@ func cohereStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		}
 		return 0, nil, nil
 	})
-	dataChan := make(chan string)
-	stopChan := make(chan bool)
-	go func() {
-		for scanner.Scan() {
-			data := scanner.Text()
-			dataChan <- data
-		}
-		if err := scanner.Err(); err != nil {
-			common.SysLog("error reading stream: " + err.Error())
-		}
-		stopChan <- true
-	}()
 	helper.SetEventStreamHeaders(c)
-	isFirst := true
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case data := <-dataChan:
-			if isFirst {
-				isFirst = false
-				info.FirstResponseTime = time.Now()
-			}
-			data = strings.TrimSuffix(data, "\r")
-			var cohereResp CohereResponse
-			err := json.Unmarshal([]byte(data), &cohereResp)
-			if err != nil {
-				common.SysLog("error unmarshalling stream response: " + err.Error())
-				return true
-			}
-			var openaiResp dto.ChatCompletionsStreamResponse
-			openaiResp.Id = responseId
-			openaiResp.Created = createdTime
-			openaiResp.Object = "chat.completion.chunk"
-			openaiResp.Model = info.UpstreamModelName
-			if cohereResp.IsFinished {
-				finishReason := stopReasonCohere2OpenAI(cohereResp.FinishReason)
-				openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{
-					{
-						Delta:        dto.ChatCompletionsStreamResponseChoiceDelta{},
-						Index:        0,
-						FinishReason: &finishReason,
-					},
-				}
-				if cohereResp.Response != nil {
-					usage.PromptTokens = cohereResp.Response.Meta.BilledUnits.InputTokens
-					usage.CompletionTokens = cohereResp.Response.Meta.BilledUnits.OutputTokens
-				}
-			} else {
-				openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{
-					{
-						Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
-							Role:    "assistant",
-							Content: &cohereResp.Text,
-						},
-						Index: 0,
-					},
-				}
-				responseText += cohereResp.Text
-			}
-			jsonStr, err := json.Marshal(openaiResp)
-			if err != nil {
-				common.SysLog("error marshalling stream response: " + err.Error())
-				return true
-			}
-			c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonStr)})
-			return true
-		case <-stopChan:
-			c.Render(-1, common.CustomEvent{Data: "data: [DONE]"})
-			return false
+	seenValidResponse := false
+	completed := false
+	for scanner.Scan() {
+		data := strings.TrimSuffix(scanner.Text(), "\r")
+		if strings.TrimSpace(data) == "" {
+			continue
 		}
-	})
+		var cohereResp CohereResponse
+		if err := common.Unmarshal([]byte(data), &cohereResp); err != nil {
+			common.SysLog("error unmarshalling stream response: " + err.Error())
+			service.MarkUpstreamAccepted(c)
+			return usage, relaychannel.AcceptedResponseDeliveryError()
+		}
+		eventType := strings.ToLower(strings.TrimSpace(cohereResp.EventType))
+		finishReasonValue := strings.ToUpper(strings.TrimSpace(cohereResp.FinishReason))
+		if strings.Contains(eventType, "error") || strings.HasPrefix(finishReasonValue, "ERROR") {
+			if seenValidResponse {
+				service.MarkUpstreamAccepted(c)
+				return usage, relaychannel.AcceptedResponseDeliveryError()
+			}
+			return usage, service.MarkExplicitUpstreamRejection(types.NewOpenAIError(
+				fmt.Errorf("Cohere rejected the streaming request: event=%s finish_reason=%s", cohereResp.EventType, cohereResp.FinishReason),
+				types.ErrorCodeBadResponse,
+				http.StatusBadGateway,
+			))
+		}
+		service.MarkUpstreamAccepted(c)
+		seenValidResponse = true
+		info.SetFirstResponseTime()
+		var openaiResp dto.ChatCompletionsStreamResponse
+		openaiResp.Id = responseId
+		openaiResp.Created = createdTime
+		openaiResp.Object = "chat.completion.chunk"
+		openaiResp.Model = info.UpstreamModelName
+		if cohereResp.IsFinished || eventType == "stream-end" {
+			completed = true
+			finishReason := stopReasonCohere2OpenAI(cohereResp.FinishReason)
+			openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{{
+				Delta:        dto.ChatCompletionsStreamResponseChoiceDelta{},
+				Index:        0,
+				FinishReason: &finishReason,
+			}}
+			if cohereResp.Response != nil {
+				usage.PromptTokens = cohereResp.Response.Meta.BilledUnits.InputTokens
+				usage.CompletionTokens = cohereResp.Response.Meta.BilledUnits.OutputTokens
+				usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+			}
+		} else {
+			openaiResp.Choices = []dto.ChatCompletionsStreamResponseChoice{{
+				Delta: dto.ChatCompletionsStreamResponseChoiceDelta{
+					Role:    "assistant",
+					Content: &cohereResp.Text,
+				},
+				Index: 0,
+			}}
+			responseText += cohereResp.Text
+		}
+		if err := helper.ObjectData(c, openaiResp); err != nil {
+			return usage, relaychannel.AcceptedResponseDeliveryError()
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		common.SysLog("error reading stream: " + err.Error())
+		service.MarkUpstreamAccepted(c)
+		return usage, relaychannel.AcceptedResponseDeliveryError()
+	}
 	if usage.PromptTokens == 0 {
 		usage = service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens())
+	}
+	if !seenValidResponse || !completed {
+		service.MarkUpstreamAccepted(c)
+		return usage, relaychannel.AcceptedResponseDeliveryError()
+	}
+	if err := helper.StringData(c, "[DONE]"); err != nil {
+		return usage, relaychannel.AcceptedResponseDeliveryError()
 	}
 	return usage, nil
 }
 
 func cohereHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	createdTime := common.GetTimestamp()
-	responseBody, err := io.ReadAll(resp.Body)
+	defer service.CloseResponseBodyGracefully(resp)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
-	service.CloseResponseBodyGracefully(resp)
 	var cohereResp CohereResponseResult
-	err = json.Unmarshal(responseBody, &cohereResp)
+	err = common.Unmarshal(responseBody, &cohereResp)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
@@ -206,7 +211,7 @@ func cohereHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		},
 	}
 
-	jsonResponse, err := json.Marshal(openaiResp)
+	jsonResponse, err := common.Marshal(openaiResp)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
@@ -217,13 +222,13 @@ func cohereHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 }
 
 func cohereRerankHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
-	responseBody, err := io.ReadAll(resp.Body)
+	defer service.CloseResponseBodyGracefully(resp)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
-	service.CloseResponseBodyGracefully(resp)
 	var cohereResp CohereRerankResponseResult
-	err = json.Unmarshal(responseBody, &cohereResp)
+	err = common.Unmarshal(responseBody, &cohereResp)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
@@ -242,7 +247,7 @@ func cohereRerankHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	rerankResp.Results = cohereResp.Results
 	rerankResp.Usage = usage
 
-	jsonResponse, err := json.Marshal(rerankResp)
+	jsonResponse, err := common.Marshal(rerankResp)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}

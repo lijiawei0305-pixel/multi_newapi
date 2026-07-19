@@ -8,9 +8,10 @@ func GetModelEnableGroups(modelName string) []string {
 		return make([]string, 0)
 	}
 
-	modelEnableGroupsLock.RLock()
-	groups, ok := modelEnableGroups[modelName]
-	modelEnableGroupsLock.RUnlock()
+	pricingCacheLock.RLock()
+	groups, ok := pricingCache.modelEnableGroups[modelName]
+	groups = append([]string(nil), groups...)
+	pricingCacheLock.RUnlock()
 	if !ok {
 		return make([]string, 0)
 	}
@@ -21,9 +22,9 @@ func GetModelEnableGroups(modelName string) []string {
 func GetModelQuotaTypes(modelName string) []int {
 	GetPricing()
 
-	modelEnableGroupsLock.RLock()
-	quota, ok := modelQuotaTypeMap[modelName]
-	modelEnableGroupsLock.RUnlock()
+	pricingCacheLock.RLock()
+	quota, ok := pricingCache.modelQuotaTypes[modelName]
+	pricingCacheLock.RUnlock()
 	if !ok {
 		return []int{}
 	}

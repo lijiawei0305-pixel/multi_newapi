@@ -111,17 +111,17 @@
 
 ---
 
-## 本项目配置（填入 auth-service/config.yaml）
+## 本项目配置
 
-```yaml
-alipay:
-  mock: false
-  app_id: ""               # 待填：支付宝 app_id
-  private_key: ""          # 待填：应用私钥（PEM 内容，或读取文件路径）
-  alipay_public_key: ""    # 待填：支付宝公钥（PEM 内容）
-  notify_url: "https://your-domain.com/api/payment/alipay/notify"
-  return_url: "https://your-domain.com/order/status"
-  sandbox: false           # true=沙箱，false=正式
+当前支付宝 SDK 运行在主站进程内。管理员在「系统设置 → 集成 → 支付 → 支付宝」填写并验证应用 ID、
+应用私钥、支付宝公钥及返回地址；凭据由主站写入现有 options 数据库配置，不使用仓库内 YAML。请限制数据库和备份的访问。
+
+异步通知地址由 `MT_PAY_NOTIFY_BASE` 与固定路径组成：
+
+```text
+https://your-domain.com/api/pay/alipay/notify
 ```
 
-**安全要求**：私钥通过环境变量或服务器文件路径注入，绝不写入代码或 Git 仓库。
+完整上线步骤见 [`deploy-real-payments.md`](deploy-real-payments.md)。
+
+**安全要求**：私钥只通过受控管理页提交，绝不写入代码、Git、Compose 或命令历史。

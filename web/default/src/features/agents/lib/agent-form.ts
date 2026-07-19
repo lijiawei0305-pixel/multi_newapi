@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { z } from 'zod'
 import type { TFunction } from 'i18next'
+import { z } from 'zod'
+
 import type { Agent, AgentPayload } from '../types'
 
 export function getAgentFormSchema(t: TFunction) {
@@ -25,7 +26,10 @@ export function getAgentFormSchema(t: TFunction) {
     owner_user_id: z.coerce
       .number()
       .int()
-      .min(1, t('Please select an owner user', { defaultValue: '请选择所属用户' })),
+      .min(
+        1,
+        t('Please select an owner user', { defaultValue: '请选择所属用户' })
+      ),
     slug: z
       .string()
       .min(1, t('Please enter a slug', { defaultValue: '请填写标识 Slug' })),

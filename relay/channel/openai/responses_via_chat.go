@@ -2,12 +2,12 @@ package openai
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -22,7 +22,7 @@ func OaiChatToResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	}
 	defer service.CloseResponseBodyGracefully(resp)
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
@@ -31,9 +31,10 @@ func OaiChatToResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if err := common.Unmarshal(body, &chatResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if oaiError := chatResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
-		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
+	if apiErr := explicitOpenAIRejection(chatResp.GetOpenAIError(), resp.StatusCode); apiErr != nil {
+		return nil, apiErr
 	}
+	service.MarkUpstreamAccepted(c)
 
 	responseID := helper.GetResponseID(c)
 	responsesResp, usage, err := service.ChatCompletionsResponseToResponsesResponse(&chatResp, responseID)
@@ -64,6 +65,8 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	responseID := helper.GetResponseID(c)
 	state := relayconvert.NewChatToResponsesStreamState(responseID, info.UpstreamModelName)
 	streamErr := (*types.NewAPIError)(nil)
+	seenValidResponse := false
+	completed := false
 
 	sendEvent := func(event relayconvert.ChatToResponsesStreamEvent) bool {
 		data, err := common.Marshal(event.Payload)
@@ -71,7 +74,10 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			streamErr = types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
 			return false
 		}
-		helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: event.Type}, string(data))
+		if err := helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: event.Type}, string(data)); err != nil {
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			return false
+		}
 		return true
 	}
 
@@ -83,8 +89,13 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 		var errorResp dto.OpenAITextResponse
 		if err := common.UnmarshalJsonStr(data, &errorResp); err == nil {
-			if oaiError := errorResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
-				streamErr = types.WithOpenAIError(*oaiError, resp.StatusCode)
+			if apiErr := explicitOpenAIRejection(errorResp.GetOpenAIError(), resp.StatusCode); apiErr != nil {
+				if seenValidResponse {
+					service.MarkUpstreamAccepted(c)
+					streamErr = relaychannel.AcceptedResponseDeliveryError()
+				} else {
+					streamErr = apiErr
+				}
 				sr.Stop(streamErr)
 				return
 			}
@@ -93,13 +104,24 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		var chunk dto.ChatCompletionsStreamResponse
 		if err := common.UnmarshalJsonStr(data, &chunk); err != nil {
 			logger.LogError(c, "failed to unmarshal chat stream response: "+err.Error())
-			sr.Error(err)
+			service.MarkUpstreamAccepted(c)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
 			return
 		}
+		if chunk.Id == "" && chunk.Object == "" && chunk.Model == "" && chunk.Choices == nil && chunk.Usage == nil {
+			service.MarkUpstreamAccepted(c)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
+			return
+		}
+		service.MarkUpstreamAccepted(c)
+		seenValidResponse = true
+		completed = completed || chunk.IsFinished()
 
 		events, err := relayconvert.ChatCompletionsStreamChunkToResponsesEvents(&chunk, state)
 		if err != nil {
-			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
 			sr.Stop(streamErr)
 			return
 		}
@@ -113,6 +135,11 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 	if streamErr != nil {
 		return nil, streamErr
+	}
+	finishedNormally := completed || info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonDone
+	if info.StreamStatus == nil || !info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors() || !seenValidResponse || !finishedNormally {
+		service.MarkUpstreamAccepted(c)
+		return nil, relaychannel.AcceptedResponseDeliveryError()
 	}
 
 	usage := state.Usage

@@ -17,8 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import React, { useState } from 'react'
+
 import useDialogState from '@/hooks/use-dialog'
-import { type AdminTokenPlan, type TokenPlansDialogType } from '../types'
+
+import type { AdminTokenPlan, TokenPlansDialogType } from '../types'
 
 type TokenPlansContextType = {
   open: TokenPlansDialogType | null
@@ -29,7 +31,9 @@ type TokenPlansContextType = {
   triggerRefresh: () => void
 }
 
-const TokenPlansContext = React.createContext<TokenPlansContextType | null>(null)
+const TokenPlansContext = React.createContext<TokenPlansContextType | null>(
+  null
+)
 
 export function TokenPlansProvider({
   children,

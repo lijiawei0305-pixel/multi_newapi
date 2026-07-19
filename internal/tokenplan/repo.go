@@ -17,7 +17,7 @@ type listingKey struct {
 //
 // 关键点：Meter（月度计量）与 ActivateFromOrder（幂等激活）在同一把互斥锁下完成
 // 「读-判定-写」，**模拟 detailed-design §6.2 的原子条件 UPDATE**，高并发下零穿透/零重复。
-// 真实 GORM 实现（条件 UPDATE / 行锁、scopeByTenant、迁移）顺延（见报告 TODO）。
+// 生产 GORM 实现（条件 UPDATE / 行锁、scopeByTenant、迁移）位于 gormrepo 子包。
 type MemRepo struct {
 	mu sync.Mutex
 

@@ -1,12 +1,13 @@
 package jimeng
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
@@ -51,15 +52,18 @@ func responseJimeng2OpenAIImage(_ *gin.Context, response *ImageResponse, info *r
 // jimengImageHandler handles the Jimeng image generation response
 func jimengImageHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
 	var jimengResponse ImageResponse
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
-	}
-	service.CloseResponseBodyGracefully(resp)
-
-	err = json.Unmarshal(responseBody, &jimengResponse)
-	if err != nil {
-		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+	defer service.CloseResponseBodyGracefully(resp)
+	if err := common.DecodeJsonWithLimit(resp.Body, &jimengResponse, common.UpstreamJSONBodyLimit()); err != nil {
+		service.MarkUpstreamAccepted(c)
+		if errors.Is(err, common.ErrReadLimitExceeded) {
+			common.SysError("accepted Jimeng image response exceeded the local response limit; retry suppressed")
+		} else {
+			common.SysError(fmt.Sprintf("accepted Jimeng image response decode failed: error_type=%T", err))
+		}
+		if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+			_ = buffered.Fail(err)
+		}
+		return nil, channel.AcceptedResponseDeliveryError()
 	}
 
 	// Check if the response indicates an error
@@ -69,21 +73,19 @@ func jimengImageHandler(c *gin.Context, resp *http.Response, info *relaycommon.R
 			Type:    "jimeng_error",
 			Param:   "",
 			Code:    fmt.Sprintf("%d", jimengResponse.Code),
-		}, resp.StatusCode)
+		}, http.StatusBadGateway)
 	}
+	service.MarkUpstreamAccepted(c)
 
 	// Convert Jimeng response to OpenAI format
 	fullTextResponse := responseJimeng2OpenAIImage(c, &jimengResponse, info)
-	jsonResponse, err := json.Marshal(fullTextResponse)
-	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
-	}
-
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(resp.StatusCode)
-	_, err = c.Writer.Write(jsonResponse)
-	if err != nil {
-		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+	if err := channel.WriteImageResponse(c.Writer, fullTextResponse); err != nil {
+		if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+			_ = buffered.Fail(err)
+		}
+		return &dto.Usage{}, nil
 	}
 
 	return &dto.Usage{}, nil

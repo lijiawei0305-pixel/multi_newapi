@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/stretchr/testify/assert"
@@ -22,6 +24,8 @@ import (
 type taskPollingFetchAdaptor struct {
 	mu           sync.Mutex
 	taskIDs      []string
+	active       int
+	maxActive    int
 	fetched      chan string
 	blockTaskID  string
 	blockStarted chan struct{}
@@ -31,7 +35,19 @@ type taskPollingFetchAdaptor struct {
 
 func (a *taskPollingFetchAdaptor) Init(_ *relaycommon.RelayInfo) {}
 
-func (a *taskPollingFetchAdaptor) FetchTask(_ string, _ string, body map[string]any, _ string) (*http.Response, error) {
+func (a *taskPollingFetchAdaptor) FetchTask(ctx context.Context, _ string, _ string, body map[string]any, _ string) (*http.Response, error) {
+	a.mu.Lock()
+	a.active++
+	if a.active > a.maxActive {
+		a.maxActive = a.active
+	}
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.active--
+		a.mu.Unlock()
+	}()
+
 	taskID, _ := body["task_id"].(string)
 	if taskID == a.blockTaskID && a.releaseBlock != nil {
 		a.blockOnce.Do(func() {
@@ -39,7 +55,11 @@ func (a *taskPollingFetchAdaptor) FetchTask(_ string, _ string, body map[string]
 				close(a.blockStarted)
 			}
 		})
-		<-a.releaseBlock
+		select {
+		case <-a.releaseBlock:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
 	a.mu.Lock()
@@ -88,6 +108,40 @@ func (a *taskPollingFetchAdaptor) fetchedTaskIDs() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]string(nil), a.taskIDs...)
+}
+
+func (a *taskPollingFetchAdaptor) maximumConcurrentFetches() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.maxActive
+}
+
+type closeTrackingBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *closeTrackingBody) Close() error {
+	b.closed = true
+	return nil
+}
+
+type sunoStatusPollingAdaptor struct {
+	response *http.Response
+}
+
+func (*sunoStatusPollingAdaptor) Init(*relaycommon.RelayInfo) {}
+
+func (a *sunoStatusPollingAdaptor) FetchTask(context.Context, string, string, map[string]any, string) (*http.Response, error) {
+	return a.response, nil
+}
+
+func (*sunoStatusPollingAdaptor) ParseTaskResult([]byte) (*relaycommon.TaskInfo, error) {
+	return nil, nil
+}
+
+func (*sunoStatusPollingAdaptor) AdjustBillingOnComplete(*model.Task, *relaycommon.TaskInfo) int {
+	return 0
 }
 
 func seedTaskPollingChannel(t *testing.T, id int, disableSleep bool) {
@@ -153,6 +207,22 @@ func TestUpdateVideoTasksDefaultSleepWaitsBetweenTasks(t *testing.T) {
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Equal(t, 1, adaptor.fetchCount())
+}
+
+func TestNormalizeSunoFailureMakesEarlyFailReasonTerminal(t *testing.T) {
+	task := &model.Task{Status: model.TaskStatusInProgress, Progress: "35%", FailReason: "provider rejected the input"}
+
+	assert.True(t, normalizeSunoFailure(task, task.FailReason))
+	assert.EqualValues(t, model.TaskStatusFailure, task.Status)
+	assert.Equal(t, taskcommon.ProgressComplete, task.Progress)
+}
+
+func TestNormalizeSunoFailureLeavesHealthyProgressUnchanged(t *testing.T) {
+	task := &model.Task{Status: model.TaskStatusInProgress, Progress: "35%"}
+
+	assert.False(t, normalizeSunoFailure(task, ""))
+	assert.EqualValues(t, model.TaskStatusInProgress, task.Status)
+	assert.Equal(t, "35%", task.Progress)
 }
 
 func TestUpdateVideoTasksCanSkipPollingSleepPerChannel(t *testing.T) {
@@ -235,10 +305,13 @@ func TestUpdateVideoTasksSlowChannelDoesNotBlockOtherChannels(t *testing.T) {
 	slowTask := seedPollingTask(t, slowChannelID, "task_public_slow", "upstream_slow_1")
 	fastFirst := seedPollingTask(t, fastChannelID, "task_public_fast_1", "upstream_fast_parallel_1")
 	fastSecond := seedPollingTask(t, fastChannelID, "task_public_fast_2", "upstream_fast_parallel_2")
+	slowUpstreamID := slowTask.GetUpstreamTaskID()
+	fastFirstUpstreamID := fastFirst.GetUpstreamTaskID()
+	fastSecondUpstreamID := fastSecond.GetUpstreamTaskID()
 
 	adaptor := &taskPollingFetchAdaptor{
 		fetched:      make(chan string, 4),
-		blockTaskID:  slowTask.GetUpstreamTaskID(),
+		blockTaskID:  slowUpstreamID,
 		blockStarted: make(chan struct{}),
 		releaseBlock: make(chan struct{}),
 	}
@@ -257,16 +330,16 @@ func TestUpdateVideoTasksSlowChannelDoesNotBlockOtherChannels(t *testing.T) {
 	gopool.Go(func() {
 		errCh <- UpdateVideoTasks(context.Background(), constant.TaskPlatform("kling"), map[int][]string{
 			slowChannelID: {
-				slowTask.GetUpstreamTaskID(),
+				slowUpstreamID,
 			},
 			fastChannelID: {
-				fastFirst.GetUpstreamTaskID(),
-				fastSecond.GetUpstreamTaskID(),
+				fastFirstUpstreamID,
+				fastSecondUpstreamID,
 			},
 		}, map[string]*model.Task{
-			slowTask.GetUpstreamTaskID():   slowTask,
-			fastFirst.GetUpstreamTaskID():  fastFirst,
-			fastSecond.GetUpstreamTaskID(): fastSecond,
+			slowUpstreamID:       slowTask,
+			fastFirstUpstreamID:  fastFirst,
+			fastSecondUpstreamID: fastSecond,
 		})
 	})
 
@@ -279,17 +352,120 @@ func TestUpdateVideoTasksSlowChannelDoesNotBlockOtherChannels(t *testing.T) {
 	require.Eventually(t, func() bool {
 		fetchedTaskIDs := adaptor.fetchedTaskIDs()
 		return len(fetchedTaskIDs) == 2 &&
-			fetchedTaskIDs[0] == fastFirst.GetUpstreamTaskID() &&
-			fetchedTaskIDs[1] == fastSecond.GetUpstreamTaskID()
+			fetchedTaskIDs[0] == fastFirstUpstreamID &&
+			fetchedTaskIDs[1] == fastSecondUpstreamID
 	}, 500*time.Millisecond, 10*time.Millisecond)
 
 	releaseBlockedTask()
 	require.NoError(t, <-errCh)
 	assert.ElementsMatch(t, []string{
-		slowTask.GetUpstreamTaskID(),
-		fastFirst.GetUpstreamTaskID(),
-		fastSecond.GetUpstreamTaskID(),
+		slowUpstreamID,
+		fastFirstUpstreamID,
+		fastSecondUpstreamID,
 	}, adaptor.fetchedTaskIDs())
+}
+
+func TestUpdateVideoTasksCancellationEndsInFlightFetchBeforeNextRun(t *testing.T) {
+	truncate(t)
+
+	const channelID = 261
+	seedTaskPollingChannel(t, channelID, true)
+	task := seedPollingTask(t, channelID, "task_public_lease", "upstream_lease")
+	upstreamID := task.GetUpstreamTaskID()
+
+	adaptor := &taskPollingFetchAdaptor{
+		blockTaskID:  upstreamID,
+		blockStarted: make(chan struct{}),
+		releaseBlock: make(chan struct{}),
+	}
+	previousFactory := GetTaskAdaptorFunc
+	GetTaskAdaptorFunc = func(constant.TaskPlatform) TaskPollingAdaptor { return adaptor }
+	t.Cleanup(func() { GetTaskAdaptorFunc = previousFactory })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	firstRun := make(chan error, 1)
+	gopool.Go(func() {
+		firstRun <- UpdateVideoTasks(ctx, constant.TaskPlatform("kling"), map[int][]string{
+			channelID: {upstreamID},
+		}, map[string]*model.Task{upstreamID: task})
+	})
+
+	select {
+	case <-adaptor.blockStarted:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("poll request did not enter the blackhole")
+	}
+	cancel()
+	select {
+	case err := <-firstRun:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("canceled poll outlived its lease context")
+	}
+
+	close(adaptor.releaseBlock)
+	require.NoError(t, UpdateVideoTasks(context.Background(), constant.TaskPlatform("kling"), map[int][]string{
+		channelID: {upstreamID},
+	}, map[string]*model.Task{upstreamID: task}))
+	assert.Equal(t, 1, adaptor.maximumConcurrentFetches(), "a later poll owner must not overlap the canceled owner")
+}
+
+func TestUpdateSunoTasksClosesNonOKResponseBody(t *testing.T) {
+	truncate(t)
+
+	const channelID = 271
+	baseURL := "https://suno.invalid"
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Type:    constant.ChannelTypeSunoAPI,
+		Name:    "suno_polling_channel",
+		Key:     "sk-test",
+		Status:  common.ChannelStatusEnabled,
+		BaseURL: &baseURL,
+	}).Error)
+
+	body := &closeTrackingBody{Reader: bytes.NewBufferString("upstream unavailable")}
+	adaptor := &sunoStatusPollingAdaptor{response: &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       body,
+	}}
+	previousFactory := GetTaskAdaptorFunc
+	GetTaskAdaptorFunc = func(constant.TaskPlatform) TaskPollingAdaptor { return adaptor }
+	t.Cleanup(func() { GetTaskAdaptorFunc = previousFactory })
+
+	err := updateSunoTasks(context.Background(), channelID, []string{"upstream-suno"}, nil)
+	require.Error(t, err)
+	assert.True(t, body.closed, "non-200 task response body must be closed")
+}
+
+func TestUpdateSunoTasksReportsUnsuccessfulPayloadWithoutLeakingMessage(t *testing.T) {
+	truncate(t)
+
+	const channelID = 272
+	baseURL := "https://suno.invalid"
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      channelID,
+		Type:    constant.ChannelTypeSunoAPI,
+		Name:    "suno_unsuccessful_channel",
+		Key:     "sk-test",
+		Status:  common.ChannelStatusEnabled,
+		BaseURL: &baseURL,
+	}).Error)
+
+	body := &closeTrackingBody{Reader: strings.NewReader(`{"code":"provider_denied","message":"secret provider diagnostic","data":[]}`)}
+	adaptor := &sunoStatusPollingAdaptor{response: &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       body,
+	}}
+	previousFactory := GetTaskAdaptorFunc
+	GetTaskAdaptorFunc = func(constant.TaskPlatform) TaskPollingAdaptor { return adaptor }
+	t.Cleanup(func() { GetTaskAdaptorFunc = previousFactory })
+
+	err := updateSunoTasks(context.Background(), channelID, []string{"upstream-suno"}, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `code="provider_denied"`)
+	assert.NotContains(t, err.Error(), "secret provider diagnostic")
+	assert.True(t, body.closed)
 }
 
 func TestUpdateVideoTasksMixedChannelSleepSettings(t *testing.T) {

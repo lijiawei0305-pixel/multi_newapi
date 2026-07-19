@@ -22,7 +22,7 @@ type codeKey struct {
 //
 // 关键点：余额扣减（ChargeBalance）与兑换码翻牌（UseRedemption）在同一把互斥锁下完成
 // 「读-判定-写」，**模拟 detailed-design §6.2 的原子条件 UPDATE**，高并发下零穿透/零透支。
-// 真实 GORM 实现（条件 UPDATE / 行锁、scopeByTenant、迁移）顺延（见报告 TODO）。
+// 生产 GORM 实现（条件 UPDATE / 行锁、scopeByTenant、迁移）位于 gormrepo 子包。
 type MemRepo struct {
 	mu        sync.Mutex
 	balances  map[balKey]float64

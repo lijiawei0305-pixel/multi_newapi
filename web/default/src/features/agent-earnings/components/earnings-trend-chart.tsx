@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo } from 'react'
 import { VChart } from '@visactor/react-vchart'
 import { TrendingUp } from 'lucide-react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { Skeleton } from '@/components/ui/skeleton'
 import { cny } from '@/features/financial-report/lib'
 import type { EarningsTrendPoint } from '@/features/financial-report/types'
@@ -41,7 +42,10 @@ export interface EarningsTrendChartProps {
   loading?: boolean
 }
 
-export function EarningsTrendChart({ series, loading }: EarningsTrendChartProps) {
+export function EarningsTrendChart({
+  series,
+  loading,
+}: EarningsTrendChartProps) {
   const { t } = useTranslation()
   const { resolvedTheme, themeReady } = useChartTheme()
 
@@ -61,8 +65,16 @@ export function EarningsTrendChart({ series, loading }: EarningsTrendChartProps)
     for (const point of series) {
       const tokenplan = Number(point.tokenplan_withdrawable_cny) || 0
       const consumption = Number(point.consumption_withdrawable_cny) || 0
-      out.push({ bucket: point.bucket, series: tokenplanLabel, value: tokenplan })
-      out.push({ bucket: point.bucket, series: consumptionLabel, value: consumption })
+      out.push({
+        bucket: point.bucket,
+        series: tokenplanLabel,
+        value: tokenplan,
+      })
+      out.push({
+        bucket: point.bucket,
+        series: consumptionLabel,
+        value: consumption,
+      })
       out.push({
         bucket: point.bucket,
         series: totalLabel,
@@ -159,13 +171,13 @@ export function EarningsTrendChart({ series, loading }: EarningsTrendChartProps)
         </h3>
       </header>
       <div className='h-64 p-2 sm:h-72'>
-        {loading || !themeReady ? (
-          <Skeleton className='h-full w-full' />
-        ) : values.length === 0 ? (
+        {(loading || !themeReady) && <Skeleton className='h-full w-full' />}
+        {!loading && themeReady && values.length === 0 && (
           <div className='text-muted-foreground/80 flex h-full items-center justify-center text-xs'>
             {t('No data available')}
           </div>
-        ) : (
+        )}
+        {!loading && themeReady && values.length > 0 && (
           <VChart
             key={chartKey}
             spec={{

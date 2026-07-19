@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { KeyRound, Loader2, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
+import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -27,10 +29,9 @@ import {
   SelectSeparator,
   SelectTrigger,
 } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
 import { API_KEY_STATUS } from '@/features/keys/constants'
 import type { ApiKey } from '@/features/keys/types'
+import { cn } from '@/lib/utils'
 
 // 「auto 分组·不指定密钥」哨兵值（Select 需要一个非空 value 才能高亮该项）。
 // 选中 auto 时对外表现为「未选具体密钥」：目录展示全部模型，聊天走后端 auto 组自动路由。
@@ -71,9 +72,8 @@ export function KeySelector({
   loading = false,
 }: KeySelectorProps) {
   const { t } = useTranslation()
-  const selectedKey = selectedId != null
-    ? keys.find((k) => k.id === selectedId) ?? null
-    : null
+  const selectedKey =
+    selectedId != null ? (keys.find((k) => k.id === selectedId) ?? null) : null
 
   // 整个下拉禁用：未登录 或 正在加载
   const rootDisabled = !isAuthed || loading
@@ -101,15 +101,17 @@ export function KeySelector({
       <SelectTrigger
         className={cn(
           'min-w-[200px] max-w-[280px]',
-          rootDisabled && 'cursor-not-allowed opacity-60',
+          rootDisabled && 'cursor-not-allowed opacity-60'
         )}
         aria-label={t('Select an API key')}
       >
-        {loading ? (
+        {loading && (
           <Loader2 className='text-muted-foreground size-3.5 shrink-0 animate-spin' />
-        ) : selectedKey != null ? (
+        )}
+        {!loading && selectedKey != null && (
           <KeyRound className='text-muted-foreground size-3.5 shrink-0' />
-        ) : (
+        )}
+        {!loading && selectedKey == null && (
           <Sparkles className='text-muted-foreground size-3.5 shrink-0' />
         )}
         {selectedKey != null ? (
@@ -117,7 +119,7 @@ export function KeySelector({
             {selectedKey.name}
           </span>
         ) : (
-          <span className='flex-1 truncate text-left text-sm text-muted-foreground'>
+          <span className='text-muted-foreground flex-1 truncate text-left text-sm'>
             {!isAuthed ? t('Please sign in to select an API key') : 'auto'}
           </span>
         )}
@@ -130,12 +132,16 @@ export function KeySelector({
           <SelectItem value={AUTO_VALUE}>
             <span className='flex flex-1 items-center gap-2 truncate'>
               <Sparkles className='size-3.5 shrink-0' />
-              <span className='truncate'>{t('auto · Auto-routing (all models)')}</span>
+              <span className='truncate'>
+                {t('auto · Auto-routing (all models)')}
+              </span>
             </span>
           </SelectItem>
         </SelectGroup>
 
-        {(enabledKeys.length > 0 || disabledKeys.length > 0) && <SelectSeparator />}
+        {(enabledKeys.length > 0 || disabledKeys.length > 0) && (
+          <SelectSeparator />
+        )}
 
         {/* 可用密钥分组 */}
         {enabledKeys.length > 0 && (
@@ -170,7 +176,10 @@ export function KeySelector({
                     <span className='truncate'>{key.name}</span>
                   </span>
                   {STATUS_LABEL[key.status] != null && (
-                    <Badge variant='outline' className='ml-auto shrink-0 text-xs'>
+                    <Badge
+                      variant='outline'
+                      className='ml-auto shrink-0 text-xs'
+                    >
                       {t(STATUS_LABEL[key.status])}
                     </Badge>
                   )}

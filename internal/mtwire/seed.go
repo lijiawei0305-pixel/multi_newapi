@@ -3,6 +3,10 @@ package mtwire
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 
@@ -20,9 +24,10 @@ const (
 	demoSlug = "tokendream"
 	demoName = "TokenDream"
 
-	// demo 代理 owner 用户（便于 UI/E2E 有可登录的代理样例）。
-	demoAgentUsername = "demoagent"
-	demoAgentPassword = "demoagent123" // 8-20 位，满足 new-api 校验；演示用，部署后请改。
+	// demo 代理 owner 用户（仅显式启用的本地/测试环境创建）。
+	demoAgentUsername       = "demoagent"
+	demoAgentPasswordEnv    = "MT_DEMO_AGENT_PASSWORD"
+	demoAgentSeedEnabledEnv = "MT_ENABLE_DEMO_AGENT_SEED"
 
 	// 平台（主站）直销租户：产品侧已确认「主站自身也直销 tokenplan 套餐 + 接受直充」（非仅代理转售），
 	// 见 platformTenant / http.go resolveBuyerTenant。slug 非保留词（见 tenant.ReservedSlugs），可正常
@@ -32,18 +37,33 @@ const (
 	platformName = "主站直销"
 )
 
+// ErrDemoAgentSecurity marks a failure to retire or safely configure the
+// historical demo login. Master startup must fail closed on this class of seed
+// error because continuing could leave a reserved demo login enabled unexpectedly.
+var ErrDemoAgentSecurity = errors.New("demo agent security reconciliation failed")
+
 // Seed 幂等地写入演示数据（仅 master 节点调用，见 router/mt-router.go）：
 //  1. demo 租户 tokendream（+ 自动域名 tokendream.wedreamhub.com），开启 tokenplan；
 //  2. proposal §8.2 的 6 档主站套餐写入 token_plans（按 code 幂等）；
 //  3. 6 档套餐为 demo 租户上架（零售价默认取 BasePrice，已存在不覆盖人工改动）。
 //
-// 注意：root/初始用户由 new-api setup 流程创建，本 seed **不触碰** new-api 用户。
+// 注意：root/初始用户仍由 new-api setup 流程创建；可登录 demoagent 默认不创建。
+// 仅显式 development opt-in 才会创建它；默认路径会禁用这个保留用户名的任何既有账号。
 func (a *App) Seed() error {
 	ctx := context.Background()
+	password, demoAgentSeedEnabled, err := a.prepareDemoAgentSeed()
+	if err != nil {
+		return err
+	}
 
 	t, created, err := a.ensureDemoTenant(ctx)
 	if err != nil {
 		return err
+	}
+	if demoAgentSeedEnabled {
+		if err := a.seedDemoAgent(ctx, t.ID, password); err != nil {
+			return fmt.Errorf("%w: %w", ErrDemoAgentSecurity, err)
+		}
 	}
 
 	// 首次初始化（新库）时把前端主题固化为 default：我们所有页面都在新版前端 web/default，
@@ -82,14 +102,6 @@ func (a *App) Seed() error {
 	// 三档代理套餐默认基准（主站全局、非按租户上架；幂等，已存在不覆盖管理员改动）。
 	if err := agentplan.SeedInto(a.AgentPlanRepo); err != nil {
 		return err
-	}
-
-	// demo 代理：把 tokendream 的 owner 设为 demo 代理用户，并写一条 agent_profile + 钱包（幂等）。
-	// 仅当尚未设代理（owner==0）才设置，避免覆盖运营人工改派。
-	if t.OwnerUserID == 0 {
-		if err := a.seedDemoAgent(ctx, t.ID); err != nil {
-			common.SysError("mtwire: seed demo agent failed: " + err.Error())
-		}
 	}
 
 	// 平台（主站）直销租户：失败不影响以上 demo 租户主链路，仅记日志——届时主站买家端点
@@ -197,26 +209,129 @@ func (a *App) firstAdminUserID(ctx context.Context) (int64, bool, error) {
 	return row.ID, true, nil
 }
 
-// seedDemoAgent 确保 demo 代理用户存在，并把其设为 tenantID 的 owner + 写 agent_profile + 钱包。
-func (a *App) seedDemoAgent(ctx context.Context, tenantID int64) error {
-	ownerID, err := a.ensureDemoAgentUser()
+// seedDemoAgent 仅认领尚无 owner 的 demo 租户。已有 owner 时不建用户、不改归属，避免
+// 启动 seed 覆盖运营人工改派；若 owner 本来就是 demoagent，则按显式开发配置轮换口令。
+func (a *App) seedDemoAgent(ctx context.Context, tenantID int64, password string) error {
+	currentOwnerID, err := a.TenantRepo.OwnerUserID(ctx, tenantID)
 	if err != nil {
 		return err
 	}
-	if err := a.TenantRepo.SetOwnerUserID(ctx, tenantID, ownerID); err != nil {
+	if currentOwnerID != 0 {
+		var existing model.User
+		err := model.DB.Select("id", "password").Where("username = ?", demoAgentUsername).First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if int64(existing.Id) != currentOwnerID {
+			return nil
+		}
+		_, err = a.ensureDemoAgentUser(password)
 		return err
 	}
-	if err := a.AgentService.SetAgentType(ctx, tenantID, agent.AgentParams{CostPrice: 50, PackageDiscount: 0.9, CommissionRatio: 0.2, Level: 1}); err != nil {
+
+	ownerID, err := a.ensureDemoAgentUser(password)
+	if err != nil {
+		return err
+	}
+	// Compare-and-set closes the gap between the owner read above and this write:
+	// an operator assigning an owner concurrently always wins over the demo seed.
+	claim := a.DB.WithContext(ctx).Table("tenants").
+		Where("id = ? AND owner_user_id = ?", tenantID, 0).
+		Update("owner_user_id", ownerID)
+	if claim.Error != nil {
+		return claim.Error
+	}
+	if claim.RowsAffected == 0 {
+		return nil
+	}
+	if err := a.AgentService.SetAgentType(ctx, tenantID, agent.AgentParams{
+		UserID: ownerID, CostPrice: 50, PackageDiscount: 0.9, CommissionRatio: 0.2, Level: 1,
+	}); err != nil {
 		return err
 	}
 	return a.AgentRepo.EnsureWallet(ctx, tenantID, ownerID)
 }
 
+// reconcileDemoAgentSeed keeps the login absent by default. Invalid opt-in
+// configuration (including any production opt-in) is treated as disabled and
+// still disables the reserved demo username.
+func (a *App) reconcileDemoAgentSeed(ctx context.Context, tenantID int64) error {
+	password, enabled, err := a.prepareDemoAgentSeed()
+	if err != nil || !enabled {
+		return err
+	}
+	if err := a.seedDemoAgent(ctx, tenantID, password); err != nil {
+		return fmt.Errorf("%w: %w", ErrDemoAgentSecurity, err)
+	}
+	return nil
+}
+
+// prepareDemoAgentSeed runs before any non-security seed work. The default and
+// every invalid opt-in path first disable the reserved demo username. Any
+// failure is tagged so master startup can
+// stop instead of serving traffic with uncertain demo-login state.
+func (a *App) prepareDemoAgentSeed() (string, bool, error) {
+	password, enabled, configErr := demoAgentSeedPassword()
+	if enabled {
+		return password, true, nil
+	}
+	if err := errors.Join(configErr, a.disableDemoAgentByDefault()); err != nil {
+		return "", false, fmt.Errorf("%w: %w", ErrDemoAgentSecurity, err)
+	}
+	return "", false, nil
+}
+
+func demoAgentSeedPassword() (string, bool, error) {
+	seedSetting := strings.TrimSpace(os.Getenv(demoAgentSeedEnabledEnv))
+	if seedSetting == "" || strings.EqualFold(seedSetting, "false") {
+		return "", false, nil
+	}
+	if !strings.EqualFold(seedSetting, "true") {
+		return "", false, fmt.Errorf("%s must be exactly true or false", demoAgentSeedEnabledEnv)
+	}
+	if common.ProductionDeployment {
+		return "", false, errors.New("automatic demo-agent creation is forbidden in production")
+	}
+	password := os.Getenv(demoAgentPasswordEnv)
+	if !utf8.ValidString(password) {
+		return "", false, fmt.Errorf("%s must contain valid UTF-8", demoAgentPasswordEnv)
+	}
+	passwordLength := utf8.RuneCountInString(password)
+	if passwordLength < 16 || passwordLength > 20 {
+		return "", false, fmt.Errorf("%s must contain 16-20 characters", demoAgentPasswordEnv)
+	}
+	if len(password) > 72 {
+		return "", false, fmt.Errorf("%s must not exceed bcrypt's 72-byte input limit", demoAgentPasswordEnv)
+	}
+	return password, true, nil
+}
+
 // ensureDemoAgentUser 幂等地取/建 demo 代理用户（new-api 原生 users 表，经 model.User.Insert 正确散列口令）。
-func (a *App) ensureDemoAgentUser() (int64, error) {
+func (a *App) ensureDemoAgentUser(password string) (int64, error) {
 	var u model.User
 	err := model.DB.Where("username = ?", demoAgentUsername).First(&u).Error
 	if err == nil {
+		if common.ValidatePasswordAndHash(password, u.Password) && u.Status == common.UserStatusEnabled {
+			return int64(u.Id), nil
+		}
+		newHash, err := common.Password2Hash(password)
+		if err != nil {
+			return 0, err
+		}
+		rotated := model.DB.Model(&model.User{}).
+			Where("id = ? AND password = ?", u.Id, u.Password).
+			Updates(map[string]interface{}{"password": newHash, "status": common.UserStatusEnabled})
+		if rotated.Error != nil {
+			return 0, rotated.Error
+		}
+		if rotated.RowsAffected > 0 {
+			if err := errors.Join(model.InvalidateUserCache(u.Id), model.InvalidateUserTokensCache(u.Id)); err != nil {
+				return 0, err
+			}
+		}
 		return int64(u.Id), nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -224,7 +339,7 @@ func (a *App) ensureDemoAgentUser() (int64, error) {
 	}
 	nu := model.User{
 		Username:    demoAgentUsername,
-		Password:    demoAgentPassword,
+		Password:    password,
 		DisplayName: "Demo Agent",
 		Role:        common.RoleCommonUser,
 		Status:      common.UserStatusEnabled,
@@ -233,6 +348,33 @@ func (a *App) ensureDemoAgentUser() (int64, error) {
 		return 0, err
 	}
 	return int64(nu.Id), nil
+}
+
+// disableDemoAgentByDefault reserves the demo username for explicit development
+// opt-in. This avoids retaining any historical credential material in source and
+// guarantees production cannot silently keep a login under that known username.
+func (a *App) disableDemoAgentByDefault() error {
+	var user model.User
+	err := model.DB.Where("username = ?", demoAgentUsername).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if user.Status == common.UserStatusDisabled {
+		return nil
+	}
+	disabled := model.DB.Model(&model.User{}).
+		Where("id = ? AND password = ? AND status <> ?", user.Id, user.Password, common.UserStatusDisabled).
+		Update("status", common.UserStatusDisabled)
+	if disabled.Error != nil {
+		return disabled.Error
+	}
+	if disabled.RowsAffected == 0 {
+		return nil
+	}
+	return errors.Join(model.InvalidateUserCache(user.Id), model.InvalidateUserTokensCache(user.Id))
 }
 
 // ensureDemoTenant 返回 demo 租户 + 是否本次新建（created）；不存在则经 TenantService.Create

@@ -36,6 +36,7 @@ func TestMain(m *testing.M) {
 
 	if err := db.AutoMigrate(
 		&Task{},
+		&Midjourney{},
 		&User{},
 		&Token{},
 		&Log{},
@@ -45,7 +46,17 @@ func TestMain(m *testing.M) {
 		&TopUp{},
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
+		&SubscriptionPaymentReceipt{},
+		&SubscriptionPaymentEvidence{},
+		&SubscriptionPaymentReviewDecision{},
 		&UserSubscription{},
+		&BillingRefundIntent{},
+		&BillingAdjustmentIntent{},
+		&BillingSettlementEvent{},
+		&BillingTerminalRecovery{},
+		&BillingProjectionOutbox{},
+		&TaskSubmissionRecovery{},
+		&SubscriptionPreConsumeRecord{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
 		&SystemInstance{},
@@ -53,6 +64,21 @@ func TestMain(m *testing.M) {
 		&SystemTaskLock{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
+	}
+	if err := ensureSubscriptionPaymentReceiptIndexes(db); err != nil {
+		panic("failed to migrate subscription payment receipt indexes: " + err.Error())
+	}
+	if err := backfillSubscriptionPaymentReceiptMetadata(); err != nil {
+		panic("failed to backfill subscription payment receipt metadata: " + err.Error())
+	}
+	if err := backfillSubscriptionOrderReviewMetadata(); err != nil {
+		panic("failed to backfill subscription order review metadata: " + err.Error())
+	}
+	if err := EnsureTaskSubmissionIdempotencyUniqueIndex(db); err != nil {
+		panic("failed to migrate task submission idempotency: " + err.Error())
+	}
+	if err := ensureQuotaDataBucketUniqueIndex(db, false); err != nil {
+		panic("failed to migrate quota data bucket identity: " + err.Error())
 	}
 
 	os.Exit(m.Run())
@@ -62,6 +88,7 @@ func truncateTables(t *testing.T) {
 	t.Helper()
 	t.Cleanup(func() {
 		DB.Exec("DELETE FROM tasks")
+		DB.Exec("DELETE FROM midjourneys")
 		DB.Exec("DELETE FROM users")
 		DB.Exec("DELETE FROM tokens")
 		DB.Exec("DELETE FROM logs")
@@ -69,9 +96,19 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM quota_data")
 		DB.Exec("DELETE FROM abilities")
 		DB.Exec("DELETE FROM top_ups")
+		DB.Exec("DELETE FROM subscription_payment_evidences")
+		DB.Exec("DELETE FROM subscription_payment_review_decisions")
+		DB.Exec("DELETE FROM subscription_payment_receipts")
 		DB.Exec("DELETE FROM subscription_orders")
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM user_subscriptions")
+		DB.Exec("DELETE FROM billing_refund_intents")
+		DB.Exec("DELETE FROM billing_adjustment_intents")
+		DB.Exec("DELETE FROM billing_settlement_events")
+		DB.Exec("DELETE FROM billing_terminal_recoveries")
+		DB.Exec("DELETE FROM billing_projection_outboxes")
+		DB.Exec("DELETE FROM task_submission_recoveries")
+		DB.Exec("DELETE FROM subscription_pre_consume_records")
 		DB.Exec("DELETE FROM user_oauth_bindings")
 		DB.Exec("DELETE FROM perf_metrics")
 		DB.Exec("DELETE FROM system_instances")

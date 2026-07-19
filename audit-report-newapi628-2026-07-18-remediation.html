@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>newapi628 修复复审报告 · 52204cb..ed09773</title>
+<style>
+  :root {
+    --sidebar-bg: #1a1f2e;
+    --sidebar-hover: #242a3d;
+    --sidebar-active: #2d3555;
+    --bg: #f0f3f7;
+    --card-bg: #ffffff;
+    --border: #e6eaef;
+    --text: #1e2233;
+    --text-secondary: #6b7394;
+    --accent: #3370ff;
+    --accent-light: #e8f0ff;
+    --success: #34c759;
+    --warning: #ff9500;
+    --danger: #ff3b30;
+    --info: #5ac8fa;
+    --badge-critical: #ff3b30;
+    --badge-high: #ff9500;
+    --badge-medium: #3370ff;
+    --badge-low: #8e8e93;
+    --badge-info: #5ac8fa;
+    --bar-bg: #e8eaed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    display: flex;
+    min-height: 100vh;
+    font-size: 15px;
+  }
+  .sidebar { width: 240px; background: var(--sidebar-bg); color: #fff; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  .sidebar-header .sub { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 4px; }
+  .sidebar-nav { padding: 8px 0; flex: 1; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 14px 20px; color: rgba(255,255,255,.6); text-decoration: none; font-size: 14px; transition: all .15s; border-left: 3px solid transparent; }
+  .sidebar-nav a:hover { background: var(--sidebar-hover); color: #fff; }
+  .sidebar-nav a.active { background: var(--sidebar-active); color: #fff; border-left-color: var(--accent); }
+  .sidebar-nav a .icon { width: 18px; text-align: center; font-size: 14px; }
+  .sidebar-footer { padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.3); }
+  .main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+  .page-header { margin-bottom: 32px; }
+  .page-header h2 { font-size: 26px; font-weight: 700; }
+  .page-header .meta { font-size: 14px; color: var(--text-secondary); margin-top: 6px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .page-header .meta span { display: flex; align-items: center; gap: 4px; }
+  .card { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .card-body { padding: 24px; }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .score-item { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); }
+  .score-item .label { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .4px; }
+  .score-item .bar-row { display: flex; align-items: center; gap: 12px; }
+  .score-item .bar-track { flex: 1; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .score-item .bar-fill { height: 100%; border-radius: 5px; transition: width .6s ease; }
+  .score-item .value { font-size: 22px; font-weight: 700; min-width: 52px; text-align: right; }
+  .score-item .grade { font-size: 15px; font-weight: 700; min-width: 22px; text-align: center; }
+  .bar-fill.s { background: linear-gradient(90deg, #34c759, #30d158); }
+  .bar-fill.a { background: linear-gradient(90deg, #3370ff, #5e8cff); }
+  .bar-fill.b { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .bar-fill.c { background: linear-gradient(90deg, #ff3b30, #ff6b61); }
+  .bar-fill.d { background: linear-gradient(90deg, #ff6b61, #ff9f91); }
+  .bar-fill.f { background: linear-gradient(90deg, #9b1d1a, #d63031); }
+  .grade-s { color: #34c759; } .grade-a { color: #3370ff; }
+  .grade-b { color: #ff9500; } .grade-c { color: #ff3b30; }
+  .grade-d { color: #ff6b61; } .grade-f { color: #9b1d1a; }
+  .overall-row { grid-column: 1 / -1; background: linear-gradient(135deg, #1a1f2e, #2d3555); border-color: transparent; }
+  .overall-row .label { color: rgba(255,255,255,.6); }
+  .overall-row .value { color: #fff; }
+  .overall-row .grade { color: #34c759; }
+  .overall-row .bar-fill { background: linear-gradient(90deg, #34c759, #30d158); }
+  .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat-card { flex: 1; min-width: 140px; padding: 20px 24px; background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); text-align: center; }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1.3; }
+  .stat-card .desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .finding { border-left: 4px solid var(--border); margin-bottom: 20px; padding: 20px 24px; border-radius: 0 10px 10px 0; background: #fafbfc; border: 1px solid var(--border); border-left-width: 4px; }
+  .finding.severity-critical { border-left-color: var(--badge-critical); }
+  .finding.severity-high { border-left-color: var(--badge-high); }
+  .finding.severity-medium { border-left-color: var(--badge-medium); }
+  .finding.severity-low { border-left-color: var(--badge-low); }
+  .finding.severity-info { border-left-color: var(--badge-info); }
+  .finding-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .finding-header h4 { font-size: 16px; font-weight: 600; flex: 1; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; line-height: 1.6; }
+  .badge-critical { background: #ffeae9; color: var(--badge-critical); }
+  .badge-high { background: #fff3e0; color: var(--badge-high); }
+  .badge-medium { background: var(--accent-light); color: var(--badge-medium); }
+  .badge-low { background: #f2f2f5; color: var(--badge-low); }
+  .badge-info { background: #e4f5ff; color: #007aff; }
+  .badge-confirmed { background: #e8ffe8; color: #248a3d; }
+  .badge-suspected { background: #fff8e1; color: #b8860b; }
+  .badge-s { background: #e8ffe8; color: #248a3d; }
+  .badge-a { background: var(--accent-light); color: var(--accent); }
+  .badge-b { background: #fff3e0; color: var(--warning); }
+  .badge-c { background: #ffeae9; color: var(--danger); }
+  .finding-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+  .finding-meta span { display: flex; align-items: center; gap: 4px; }
+  .finding .evidence { margin: 12px 0; padding: 14px 18px; background: #f0f2f5; border-radius: 8px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .finding .problem { font-size: 14px; margin: 12px 0; color: var(--text); line-height: 1.8; }
+  .finding .fix-box { margin-top: 12px; padding: 14px 18px; background: #f0f7ff; border-radius: 8px; border: 1px solid #d6e4ff; font-size: 13px; }
+  .finding .fix-box code { display: block; margin-top: 6px; padding: 12px 16px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .fix-label { font-weight: 600; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
+  .section-title { font-size: 20px; font-weight: 700; margin: 36px 0 20px; padding-bottom: 10px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 12px 16px; font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); background: #f8fafc; }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; }
+  .check-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.6; }
+  .check-item .check { color: var(--success); font-weight: 700; }
+  .check-item .cross { color: var(--danger); font-weight: 700; }
+  .win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .win-card { padding: 16px; background: linear-gradient(135deg, #f0f7ff, #e8f0ff); border-radius: 8px; border: 1px solid #d6e4ff; }
+  .win-card .win-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .win-card .win-meta { font-size: 11px; color: var(--text-secondary); }
+  .small { font-size: 13px; color: var(--text-secondary); }
+  .code-block { margin: 8px 0; padding: 14px 18px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; overflow-x: auto; white-space: pre; line-height: 1.7; }
+  .hl { color: #f7768e; font-weight: 600; } .cm { color: #565f89; }
+  .kw { color: #bb9af7; } .fn { color: #7aa2f7; }
+  .ty { color: #ff9e64; } .op { color: #89ddff; }
+  .str { color: #9ece6a; } .nu { color: #ff9e64; }
+  @media (max-width: 768px) { .sidebar { display: none; } .main { padding: 16px; } .score-grid { grid-template-columns: 1fr; } .stats-row { flex-direction: column; } .check-list { grid-template-columns: 1fr; } .win-grid { grid-template-columns: 1fr; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c1c7d0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a8adb8; }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>newapi628</h1>
+    <div class="sub">修复复审 · 2026-07-18</div>
+  </div>
+  <div class="sidebar-nav">
+    <a href="#summary"><span class="icon">📊</span> 评分面板</a>
+    <a href="#executive-summary"><span class="icon">📝</span> 总体评估</a>
+    <a href="#change-summary"><span class="icon">🔀</span> 复审范围</a>
+    <a href="#coverage"><span class="icon">🧭</span> 覆盖矩阵</a>
+    <a href="#top-risks"><span class="icon">⚠️</span> 首要风险</a>
+    <a href="#findings"><span class="icon">🔍</span> 详细发现</a>
+    <a href="#security"><span class="icon">🔒</span> 安全</a>
+    <a href="#stability"><span class="icon">⚡</span> 稳定性</a>
+    <a href="#data-integrity"><span class="icon">🧱</span> 数据完整性</a>
+    <a href="#concurrency"><span class="icon">🔀</span> 并发</a>
+    <a href="#testing-authenticity"><span class="icon">🧪</span> 测试真实性</a>
+    <a href="#release"><span class="icon">🚢</span> 发布与运维</a>
+    <a href="#principles"><span class="icon">📋</span> 工程原则</a>
+    <a href="#fix-order"><span class="icon">🎯</span> 修复顺序</a>
+  </div>
+  <div class="sidebar-footer">Fuck My Shit Mountain v1.0</div>
+</nav>
+
+<div class="main">
+
+  <div class="page-header" id="summary">
+    <h2>newapi628 修复复审报告（post-remediation review）</h2>
+    <div class="meta">
+      <span>📅 2026-07-18</span>
+      <span>🔍 incremental + security + data-integrity + concurrency + testing-authenticity</span>
+      <span>🛠 Claude Opus 4.8（含 2 路 opus 对抗式子代理）</span>
+      <span>🎯 52204cb..ed09773（本会话 5 条修复 / 21 文件）</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">📊 评分面板（复审对象=本轮修复本身）</div>
+    <div class="card-body">
+      <div class="score-grid">
+
+        <div class="score-item">
+          <div class="label">Security</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill a" style="width:75%"></div></div>
+            <span class="value grade-a">7.5</span>
+            <span class="grade grade-a">A</span>
+          </div>
+          <div class="small">F1 关掉 UA 武器化/绕过、F4 堵死 force 滥用,安全姿态净改善;但 F1 的纯 IP 方案对熟练攻击者仅是减速带(可换 IP/VPN 绕过),安全收益与其可用性代价不对称。覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Stability</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:60%"></div></div>
+            <span class="value grade-b">6.0</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">F2 两级补偿核心正确,但 F1 引入 High 可用性回归(同 IP 永久锁死 Trial,已随 ed09773 上线)+ F2 Level B 残留一条 ctx 泄漏窗口。覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Data Integrity</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill a" style="width:70%"></div></div>
+            <span class="value grade-a">7.0</span>
+            <span class="grade grade-a">A</span>
+          </div>
+          <div class="small">补偿的归属校验正确、无双重释放/漏释放/跨用户误删(三条最凶假设全被证伪);残留 R3(ctx 窗口)+ R4(孤儿 pending 单,2h 对账清扫)。覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Concurrency</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill s" style="width:90%"></div></div>
+            <span class="value grade-s">9.0</span>
+            <span class="grade grade-s">S</span>
+          </div>
+          <div class="small">单赢家性质保持、committed 为函数内局部无跨协程共享、-race 全绿(并发用例 200× 零抖动);两级补偿未引入任何新竞态。覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Testing</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill a" style="width:75%"></div></div>
+            <span class="value grade-a">7.5</span>
+            <span class="grade grade-a">A</span>
+          </div>
+          <div class="small">F6 变异 5/5 全杀、Level A 补偿有真引擎回归、force 边界有守卫;但 F2 Level B 的 HTTP 触发块 + ctx 路径零覆盖(全跑 MemKV 测不到 ctx),是唯一实质缺口。覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Release</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill a" style="width:85%"></div></div>
+            <span class="value grade-a">8.5</span>
+            <span class="grade grade-a">A</span>
+          </div>
+          <div class="small">F3 惰性 require_db_pass 无漏网消费者(6 sourcer 穷举)、set -e 安全、demo.sh 顺序合理;仅 .env sed 尾空格/CRLF 是既有非本次引入的小缺口。覆盖 High。</div>
+        </div>
+
+        <div class="score-item overall-row">
+          <div class="label">Overall</div>
+          <div class="bar-row">
+            <div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:76%;background:linear-gradient(90deg,#3370ff,#5e8cff)"></div></div>
+            <span class="value" style="color:#fff">7.6</span>
+            <span class="grade" style="color:#5e8cff">A</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="executive-summary">📝 总体评估</h3>
+
+  <div class="card">
+    <div class="card-header">📋 总体评估</div>
+    <div class="card-body">
+      <p><strong>复审对象：</strong> 本会话针对上一轮增量审计（High×3 + Medium×3）所做的 5 条修复 <code>52204cb..ed09773</code>（F1 指纹去 UA / F2 占键两级补偿 / F3 lib.sh 惰性口令校验 / F4 收窄 force / F6 补 Del 测试；21 文件、+781/−54，其中 ~460 行是测试）。方法：2 路 opus 对抗式子代理各带 9 条「证伪假设」深挖，加审计者独立复核（含对头号发现的第一手复现），全程 <code>go test -race</code> 实跑、工作树复核零残留。这是「修完自己审自己补丁」的复审——目标是抓修复引入的新缺陷，而非重复原发现。</p>
+
+      <p style="margin-top:12px"><strong>一句话结论：</strong> <strong>修复大体扎实，但我在 F1 上修过头了——它引入了一条 High 级可用性回归，且已随 ed09773 上线生产。</strong> 好消息占多数：F2 两级补偿的三条最凶假设（双重释放、漏释放、跨用户误删）全部被证伪；F3、F4、F6 经得起对抗，18 条证伪假设里 12 条是伪警报。坏消息是 1 条真回归 + 2 条残留 + 1 处测试盲区。</p>
+
+      <p style="margin-top:12px"><strong>头号问题（R1，High，已上线）：</strong> F1 把设备指纹从 <code>sha256(ClientIP+UA)</code> 改成 <code>sha256(ClientIP)</code>，安全推理没错（UA 是客户端可自选、不该进唯一性键）——但它<strong>移除了唯一能让同 IP 真人不碰撞的分量</strong>，而设备维度的键是 <code>TTL=0 终身</code>、且实名维度恒空（无 KYC）导致三维去重实际退化为 <code>user∪device</code>。后果：<strong>同一运营商 CGNAT / 公司 / 校园出口 IP，谁先领到 Trial，其后所有共享该 IP 的真人账号就被永久拒绝</strong>——换账号、换设备都无效（指纹只认 IP），唯一解套是人工客服后台释放。我已用独立测试第一手复现（同 IP 的 1002/1003 被拒、换 IP 的 1004 放行）。中国移动网大量走 CGNAT、单出口 IP 时分复用数百至上千订阅者，而 Trial 正是引流获客的漏斗顶端——这是结构性、永久、面广的转化损失。它把一个「潜伏危险（TTL=0 + 共享粗粒度维度）」从对合法用户休眠，转成了对 CGNAT 流量 live。</p>
+
+      <p style="margin-top:12px"><strong>其余：</strong> R3（Medium）——F2 的 Level B 补偿用了原始 <code>ctx</code> 而非 <code>context.WithoutCancel</code>（Level A 用对了），客户端在 CreatePay 失败瞬间断连时释放会随 ctx 取消而失败 → 又泄漏一把终身键，恰是 F2 本要根除的场景；这个泄漏当前测不出，因为所有测试跑在忽略 ctx 的 MemKV 上（与 C8「SQLite 绿测盖住坏生产路径」同型）。R5（Medium/测试）——Level B 的 HTTP 触发块（CreatePay 失败→释放）零测试覆盖，若有人删掉它或传错参（错 deviceID/丢 PlanCode）无测试报红。R4（Low）——CreatePay 失败会留孤儿 pending SUB 单，但 2h 对账清扫、Trial 免费，轻微。R2（Low）——F1 在 <code>http.go:235</code> 写的「/24 网段可降低连坐」注释<strong>方向反了</strong>（越粗→越多人共键→连坐更重），会误导未来修复者。R6/R7 为 Info（force 张力、.env sed 尾空格，均非本次引入的真缺陷）。</p>
+
+      <p style="margin-top:12px"><strong>做对的部分（占多数，须点名）：</strong> F2 两级补偿的时序设计是对的——defer 注册在 CheckPurchaseLimit 成功<em>之后</em>，所以购买前失败（含同 IP 被拒的 B）不会触发误释放；配合 <code>ReleaseTrialLimit</code> 的 force=false 归属校验，双保险防跨用户误删。F4 的 <code>forceReleasable</code> 边界是 fail-safe（合法 owner 键恒受保护、脏值恒可 force），reason 校验前置于引擎断言（fail-closed），限流中间件顺序正确。F3 穷举 6 个 lib.sh sourcer 无漏网。F6 的 5 个变异逐一杀死对应测试、并发用例 200× -race 零抖动。并发维度（Concurrency 9.0/S）几乎满分——没有引入任何新竞态。</p>
+
+      <p style="margin-top:12px"><strong>总评：7.6 / A。</strong> 作为一次修复复审，这是「合格且大部分优秀，但有一条必须尽快回滚/收口的 High 回归」。R1 已在生产 live，是本报告唯一的紧急项——它不是 F1 方向错（去 UA 是对的），而是<strong>没同时处理病根：共享粗粒度维度上的 TTL=0 终身键</strong>。正确收口=给设备维度加有界 TTL（或把占用挪到支付成功后），同时保留 user 维度的终身去重。</p>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="change-summary">🔀 复审范围</h3>
+
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>项目</th><th>数值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>范围</td><td><code>52204cb..ed09773</code></td><td>本会话对上一轮审计的 5 条修复提交</td></tr>
+            <tr><td>提交 / 文件</td><td>5 / 21</td><td>+781 / −54 行（约 460 行为测试）</td></tr>
+            <tr><td>F1 <code>5f07753</code></td><td>指纹去 UA</td><td><code>internal/mtwire/http.go</code>（+RETRO）→ <strong>R1/R2 所在</strong></td></tr>
+            <tr><td>F2 <code>3dc032a</code></td><td>占键两级补偿</td><td>tokenplan + mtwire（9 文件）→ <strong>R3/R4/R5 所在</strong></td></tr>
+            <tr><td>F3 <code>8ac52a4</code></td><td>lib.sh 惰性口令校验</td><td>deploy/ops + demo.sh（5 文件）→ 干净（R7 为既有）</td></tr>
+            <tr><td>F4 <code>939a864</code></td><td>收窄 force</td><td>risk/engine + risk_admin_http + router → 干净（R6 为张力）</td></tr>
+            <tr><td>F6 <code>ed09773</code></td><td>补 Del 测试</td><td><code>internal/risk/engine_test.go</code> → 干净</td></tr>
+            <tr><td>生产部署状态</td><td><span class="badge badge-high">全部已上线</span></td><td><code>/api/status</code> = <code>ed09773-dirty-20260718-175217</code>；R1 回归当前 live</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">风险增量 / 修复闭合情况</div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>维度</th><th>明细</th></tr></thead>
+          <tbody>
+            <tr><td>原发现闭合</td><td>F2/F3/F4/F6 <strong>真正闭合</strong>了对应原发现；F1 达成了安全目标（关闭 UA 武器化/绕过）但<strong>引入新回归</strong></td></tr>
+            <tr><td>修复引入的新缺陷</td><td><strong>1 High（R1）+ 1 Medium（R3）+ 1 Low（R4）+ 1 Low（R2 注释）</strong></td></tr>
+            <tr><td>修复引入的测试缺口</td><td><strong>1（R5：Level B HTTP 触发块 + ctx 路径零覆盖）</strong></td></tr>
+            <tr><td>证伪的假设（伪警报）</td><td>12 / 18（双重释放、漏释放、跨用户误删、并发竞态、force 边界、遗漏 sourcer、测试真实性…均证伪）</td></tr>
+            <tr><td>既有问题（非本次引入）</td><td>R7（.env sed 尾空格/CRLF）；R6（force 无法抢救同 IP 无辜者，是 R1 的连带）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="coverage">🧭 覆盖矩阵</h3>
+
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>维度</th><th style="width:120px">覆盖度</th><th>已检查证据</th><th>排除 / 限制</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Security</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>逐行读 F1/F4 全部改动；追 realname 恒空链（http.go:299/319 + engine.go:342）；核 <code>c.ClientIP()</code>=CF-Connecting-IP（trusted_ip.go:21）；forceReleasable 全边界枚举；reason 校验时机（用 <code>App{}</code> 无引擎测试坐实前置）；限流中间件顺序</td>
+              <td>未做线上真实渗透；CF 面板侧配置不可见；攻击者换 IP 绕过的实际成本未量化（VPN/移动重连属常识范畴）</td>
+            </tr>
+            <tr>
+              <td>Stability</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>第一手复现 R1 同 IP 锁死（临时测试已删）；对比 F1 前后指纹碰撞行为；追 Level A/B 的 ctx 来源（subscription.go:83 vs http.go:313，reqCtx=c.Request.Context()）；核 sub_reconcile 对孤儿单的清扫（2h 终态）</td>
+              <td>R3 的断连泄漏未在真实 Redis 上端到端复现（MemKV 忽略 ctx，需 ctx-aware fake 或线上 Redis 栈）</td>
+            </tr>
+            <tr>
+              <td>Data Integrity</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>枚举 Purchase 全返回路径 + HandlePurchase 全错误分支，逐一验双重/漏释放；核 committed 门与 defer 注册时机；核 ReleaseTrialLimit force=false 归属校验；核补偿只删本次 claimed</td>
+              <td>未在 MySQL 栈做并发下的补偿+对账交互压测</td>
+            </tr>
+            <tr>
+              <td>Concurrency</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>逐交错分析同用户/同 IP 两账号并发；核 committed 为函数内局部（无跨协程）；<code>go test -race</code> 三包全绿；并发用例（n=4）200× 复跑零抖动；kvDelSpy 的 mutex 保护核实</td>
+              <td>未做长时高并发压测；barrierGetKV 对当前实现不触发（实现不调 Get），并发强度等价 n=4</td>
+            </tr>
+            <tr>
+              <td>Testing Authenticity</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>对 F6 的 4 个新用例 + 既有回归做 5 次变异（改坏 engine.go → 确认对应测试变红 → 还原，git diff 归零）；核 CompensationDeletesOnlyClaimedKeys 的四重集合断言；核 Level A（真引擎「补偿后可重购」）与 Level B（仅原语覆盖、HTTP 触发块无覆盖）的覆盖强度差异</td>
+              <td>未跑 <code>go test -cover</code> 覆盖率数字（本维度看真实信心非行覆盖）</td>
+            </tr>
+            <tr>
+              <td>Release</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>穷举 6 个 <code>source lib.sh</code> 的脚本，逐个核对 DB_PASS 使用与 require_db_pass 调用；核 die/require 定义顺序与 set -euo 安全；沙盒实测 .env sed 对 <code>=</code>/引号/多行/尾空格/CRLF 的解析</td>
+              <td>未在服务器实跑 backup/restore/reconcile（破坏性）；deploy.sh 本身不 source lib.sh，未纳入</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>方法：</strong> 2 路 opus 对抗式子代理（探针 1 = F1+F2，探针 2 = F3+F4+F6），各带 9 条「默认要证伪」的假设深挖；审计者独立复核关键结论（H1/H7 的代码事实 + H1 的第一手复现测试）。<strong>凡子代理声称的缺陷，均由审计者用 <code>文件:行号</code> 或实跑二次确认；凡「无缺陷」结论，落在安全方向（宁可多报不漏报）。</strong></p>
+      <p style="margin-top:10px"><strong>执行的验证：</strong> <code>go test -race ./internal/risk/ ./internal/mtwire/ ./internal/tokenplan/</code>（全绿）；一次性 H1 复现测试（同 IP 两账号锁死，已删）；两子代理各自的临时变异/复现（均已还原，审计者复核 <code>git status</code>/<code>git diff</code> 归零、HEAD 仍 ed09773、生产文件零残留）。</p>
+      <p style="margin-top:10px"><strong>范围与排除：</strong> 只审这 5 条修复触及的 21 个文件及其直接调用链（HandlePurchase、subscription.Purchase、ReleaseTrialLimit、lib.sh sourcer）。未改动的其余代码、前端、既有未跟踪的 audit 报告/docs 不在范围。R7（sed）虽在改动文件内但经 <code>git show</code> 确认非本次改动行，标为既有。</p>
+    </div>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">7</div><div class="desc">总发现</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-high)">1</div><div class="desc">High</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">2</div><div class="desc">Medium</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-low)">2</div><div class="desc">Low</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-info)">2</div><div class="desc">Info</div></div>
+  </div>
+
+  <h3 class="section-title" id="top-risks">⚠️ 首要风险</h3>
+
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:60px">#</th><th>发现</th><th style="width:100px">严重程度</th><th style="width:110px">类别</th><th style="width:90px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>R1</td><td>F1 修过头:纯 IP 终身设备键 → 同 IP/CGNAT 首个买家后,其余真人账号永久被拒 Trial（已上线）</td><td><span class="badge badge-high">High</span></td><td>Stability/Security</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>R3</td><td>F2 Level B 用原始 ctx（非 WithoutCancel）→ 客户端断连时释放失败,又泄漏一把终身键</td><td><span class="badge badge-medium">Medium</span></td><td>Data Integrity</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>R5</td><td>F2 Level B 的 HTTP 触发块 + ctx 路径零测试覆盖,删块/传错参无测试报红</td><td><span class="badge badge-medium">Medium</span></td><td>Testing</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>R2</td><td>F1 的「/24 网段可降低连坐」注释方向反了（越粗→连坐越重）,会误导未来修复者</td><td><span class="badge badge-low">Low</span></td><td>Documentation</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>R4</td><td>F2 CreatePay 失败留孤儿 pending SUB 单（重试造多条）,2h 对账清扫,Trial 免费</td><td><span class="badge badge-low">Low</span></td><td>Data Integrity</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>R6</td><td>F4 后 force 无法抢救同 IP 无辜者的设备键（R1 的连带,反刷取舍自洽）</td><td><span class="badge badge-info">Info</span></td><td>Security</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>R7</td><td>【既有,非本次引入】.env 解析 sed 不剥尾空格/CRLF,值污染致认证失败</td><td><span class="badge badge-info">Info</span></td><td>Release</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="findings">🔍 详细发现</h3>
+
+  <!-- R1 -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>R1. F1 修过头 —— 纯 IP 终身设备键导致同 IP / CGNAT 用户永久被拒 Trial（已上线生产）</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Stability / Security（可用性）</span>
+      <span>📍 internal/mtwire/http.go:234-242 · internal/risk/engine.go:171-208</span>
+      <span>🎯 deviceFingerprint / checkTrialLimit</span>
+      <span>🎓 置信度 High</span>
+      <span>🔧 本次修复引入</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>F1 修复的<em>方向</em>正确——UA 是客户端可自选字段，把它放进唯一性键确实等于让被监管方自选分桶（原 F1 发现成立）。但改成纯 <code>sha256(ClientIP)</code> 后，<strong>三个前提叠加</strong>把「潜伏危险」变成了对真实流量的 live 回归：<br>
+      ① <strong>实名维度恒空</strong>（<code>http.go:299</code> <code>RealNameID:""</code> 硬编码，<code>engine.go:342</code> 注释自陈「当前恒空」，无 KYC）→ 三维去重 <code>user∪realname∪device</code> 实际退化为 <code>user∪device</code>；<br>
+      ② <strong>设备维度 = CGNAT 出口 IP</strong>（<code>trusted_ip.go:21</code> <code>TrustedPlatform=CF-Connecting-IP</code> → <code>ClientIP()</code> 返回运营商 NAT 出口 IP）；<br>
+      ③ <strong>该键 TTL=0 终身</strong>（<code>port.go:77</code> <code>PurchaseDedupTTL:0</code>，值=首占者 userID，永不过期）。<br><br>
+      合起来：<strong>同一出口 IP，谁先领到 Trial，其后所有共享该 IP 的真人账号就被 <code>PURCHASE_LIMIT_EXCEEDED</code> 永久拒绝</strong>——换新账号（userK 全新可过，但 devK 撞上）、换浏览器/设备（指纹只认 IP）都无效，唯一解套是带鉴权的后台 <code>ReleaseTrialLimit</code>（人工客服）。与 F1 <em>之前</em>（IP+UA）相比是严格变坏：改前同 IP 不同 UA 得不同键、真人不碰撞；改后必碰撞。F1 关掉了「换 UA 绕过」，却移除了唯一缓解连坐的分量，而没碰真正的病根（共享粗粒度维度上的终身键）。<br><br>
+      <strong>此回归当前 live 在生产（ed09773-dirty-20260718-175217）。</strong>
+    </div>
+    <div class="evidence">审计者第一手复现（一次性测试,跑后即删）：
+  e := NewEngine(NewMemKVCache(nil))   // DefaultConfig.PurchaseDedupTTL=0 = 生产装配
+  dev := sha256(ClientIP="100.64.12.34")  // 某运营商 CGNAT 出口 IP,A/B/C 共享
+  A(1001) 首购 Trial            → 通过
+  B(1002) 全新账号,同出口 IP    → PURCHASE_LIMIT_EXCEEDED: 已超过该套餐的限购次数
+  C(1003) 又一账号,同出口 IP    → PURCHASE_LIMIT_EXCEEDED（换 UA/设备均无效,指纹只认 IP）
+  D(1004) 不同 IP               → 通过
+  ⇒ 坐实:每个出口 IP 终身仅首个账号可领 Trial,其余真人永久被拒。
+
+realname 恒空:internal/mtwire/http.go:299  RealNameID: ""   （Level B 归还入参同,:319）
+              internal/risk/engine.go:342   注释「**当前恒空**：暂无可信的服务端实名来源」
+设备维=CF-IP:  router/trusted_ip.go:21       engine.TrustedPlatform = gin.PlatformCloudflare
+TTL=0 终身:    internal/risk/port.go:77      PurchaseDedupTTL: 0（「<=0 表示永不过期」）
+连坐代码链:    internal/risk/engine.go:171-208 checkTrialLimit（userK 过、devK 撞→拒→回滚 userK）</div>
+    <div class="problem">
+      <strong>现实失败场景：</strong>中国移动/联通/电信移动网大量走 CGNAT（<code>100.64/10</code>），单出口 IP 时分复用数百至上千订阅者。某写字楼/学校/小区宽带亦共享少量公网出口。只要该 IP 下有<strong>任意一个</strong>用户曾成功领过 Trial，之后该 IP 下的<strong>所有</strong>新用户在购买 Trial 时都被永久拒绝。Trial 是引流获客的漏斗顶端（<code>risk/port.go:41</code>「引流体验款：需最强限购」），这直接砍掉这部分新用户的转化，且不可自愈、面广、永久。<br>
+      <strong>安全侧的不对称：</strong>这道锁拦不住熟练攻击者——换 IP（VPN / 代理 / 移动数据重连即换 CGNAT 出口）就得到全新指纹、照刷不误。即反滥用收益只是「减速带」，而合法用户的连坐代价是「永久且广谱」。收益与代价严重不对称。<br>
+      <strong>用户可见影响：</strong>大量真实新用户点「领取 Trial」得到「已超过限购次数」，而他们从未领过；客服工单激增；获客漏斗顶端静默流失。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复 —— 给设备维度加有界 TTL（保留 user 维度终身）</div>
+      <code>// 病根是「共享粗粒度维度 + TTL=0」,而非「用不用 UA」。user 维度终身去重是对的
+// （一个人不该无限领 Trial）;device 维度因共享且粗,必须有界,让连坐自愈。
+// 需要按维度分设 TTL(现在 PurchaseDedupTTL 是全局一个值):
+//   · user 维度   : TTL=0 终身（不变）
+//   · device 维度 : TTL=24~72h（防「同 IP 短时批量刷」这一真实滥用,长期误伤自动过期）
+// checkTrialLimit 里对 devK 用有界 ttl 调 SetNX;engine.Config 增设 DeviceDedupTTL。
+// 同时订正 http.go:235-236 的反向注释（见 R2）。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px">
+      <div class="fix-label">更好的长期修复</div>
+      <code>把设备维度的「占用」从下单前挪到**支付/激活成功之后**——只让真正拿到 Trial 的人
+消耗一个 IP 名额,而不是「点了下单没付款也占住整个 IP」。这与原 F2 的「消耗移到支付
+成功后」根治方向一致,能同时消灭 R1(连坐)与占键泄漏整类。KYC 落地后再补「authenticated
+真实身份」维度替代 IP,彻底摆脱 IP 粒度的先天不可信。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff3e0;border-color:#ffcc80">
+      <strong>⚠ 处置建议：</strong> R1 已 live。若短期内无法改 TTL，可先把 <code>deviceFingerprint</code> 临时回退到「IP+UA」以恢复改前的碰撞面（比当前窄），或临时禁用 device 维度（只留 user 去重）——两者都比现状轻，作为改 TTL 前的止血。是否回退请你定夺。
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 有界 TTL 方案 1–2 小时（含按维度分 TTL 与测试）；长期「挪到支付后」1–2 天 &nbsp;·&nbsp; <strong>回归测试建议：</strong> <code>TestTrial_SameIPBoundedTTLSelfHeals</code>：同 IP 两用户，注入假时钟推进超过 <code>DeviceDedupTTL</code> 后，第二人可购买；<code>TestTrial_UserDimStillLifetime</code>：同 userID 无论过多久都不能再领（user 维度仍终身）。MemKV 已支持惰性 TTL 回收，可确定性测。
+    </div>
+  </div>
+
+  <!-- R3 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>R3. F2 的 Level B 补偿用了原始 ctx（非 WithoutCancel）—— 客户端断连时释放失败，又泄漏终身键</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Data Integrity / Stability</span>
+      <span>📍 internal/mtwire/http.go:313 vs internal/tokenplan/subscription.go:83</span>
+      <span>🎯 HandlePurchase（Level B 补偿）</span>
+      <span>🎓 置信度 High</span>
+      <span>🔧 本次修复引入（不一致）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>F2 的两级补偿里，<strong>Level A 用对了 <code>context.WithoutCancel(ctx)</code></strong>（<code>subscription.go:83</code>，注释还专门解释「客户端断连致 ctx 取消时释放不被跳过」），<strong>但 Level B 忘了对齐，用的是原始 <code>ctx</code></strong>（<code>http.go:313</code>）。而这个 <code>ctx = reqCtx(c) = c.Request.Context()</code>（<code>http.go:112</code>），<strong>客户端一断连即被取消</strong>。生产的 <code>RedisKVCache</code> 把 ctx 透传给 redis 命令，取消的 ctx → <code>context.Canceled</code> → 释放失败 → 仅 SysLog → <strong>Trial 终身键泄漏</strong>——恰是 F2 本要根除的那类泄漏。触发窗口比 Level A 窄（需 CreatePay 失败 <em>且</em> 此刻客户端断连），但属同一类缺陷，且是「一个函数写对了、隔壁忘了抄」的低级不一致。
+    </div>
+    <div class="evidence">Level A（对）— internal/tokenplan/subscription.go:83
+  _ = s.risk.ReleasePurchaseClaim(context.WithoutCancel(ctx), check)   ← 断连不影响释放
+
+Level B（错）— internal/mtwire/http.go:307-313
+  payURL, err := a.subscriptionPayURL(ctx, ticket, provider)
+  if err != nil {
+      if rerr := a.Subscriptions.ReleasePurchaseClaim(ctx, tokenplan.PurchaseLimitCheck{  ← 原始 ctx
+          ...
+      }); rerr != nil { common.SysLog(...) }
+
+ctx 来源:internal/mtwire/http.go:112  reqCtx(c) → c.Request.Context()（断连即 cancel）
+生产 KV 透传 ctx:internal/risk/rediskv.go  Get/Del(ctx, ...) → 取消 ctx 即 context.Canceled
+现有测试测不出:MemKVCache 全方法忽略 ctx（memkv.go），已取消 ctx 下 Del 照常成功 → 与 C8 同型盲区</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复 —— 一行，与 Level A 对齐</div>
+      <code>// internal/mtwire/http.go:313
+if rerr := a.Subscriptions.ReleasePurchaseClaim(context.WithoutCancel(ctx), tokenplan.PurchaseLimitCheck{
+    ...
+}); rerr != nil { common.SysLog(...) }
+// 需 import "context"（若尚未）。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 10 分钟 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 引入一个<strong>感知 ctx 的 fake KV</strong>（ctx 已取消即返 <code>context.Canceled</code>），驱动「CreatePay 失败 + 已取消 ctx」，断言释放<strong>仍</strong>发生（键被删）。这条同时补上 R5 的 ctx 路径盲区。不能用 MemKV（它忽略 ctx）。
+    </div>
+  </div>
+
+  <!-- R5 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>R5. F2 Level B 的 HTTP 触发块 + ctx 路径零测试覆盖 —— 删块或传错参无测试报红</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Testing（Subtype: HappyPathOnly / FalseConfidence）</span>
+      <span>📍 internal/mtwire/http.go:307-325 · risk_purchase_compensation_test.go</span>
+      <span>🎯 HandlePurchase Level B 触发块</span>
+      <span>🎓 置信度 High</span>
+      <span>🔧 本次修复的覆盖缺口</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>F2 的测试对 Level A（真引擎「补偿后可重购」）与补偿<em>原语</em>（<code>ReleasePurchaseClaim</code>→adapter→<code>ReleaseTrialLimit</code>）覆盖扎实，但 <strong>Level B 在 <code>HandlePurchase</code> 里真正的触发块</strong>——<code>subscriptionPayURL(...) 出错 → ReleasePurchaseClaim(...)</code>（<code>http.go:307-325</code>）——<strong>零测试</strong>。测试文件注释自认：让 <code>CreatePay</code> 返错需要真实支付 SDK，故没测。后果：若有人删掉 Level B 整块、或传错参（错 <code>deviceID</code> / 丢 <code>PlanCode</code> → 非 Trial 分支 no-op → 不释放），<strong>没有任何测试会报红</strong>。叠加 R3：所有测试跑在忽略 ctx 的 MemKV 上，Level B 的 ctx 取消路径也测不到。这是一条 money 路径的错误补偿分支——正是最该有测试的地方。
+    </div>
+    <div class="evidence">已覆盖（真）:
+  risk_purchase_compensation_test.go  TestReleasePurchaseClaim_TrialReclaimable（真引擎,补偿原语可重购）
+  subscription_test.go                Level A 调用计数（CreateOrder 失败恰归还 1 次 / 成功 0 次）
+
+未覆盖（缺口）:
+  internal/mtwire/http.go:307-325  Level B 触发块本身:
+    payURL, err := a.subscriptionPayURL(...)  // CreatePay 失败分支从未被测试驱动
+    if err != nil { a.Subscriptions.ReleasePurchaseClaim(ctx, {PlanCode: ticket.PlanCode, DeviceID: deviceID, ...}) }
+  ⇒ 删除该块 / PlanCode 传错 / deviceID 传错 → 无测试报红
+  ⇒ ctx 取消路径（R3）亦无覆盖（MemKV 忽略 ctx）</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复 —— 让 subscriptionPayURL 可注入失败 + ctx-aware fake KV</div>
+      <code>// 把 CreatePay 那步做成可注入（provider fake 返错,或把 subscriptionPayURL 抽成可替身），
+// 用感知 ctx 的 fake KV,加一条 mtwire handler 测试:
+//   TestHandlePurchase_CreatePayFailureReleasesClaim
+//     构造 Trial 购买 → 让 subscriptionPayURL 返错 → 断言:
+//       ① ReleaseTrialLimit 被调用且 devK/userK 被删（同 identity 可重购）
+//       ② 入参 PlanCode=="trial"、deviceID 与购买时一致（防传错参回归）
+//       ③ 在「ctx 已取消」下重跑,断言释放仍发生（同时覆盖 R3）</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 1.5 小时（含 subscriptionPayURL 可注入化 + ctx-aware fake KV，两条测试可与 R3 合并） &nbsp;·&nbsp; <strong>回归测试建议：</strong> 见上；核心是让 Level B 的三种破坏（删块 / 错 PlanCode / 错 deviceID）各有一个会变红的断言。
+    </div>
+  </div>
+
+  <!-- R2 -->
+  <div class="finding severity-low">
+    <div class="finding-header">
+      <h4>R2. F1 的「/24 网段可降低连坐」注释方向反了 —— 会把未来修复者引向放大 R1 的路</h4>
+      <span class="badge badge-low">Low</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Documentation</span>
+      <span>📍 internal/mtwire/http.go:235-236</span>
+      <span>🎯 deviceFingerprint 文档注释</span>
+      <span>🎓 置信度 High</span>
+      <span>🔧 本次修复引入</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>F1 在 <code>deviceFingerprint</code> 上方注释写道「如需降低共享出口的连带误伤，可日后把粒度退到 /24（IPv4）或 /64（IPv6）网段」。<strong>这个方向是反的。</strong>对「首占者赢 + TTL=0」的方案，粒度<strong>越粗</strong>（/24 覆盖 254 个 IP、/64 覆盖海量地址）→ 越多人共用<strong>一把</strong>键 → 连坐<strong>更严重</strong>，不是更轻。这条注释若被未来修复者当作缓解手段采纳，会直接放大 R1。是承重的错误注释（与本仓 RETRO 反复强调的「承重假注释」同型）。
+    </div>
+    <div class="evidence">internal/mtwire/http.go:235-236（当前）:
+  // 如需降低共享出口的连带误伤,可日后把粒度退到 /24（IPv4）或 /64（IPv6）
+  // 网段——那是「更粗但仍不可自选」,严格优于「更细但可自选」（如 UA）。
+  ⇒ 对首占者赢+TTL=0:/24 = 254 IP 共一键 → 连坐面 ×254,方向反了。
+  真正的缓解是「更细粒度 + 有界 TTL」或「挪到支付后」,不是更粗网段。</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复 —— 订正为正确方向（与 R1 修复一并）</div>
+      <code>// internal/mtwire/http.go:235
+// 缓解同 IP 连带误伤的正确方向是「设备维度加有界 TTL(让连坐自愈)」或「占用挪到支付
+// 成功后」,而**不是**放粗到 /24//64 网段——对首占者赢+TTL=0 的方案,网段越粗→越多真人
+// 共用一把终身键→连坐越严重(见 audit 2026-07-18 复审 R1/R2)。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 5 分钟（随 R1 一起改） &nbsp;·&nbsp; <strong>回归测试建议：</strong> 注释类无法单测；在 R1 的修复 commit 里一并订正即可，并在 code review 复核该注释与新实现一致。
+    </div>
+  </div>
+
+  <!-- R4 -->
+  <div class="finding severity-low">
+    <div class="finding-header">
+      <h4>R4. F2 CreatePay 失败留孤儿 pending SUB 订单 —— 重试造多条，2h 对账清扫</h4>
+      <span class="badge badge-low">Low</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Data Integrity（Subtype: TransactionBoundary）</span>
+      <span>📍 internal/tokenplan/subscription.go:44 · sub_reconcile.go:11,77-93</span>
+      <span>🎯 Purchase 非事务 + Level B 只释放键不回滚订单</span>
+      <span>🎓 置信度 High</span>
+      <span>🔧 既有技术债，被 F2「允许重试」轻微放大</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>F2 的 Level B 在 CreatePay 失败时只归还风控占键，<strong>不回滚 <code>Purchase</code> 已写入的 SUB 订单 + PendingPurchase</strong>（<code>Purchase</code> 本就非事务，<code>subscription.go:44</code> 已自陈）。用户重试 → 每次造一条新 pending SUB 单。<strong>但被对账有界清扫、非永久</strong>：<code>sub_reconcile.go:11</code> <code>subReconcileExpireAge=2h</code>，确认未付 / 网关 <code>ORDER_NOT_EXIST</code> → 置终态 <code>subOrderExpired</code>；且用户拿不到失败那单的 pay_url、无从支付 → 不会双激活。属既有的有界技术债，被 F2「允许重试」轻微放大。
+    </div>
+    <div class="evidence">internal/tokenplan/subscription.go:44  注释「真实实现下单+暂存应同事务,本轮内存假实现按序执行」
+Level B（http.go:307-325）只调 ReleasePurchaseClaim,不动已建的 SUB 订单/PendingPurchase
+清扫兜底:sub_reconcile.go:11  subReconcileExpireAge = 2h
+        sub_reconcile.go:77-93 确认未付/ORDER_NOT_EXIST → subOrderExpired（终态）
+后果:用户重试造多条 pending 单,但 2h 内清扫、Trial 免费、无双激活 → 影响轻微</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（可选，fail-fast）</div>
+      <code>// Level B 归还占键的同时,把刚建的这条 SUB 订单也置终态（failed/expired）,
+// 不必等 2h 对账;减少孤儿单堆积与用户「列表里一堆失败单」的观感。
+// 需 subscription 侧暴露一个按 orderID 置终态的方法,在 http.go:307 分支内调用。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 1 小时 &nbsp;·&nbsp; <strong>回归测试建议：</strong> <code>TestHandlePurchase_CreatePayFailureMarksOrderTerminal</code>：CreatePay 失败后断言该订单状态为终态（而非 pending）。优先级低于 R1/R3/R5。
+    </div>
+  </div>
+
+  <!-- R6 -->
+  <div class="finding severity-info">
+    <div class="finding-header">
+      <h4>R6. F4 后 force 无法抢救同 IP 无辜者的设备键 —— R1 的连带，反刷取舍自洽</h4>
+      <span class="badge badge-info">Info</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Security（设计张力）</span>
+      <span>📍 internal/risk/engine.go:217-223,265-270</span>
+      <span>🎯 forceReleasable 与 R1 的交互</span>
+      <span>🎓 置信度 High</span>
+      <span>🔧 by-design（建议记 RETRO）</span>
+    </div>
+    <div class="problem">
+      <strong>说明（非缺陷，记录设计张力）：</strong>F4 正确地让 <code>force</code> 只能删「归属不可考的遗留/脏值键」，不能删「另一真实用户的有效占用键」。但结合 R1（设备指纹现为纯 IP）：同 IP 的无辜者 B 撞上 A 的有效 devK（值="A"，<code>n&gt;0</code> → 受保护）后，<strong>连 force 都救不了 B</strong>——客服想帮 B 释放该设备键会被归属校验挡住（除非把 A 的 userID 报进去，但那才是 F4 要防的误删）。这在键层面与「欺诈者拿消耗过的设备再刷」不可区分，牺牲它是自洽的反刷取舍。<strong>它不是 F4 的缺陷，而是 R1（IP 粒度 + 终身键）的连带症状</strong>——R1 一旦按有界 TTL / 挪到支付后修好，本张力自然消解。
+    </div>
+    <div class="evidence">internal/risk/engine.go:217-223  forceReleasable:val 为合法 userID（n>0 且规范串）→ false（受保护）
+internal/risk/engine.go:265-270  ReleaseTrialLimit:val!=owner 且非 forceReleasable → Skipped
+⇒ B 的客服释放:devK 值="A" → 受保护 → 即便 force 也 Skipped → B 无法经客服解套
+⇒ 根因是 R1(IP 粒度共享 + TTL=0),非 F4;修好 R1 后此张力消失</div>
+    <div class="fix-box">
+      <div class="fix-label">建议</div>
+      <code>不单独修——随 R1 一起消解。可在 RETRO 记一条「已知限制」:
+「force 归属校验(F4)与 IP 粒度设备指纹(F1)叠加时,同 IP 无辜者的连坐无法经 force 解套;
+根治依赖 R1(设备维有界 TTL / 挪到支付后)」。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 0（随 R1 消解，仅记 RETRO 5 分钟） &nbsp;·&nbsp; <strong>回归测试建议：</strong> 无需单独测；R1 的有界 TTL 自愈测试即覆盖此场景的解套。
+    </div>
+  </div>
+
+  <!-- R7 -->
+  <div class="finding severity-info">
+    <div class="finding-header">
+      <h4>R7.【既有，非本次引入】.env 解析 sed 不剥尾空格 / CRLF —— 值污染致 DB 认证失败</h4>
+      <span class="badge badge-info">Info</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Release / Configuration</span>
+      <span>📍 deploy/ops/lib.sh（DB_PASS 解析 sed 行）</span>
+      <span>🎯 从 .env 抽 MYSQL_ROOT_PASSWORD</span>
+      <span>🎓 置信度 High</span>
+      <span>🔧 既有逻辑（F3 未改动该行）</span>
+    </div>
+    <div class="problem">
+      <strong>说明：</strong>沙盒实测 lib.sh 从 .env 抽 <code>MYSQL_ROOT_PASSWORD</code> 的 sed：对含 <code>=</code>、单/双引号包裹、多行取末条、值内引号<strong>均正确</strong>；但<strong>不剥除尾部空格</strong>（<code>pw123␣␣␣</code> → 长度 8）和 <strong>CRLF 的 <code>\r</code></strong>（<code>pw999\r</code> → 长度 6），二者会污染 <code>DB_PASS</code> 致 MySQL 认证失败。经 <code>git show 8ac52a4</code> 确认 <strong>F3 未改动该 sed 行</strong>（只删顶层 exit 块、加 <code>require_db_pass</code> 函数），故是既有逻辑、非本次引入；Linux 上手写 .env 触发概率极低（编辑器带 CRLF 或误加尾空格才会）。列为 Info 供顺带硬化。
+    </div>
+    <div class="evidence">deploy/ops/lib.sh  DB_PASS="$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' "$ENV_FILE" | tail -n 1 | sed "s/^['\"]//;s/['\"]\$//")"
+沙盒实测:pw123␣␣␣ → 长度 8（尾空格未剥）;pw999\r → 长度 6（CR 残留）
+git show 8ac52a4:确认本次未改此行,是既有逻辑</div>
+    <div class="fix-box">
+      <div class="fix-label">可选硬化</div>
+      <code># deploy/ops/lib.sh —— 第二个 sed 末尾补去尾部空白/CR
+DB_PASS="$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' "$ENV_FILE" | tail -n 1 \
+  | sed "s/^['\"]//;s/['\"]\$//;s/[[:space:]$(printf '\r')]*\$//")"</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 15 分钟 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 沙盒用例：含尾空格 / CRLF 的 .env 值经解析后长度正确（需在服务器或有 bash 的环境跑）。优先级最低。
+    </div>
+  </div>
+
+  <!-- ════════ 维度分节 ════════ -->
+
+  <h3 class="section-title" id="security">🔒 Security</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 逐行读 F1/F4 全部改动；realname 恒空链（http.go:299/319 + engine.go:342）；<code>ClientIP()</code>=CF-Connecting-IP（trusted_ip.go:21）；<code>forceReleasable</code> 全边界枚举（"1"/"0"/负/空/超界/"007"/"+7"/带空格）；reason 校验前置于引擎断言（<code>App{}</code> 无引擎测试坐实）；限流中间件顺序。</p>
+      <p><strong>排除 / 限制：</strong> 未做线上渗透；攻击者换 IP 绕过成本未量化（VPN/移动重连属常识）；CF 面板侧不可见。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody>
+          <tr><td>R1 纯 IP 终身键 → 同 IP 永久锁死（安全侧:换 IP 即绕过,收益/代价不对称）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          <tr><td>R6 force 无法抢救同 IP 无辜者（R1 连带,反刷取舍自洽）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          <tr><td>R2 /24 网段缓解注释方向反了</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证安全（F1/F4 的安全目标确实达成）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> F1 关闭了「填受害者标识武器化」与「换 UA 绕过」——UA 已彻底移出唯一性键</div>
+        <div class="check-item"><span class="check">✓</span> F4 <code>forceReleasable</code> 边界 fail-safe：合法 owner 键（规范正整数串）恒受保护，脏值/不可能值才可 force</div>
+        <div class="check-item"><span class="check">✓</span> F4 <code>reason</code> 必填校验前置于引擎 nil 断言（fail-closed），纯空格被 TrimSpace 挡住</div>
+        <div class="check-item"><span class="check">✓</span> F4 端点限流按 <code>user_id</code> 计桶、AdminAuth 先注入 id、免疫伪造 XFF</div>
+        <div class="check-item"><span class="check">✓</span> force 只豁免遗留/脏值键，绝不豁免另一真实用户的有效占用（M5 变异坐实）</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="stability">⚡ Stability</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 第一手复现 R1 同 IP 锁死；对比 F1 前后碰撞行为；追 Level A/B 的 ctx 来源；核 sub_reconcile 对孤儿单的 2h 终态清扫。</p>
+      <p><strong>排除 / 限制：</strong> R3 断连泄漏未在真实 Redis 端到端复现（MemKV 忽略 ctx）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody>
+          <tr><td>R1 同 IP/CGNAT 永久锁死 Trial（可用性回归，已上线）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          <tr><td>R3 Level B 原始 ctx → 断连时释放失败泄漏终身键</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          <tr><td>R4 CreatePay 失败留孤儿 pending 单（2h 清扫）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证稳健</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> Level A 用 <code>context.WithoutCancel</code>，断连不影响补偿（Level B 忘了抄 = R3）</div>
+        <div class="check-item"><span class="check">✓</span> 孤儿 pending 单有对账兜底（2h 终态），不双激活、Trial 免费</div>
+        <div class="check-item"><span class="check">✓</span> F3 惰性 <code>require_db_pass</code> 使回滚/巡检不再被无关 DB 口令击穿</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="data-integrity">🧱 Data Integrity</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 枚举 Purchase 全返回路径 + HandlePurchase 全错误分支验双重/漏释放；核 committed 门与 defer 注册时机（在 CheckPurchaseLimit 成功之后）；核 <code>ReleaseTrialLimit</code> force=false 归属校验；核补偿只删本次 claimed。</p>
+      <p><strong>排除 / 限制：</strong> 未在 MySQL 栈做「补偿+对账」并发交互压测。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody>
+          <tr><td>R3 Level B ctx 取消 → 释放失败泄漏终身键</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          <tr><td>R4 孤儿 pending SUB 订单（重试造多条，2h 清扫）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证可靠（F2 核心三条最凶假设全被证伪）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> <strong>无双重释放</strong>：Level A/B 互斥（committed 成功→A no-op；A 已释放→HandlePurchase 先 return 不到 B）</div>
+        <div class="check-item"><span class="check">✓</span> <strong>无漏释放</strong>：Purchase 内部失败、CreatePay 失败两条路径都有补偿</div>
+        <div class="check-item"><span class="check">✓</span> <strong>无跨用户误删</strong>：defer 注册在占键成功之后（购买前失败不触发）+ force=false 归属校验双保险</div>
+        <div class="check-item"><span class="check">✓</span> 补偿只删本次 SetNX 成功、值=本人 userID 的键，绝不触碰赢家占用（M2 变异坐实）</div>
+        <div class="check-item"><span class="check">✓</span> <code>ReleaseTrialLimit</code> 幂等 + 归属校验，即便误触发也无害</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="concurrency">🔀 Concurrency</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 逐交错分析同用户/同 IP 两账号并发；核 <code>committed</code> 为函数内局部（无跨协程访问）；<code>go test -race</code> 三包全绿；并发用例 200× 复跑零抖动；kvDelSpy 的 mutex 保护。</p>
+      <p><strong>排除 / 限制：</strong> 未做长时高并发压测；barrierGetKV 对当前实现不触发（实现不调 Get）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 无发现（两级补偿未引入任何新竞态）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 单赢家性质保持：devK/userK 的 SetNX 原子决胜，败者只回滚自己的 userK</div>
+        <div class="check-item"><span class="check">✓</span> <code>committed</code> 是函数内局部 bool，单 goroutine（函数体 + 自身 defer），无数据竞争</div>
+        <div class="check-item"><span class="check">✓</span> 补偿的 Get→Del 窗口只对归属者、每次占键至多释放一次，未引入新的并发误删</div>
+        <div class="check-item"><span class="check">✓</span> <code>-race</code> 在 CI 与本机均实跑；并发用例 200× 零抖动（非仅声明）</div>
+        <div class="check-item"><span class="check">✓</span> kvDelSpy 的 <code>calls</code> 有 mutex 保护、<code>failNow</code> 为启动前写一次，-race 证无竞态</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="testing-authenticity">🧪 Testing Authenticity</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 对 F6 的 4 个新用例 + 既有回归做 5 次变异（改坏 engine.go → 确认对应测试变红 → 还原，git diff 归零）；核 <code>CompensationDeletesOnlyClaimedKeys</code> 的四重集合断言；核 Level A（真引擎「补偿后可重购」）与 Level B（HTTP 触发块无覆盖）的强度差异。</p>
+      <p><strong>排除 / 限制：</strong> 未跑 <code>go test -cover</code>（本维度看真实信心非行覆盖）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody>
+          <tr><td>R5 Level B HTTP 触发块 + ctx 路径零覆盖（删块/传错参无红）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证真实（F6 与本轮测试质量高）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> F6 的 5 个变异逐一杀死对应测试（删补偿/多删赢家键/删中途补偿/吞 Del 错/force 退回无差别）</div>
+        <div class="check-item"><span class="check">✓</span> <code>CompensationDeletesOnlyClaimedKeys</code> 四重断言（被删⊆败者键、赢家 devK 必存活、len==n-1、赢家键存活）不会漏判误删</div>
+        <div class="check-item"><span class="check">✓</span> Level A 用真实 risk.Engine 断言「补偿后可重购」这一外部可观测性质，非仅 mock 调用计数</div>
+        <div class="check-item"><span class="check">✓</span> 无恒真/过度宽松断言；并发用例 200× -race 零抖动</div>
+        <div class="check-item"><span class="check">✓</span> F4 新增 3 个 handler 层测试（此前端点零测试）；删 <code>kvErrOn.expire</code> 死字段无连带</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="release">🚢 Release &amp; 运维</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 穷举 6 个 <code>source lib.sh</code> 脚本，逐个核 DB_PASS 使用与 <code>require_db_pass</code> 调用；核 die/require 定义顺序与 set -euo 安全；沙盒实测 .env sed 对各种值的解析。</p>
+      <p><strong>排除 / 限制：</strong> 未在服务器实跑 backup/restore/reconcile（破坏性）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+        <tbody>
+          <tr><td>R7【既有】.env sed 不剥尾空格/CRLF（本次未改动该行）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证就绪（F3 干净）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 6 个 lib.sh sourcer 穷举无漏网：4 个用 DB_PASS 的全调 require_db_pass，2 个不用的正确不调</div>
+        <div class="check-item"><span class="check">✓</span> <code>die</code> 定义先于 <code>require_db_pass</code>；各调用在 source 后、首次用 $DB_PASS 前；set -euo 下安全</div>
+        <div class="check-item"><span class="check">✓</span> <code>deploy.sh</code> 不 source lib.sh（自带 compose 串），不受影响；<code>scripts/*.sh</code> source 的是无关的 custom-domain-lib.sh</div>
+        <div class="check-item"><span class="check">✓</span> demo.sh 的 <code>guard_not_prod</code> 先于 <code>require_db_pass</code>，顺序合理</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="principles">📋 工程原则符合性</h3>
+  <div class="card">
+    <div class="card-header">违反项</div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th>原则</th><th style="width:70px">次数</th><th style="width:100px">严重程度</th><th>区域</th></tr></thead>
+        <tbody>
+          <tr><td>修复须治病根，不制造新病（over-correction）</td><td>1</td><td><span class="badge badge-high">High</span></td><td>F1 去 UA 却没碰 TTL=0 共享维度病根 → R1</td></tr>
+          <tr><td>一致性：同类逻辑同样处理</td><td>1</td><td><span class="badge badge-medium">Medium</span></td><td>Level A 用 WithoutCancel、Level B 忘了 → R3</td></tr>
+          <tr><td>money/错误补偿路径必须有测试</td><td>1</td><td><span class="badge badge-medium">Medium</span></td><td>Level B HTTP 触发块零覆盖 → R5</td></tr>
+          <tr><td>注释须与实现/事实相符（承重注释）</td><td>1</td><td><span class="badge badge-low">Low</span></td><td>/24 缓解注释方向反 → R2</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 遵守的原则</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> Fail-closed — F4 reason 前置、forceReleasable 保护合法 owner；Level A WithoutCancel</div>
+        <div class="check-item"><span class="check">✓</span> 时序正确 — 补偿 defer 注册在占键成功之后，杜绝购买前失败误释放</div>
+        <div class="check-item"><span class="check">✓</span> 最小作用域 — F3 把 fail-closed 从 source 期收进 require_db_pass 函数</div>
+        <div class="check-item"><span class="check">✓</span> 测试即证据 — F6 变异验证、Level A 真引擎断言、并发 200× -race</div>
+        <div class="check-item"><span class="check">✓</span> 归属校验 — 跨用户共享键的释放一律验值==userID，force 不破例</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="fix-order">🎯 建议修复顺序</h3>
+  <div class="card">
+    <div class="card-header">
+      <span>⚡ 立即（R1 已 live 生产）</span>
+      <span class="badge badge-high">High</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th style="width:50px">#</th><th>修复</th><th style="width:120px">工作量</th><th>不修的风险</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td><strong>R1</strong> 设备维度加有界 TTL（保留 user 维度终身）；或临时回退 IP+UA / 禁用 device 维度止血；一并订正 <strong>R2</strong> 反向注释</td><td>止血 15 分钟 / 有界 TTL 1–2 小时</td><td>同 IP/CGNAT 真实新用户持续被永久拒 Trial，获客漏斗顶端静默流失（现 live）</td></tr>
+          <tr><td>2</td><td><strong>R3</strong> Level B 改用 <code>context.WithoutCancel(ctx)</code>（与 Level A 对齐）</td><td>10 分钟</td><td>客户端断连时又泄漏终身 Trial 键，恰是 F2 要根除的场景</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span>📅 排期</span>
+      <span class="badge badge-medium">Medium</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table>
+        <thead><tr><th style="width:50px">#</th><th>修复</th><th style="width:120px">工作量</th></tr></thead>
+        <tbody>
+          <tr><td>3</td><td><strong>R5</strong> 让 <code>subscriptionPayURL</code> 可注入失败 + ctx-aware fake KV，测 Level B 触发块（删块/错 PlanCode/错 deviceID 各有红），并覆盖 R3 的 ctx 取消路径</td><td>1.5 小时（与 R3 合并）</td></tr>
+          <tr><td>4</td><td><strong>R4</strong>（可选）CreatePay 失败时把该 SUB 单也置终态（fail-fast，不等 2h 对账）</td><td>1 小时</td></tr>
+          <tr><td>5</td><td><strong>R6</strong> 随 R1 消解，仅在 RETRO 记「force×IP 指纹叠加的已知限制」</td><td>5 分钟</td></tr>
+          <tr><td>6</td><td><strong>R7</strong>（可选）.env sed 补去尾空格/CRLF</td><td>15 分钟</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span>✅ 复审结论</span>
+      <span class="badge badge-high">Request changes（R1 需尽快收口）</span>
+    </div>
+    <div class="card-body">
+      <p><strong>结论：Request changes</strong>——5 条修复中 4 条（F2 核心 / F3 / F4 / F6）经对抗式复审确认扎实、真正闭合原发现；F1 达成了安全目标但<strong>引入一条 High 可用性回归（R1），且已 live 生产</strong>，需尽快收口（有界 TTL / 止血回退）。R3 是「一处写对、隔壁忘抄」的一行不一致，连同 R5 测试盲区一并补。整体是一次合格且大部分优秀的修复，问题集中在 F1 单点。</p>
+      <p style="margin-top:12px"><strong>可复述的教训：</strong> F1 的失误是「治标未治本」——去掉 UA（标）却没碰「共享粗粒度维度 + TTL=0 终身键」（本），把潜伏危险转成 live。修一个「输入可被自选」的问题时，要同时问：换成的新输入在<strong>可用性维度</strong>是否引入新的连坐面？终身键的粒度与共享性是否匹配其 TTL？建议记入 RETRO：<strong>「反滥用维度换信号源时，须同时评估新信号的『误伤连坐面 × TTL』——粗粒度共享信号绝不配终身键」</strong>。</p>
+    </div>
+  </div>
+
+  <h3 class="section-title">⚡ 速赢清单</h3>
+  <div class="win-grid">
+    <div class="win-card"><div class="win-title">R3 · Level B 换 WithoutCancel</div><div class="win-meta">1 行 · 10 分钟 · 堵住断连泄漏，与 Level A 对齐</div></div>
+    <div class="win-card"><div class="win-title">R2 · 订正 /24 反向注释</div><div class="win-meta">2 行注释 · 5 分钟 · 随 R1 一起，防误导未来修复者</div></div>
+    <div class="win-card"><div class="win-title">R1 止血 · 临时回退 IP+UA</div><div class="win-meta">1 行 · 15 分钟 · 立即缩小连坐面（改前状态），为有界 TTL 争取时间</div></div>
+    <div class="win-card"><div class="win-title">R6 · RETRO 记已知限制</div><div class="win-meta">5 分钟 · force×IP 指纹叠加，随 R1 消解</div></div>
+  </div>
+
+  <div style="text-align:center;padding:40px 0 20px;color:var(--text-secondary);font-size:12px">
+    newapi628 修复复审（post-remediation review）· 范围 52204cb..ed09773（5 提交 / 21 文件）· 模式 incremental + security + data-integrity + concurrency + testing-authenticity · 2026-07-18 · Claude Opus 4.8 + 2 路 opus 对抗式子代理<br>
+    敏感凭据值已按审计规范隐去。所有子代理临时变异/复现均已还原，工作树复核零残留、HEAD=ed09773。
+  </div>
+
+</div>
+
+<script>
+  const sections = document.querySelectorAll('[id]');
+  const navLinks = document.querySelectorAll('.sidebar-nav a');
+  const observer = new IntersectionObserver((entries) => {
+    let activeId = null;
+    entries.forEach(entry => { if (entry.isIntersecting) activeId = entry.target.id; });
+    if (activeId) {
+      navLinks.forEach(a => { a.classList.toggle('active', a.getAttribute('href') === '#' + activeId); });
+    }
+  }, { rootMargin: '-10% 0px -60% 0px' });
+  sections.forEach(s => observer.observe(s));
+  navLinks.forEach(a => {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+
+</body>
+</html>

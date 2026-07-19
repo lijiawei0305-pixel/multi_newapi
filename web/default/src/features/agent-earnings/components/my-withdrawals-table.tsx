@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+
 import { StatusBadge } from '@/components/status-badge'
 import {
   Table,
@@ -26,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+
 import {
   cny,
   formatDateTime,
@@ -64,7 +66,7 @@ export function MyWithdrawalsTable({ items, loading }: Props) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {loading ? (
+        {loading && (
           <TableRow>
             <TableCell
               colSpan={COLUMN_COUNT}
@@ -73,7 +75,8 @@ export function MyWithdrawalsTable({ items, loading }: Props) {
               {t('Loading...')}
             </TableCell>
           </TableRow>
-        ) : items.length === 0 ? (
+        )}
+        {!loading && items.length === 0 && (
           <TableRow>
             <TableCell
               colSpan={COLUMN_COUNT}
@@ -82,7 +85,9 @@ export function MyWithdrawalsTable({ items, loading }: Props) {
               {t('No withdrawals')}
             </TableCell>
           </TableRow>
-        ) : (
+        )}
+        {!loading &&
+          items.length > 0 &&
           items.map((row) => {
             const meta = withdrawalStatusMeta(row.status, t)
             return (
@@ -136,8 +141,7 @@ export function MyWithdrawalsTable({ items, loading }: Props) {
                 </TableCell>
               </TableRow>
             )
-          })
-        )}
+          })}
       </TableBody>
     </Table>
   )

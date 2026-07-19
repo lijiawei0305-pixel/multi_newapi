@@ -21,8 +21,8 @@ import { SSE } from 'sse.js'
 
 import { getCommonHeaders } from '@/lib/api'
 
-import { usePlaygroundCredential } from '../context/credential-context'
 import { API_ENDPOINTS, ERROR_MESSAGES } from '../constants'
+import { usePlaygroundCredential } from '../context/credential-context'
 import {
   getStreamReadyStateError,
   isStreamClosedReadyState,

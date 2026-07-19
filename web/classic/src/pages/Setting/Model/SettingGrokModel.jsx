@@ -121,7 +121,7 @@ export default function SettingGrokModel(props) {
                     <a
                       href={XAI_VIOLATION_FEE_DOC_URL}
                       target='_blank'
-                      rel='noreferrer'
+                      rel='noopener noreferrer'
                     >
                       {t('官方说明')}
                     </a>
@@ -152,7 +152,7 @@ export default function SettingGrokModel(props) {
                     <a
                       href={XAI_VIOLATION_FEE_DOC_URL}
                       target='_blank'
-                      rel='noreferrer'
+                      rel='noopener noreferrer'
                     >
                       {t('官方说明')}
                     </a>

@@ -17,8 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
+
 import type { StatusVariant } from '@/components/status-badge'
 import dayjs from '@/lib/dayjs'
+
 import type { AlertLevel } from '../types'
 
 // ============================================================================
@@ -87,12 +89,12 @@ export function formatDate(value: number | string | null | undefined): string {
 }
 
 /** 把 epoch 秒的快照锚点渲染成日期标签（用于趋势图 X 轴 / tooltip）。 */
-export function formatSnapshotTs(
-  bucketTs: number | null | undefined
-): string {
+export function formatSnapshotTs(bucketTs: number | null | undefined): string {
   const n = toFinite(bucketTs)
   if (n <= 0) return '-'
-  return dayjs(n * 1000).tz().format('YYYY-MM-DD')
+  return dayjs(n * 1000)
+    .tz()
+    .format('YYYY-MM-DD')
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +112,10 @@ export function alertLevelMeta(
 ): { variant: StatusVariant; label: string } {
   switch (level) {
     case 'warn':
-      return { variant: 'warning', label: t('Warning', { defaultValue: '预警' }) }
+      return {
+        variant: 'warning',
+        label: t('Warning', { defaultValue: '预警' }),
+      }
     case 'critical':
       return {
         variant: 'danger',

@@ -16,72 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { ColumnDef } from '@tanstack/react-table'
 import { useMemo } from 'react'
-import { type ColumnDef } from '@tanstack/react-table'
-import { Banknote, Check, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
-import { Button } from '@/components/ui/button'
-import type { Withdrawal } from '../types'
+
 import {
   cny,
   formatDateTime,
-  isApproved,
-  isPending,
   payoutMethodLabel,
   withdrawalStatusMeta,
 } from '../lib'
-import { useWithdrawals } from './withdrawals-provider'
-
-function RowActions({ row }: { row: Withdrawal }) {
-  const { t } = useTranslation()
-  const { openAction } = useWithdrawals()
-
-  if (isPending(row.status)) {
-    return (
-      <div className='flex items-center gap-2'>
-        <Button
-          size='sm'
-          variant='outline'
-          className='h-7 text-success hover:text-success'
-          onClick={() => openAction(row, 'approve')}
-          data-testid={`wd-approve-${row.id}`}
-        >
-          <Check className='h-3.5 w-3.5' />
-          {t('Approve')}
-        </Button>
-        <Button
-          size='sm'
-          variant='outline'
-          className='text-destructive hover:text-destructive h-7'
-          onClick={() => openAction(row, 'reject')}
-          data-testid={`wd-reject-${row.id}`}
-        >
-          <X className='h-3.5 w-3.5' />
-          {t('Reject')}
-        </Button>
-      </div>
-    )
-  }
-
-  if (isApproved(row.status)) {
-    return (
-      <Button
-        size='sm'
-        variant='outline'
-        className='h-7'
-        onClick={() => openAction(row, 'mark-paid')}
-        data-testid={`wd-mark-paid-${row.id}`}
-      >
-        <Banknote className='h-3.5 w-3.5' />
-        {t('Mark as paid', { defaultValue: '标记已打款' })}
-      </Button>
-    )
-  }
-
-  return <span className='text-muted-foreground'>—</span>
-}
+import type { Withdrawal } from '../types'
+import { WithdrawalRowActions } from './withdrawal-row-actions'
 
 export function useWithdrawalsColumns(): ColumnDef<Withdrawal>[] {
   const { t } = useTranslation()
@@ -221,7 +170,7 @@ export function useWithdrawalsColumns(): ColumnDef<Withdrawal>[] {
       {
         id: 'actions',
         header: () => t('Actions'),
-        cell: ({ row }) => <RowActions row={row.original} />,
+        cell: ({ row }) => <WithdrawalRowActions row={row.original} />,
         meta: { pinned: 'right' as const },
         size: 180,
       },

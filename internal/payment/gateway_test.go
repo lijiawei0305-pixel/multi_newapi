@@ -38,7 +38,7 @@ func TestCreateOrderPersistsAndBackfills(t *testing.T) {
 	if o.Status != OrderCreated {
 		t.Fatalf("status = %q, want created", o.Status)
 	}
-	if o.NotifyURL != "https://api.test/pay/wxpay/notify" {
+	if o.NotifyURL != "https://api.test/api/pay/wechat/notify" {
 		t.Fatalf("notify_url = %q", o.NotifyURL)
 	}
 	if o.PayURL == "" {
@@ -62,7 +62,7 @@ func TestCreateOrderAlipayNotifyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateOrder: %v", err)
 	}
-	if o.NotifyURL != "https://x/auth/alipay/notify" {
+	if o.NotifyURL != "https://x/api/pay/alipay/notify" {
 		t.Fatalf("alipay notify_url = %q", o.NotifyURL)
 	}
 }

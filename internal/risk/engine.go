@@ -142,6 +142,9 @@ func (e *Engine) CheckPurchaseLimit(ctx context.Context, userID int64, plan Plan
 		_ = e.kv.Expire(ctx, key, e.cfg.PurchaseDedupTTL)
 	}
 	if n > int64(plan.PerUserLimit) {
+		if _, rollbackErr := e.kv.Decr(context.WithoutCancel(ctx), key); rollbackErr != nil {
+			return fmt.Errorf("%w: rollback rejected purchase counter: %v", ErrPurchaseLimitExceeded, rollbackErr)
+		}
 		return ErrPurchaseLimitExceeded
 	}
 	return nil
@@ -231,6 +234,7 @@ func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 
 // 编译期断言：*Engine 亦满足后台释放契约（限购键补偿释放，见 port.go PurchaseLimitAdmin）。
 var _ PurchaseLimitAdmin = (*Engine)(nil)
+var _ PurchaseLimitCompensator = (*Engine)(nil)
 
 // forceReleasable 判断「归属不符」的键是否允许经 force 释放：仅限归属不可考的遗留/脏值键，
 // 绝不含另一真实用户的有效占用（值为其 userID）。遗留键值恒为 "1"（旧版 SetNX 写入）；新键
@@ -307,6 +311,13 @@ func (e *Engine) ReleasePurchaseLimit(ctx context.Context, planID, userID int64)
 	return e.kv.Del(ctx, purchaseKey(planID, userID))
 }
 
+// RollbackPurchaseLimit 原子归还本次非 Trial 购买占用的一次计数。不存在或已归零均幂等返回 nil；
+// 与后台整键释放分开，防止 CreatePay/SavePending 失败误清同用户其它成功购买的计数。
+func (e *Engine) RollbackPurchaseLimit(ctx context.Context, planID, userID int64) error {
+	_, err := e.kv.Decr(ctx, purchaseKey(planID, userID))
+	return err
+}
+
 // NoteUsage used/limit 逼近阈值时打标告警；按 subID 去重（SetNX）确保只告警一次。
 func (e *Engine) NoteUsage(ctx context.Context, subID int64, used, limit float64) {
 	if limit <= 0 {
@@ -357,13 +368,13 @@ func alertKey(subID int64) string {
 // 故实名/设备经请求级 context 传入，detailed-design §2.13 三维去重）。
 // 铁律：这两个字段必须由**服务端派生**，绝不承载客户端自报值——反滥用维度若由被监管方自报，
 // 即可被随机化绕过、或被填入受害者标识反向武器化（RETRO 2026-07-17）。注入点见
-// mtwire.HandlePurchase：DeviceID 由 deviceFingerprint(c) 从 ClientIP+User-Agent 派生。
+// mtwire.HandlePurchase：DeviceID 由 deviceFingerprint(c) 仅从服务端解析的 ClientIP 派生。
 type PurchaseIdentity struct {
 	// RealNameID 实名标识（同一身份证/手机号归一）；空表示未实名，跳过该维度。
 	// **当前恒空**：暂无可信的服务端实名来源（无 KYC 装配），故实名维度未启用；
 	// 待接入可信身份系统后，须由 authenticated user 的服务端记录派生，绝不读客户端串。
 	RealNameID string
-	// DeviceID 设备指纹（UA+IP 等归一，服务端派生）；空表示无信号，跳过该维度。
+	// DeviceID 设备指纹（当前为归一后的 ClientIP，服务端派生）；空表示无信号，跳过该维度。
 	DeviceID string
 }
 

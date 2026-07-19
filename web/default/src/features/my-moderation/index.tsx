@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+
 import { Badge } from '@/components/ui/badge'
 import {
   Table,
@@ -27,8 +28,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { ModerationWordsManager } from '../moderation-words/words-manager'
+
 import type { BannedWord } from '../moderation-words/types'
+import { ModerationWordsManager } from '../moderation-words/words-manager'
 import { listBaseWords, tenantWordsApi } from './api'
 
 /** Read-only view of the global base library (tenant_id=0) the agent inherits. */
@@ -56,19 +58,28 @@ function BaseLibrarySection() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading ? (
+            {isLoading && (
               <TableRow>
-                <TableCell colSpan={4} className='text-muted-foreground text-center'>
+                <TableCell
+                  colSpan={4}
+                  className='text-muted-foreground text-center'
+                >
                   {t('Loading...')}
                 </TableCell>
               </TableRow>
-            ) : rows.length === 0 ? (
+            )}
+            {!isLoading && rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className='text-muted-foreground text-center'>
+                <TableCell
+                  colSpan={4}
+                  className='text-muted-foreground text-center'
+                >
                   {t('No banned words yet')}
                 </TableCell>
               </TableRow>
-            ) : (
+            )}
+            {!isLoading &&
+              rows.length > 0 &&
               rows.map((row: BannedWord) => (
                 <TableRow key={row.id}>
                   <TableCell className='font-medium'>{row.word}</TableCell>
@@ -76,14 +87,19 @@ function BaseLibrarySection() {
                     <Badge variant='secondary'>{row.match_type}</Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={row.action === 'block' ? 'destructive' : 'outline'}>
+                    <Badge
+                      variant={
+                        row.action === 'block' ? 'destructive' : 'outline'
+                      }
+                    >
                       {row.action === 'block' ? t('Block') : t('Remind')}
                     </Badge>
                   </TableCell>
-                  <TableCell>{row.enabled ? t('Enabled') : t('Disabled')}</TableCell>
+                  <TableCell>
+                    {row.enabled ? t('Enabled') : t('Disabled')}
+                  </TableCell>
                 </TableRow>
-              ))
-            )}
+              ))}
           </TableBody>
         </Table>
       </div>

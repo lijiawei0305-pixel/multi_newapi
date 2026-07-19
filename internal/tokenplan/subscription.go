@@ -41,7 +41,8 @@ func NewSubscriptionService(
 //	  → RiskEngine 限购(超限→PURCHASE_LIMIT_EXCEEDED) → PaymentGateway 下单(type=subscription)
 //	  → 暂存购买意图(供 ActivateFromPayment 还原)
 //
-// 真实实现下单+暂存应同事务，本轮内存假实现按序执行（见报告 TODO）。
+// 生产 GORM 桥实现 AtomicPurchaseGateway，将本地订单与购买快照同事务落库；内存/外部假实现仍走
+// PaymentGateway + SubscriptionRepo 的顺序路径。
 func (s *subscriptionService) Purchase(ctx context.Context, in PurchaseInput) (*PurchaseTicket, error) {
 	plan, err := s.plans.GetPlan(ctx, in.PlanID)
 	if err != nil {
@@ -70,40 +71,33 @@ func (s *subscriptionService) Purchase(ctx context.Context, in PurchaseInput) (*
 		return nil, err // PURCHASE_LIMIT_EXCEEDED
 	}
 	// committed 门 + defer：占键成功后，若走到成功终点之前的任一步（CreateOrder / SavePendingPurchase）
-	// 失败，即归还本次占键。否则 Trial 终身键（PurchaseDedupTTL=0 永不过期）永久泄漏——用户没付款、
-	// 订单没成，却再也买不了 Trial、只能走客服（audit F2）。
+	// 失败，即归还本次占用。Trial 防止终身键泄漏；非 Trial 只递减本次计数，不影响其它成功购买。
 	// 归还只在**确知本次已占键之后**触发（defer 注册在 CheckPurchaseLimit 成功之后），故绝不会误删
 	// 「购买前即失败（PLAN_DISABLED / PLAN_NOT_LISTED / PLAN_NOT_FOUND）时用户持有的既有合法 Trial 键」。
 	// CreatePay 失败点在 Purchase 返回之后、本 defer 触不到，由 HandlePurchase 另行显式补偿（Level B）。
 	committed := false
 	defer func() {
 		if !committed {
-			// best-effort：释放失败仅由 RiskEngine 侧 SysLog 留痕，仍可经后台 ReleaseTrialLimit 兜底，
 			// 绝不改变返回给用户的原始错误。WithoutCancel：客户端断连致 ctx 取消时释放不被跳过（Go 1.21+）。
 			_ = s.risk.ReleasePurchaseClaim(context.WithoutCancel(ctx), check)
 		}
 	}()
 
-	order, err := s.payment.CreateOrder(ctx, OrderInput{
+	orderInput := OrderInput{
 		TenantID:  in.TenantID,
 		UserID:    in.UserID,
 		Type:      OrderTypeSubscription,
 		AmountCNY: listing.RetailPrice,
 		Reference: plan.Code,
 		Subject:   plan.Name,
-	})
-	if err != nil {
-		return nil, err
 	}
-
 	// 代理进货成本价：设了折扣系数就按「主站官方售价 BasePrice × 系数」得 per-agent 成本；否则回退套餐
 	// 自带的 AgentCostPrice（对所有代理一样，现状）。差价 = 零售 − 此成本，在 ActivateFromPayment 结算。
 	agentCost := plan.AgentCostPrice
 	if in.DiscountRatio > 0 {
 		agentCost = plan.BasePrice * in.DiscountRatio
 	}
-	if err := s.subs.SavePendingPurchase(ctx, &PendingPurchase{
-		OrderID:        order.OrderID,
+	pending := &PendingPurchase{
 		TenantID:       in.TenantID,
 		UserID:         in.UserID,
 		PlanID:         in.PlanID,
@@ -111,7 +105,19 @@ func (s *subscriptionService) Purchase(ctx context.Context, in PurchaseInput) (*
 		AgentCostPrice: agentCost,
 		MonthLimitUSD:  plan.MonthLimitUSD,
 		ValidDays:      plan.ValidDays,
-	}); err != nil {
+	}
+
+	var order *PayOrder
+	if atomic, ok := s.payment.(AtomicPurchaseGateway); ok {
+		order, err = atomic.CreateOrderWithPending(ctx, orderInput, pending)
+	} else {
+		order, err = s.payment.CreateOrder(ctx, orderInput)
+		if err == nil {
+			pending.OrderID = order.OrderID
+			err = s.subs.SavePendingPurchase(ctx, pending)
+		}
+	}
+	if err != nil {
 		return nil, err
 	}
 

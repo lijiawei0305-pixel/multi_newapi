@@ -30,16 +30,16 @@ interface GatingAlertProps {
 export function GatingAlert({ message, action }: GatingAlertProps) {
   // 门控是「常态引导」而非「警告」，用中性 muted 信息态更克制专业（非 warning 黄）。
   return (
-    <Alert className="flex items-center gap-3 border-border bg-muted/40">
-      <Info className="text-muted-foreground" />
-      <AlertDescription className="flex-1 text-foreground">
+    <Alert className='border-border bg-muted/40 flex items-center gap-3'>
+      <Info className='text-muted-foreground' />
+      <AlertDescription className='text-foreground flex-1'>
         {message}
       </AlertDescription>
       {action && (
         <Button
-          size="sm"
-          variant="outline"
-          className="shrink-0"
+          size='sm'
+          variant='outline'
+          className='shrink-0'
           onClick={action.onClick}
         >
           {action.label}

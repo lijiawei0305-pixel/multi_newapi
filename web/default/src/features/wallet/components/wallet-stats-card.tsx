@@ -18,8 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Activity, BarChart3, WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { formatQuota } from '@/lib/format'
+
 import { Skeleton } from '@/components/ui/skeleton'
+import { formatQuota } from '@/lib/format'
+
 import type { UserWalletData } from '../types'
 
 interface WalletStatsCardProps {
@@ -33,8 +35,8 @@ export function WalletStatsCard(props: WalletStatsCardProps) {
     return (
       <div className='overflow-hidden rounded-lg border'>
         <div className='divide-border/60 grid grid-cols-3 divide-x'>
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className='px-3 py-3 sm:px-5 sm:py-4'>
+          {['balance', 'spent', 'transactions'].map((metric) => (
+            <div key={metric} className='px-3 py-3 sm:px-5 sm:py-4'>
               <Skeleton className='h-3.5 w-20' />
               <Skeleton className='mt-2 h-7 w-28' />
               <Skeleton className='mt-1.5 h-3.5 w-24' />

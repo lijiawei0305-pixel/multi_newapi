@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { agentContextQueryOptions } from '@/lib/agent-context'
+
 import { MyModeration } from '@/features/my-moderation'
+import { agentContextQueryOptions } from '@/lib/agent-context'
 
 export const Route = createFileRoute('/_authenticated/my-moderation/')({
   beforeLoad: async ({ context }) => {

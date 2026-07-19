@@ -69,7 +69,7 @@ func (g *Gateway) ListStuckPaid(ctx context.Context, before time.Time) ([]*PayOr
 // 卡单成因：用户已付，但平台异步回调始终未成功送达主站（极端：平台多次重推全失败），
 // 订单永停 created。本方法是其兜底（与 ReconcileStuckPaid 互补：后者管「已 paid 未 credited」崩溃缺口）。
 //
-//   - query：由调用方注入（主站经 auth-service 向微信/支付宝查单），返回该单平台是否已收款。
+//   - query：由调用方注入（主站进程内适配器向微信/支付宝查单），返回该单平台是否已收款。
 //   - expireAge：created 超过 now-expireAge（贴微信二维码有效期，如 2h）后，查证未付或查无此单即置 failed（自动过期）。0=关闭。
 //   - limit：单轮最多处理笔数（>0 生效），防一轮查单过多。
 func (g *Gateway) ReconcileStuckCreated(

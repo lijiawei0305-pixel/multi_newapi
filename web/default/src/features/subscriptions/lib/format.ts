@@ -17,7 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
+
 import dayjs from '@/lib/dayjs'
+
 import type { SubscriptionPlan } from '../types'
 
 export function formatDuration(
@@ -62,5 +64,7 @@ export function formatResetPeriod(
 
 export function formatTimestamp(ts: number): string {
   if (!ts) return '-'
-  return dayjs(ts * 1000).tz().format('YYYY-MM-DD HH:mm:ss')
+  return dayjs(ts * 1000)
+    .tz()
+    .format('YYYY-MM-DD HH:mm:ss')
 }

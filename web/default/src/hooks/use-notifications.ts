@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNotificationStore } from '@/stores/notification-store'
-import { getNotice } from '@/lib/api'
+import { useState, useMemo } from 'react'
+
 import { useStatus } from '@/hooks/use-status'
+import { getNotice } from '@/lib/api'
+import { useNotificationStore } from '@/stores/notification-store'
 
 function hashString(input: string): string {
   let hash = 0
@@ -81,10 +82,16 @@ export function useNotifications() {
   // Fetch Announcements from status
   const { status, loading: statusLoading } = useStatus()
   const announcementsEnabled = status?.announcements_enabled ?? false
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const announcements: Record<string, unknown>[] = announcementsEnabled
-    ? ((status?.announcements || []) as Record<string, unknown>[]).slice(0, 20)
-    : []
+  const announcements = useMemo<Record<string, unknown>[]>(
+    () =>
+      announcementsEnabled
+        ? ((status?.announcements || []) as Record<string, unknown>[]).slice(
+            0,
+            20
+          )
+        : [],
+    [announcementsEnabled, status?.announcements]
+  )
 
   // Notification store
   const {

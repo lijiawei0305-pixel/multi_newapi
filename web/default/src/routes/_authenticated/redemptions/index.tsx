@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { agentContextQueryOptions } from '@/lib/agent-context'
+
 import { Redemptions } from '@/features/redemptions'
+import { agentContextQueryOptions } from '@/lib/agent-context'
 
 // Agent self-service: accessible only to the agent owner of the current Host's
 // tenant. Non-owners (normal users, or agents on the main site / another

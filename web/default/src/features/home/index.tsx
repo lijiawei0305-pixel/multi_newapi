@@ -17,24 +17,32 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
+import { lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
-import { LandingReact } from '@/features/landing-react'
 import { isLikelyHtml } from '@/lib/content-format'
+import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
 import { resolveTenant } from '@/lib/tenant'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CTA, Features, Hero, HowItWorks, Stats } from './components'
 import { useHomePageContent } from './hooks'
 
+const LandingReact = lazy(() =>
+  import('@/features/landing-react').then((module) => ({
+    default: module.LandingReact,
+  }))
+)
+
 export function Home() {
   const { t } = useTranslation()
   const { auth } = useAuthStore()
   const isAuthenticated = !!auth.user
   const { content, isLoaded, isUrl } = useHomePageContent()
+  const contentUrl = isUrl ? normalizeHttpNavigationUrl(content) : null
   // 复用 root 的 ['tenant-resolution'] 查询（每会话一次 GET /api/tenant/current），按 Host 区分主站/代理站。
   const { data: resolution, isLoading: isTenantLoading } = useQuery({
     queryKey: ['tenant-resolution'],
@@ -71,7 +79,15 @@ export function Home() {
     //     text-muted-foreground 是深灰，在黑底上看不见。z-20 是为了压过落地页的 #vignette(z:12)。
     return (
       <>
-        <LandingReact />
+        <Suspense
+          fallback={
+            <main className='flex min-h-screen items-center justify-center bg-[#061127] text-white'>
+              {t('Loading...')}
+            </main>
+          }
+        >
+          <LandingReact />
+        </Suspense>
         {/* 页脚接在落地页深空渐变之后：给 wrapper 填渐变的收尾色 #061127，与上方场景同色无缝衔接，
             同时盖住浅色主题下透出的白色 body 背景（否则页面最底部会出现一条白带）。
             Footer 自带的 border-t 是一道微弱白线，在纯色底上会成接缝，故传 border-transparent 消除。 */}
@@ -83,14 +99,15 @@ export function Home() {
   }
 
   if (content) {
-    if (isUrl) {
+    if (contentUrl) {
       return (
         <PublicLayout showMainContainer={false}>
           <iframe
-            src={content}
+            src={contentUrl}
             className='h-screen w-full border-none'
             title={t('Custom Home Page')}
             sandbox='allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts'
+            referrerPolicy='no-referrer'
           />
         </PublicLayout>
       )

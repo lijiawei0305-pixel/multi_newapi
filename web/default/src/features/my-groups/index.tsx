@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -33,6 +34,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { getApiErrorCode } from '@/lib/api'
+
 import { getTenantGroups, updateTenantGroup } from './api'
 import type { TenantGroup } from './types'
 
@@ -88,7 +90,7 @@ function GroupRow({ row, onSaved }: { row: TenantGroup; onSaved: () => void }) {
           value={Number.isFinite(ratio) ? ratio : ''}
           aria-invalid={belowFloor}
           onChange={(e) => {
-            const parsed = parseFloat(e.target.value)
+            const parsed = Number.parseFloat(e.target.value)
             setRatio(Number.isNaN(parsed) ? 0 : parsed)
           }}
         />
@@ -161,7 +163,7 @@ export function MyGroups() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading ? (
+                {isLoading && (
                   <TableRow>
                     <TableCell
                       colSpan={6}
@@ -170,7 +172,8 @@ export function MyGroups() {
                       {t('Loading...')}
                     </TableCell>
                   </TableRow>
-                ) : rows.length === 0 ? (
+                )}
+                {!isLoading && rows.length === 0 && (
                   <TableRow>
                     <TableCell
                       colSpan={6}
@@ -179,15 +182,16 @@ export function MyGroups() {
                       {t('No groups yet')}
                     </TableCell>
                   </TableRow>
-                ) : (
+                )}
+                {!isLoading &&
+                  rows.length > 0 &&
                   rows.map((row: TenantGroup) => (
                     <GroupRow
                       key={row.group_name}
                       row={row}
                       onSaved={refresh}
                     />
-                  ))
-                )}
+                  ))}
               </TableBody>
             </Table>
           </div>

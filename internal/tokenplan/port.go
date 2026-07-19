@@ -64,7 +64,7 @@ type SubscriptionQuotaFactory interface {
 // 本包只 import 自己声明的接口与 platform/{quota,apperr,appctx}，不 import 兄弟业务模块。
 
 // PlanRepo 是套餐定义与代理上架的持久化抽象。本轮提供并发安全内存假实现（MemRepo）；
-// 真实 GORM 实现（迁移 / UNIQUE(tenant_id,plan_id) / scopeByTenant）顺延（见报告 TODO）。
+// 生产 GORM 实现（迁移 / UNIQUE(tenant_id,plan_id) / scopeByTenant）位于 gormrepo 子包。
 type PlanRepo interface {
 	// CreatePlan 入库并回填 p.ID / 时间戳。
 	CreatePlan(ctx context.Context, p *Plan) error
@@ -118,13 +118,19 @@ type PaymentGateway interface {
 	CreateOrder(ctx context.Context, in OrderInput) (*PayOrder, error)
 }
 
+// AtomicPurchaseGateway 是生产 GORM 支付桥可选实现的更强契约：把本地 SUB 订单与完整购买快照放在
+// 同一数据库事务提交。Purchase 会优先使用本接口；纯内存/外部网关仍可只实现 PaymentGateway，走
+// 既有顺序路径。实现必须为 pending 回填最终 OrderID，任一步失败不得留下孤立 pending 订单。
+type AtomicPurchaseGateway interface {
+	CreateOrderWithPending(ctx context.Context, in OrderInput, pending *PendingPurchase) (*PayOrder, error)
+}
+
 // RiskEngine 是限购校验（消费者定义接口）。Trial 等限购口径见 §7 默认 #4。
 type RiskEngine interface {
 	// CheckPurchaseLimit 触发限购返回 PURCHASE_LIMIT_EXCEEDED；放行返回 nil。
 	CheckPurchaseLimit(ctx context.Context, in PurchaseLimitCheck) error
 	// ReleasePurchaseClaim 归还本次已通过 CheckPurchaseLimit 的限购占用（补偿：下单/支付凭据
-	// 创建失败时调用，否则 Trial 终身键永久泄漏，audit F2）。入参与 CheckPurchaseLimit 对称，
-	// 只删归属本用户的键（force=false 归属校验）。幂等；非 Trial 档当前 no-op（见实现注释）。
+	// 创建失败时调用）。Trial 只删归属本用户的维度键；非 Trial 原子递减本次计数，不能整键清零。
 	ReleasePurchaseClaim(ctx context.Context, in PurchaseLimitCheck) error
 }
 

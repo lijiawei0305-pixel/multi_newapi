@@ -76,12 +76,12 @@ export interface TenantSubscription {
 
 /**
  * Purchase response payload (snake_case, mirrors the wallet recharge envelope).
- * The backend creates a SUB order then asks the auth-service for a mock pay page:
- * `pay_url` and `pay.*` carry the same hosted URL. WeChat surfaces it as a QR
- * payload (`pay.wxpay_qr`), Alipay as a redirect URL (`pay.alipay_url`).
+ * The backend creates a SUB order through the in-process payment adapter.
+ * `pay_url` and `pay.*` carry the provider credential. WeChat surfaces a QR
+ * payload (`pay.wxpay_qr`), while Alipay surfaces a redirect URL (`pay.alipay_url`).
  */
 export interface PurchaseResult {
-  /** Hosted mock pay page (auth-service); same value as pay.wxpay_qr / pay.alipay_url. */
+  /** Provider pay credential; same value as pay.wxpay_qr / pay.alipay_url. */
   pay_url?: string
   /** SUB order number (matches the recharge `order_no` shape). */
   order_no?: string
@@ -91,7 +91,7 @@ export interface PurchaseResult {
   plan_id?: number
   /** Provider-specific pay credential. */
   pay?: {
-    /** WeChat: QR payload (mock confirm page URL). */
+    /** WeChat: QR payload returned by the configured provider. */
     wxpay_qr?: string
     /** Alipay: redirect target. */
     alipay_url?: string

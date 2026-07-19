@@ -9,7 +9,6 @@ package mtwire
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -267,7 +266,7 @@ func (a *App) HandleAdminDeleteModelGroup(c *gin.Context) {
 func (a *App) syncModelGroupRatioAndUsable(name string, ratio float64, desc string) error {
 	gr := ratio_setting.GetGroupRatioCopy()
 	gr[name] = ratio
-	grJSON, err := json.Marshal(gr)
+	grJSON, err := common.Marshal(gr)
 	if err != nil {
 		return err
 	}
@@ -280,7 +279,7 @@ func (a *App) syncModelGroupRatioAndUsable(name string, ratio float64, desc stri
 			label = name
 		}
 		uug[name] = label
-		uugJSON, err := json.Marshal(uug)
+		uugJSON, err := common.Marshal(uug)
 		if err != nil {
 			return err
 		}
@@ -293,7 +292,7 @@ func (a *App) syncModelGroupRatioAndUsable(name string, ratio float64, desc stri
 func (a *App) updateGroupRatioOption(name string, ratio float64) error {
 	gr := ratio_setting.GetGroupRatioCopy()
 	gr[name] = ratio
-	grJSON, err := json.Marshal(gr)
+	grJSON, err := common.Marshal(gr)
 	if err != nil {
 		return err
 	}
@@ -307,7 +306,7 @@ func (a *App) removeUserUsableGroup(name string) error {
 		return nil
 	}
 	delete(uug, name)
-	uugJSON, err := json.Marshal(uug)
+	uugJSON, err := common.Marshal(uug)
 	if err != nil {
 		return err
 	}
@@ -352,11 +351,11 @@ func (a *App) ReconcileModelGroupsUsable() error {
 	if !changed {
 		return nil
 	}
-	grJSON, err := json.Marshal(gr)
+	grJSON, err := common.Marshal(gr)
 	if err != nil {
 		return err
 	}
-	uugJSON, err := json.Marshal(uug)
+	uugJSON, err := common.Marshal(uug)
 	if err != nil {
 		return err
 	}

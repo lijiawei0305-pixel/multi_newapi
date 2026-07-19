@@ -16,20 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import type { AxiosRequestConfig } from 'axios'
 import {
   createFileRoute,
   useNavigate,
   useParams,
   useSearch,
 } from '@tanstack/react-router'
+import type { AxiosRequestConfig } from 'axios'
 import i18next from 'i18next'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { useAuthStore, type AuthUser } from '@/stores/auth-store'
-import { api, getSelf } from '@/lib/api'
+
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+import { api, getSelf } from '@/lib/api'
+import { normalizeSameOriginNavigationPath } from '@/lib/safe-navigation'
+import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 
 type OAuthRequestConfig = AxiosRequestConfig & {
   skipBusinessError?: boolean
@@ -59,19 +61,20 @@ function OAuthCallback() {
   useEffect(() => {
     ;(async () => {
       const safeNavigate = (target: string) => {
-        navigate({ to: target as never, replace: true })
+        const safeTarget = normalizeSameOriginNavigationPath(target)
+        if (!safeTarget) return
+        navigate({ to: safeTarget as never, replace: true })
         if (typeof window !== 'undefined') {
           setTimeout(() => {
-            const normalizedTarget = target.startsWith('/')
-              ? target
-              : `/${target}`
             const currentPath =
-              window.location.pathname + window.location.search
+              window.location.pathname +
+              window.location.search +
+              window.location.hash
             if (
-              currentPath !== normalizedTarget &&
-              currentPath !== `${normalizedTarget}/`
+              currentPath !== safeTarget &&
+              currentPath !== `${safeTarget}/`
             ) {
-              window.location.replace(target)
+              window.location.replace(safeTarget)
             }
           }, 100)
         }
@@ -143,7 +146,9 @@ function OAuthCallback() {
       }
 
       const redirectAfterLogin = (target?: string) => {
-        const to = target || search?.redirect || '/dashboard'
+        const to =
+          normalizeSameOriginNavigationPath(target || search?.redirect) ||
+          '/dashboard'
         safeNavigate(to)
         toast.success(i18next.t('Signed in successfully!'))
       }
@@ -207,7 +212,8 @@ function OAuthCallback() {
         const message = res?.data?.message || 'OAuth failed'
         if (!res?.data?.success && !isBindingFlow) {
           // When logging in with an already bound GitHub account, backend may return this message
-          if (message === '该 GitHub 账户已被绑定') { // 后端 i18n 字面匹配（zh-CN oauth.already_bound 渲染结果），非展示文案，不做 t()/defaultValue 翻译
+          if (message === '该 GitHub 账户已被绑定') {
+            // 后端 i18n 字面匹配（zh-CN oauth.already_bound 渲染结果），非展示文案，不做 t()/defaultValue 翻译
             if (await finalizeLogin()) {
               redirectAfterLogin()
               return

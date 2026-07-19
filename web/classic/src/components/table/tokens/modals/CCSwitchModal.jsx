@@ -28,6 +28,7 @@ import {
 } from '@douyinfe/semi-ui';
 import { useTranslation } from 'react-i18next';
 import { selectFilter } from '../../../../helpers';
+import { openChatUrlInNewTab } from '../../../../helpers/safeNavigation';
 
 const APP_CONFIGS = {
   claude: {
@@ -117,8 +118,9 @@ export default function CCSwitchModal({
       return;
     }
     const url = buildCCSwitchURL(app, name, models, 'sk-' + tokenKey);
-    window.open(url, '_blank');
-    onClose();
+    if (openChatUrlInNewTab(url)) {
+      onClose();
+    }
   };
 
   const fieldLabelStyle = useMemo(

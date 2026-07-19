@@ -26,6 +26,7 @@ import (
 var (
 	errAgentForbidden     = apperr.New("AGENT_FORBIDDEN", "无权访问该代理资源", http.StatusForbidden)
 	errAgentInputInvalid  = apperr.New("AGENT_INPUT_INVALID", "代理入参非法", http.StatusBadRequest)
+	errAgentNotFound      = apperr.New("AGENT_NOT_FOUND", "代理不存在", http.StatusNotFound)
 	errAgentOwnerTaken    = apperr.New("AGENT_OWNER_TAKEN", "该用户已是其他租户的代理 owner", http.StatusConflict)
 	errAgentUserNotFound  = apperr.New("AGENT_USER_NOT_FOUND", "owner 用户不存在", http.StatusBadRequest)
 	errAgentTierInvalid   = apperr.New("AGENT_TIER_INVALID", "不允许的用户层级", http.StatusBadRequest)

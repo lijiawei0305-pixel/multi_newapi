@@ -15,7 +15,6 @@ package mtwire
 
 import (
 	"context"
-	"encoding/json"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -25,6 +24,8 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/QuantumNous/new-api/common"
+	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
 	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 	"github.com/QuantumNous/new-api/internal/pricing"
@@ -32,12 +33,20 @@ import (
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
 	tprepo "github.com/QuantumNous/new-api/internal/tokenplan/gormrepo"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type buyerTestPayCreator struct{}
+
+func (buyerTestPayCreator) CreatePay(context.Context, payment.Provider, string, string, float64, string) (string, error) {
+	return "https://pay.example.test/checkout", nil
+}
 
 // newBuyerTestApp 装配买家套餐端点（HandleListTokenPlans/HandlePurchase/HandleListSubscriptions）
 // 所需的最小 App：sqlite(:memory:) + tenant/tokenplan 两套 gorm 表 + 订阅桥接表（Purchase 会落
-// mt_subscription_orders，见 subscription_bridge.go）。不装配 providerMgr——subscriptionPayURL 回退
-// 占位 PayURL（见 http.go 注释：「单测直构 App 时回退占位 PayURL，保证可跑不 panic」），不发真实 HTTP。
+// mt_subscription_orders，见 subscription_bridge.go）。不装配 providerMgr，显式注入本地支付创建桩，
+// 避免测试依赖生产的 fail-closed 装配错误分支，也不发真实 HTTP。
 func newBuyerTestApp(t *testing.T) *App {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
@@ -70,7 +79,8 @@ func newBuyerTestApp(t *testing.T) *App {
 		Catalog:       tokenplan.NewCatalog(tp),
 		Retail:        tokenplan.NewRetailService(tp, guard),
 		Subscriptions: tokenplan.NewSubscriptionService(
-			tp, tp, newSubPayment(newSubOrderStore(db)), allowAllRisk{}, noopEarnings{}, nil),
+			tp, tp, newSubPayment(newSubOrderStore(db), tp), allowAllRisk{}, noopEarnings{}, nil),
+		subscriptionPayCreator: buyerTestPayCreator{},
 	}
 }
 
@@ -210,7 +220,7 @@ func TestHandleListTokenPlans_MainSiteFallback(t *testing.T) {
 		t.Fatalf("main-site buyer listing should succeed, got %+v", r)
 	}
 	var plans []buyerPlanOut
-	if err := json.Unmarshal(r.Data, &plans); err != nil {
+	if err := common.Unmarshal(r.Data, &plans); err != nil {
 		t.Fatalf("decode plans: %v", err)
 	}
 	if len(plans) != 1 || plans[0].Code != "pro" {
@@ -257,7 +267,7 @@ func TestHandleListTokenPlans_RealTenantHostUnaffected(t *testing.T) {
 		t.Fatalf("resolved-tenant listing should succeed, got %+v", r)
 	}
 	var plans []buyerPlanOut
-	if err := json.Unmarshal(r.Data, &plans); err != nil {
+	if err := common.Unmarshal(r.Data, &plans); err != nil {
 		t.Fatalf("decode plans: %v", err)
 	}
 	if len(plans) != 1 || plans[0].Code != "mini" || plans[0].RetailPriceCNY != 12 {
@@ -290,7 +300,7 @@ func TestHandlePurchase_MainSiteFallback(t *testing.T) {
 		AmountCNY float64 `json:"amount_cny"`
 		PlanID    int64   `json:"plan_id"`
 	}
-	if err := json.Unmarshal(r.Data, &out); err != nil {
+	if err := common.Unmarshal(r.Data, &out); err != nil {
 		t.Fatalf("decode purchase result: %v", err)
 	}
 	if out.PlanID != planID || out.OrderNo == "" {
@@ -305,6 +315,97 @@ func TestHandlePurchase_MainSiteFallback(t *testing.T) {
 	if snap.TenantID != pt.ID {
 		t.Fatalf("pending purchase tenant_id = %d, want platform tenant %d", snap.TenantID, pt.ID)
 	}
+}
+
+func TestHandlePurchaseOptionalBodyAcceptsOnlyEOFAsEmpty(t *testing.T) {
+	app := newBuyerTestApp(t)
+	_, planID := seedPlatformPlan(t, app)
+	var configuredProvider payment.Provider
+	stubProviderConfigured(t, func(p payment.Provider) bool {
+		configuredProvider = p
+		return p == payment.ProviderWxpay
+	})
+	require.True(t, providerConfigured(app, payment.ProviderWxpay))
+	param := gin.Params{{Key: "id", Value: strconv.FormatInt(planID, 10)}}
+
+	// 真正空 body 保持既有默认微信语义。
+	c, rec := newBuyerCtx("www.wedreamhub.com", nil, 7, "POST", "", param)
+	app.HandlePurchase(c)
+	resp := decodeResp(t, rec)
+	assert.Equal(t, payment.ProviderWxpay, configuredProvider)
+	require.True(t, resp.Success, "empty body should use default wxpay: %+v", resp)
+	var out struct {
+		OrderNo string `json:"order_no"`
+	}
+	require.NoError(t, common.Unmarshal(resp.Data, &out))
+	var order subscriptionOrderRow
+	require.NoError(t, app.DB.Take(&order, "order_no = ?", out.OrderNo).Error)
+	assert.Equal(t, string(payment.ProviderWxpay), order.Provider)
+	assert.Equal(t, subOrderPending, order.Status, "payment credentials must be confirmed before ordinary pending")
+
+	for name, body := range map[string]string{
+		"truncated":         `{"provider":`,
+		"wrong field type":  `{"provider":123}`,
+		"null body":         `null`,
+		"wrong top-level":   `[]`,
+		"trailing garbage":  `{} trailing`,
+		"second JSON value": `{} {}`,
+		"oversized body":    strings.Repeat(" ", int(purchaseRequestBodyLimit)+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var beforeOrders int64
+			require.NoError(t, app.DB.Model(&subscriptionOrderRow{}).Count(&beforeOrders).Error)
+			c, rec := newBuyerCtx("www.wedreamhub.com", nil, 7, "POST", body, param)
+			app.HandlePurchase(c)
+			got := decodeResp(t, rec)
+			assert.False(t, got.Success)
+			assert.Equal(t, payment.CodeOrderInvalid, got.Code)
+			var afterOrders int64
+			require.NoError(t, app.DB.Model(&subscriptionOrderRow{}).Count(&afterOrders).Error)
+			assert.Equal(t, beforeOrders, afterOrders, "malformed body must not create an order")
+		})
+	}
+}
+
+func TestHandlePurchaseMissingPaymentCreatorFailsClosed(t *testing.T) {
+	app := newBuyerTestApp(t)
+	app.subscriptionPayCreator = nil
+	app.providerMgr = nil
+	_, planID := seedPlatformPlan(t, app)
+	stubProviderConfigured(t, func(p payment.Provider) bool { return p == payment.ProviderWxpay })
+
+	c, rec := newBuyerCtx("www.wedreamhub.com", nil, 7, "POST", `{}`,
+		gin.Params{{Key: "id", Value: strconv.FormatInt(planID, 10)}})
+	app.HandlePurchase(c)
+	resp := decodeResp(t, rec)
+	assert.False(t, resp.Success)
+	assert.Equal(t, "PROVIDER_MGR_UNSET", resp.Code)
+	assert.NotContains(t, string(resp.Data), "pay.example.test")
+
+	var order subscriptionOrderRow
+	require.NoError(t, app.DB.First(&order).Error)
+	assert.Equal(t, subOrderPayFailed, order.Status)
+	assert.Equal(t, string(payment.ProviderWxpay), order.Provider)
+}
+
+func TestHandlePurchaseAgentDiscountReadErrorCreatesNothing(t *testing.T) {
+	app := newBuyerTestApp(t)
+	_, planID := seedPlatformPlan(t, app)
+	stubProviderConfigured(t, func(p payment.Provider) bool { return p == payment.ProviderWxpay })
+	// 不迁移 agent_profiles，强制真实 AgentRepo.GetAgentType 返回数据库错误。
+	app.AgentRepo = agentrepo.New(app.DB)
+
+	c, rec := newBuyerCtx("www.wedreamhub.com", nil, 7, "POST", `{}`,
+		gin.Params{{Key: "id", Value: strconv.FormatInt(planID, 10)}})
+	app.HandlePurchase(c)
+	resp := decodeResp(t, rec)
+	assert.False(t, resp.Success)
+	assert.Equal(t, "INTERNAL", resp.Code)
+	var orders, snapshots int64
+	require.NoError(t, app.DB.Model(&subscriptionOrderRow{}).Count(&orders).Error)
+	require.NoError(t, app.DB.Table("pending_subscription_orders").Count(&snapshots).Error)
+	assert.Zero(t, orders)
+	assert.Zero(t, snapshots)
 }
 
 func TestHandlePurchase_UnregisteredSubdomainStillTenantNotFound(t *testing.T) {
@@ -379,7 +480,7 @@ func TestHandleListSubscriptions_MainSiteFallback(t *testing.T) {
 		t.Fatalf("main-site subscriptions listing should succeed, got %+v", r)
 	}
 	var subs []buyerSubOut
-	if err := json.Unmarshal(r.Data, &subs); err != nil {
+	if err := common.Unmarshal(r.Data, &subs); err != nil {
 		t.Fatalf("decode subs: %v", err)
 	}
 	if len(subs) != 0 {
@@ -431,7 +532,7 @@ func TestHandleListTokenPlans_NativePlanIDMapped(t *testing.T) {
 		t.Fatalf("listing should succeed, got %+v", r)
 	}
 	var plans []buyerPlanOut
-	if err := json.Unmarshal(r.Data, &plans); err != nil {
+	if err := common.Unmarshal(r.Data, &plans); err != nil {
 		t.Fatalf("decode plans: %v", err)
 	}
 	if len(plans) != 1 {

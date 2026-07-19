@@ -1,4 +1,3 @@
-// @ts-nocheck
 /* WeDream 统一 3D 场景 —— 配置:模型元数据 / logo 素材 / 两条轨道。
    MODELS、LOGOS 由脚本从 orbit.ts 原样迁移(值一字不改);ORBITS 为本次新增。
    speed 正负号在实现期对着截图校正(内前方左→右 / 外前方右→左);
@@ -17,17 +16,96 @@ export const LOGOS: Record<string, string> = {
   minimax: `<img src="/lp-assets/logos/minimax.png" alt="" draggable="false">`,
 }
 
-export const MODELS: Record<string, any> = {
-  openai: { name: 'GPT Series', provider: 'OPENAI', desc: 'Multimodal flagship — top-tier general intelligence and tool use, with the most mature ecosystem.', scene: 'General chat, agents, multimodal understanding and generation.', telemetry: 'Multimodal pipeline online', color: '#919da7' },
-  anthropic: { name: 'Claude Series', provider: 'ANTHROPIC', desc: 'The benchmark for coding and complex reasoning; reliable long context and excellent safety alignment.', scene: 'Coding agents, long-document analysis, serious writing.', telemetry: '200K context active', color: '#bc7650' },
-  gemini: { name: 'Gemini Series', provider: 'GOOGLE DEEPMIND', desc: 'Natively multimodal engine with million-token context and strong video/audio understanding.', scene: 'Multimodal analysis, Q&A over very large corpora.', telemetry: '1M token pipeline', color: '#6485c3' },
-  deepseek: { name: 'DeepSeek Series', provider: 'DEEPSEEK', desc: 'Best value in reasoning and code; open and strong at mathematics.', scene: 'Cost-effective reasoning, code generation, math problem solving.', telemetry: 'Reasoning chain active', color: '#607a8f' },
-  xai: { name: 'Grok Series', provider: 'XAI', desc: 'Plugged into real-time information, with a distinct style and fast-improving reasoning.', scene: 'Real-time information Q&A, trend analysis.', telemetry: 'Real-time retrieval in sync', color: '#8e7866' },
-  qwen: { name: 'Qwen Series', provider: 'Alibaba Cloud', desc: 'Domestic open-source flagship — strong at code and multilingual tasks, with the broadest size lineup.', scene: 'Chinese conversation, code generation, structured output.', telemetry: 'Full size lineup online', color: '#6e8299' },
-  minimax: { name: 'MiniMax Series', provider: 'MINIMAX', desc: 'Long context and multimodality in step, with outstanding speech synthesis.', scene: 'Long-form processing, voice applications, character dialogue.', telemetry: 'Million-scale context', color: '#f23d5b' },
-  doubao: { name: 'Doubao Large Model', provider: 'ByteDance', desc: 'High concurrency at low cost, great everyday Chinese conversation, proven at scale.', scene: 'Large-scale consumer apps, smart customer service, translation.', telemetry: 'Volcano Engine pipeline', color: '#8e9aa8' },
-  kimi: { name: 'Kimi Series', provider: 'Moonshot AI', desc: 'A pioneer of ultra-long context — great for web and document digests, with open-source reasoning models.', scene: 'Long-document reading, research digests, deep reasoning.', telemetry: 'Ultra-long context active', color: '#60a9d2' },
-  glm_chatglm: { name: 'GLM Series', provider: 'Zhipu AI', desc: 'Tsinghua-rooted technology with strong agent and coding ability; open and accessible.', scene: 'Agent development, coding assistance, academic research.', telemetry: 'Agent pipeline active', color: '#7595a6' },
+export type LandingModel = {
+  name: string
+  provider: string
+  desc: string
+  scene: string
+  telemetry: string
+  color: string
+}
+
+export const MODELS: Record<string, LandingModel> = {
+  openai: {
+    name: 'GPT Series',
+    provider: 'OPENAI',
+    desc: 'Multimodal flagship — top-tier general intelligence and tool use, with the most mature ecosystem.',
+    scene: 'General chat, agents, multimodal understanding and generation.',
+    telemetry: 'Multimodal pipeline online',
+    color: '#919da7',
+  },
+  anthropic: {
+    name: 'Claude Series',
+    provider: 'ANTHROPIC',
+    desc: 'The benchmark for coding and complex reasoning; reliable long context and excellent safety alignment.',
+    scene: 'Coding agents, long-document analysis, serious writing.',
+    telemetry: '200K context active',
+    color: '#bc7650',
+  },
+  gemini: {
+    name: 'Gemini Series',
+    provider: 'GOOGLE DEEPMIND',
+    desc: 'Natively multimodal engine with million-token context and strong video/audio understanding.',
+    scene: 'Multimodal analysis, Q&A over very large corpora.',
+    telemetry: '1M token pipeline',
+    color: '#6485c3',
+  },
+  deepseek: {
+    name: 'DeepSeek Series',
+    provider: 'DEEPSEEK',
+    desc: 'Best value in reasoning and code; open and strong at mathematics.',
+    scene: 'Cost-effective reasoning, code generation, math problem solving.',
+    telemetry: 'Reasoning chain active',
+    color: '#607a8f',
+  },
+  xai: {
+    name: 'Grok Series',
+    provider: 'XAI',
+    desc: 'Plugged into real-time information, with a distinct style and fast-improving reasoning.',
+    scene: 'Real-time information Q&A, trend analysis.',
+    telemetry: 'Real-time retrieval in sync',
+    color: '#8e7866',
+  },
+  qwen: {
+    name: 'Qwen Series',
+    provider: 'Alibaba Cloud',
+    desc: 'Domestic open-source flagship — strong at code and multilingual tasks, with the broadest size lineup.',
+    scene: 'Chinese conversation, code generation, structured output.',
+    telemetry: 'Full size lineup online',
+    color: '#6e8299',
+  },
+  minimax: {
+    name: 'MiniMax Series',
+    provider: 'MINIMAX',
+    desc: 'Long context and multimodality in step, with outstanding speech synthesis.',
+    scene: 'Long-form processing, voice applications, character dialogue.',
+    telemetry: 'Million-scale context',
+    color: '#f23d5b',
+  },
+  doubao: {
+    name: 'Doubao Large Model',
+    provider: 'ByteDance',
+    desc: 'High concurrency at low cost, great everyday Chinese conversation, proven at scale.',
+    scene: 'Large-scale consumer apps, smart customer service, translation.',
+    telemetry: 'Volcano Engine pipeline',
+    color: '#8e9aa8',
+  },
+  kimi: {
+    name: 'Kimi Series',
+    provider: 'Moonshot AI',
+    desc: 'A pioneer of ultra-long context — great for web and document digests, with open-source reasoning models.',
+    scene: 'Long-document reading, research digests, deep reasoning.',
+    telemetry: 'Ultra-long context active',
+    color: '#60a9d2',
+  },
+  glm_chatglm: {
+    name: 'GLM Series',
+    provider: 'Zhipu AI',
+    desc: 'Tsinghua-rooted technology with strong agent and coding ability; open and accessible.',
+    scene: 'Agent development, coding assistance, academic research.',
+    telemetry: 'Agent pipeline active',
+    color: '#7595a6',
+  },
 }
 
 export type OrbitCfg = {
@@ -51,14 +129,38 @@ export type OrbitCfg = {
 export const ORBITS: OrbitCfg[] = [
   {
     // 内圈:逆时针(前方左→右);倾角略小。图标 11.4s/圈、光点 26s/圈。
-    ring: 'inner', color: '#8fd8ff', radius: 0.85, tubeRadius: 0.0022, opacity: 0.5, tilt: [0.5, 0, 0.12],
-    wobbleDeg: 4, wobblePeriod: 18, wobblePhase: 0, speed: -0.33, flowSpeed: -0.14, ringSpin: 0.14,
-    wakeStrength: 0.9, wakeFalloff: 5.0, keys: ['openai', 'anthropic', 'gemini', 'xai'],
+    ring: 'inner',
+    color: '#8fd8ff',
+    radius: 0.85,
+    tubeRadius: 0.0022,
+    opacity: 0.5,
+    tilt: [0.5, 0, 0.12],
+    wobbleDeg: 4,
+    wobblePeriod: 18,
+    wobblePhase: 0,
+    speed: -0.33,
+    flowSpeed: -0.14,
+    ringSpin: 0.14,
+    wakeStrength: 0.9,
+    wakeFalloff: 5.0,
+    keys: ['openai', 'anthropic', 'gemini', 'xai'],
   },
   {
     // 外圈:顺时针(前方右→左);倾角较大。图标 16.1s/圈、光点 34s/圈。
-    ring: 'outer', color: '#5f7cff', radius: 1.05, tubeRadius: 0.0016, opacity: 0.34, tilt: [0.72, 0, -0.38],
-    wobbleDeg: 6, wobblePeriod: 18, wobblePhase: Math.PI, speed: 0.23, flowSpeed: 0.11, ringSpin: -0.11,
-    wakeStrength: 0.6, wakeFalloff: 6.0, keys: ['deepseek', 'qwen', 'minimax', 'doubao', 'kimi', 'glm_chatglm'],
+    ring: 'outer',
+    color: '#5f7cff',
+    radius: 1.05,
+    tubeRadius: 0.0016,
+    opacity: 0.34,
+    tilt: [0.72, 0, -0.38],
+    wobbleDeg: 6,
+    wobblePeriod: 18,
+    wobblePhase: Math.PI,
+    speed: 0.23,
+    flowSpeed: 0.11,
+    ringSpin: -0.11,
+    wakeStrength: 0.6,
+    wakeFalloff: 6.0,
+    keys: ['deepseek', 'qwen', 'minimax', 'doubao', 'kimi', 'glm_chatglm'],
   },
 ]

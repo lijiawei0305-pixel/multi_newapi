@@ -3,17 +3,18 @@ package dify
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -85,10 +86,13 @@ func uploadDifyFile(c *gin.Context, info *relaycommon.RelayInfo, user string, me
 			common.SysLog("failed to copy file content: " + err.Error())
 			return nil
 		}
-		writer.Close()
+		if err := writer.Close(); err != nil {
+			common.SysLog("failed to finalize upload form")
+			return nil
+		}
 
 		// Create HTTP request
-		req, err := http.NewRequest("POST", uploadUrl, body)
+		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, uploadUrl, body)
 		if err != nil {
 			common.SysLog("failed to create request: " + err.Error())
 			return nil
@@ -98,20 +102,32 @@ func uploadDifyFile(c *gin.Context, info *relaycommon.RelayInfo, user string, me
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", info.ApiKey))
 
 		// Send request
-		client := service.GetHttpClient()
-		resp, err := client.Do(req)
+		client, err := service.GetHttpClientWithProxy(info.ChannelSetting.Proxy)
+		if err != nil || client == nil {
+			common.SysLog("failed to create Dify upload client")
+			return nil
+		}
+		clientWithTimeout := *client
+		if clientWithTimeout.Timeout <= 0 || clientWithTimeout.Timeout > 60*time.Second {
+			clientWithTimeout.Timeout = 60 * time.Second
+		}
+		resp, err := clientWithTimeout.Do(req)
 		if err != nil {
-			common.SysLog("failed to send request: " + err.Error())
+			common.SysLog(fmt.Sprintf("failed to send request: error_type=%T", err))
 			return nil
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			common.SysLog(fmt.Sprintf("Dify upload returned status=%d", resp.StatusCode))
+			return nil
+		}
 
 		// Parse response
 		var result struct {
 			Id string `json:"id"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			common.SysLog("failed to decode response: " + err.Error())
+		if err := common.DecodeJsonWithLimit(resp.Body, &result, common.ControlPlaneJSONMaxBytes); err != nil {
+			common.SysLog(fmt.Sprintf("failed to decode Dify upload response: error_type=%T", err))
 			return nil
 		}
 
@@ -131,14 +147,12 @@ func requestOpenAI2Dify(c *gin.Context, info *relaycommon.RelayInfo, request dto
 	}
 
 	user := request.User
-	if len(user) == 0 {
-		user = json.RawMessage(helper.GetResponseID(c))
-	}
-	var stringUser string
-	err := json.Unmarshal(user, &stringUser)
-	if err != nil {
-		common.SysLog("failed to unmarshal user: " + err.Error())
-		stringUser = helper.GetResponseID(c)
+	stringUser := helper.GetResponseID(c)
+	if len(user) != 0 {
+		if err := common.Unmarshal(user, &stringUser); err != nil {
+			common.SysLog(fmt.Sprintf("failed to decode Dify user: error_type=%T", err))
+			stringUser = helper.GetResponseID(c)
+		}
 	}
 	difyReq.User = stringUser
 
@@ -227,22 +241,43 @@ func difyStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 	var responseText string
 	usage := &dto.Usage{}
 	var nodeToken int
+	var streamErr *types.NewAPIError
+	seenValidResponse := false
+	completed := false
 	helper.SetEventStreamHeaders(c)
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		var difyResponse DifyChunkChatCompletionResponse
-		if err := json.Unmarshal([]byte(data), &difyResponse); err != nil {
+		if err := common.Unmarshal([]byte(data), &difyResponse); err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
-			sr.Error(err)
+			service.MarkUpstreamAccepted(c)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
 			return
 		}
 		if difyResponse.Event == "message_end" {
+			service.MarkUpstreamAccepted(c)
+			seenValidResponse = true
+			completed = true
 			usage = &difyResponse.MetaData.Usage
 			sr.Done()
 			return
 		} else if difyResponse.Event == "error" {
-			sr.Stop(fmt.Errorf("dify error event"))
+			apiErr := types.NewOpenAIError(
+				fmt.Errorf("Dify rejected the streaming request"),
+				types.ErrorCodeBadResponse,
+				http.StatusBadGateway,
+			)
+			if seenValidResponse {
+				service.MarkUpstreamAccepted(c)
+				streamErr = relaychannel.AcceptedResponseDeliveryError()
+			} else {
+				streamErr = service.MarkExplicitUpstreamRejection(apiErr)
+			}
+			sr.Stop(streamErr)
 			return
 		}
+		service.MarkUpstreamAccepted(c)
+		seenValidResponse = true
 		openaiResponse := *streamResponseDify2OpenAI(difyResponse)
 		if len(openaiResponse.Choices) != 0 {
 			responseText += openaiResponse.Choices[0].Delta.GetContentString()
@@ -252,26 +287,37 @@ func difyStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 		}
 		if err := helper.ObjectData(c, openaiResponse); err != nil {
 			common.SysLog(err.Error())
-			sr.Error(err)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
 		}
 	})
-	helper.Done(c)
 	if usage.TotalTokens == 0 {
 		usage = service.ResponseText2Usage(c, responseText, info.UpstreamModelName, info.GetEstimatePromptTokens())
 	}
 	usage.CompletionTokens += nodeToken
+	if streamErr != nil {
+		return usage, streamErr
+	}
+	if info.StreamStatus == nil || !info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors() || !seenValidResponse || !completed {
+		service.MarkUpstreamAccepted(c)
+		return usage, relaychannel.AcceptedResponseDeliveryError()
+	}
+	if err := helper.StringData(c, "[DONE]"); err != nil {
+		service.MarkUpstreamAccepted(c)
+		return usage, relaychannel.AcceptedResponseDeliveryError()
+	}
 	return usage, nil
 }
 
 func difyHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	var difyResponse DifyChatCompletionResponse
-	responseBody, err := io.ReadAll(resp.Body)
+	defer service.CloseResponseBodyGracefully(resp)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
-	service.CloseResponseBodyGracefully(resp)
-	err = json.Unmarshal(responseBody, &difyResponse)
+	err = common.Unmarshal(responseBody, &difyResponse)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
@@ -290,7 +336,7 @@ func difyHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respons
 		FinishReason: "stop",
 	}
 	fullTextResponse.Choices = append(fullTextResponse.Choices, choice)
-	jsonResponse, err := json.Marshal(fullTextResponse)
+	jsonResponse, err := common.Marshal(fullTextResponse)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}

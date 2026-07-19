@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { SectionPageLayout } from '@/components/layout'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Badge } from '@/components/ui/badge'
@@ -51,6 +52,7 @@ import {
 } from '@/components/ui/table'
 import { fmtDateTime, quotaToUsd } from '@/lib/agent-format'
 import { getApiErrorCode } from '@/lib/api'
+
 import { getTenantUsers, setTenantUserTier } from './api'
 import type { TenantUser, UserTier } from './types'
 
@@ -86,8 +88,9 @@ function TierCell({ tier }: { tier: string | undefined }) {
   if (!tier) {
     return <span className='text-muted-foreground'>—</span>
   }
-  const label =
-    tier === 'vip' ? t('VIP') : tier === 'default' ? t('Default') : tier
+  let label = tier
+  if (tier === 'vip') label = t('VIP')
+  else if (tier === 'default') label = t('Default')
   return (
     <Badge variant={tier === 'vip' ? 'default' : 'secondary'}>{label}</Badge>
   )
@@ -241,7 +244,7 @@ export function MyUsers() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading ? (
+                {isLoading && (
                   <TableRow>
                     <TableCell
                       colSpan={9}
@@ -250,7 +253,8 @@ export function MyUsers() {
                       {t('Loading...')}
                     </TableCell>
                   </TableRow>
-                ) : rows.length === 0 ? (
+                )}
+                {!isLoading && rows.length === 0 && (
                   <TableRow>
                     <TableCell
                       colSpan={9}
@@ -259,7 +263,9 @@ export function MyUsers() {
                       {t('No users yet')}
                     </TableCell>
                   </TableRow>
-                ) : (
+                )}
+                {!isLoading &&
+                  rows.length > 0 &&
                   rows.map((row: TenantUser) => {
                     const meta = statusMeta(row.status, t)
                     const tier = tierOverrides[row.id] ?? row.group
@@ -301,8 +307,7 @@ export function MyUsers() {
                         </TableCell>
                       </TableRow>
                     )
-                  })
-                )}
+                  })}
               </TableBody>
             </Table>
           </div>

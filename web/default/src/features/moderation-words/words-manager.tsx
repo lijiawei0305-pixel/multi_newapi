@@ -16,10 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { SectionPageLayout } from '@/components/layout'
 import { StatusBadge } from '@/components/status-badge'
@@ -54,12 +55,8 @@ import {
 } from '@/components/ui/table'
 import { fmtDateTime } from '@/lib/agent-format'
 import { getApiErrorCode } from '@/lib/api'
-import type {
-  BannedWord,
-  MatchType,
-  ModerationAction,
-  WordsApi,
-} from './types'
+
+import type { BannedWord, MatchType, ModerationAction, WordsApi } from './types'
 
 /** Create/edit dialog. `row=null` → create; otherwise edit. */
 function WordDialog({
@@ -174,7 +171,11 @@ function WordDialog({
           </div>
           <div className='flex items-center justify-between'>
             <Label htmlFor='bw-enabled'>{t('Enabled')}</Label>
-            <Switch id='bw-enabled' checked={enabled} onCheckedChange={setEnabled} />
+            <Switch
+              id='bw-enabled'
+              checked={enabled}
+              onCheckedChange={setEnabled}
+            />
           </div>
         </div>
         <DialogFooter>
@@ -254,7 +255,10 @@ export function ModerationWordsManager({
         </Button>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <div className='overflow-hidden rounded-lg border' data-testid='banned-words-table'>
+        <div
+          className='overflow-hidden rounded-lg border'
+          data-testid='banned-words-table'
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -268,19 +272,28 @@ export function ModerationWordsManager({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? (
+              {isLoading && (
                 <TableRow>
-                  <TableCell colSpan={7} className='text-muted-foreground text-center'>
+                  <TableCell
+                    colSpan={7}
+                    className='text-muted-foreground text-center'
+                  >
                     {t('Loading...')}
                   </TableCell>
                 </TableRow>
-              ) : rows.length === 0 ? (
+              )}
+              {!isLoading && rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className='text-muted-foreground text-center'>
+                  <TableCell
+                    colSpan={7}
+                    className='text-muted-foreground text-center'
+                  >
                     {t('No banned words yet')}
                   </TableCell>
                 </TableRow>
-              ) : (
+              )}
+              {!isLoading &&
+                rows.length > 0 &&
                 rows.map((row: BannedWord) => (
                   <TableRow key={row.id} data-testid={`bw-row-${row.id}`}>
                     <TableCell className='tabular-nums'>{row.id}</TableCell>
@@ -289,7 +302,11 @@ export function ModerationWordsManager({
                       <Badge variant='secondary'>{row.match_type}</Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={row.action === 'block' ? 'destructive' : 'outline'}>
+                      <Badge
+                        variant={
+                          row.action === 'block' ? 'destructive' : 'outline'
+                        }
+                      >
                         {row.action === 'block' ? t('Block') : t('Remind')}
                       </Badge>
                     </TableCell>
@@ -325,8 +342,7 @@ export function ModerationWordsManager({
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
+                ))}
             </TableBody>
           </Table>
         </div>

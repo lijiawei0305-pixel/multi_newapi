@@ -2,118 +2,89 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
-
-// LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
-// 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
-func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
-	tokenName := c.GetString("token_name")
-	logContent := fmt.Sprintf("操作 %s", info.Action)
-	// 支持任务仅按次计费
-	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
-		logContent = fmt.Sprintf("%s，按次计费", logContent)
-	} else {
-		if len(info.PriceData.OtherRatios) > 0 {
-			var contents []string
-			for key, ra := range info.PriceData.OtherRatios {
-				if 1.0 != ra {
-					contents = append(contents, fmt.Sprintf("%s: %.2f", key, ra))
-				}
-			}
-			if len(contents) > 0 {
-				logContent = fmt.Sprintf("%s, 计算参数：%s", logContent, strings.Join(contents, ", "))
-			}
-		}
-	}
-	other := make(map[string]interface{})
-	other["is_task"] = true
-	other["request_path"] = c.Request.URL.Path
-	other["model_price"] = info.PriceData.ModelPrice
-	if info.PriceData.ModelRatio > 0 {
-		other["model_ratio"] = info.PriceData.ModelRatio
-	}
-	other["group_ratio"] = info.PriceData.GroupRatioInfo.GroupRatio
-	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
-		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
-	}
-	if info.IsModelMapped {
-		other["is_model_mapped"] = true
-		other["upstream_model_name"] = info.UpstreamModelName
-	}
-	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
-		ChannelId: info.ChannelId,
-		ModelName: info.OriginModelName,
-		TokenName: tokenName,
-		Quota:     info.PriceData.Quota,
-		Content:   logContent,
-		TokenId:   info.TokenId,
-		Group:     info.UsingGroup,
-		Other:     other,
-	})
-	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
-	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
-}
 
 // ---------------------------------------------------------------------------
 // 异步任务计费辅助函数
 // ---------------------------------------------------------------------------
-
-// resolveTokenKey 通过 TokenId 运行时获取令牌 Key（用于 Redis 缓存操作）。
-// 如果令牌已被删除或查询失败，返回空字符串。
-func resolveTokenKey(ctx context.Context, tokenId int, taskID string) string {
-	token, err := model.GetTokenById(tokenId)
-	if err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("获取令牌 key 失败 (tokenId=%d, task=%s): %s", tokenId, taskID, err.Error()))
-		return ""
-	}
-	return token.Key
-}
 
 // taskIsSubscription 判断任务是否通过订阅计费。
 func taskIsSubscription(task *model.Task) bool {
 	return task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId > 0
 }
 
-// taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
-func taskAdjustFunding(task *model.Task, delta int) error {
-	if taskIsSubscription(task) {
-		return model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
+func taskBillingRequestId(task *model.Task) string {
+	if strings.TrimSpace(task.PrivateData.BillingRequestId) != "" {
+		return strings.TrimSpace(task.PrivateData.BillingRequestId)
 	}
-	if delta > 0 {
-		return model.DecreaseUserQuota(task.UserId, delta, false)
+	if task.ID > 0 {
+		return fmt.Sprintf("task:%d", task.ID)
 	}
-	return model.IncreaseUserQuota(task.UserId, -delta, false)
+	digest := sha256.Sum256([]byte(task.TaskID))
+	return fmt.Sprintf("task:%x", digest)
 }
 
-// taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
-// 需要通过 resolveTokenKey 运行时获取 key（不从 PrivateData 中读取）。
-func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
-	if task.PrivateData.TokenId <= 0 || delta == 0 {
-		return
+func taskSubscriptionOccurredAt(task *model.Task) int64 {
+	if task == nil {
+		return 0
 	}
-	tokenKey := resolveTokenKey(ctx, task.PrivateData.TokenId, task.TaskID)
-	if tokenKey == "" {
-		return
+	if task.PrivateData.SubscriptionOccurredAt > 0 {
+		return task.PrivateData.SubscriptionOccurredAt
 	}
-	var err error
-	if delta > 0 {
-		err = model.DecreaseTokenQuota(task.PrivateData.TokenId, tokenKey, delta)
+	if task.SubmitTime > 0 {
+		return task.SubmitTime
+	}
+	return task.CreatedAt
+}
+
+func midjourneySubscriptionOccurredAt(task *model.Midjourney) int64 {
+	if task == nil {
+		return 0
+	}
+	if task.SubscriptionOccurredAt > 0 {
+		return task.SubscriptionOccurredAt
+	}
+	occurredAt := task.SubmitTime
+	if occurredAt > 100_000_000_000 {
+		occurredAt /= 1000
+	}
+	return occurredAt
+}
+
+func taskBillingAdjustment(task *model.Task, actualQuota int) (*model.BillingAdjustmentSpec, int) {
+	balanceDelta := task.Quota - actualQuota
+	if balanceDelta == 0 {
+		return nil, 0
+	}
+	spec := &model.BillingAdjustmentSpec{
+		RequestId: taskBillingRequestId(task),
+		Operation: "final_adjustment",
+	}
+	if taskIsSubscription(task) {
+		spec.SubscriptionId = task.PrivateData.SubscriptionId
+		spec.SubscriptionResetEpoch = task.PrivateData.SubscriptionResetEpoch
+		spec.SubscriptionOccurredAt = taskSubscriptionOccurredAt(task)
+		spec.SubscriptionQuotaDelta = int64(-balanceDelta)
 	} else {
-		err = model.IncreaseTokenQuota(task.PrivateData.TokenId, tokenKey, -delta)
+		spec.UserId = task.UserId
+		spec.UserQuotaDelta = balanceDelta
 	}
-	if err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("调整令牌额度失败 (delta=%d, task=%s): %s", delta, task.TaskID, err.Error()))
+	if task.PrivateData.TokenId > 0 {
+		spec.TokenId = task.PrivateData.TokenId
+		spec.TokenQuotaDelta = balanceDelta
 	}
+	return spec, balanceDelta
 }
 
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
@@ -147,38 +118,305 @@ func taskModelName(task *model.Task) string {
 	return task.Properties.OriginModelName
 }
 
-// RefundTaskQuota 统一的任务失败退款逻辑。
-// 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
+// TransitionTaskWithBilling commits the terminal task CAS, lifecycle fact,
+// exact account intent, and frozen commission payload together.
+func TransitionTaskWithBilling(ctx context.Context, task *model.Task, fromStatus model.TaskStatus, actualQuota int, reason string) (bool, error) {
+	if task == nil {
+		return false, fmt.Errorf("task is nil")
+	}
+	if actualQuota < 0 {
+		return false, fmt.Errorf("actual task quota cannot be negative")
+	}
+	if task.PrivateData.BillingSource == BillingSourceFree {
+		task.Quota = 0
+		return task.UpdateWithStatus(fromStatus)
+	}
+	preConsumedQuota := task.Quota
+	requestId := taskBillingRequestId(task)
+	hasSubscriptionPreConsumeRecord := strings.TrimSpace(task.PrivateData.BillingRequestId) != ""
+	subscriptionPreConsumeRequestId := ""
+	if hasSubscriptionPreConsumeRecord {
+		subscriptionPreConsumeRequestId = requestId
+	}
+	fundingSource := task.PrivateData.BillingSource
+	if fundingSource == "" {
+		fundingSource = BillingSourceWallet
+	}
+	if fundingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId <= 0 {
+		return false, errors.New("subscription task billing metadata is corrupt")
+	}
+	subscriptionOccurredAt := int64(0)
+	if fundingSource == BillingSourceSubscription {
+		subscriptionOccurredAt = taskSubscriptionOccurredAt(task)
+		if subscriptionOccurredAt <= 0 {
+			return false, errors.New("subscription task billing occurred time is missing")
+		}
+	}
+	initialReservedQuota := preConsumedQuota
+	commissionPolicy := ""
+	if event, err := model.GetBillingSettlement(requestId, billingSettlementOperation); err == nil {
+		initialReservedQuota = event.InitialReservedQuota
+		commissionPolicy = event.CommissionPolicy
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, err
+	}
+	cancel := task.Status == model.TaskStatusFailure
+	balanceDelta := preConsumedQuota - actualQuota
+	var spec *model.BillingAdjustmentSpec
+	adjustment := model.BillingAdjustmentSpec{RequestId: requestId, Operation: "task_final_adjustment"}
+	if fundingSource == BillingSourceSubscription {
+		adjustment.SubscriptionId = task.PrivateData.SubscriptionId
+		adjustment.SubscriptionResetEpoch = task.PrivateData.SubscriptionResetEpoch
+		adjustment.SubscriptionOccurredAt = subscriptionOccurredAt
+		if cancel {
+			if hasSubscriptionPreConsumeRecord {
+				adjustment.SubscriptionRequestId = requestId
+				adjustment.SubscriptionQuotaDelta = -int64(preConsumedQuota - initialReservedQuota)
+			} else {
+				adjustment.SubscriptionQuotaDelta = -int64(preConsumedQuota)
+			}
+		} else {
+			adjustment.SubscriptionQuotaDelta = int64(actualQuota - preConsumedQuota)
+		}
+	} else if balanceDelta != 0 {
+		adjustment.UserId = task.UserId
+		adjustment.UserQuotaDelta = balanceDelta
+	}
+	if task.PrivateData.TokenId > 0 && balanceDelta != 0 {
+		adjustment.TokenId = task.PrivateData.TokenId
+		adjustment.TokenQuotaDelta = balanceDelta
+	}
+	if adjustment.UserQuotaDelta != 0 || adjustment.TokenQuotaDelta != 0 || adjustment.SubscriptionQuotaDelta != 0 || adjustment.SubscriptionRequestId != "" {
+		spec = &adjustment
+	}
+	groupRatio := 0.0
+	if task.PrivateData.BillingContext != nil {
+		groupRatio = task.PrivateData.BillingContext.GroupRatio
+	}
+	var commission *model.BillingCommissionSnapshot
+	var commissionErr error
+	if !cancel {
+		if commissionPolicy != "" {
+			commission, commissionErr = materializeBillingCommissionPolicy(commissionPolicy, actualQuota, requestId, billingSettlementOperation)
+		} else {
+			commission, commissionErr = prepareBillingCommissionFields(task.UserId, actualQuota, requestId, billingSettlementOperation, fundingSource, task.Group, groupRatio)
+		}
+	}
+	projection := taskAdjustmentBillingProjection(task, preConsumedQuota, actualQuota, reason)
+	task.Quota = actualQuota
+	won, err := model.UpdateTaskWithBillingSettlement(task, fromStatus, model.BillingSettlementSpec{
+		RequestId: requestId, Operation: billingSettlementOperation, UserId: task.UserId,
+		TokenId: task.PrivateData.TokenId, SubscriptionId: task.PrivateData.SubscriptionId,
+		SubscriptionPreConsumeRequestId: subscriptionPreConsumeRequestId,
+		SubscriptionResetEpoch:          task.PrivateData.SubscriptionResetEpoch,
+		SubscriptionOccurredAt:          subscriptionOccurredAt,
+		FundingSource:                   fundingSource, UsingGroup: task.Group, ChargedGroupRatio: groupRatio,
+		ReservedQuota: preConsumedQuota, DeferCommission: true,
+		CommissionPolicy: commissionPolicy,
+	}, model.BillingSettlementTransition{
+		RequestId: requestId, Operation: billingSettlementOperation, FinalQuota: actualQuota,
+		ReleaseCommission: !cancel, Cancel: cancel, Commission: commission,
+	}, spec, projection)
+	if !won || (err != nil && !isBillingSettlementApplyPending(err)) {
+		task.Quota = preConsumedQuota
+		return won, err
+	}
+	if err != nil {
+		return true, err
+	}
+	if commissionErr != nil {
+		return true, fmt.Errorf("task billing commission resolution pending: %w", commissionErr)
+	}
+	if !cancel && fundingSource == BillingSourceWallet && actualQuota > 0 {
+		if err := DispatchBillingCommission(requestId, billingSettlementOperation); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
+}
+
+func isBillingSettlementApplyPending(err error) bool {
+	var pending *model.BillingSettlementApplyPendingError
+	return errors.As(err, &pending)
+}
+
+func CommitMidjourneySubmission(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, deferCommission bool) error {
+	return commitMidjourneySubmission(relayInfo, task, deferCommission, nil)
+}
+
+func CommitMidjourneySubmissionWithProjection(c *gin.Context, relayInfo *relaycommon.RelayInfo, task *model.Midjourney, deferCommission bool) error {
+	projection := midjourneyInitialBillingProjection(c, relayInfo, task)
+	if projection != nil {
+		requestId := billingRequestId(relayInfo.RequestId)
+		projection.DependencyRequestId = requestId
+		projection.DependencyOperation = billingSettlementOperation
+		projection.ProjectionKey = model.BillingProjectionKey(requestId, billingSettlementOperation, "midjourney_initial")
+		projection.LogRequestId = projectionLogRequestId(c, requestId, projection.ProjectionKey)
+	}
+	return commitMidjourneySubmission(relayInfo, task, deferCommission, projection)
+}
+
+func commitMidjourneySubmission(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, deferCommission bool, projection *model.BillingProjectionSpec) error {
+	if relayInfo == nil || task == nil {
+		return errors.New("midjourney submission billing context is missing")
+	}
+	requestId := billingRequestId(relayInfo.RequestId)
+	task.BillingRequestId = requestId
+	task.SubscriptionResetEpoch = relayInfo.SubscriptionResetEpoch
+	task.SubscriptionOccurredAt = relaySubscriptionOccurredAt(relayInfo)
+	task.ChargedGroupRatio = relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	var commission *model.BillingCommissionSnapshot
+	var commissionErr error
+	if !deferCommission {
+		commission, commissionErr = prepareBillingCommission(relayInfo, task.Quota, requestId, billingSettlementOperation)
+	}
+	err := model.InsertMidjourneyWithBillingSettlement(task, model.BillingSettlementTransition{
+		RequestId: requestId, Operation: billingSettlementOperation, FinalQuota: task.Quota,
+		ReleaseCommission: !deferCommission, Commission: commission,
+	}, nil, projection)
+	if err != nil {
+		return err
+	}
+	if commissionErr != nil {
+		return fmt.Errorf("midjourney commission resolution pending: %w", commissionErr)
+	}
+	if !deferCommission && task.BillingSource != BillingSourceSubscription && task.Quota > 0 {
+		return DispatchBillingCommission(requestId, billingSettlementOperation)
+	}
+	return nil
+}
+
+// TransitionMidjourneyWithBilling atomically binds a Midjourney terminal CAS
+// to either cancellation/refund or successful commission release.
+func TransitionMidjourneyWithBilling(ctx context.Context, task *model.Midjourney, fromStatus string, reason string) (bool, error) {
+	if task == nil {
+		return false, fmt.Errorf("midjourney task is nil")
+	}
+	if task.BillingSource == BillingSourceFree {
+		task.Quota = 0
+		return task.UpdateWithStatus(fromStatus)
+	}
+	requestId := strings.TrimSpace(task.BillingRequestId)
+	hasPreConsumeRecord := requestId != ""
+	if requestId == "" {
+		requestId = fmt.Sprintf("midjourney:%d", task.Id)
+	}
+	fundingSource := task.BillingSource
+	if fundingSource == "" {
+		fundingSource = BillingSourceWallet
+	}
+	if fundingSource == BillingSourceSubscription && task.SubscriptionId <= 0 {
+		return false, errors.New("subscription midjourney billing metadata is corrupt")
+	}
+	subscriptionOccurredAt := int64(0)
+	if fundingSource == BillingSourceSubscription {
+		subscriptionOccurredAt = midjourneySubscriptionOccurredAt(task)
+		if subscriptionOccurredAt <= 0 {
+			return false, errors.New("subscription midjourney billing occurred time is missing")
+		}
+	}
+	cancel := task.Status == "FAILURE"
+	preConsumedQuota := task.Quota
+	commissionPolicy := ""
+	if event, err := model.GetBillingSettlement(requestId, billingSettlementOperation); err == nil {
+		commissionPolicy = event.CommissionPolicy
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, err
+	}
+	var spec *model.BillingAdjustmentSpec
+	if cancel && preConsumedQuota > 0 {
+		adjustment := model.BillingAdjustmentSpec{RequestId: requestId, Operation: "midjourney_terminal"}
+		if fundingSource == BillingSourceSubscription {
+			adjustment.SubscriptionId = task.SubscriptionId
+			adjustment.SubscriptionResetEpoch = task.SubscriptionResetEpoch
+			adjustment.SubscriptionOccurredAt = subscriptionOccurredAt
+			if hasPreConsumeRecord {
+				adjustment.SubscriptionRequestId = requestId
+			} else {
+				adjustment.SubscriptionQuotaDelta = -int64(preConsumedQuota)
+			}
+		} else {
+			adjustment.UserId = task.UserId
+			adjustment.UserQuotaDelta = preConsumedQuota
+		}
+		if task.TokenId > 0 {
+			adjustment.TokenId = task.TokenId
+			adjustment.TokenQuotaDelta = preConsumedQuota
+		}
+		spec = &adjustment
+	}
+	var commission *model.BillingCommissionSnapshot
+	var commissionErr error
+	if !cancel {
+		if commissionPolicy != "" {
+			commission, commissionErr = materializeBillingCommissionPolicy(commissionPolicy, preConsumedQuota, requestId, billingSettlementOperation)
+		} else {
+			commission, commissionErr = prepareBillingCommissionFields(task.UserId, preConsumedQuota, requestId, billingSettlementOperation, fundingSource, task.Group, task.ChargedGroupRatio)
+		}
+	} else {
+		task.Quota = 0
+	}
+	projection := (*model.BillingProjectionSpec)(nil)
+	if cancel {
+		projection = midjourneyTerminalBillingProjection(task, preConsumedQuota, reason)
+	}
+	subscriptionPreConsumeRequestId := ""
+	if hasPreConsumeRecord && fundingSource == BillingSourceSubscription {
+		subscriptionPreConsumeRequestId = requestId
+	}
+	won, err := model.UpdateMidjourneyWithBillingSettlement(task, fromStatus, model.BillingSettlementSpec{
+		RequestId: requestId, Operation: billingSettlementOperation, UserId: task.UserId, TokenId: task.TokenId,
+		SubscriptionId: task.SubscriptionId, SubscriptionPreConsumeRequestId: subscriptionPreConsumeRequestId,
+		SubscriptionResetEpoch: task.SubscriptionResetEpoch, SubscriptionOccurredAt: subscriptionOccurredAt, FundingSource: fundingSource,
+		UsingGroup: task.Group, ChargedGroupRatio: task.ChargedGroupRatio, ReservedQuota: preConsumedQuota, DeferCommission: true,
+		CommissionPolicy: commissionPolicy,
+	}, model.BillingSettlementTransition{
+		RequestId: requestId, Operation: billingSettlementOperation, FinalQuota: task.Quota,
+		ReleaseCommission: !cancel, Cancel: cancel, Commission: commission,
+	}, spec, projection)
+	if !won || (err != nil && !isBillingSettlementApplyPending(err)) {
+		if cancel {
+			task.Quota = preConsumedQuota
+		}
+		return won, err
+	}
+	if err != nil {
+		return true, err
+	}
+	if cancel && spec != nil {
+		logger.LogInfo(ctx, fmt.Sprintf("Midjourney task %s refunded after terminal failure", task.MjId))
+	}
+	if commissionErr != nil {
+		return true, fmt.Errorf("midjourney commission resolution pending: %w", commissionErr)
+	}
+	if !cancel && fundingSource == BillingSourceWallet && preConsumedQuota > 0 {
+		if err := DispatchBillingCommission(requestId, billingSettlementOperation); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
+}
+
+// RefundTaskQuota is the idempotent compatibility entry point for a task that
+// is already terminal. Production transitions should use
+// TransitionTaskWithBilling so the status and intent commit atomically.
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 	quota := task.Quota
 	if quota == 0 {
 		return
 	}
-
-	// 1. 退还资金来源（钱包或订阅）
-	if err := taskAdjustFunding(task, -quota); err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
+	spec, _ := taskBillingAdjustment(task, 0)
+	if spec == nil {
 		return
 	}
-
-	// 2. 退还令牌额度
-	taskAdjustTokenQuota(ctx, task, -quota)
-
-	// 3. 记录日志
-	other := taskBillingOther(task)
-	other["task_id"] = task.TaskID
-	other["reason"] = reason
-	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   model.LogTypeRefund,
-		Content:   "",
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     quota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
-	})
+	projection := taskAdjustmentBillingProjection(task, quota, 0, reason)
+	if projection == nil {
+		return
+	}
+	if err := model.ApplyBillingAdjustmentWithProjectionOnce(*spec, *projection); err != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("退还任务额度失败 task %s: %s", task.TaskID, err.Error()))
+		return
+	}
 }
 
 // RecalculateTaskQuota 通用的异步差额结算。
@@ -205,52 +443,32 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		reason,
 	))
 
-	// 调整资金来源
-	if err := taskAdjustFunding(task, quotaDelta); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
+	spec, _ := taskBillingAdjustment(task, actualQuota)
+	if spec == nil {
 		return
 	}
-
-	// 调整令牌额度
-	taskAdjustTokenQuota(ctx, task, quotaDelta)
-
-	task.Quota = actualQuota
-
-	var logType int
-	var logQuota int
-	if quotaDelta > 0 {
-		logType = model.LogTypeConsume
-		logQuota = quotaDelta
-		model.UpdateUserUsedQuotaAndRequestCount(task.UserId, quotaDelta)
-		model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
-	} else {
-		logType = model.LogTypeRefund
-		logQuota = -quotaDelta
+	projection := taskAdjustmentBillingProjection(task, preConsumedQuota, actualQuota, reason)
+	if projection == nil {
+		return
 	}
-	other := taskBillingOther(task)
-	other["task_id"] = task.TaskID
-	other["pre_consumed_quota"] = preConsumedQuota
-	other["actual_quota"] = actualQuota
-	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId:    task.UserId,
-		LogType:   logType,
-		Content:   reason,
-		ChannelId: task.ChannelId,
-		ModelName: taskModelName(task),
-		Quota:     logQuota,
-		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
-		Other:     other,
-		NodeName:  task.PrivateData.NodeName,
-	})
+	if err := model.ApplyBillingAdjustmentWithProjectionOnce(*spec, *projection); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("差额结算失败 task %s: %s", task.TaskID, err.Error()))
+		return
+	}
+	preConsumedQuota = task.Quota
+	task.Quota = actualQuota
+	if task.ID > 0 {
+		if err := model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Update("quota", actualQuota).Error; err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("更新任务实际额度失败 task %s: %s", task.TaskID, err.Error()))
+		}
+	}
 }
 
-// RecalculateTaskQuotaByTokens 根据实际 token 消耗重新计费（异步差额结算）。
-// 当任务成功且返回了 totalTokens 时，根据模型倍率和分组倍率重新计算实际扣费额度，
-// 与预扣费的差额进行补扣或退还。支持钱包和订阅计费来源。
-func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) {
+// CalculateTaskQuotaByTokens snapshots the final token-based charge without
+// mutating quota. The caller can bind the returned amount to a terminal CAS.
+func CalculateTaskQuotaByTokens(task *model.Task, totalTokens int) (int, string, bool) {
 	if totalTokens <= 0 {
-		return
+		return 0, "", false
 	}
 
 	modelName := taskModelName(task)
@@ -259,7 +477,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
 	// 只有配置了倍率(非固定价格)时才按 token 重新计费
 	if !hasRatioSetting || modelRatio <= 0 {
-		return
+		return 0, "", false
 	}
 
 	// 获取用户和组的倍率信息
@@ -271,7 +489,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		}
 	}
 	if group == "" {
-		return
+		return 0, "", false
 	}
 
 	groupRatio := ratio_setting.GetGroupRatio(group)
@@ -298,5 +516,14 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	actualQuota := int(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
 
 	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
+	return actualQuota, reason, true
+}
+
+// RecalculateTaskQuotaByTokens 根据实际 token 消耗重新计费（异步差额结算）。
+func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) {
+	actualQuota, reason, ok := CalculateTaskQuotaByTokens(task, totalTokens)
+	if !ok {
+		return
+	}
 	RecalculateTaskQuota(ctx, task, actualQuota, reason)
 }

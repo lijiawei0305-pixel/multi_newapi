@@ -161,7 +161,7 @@ resp, result, err := svc.Prepay(ctx, h5.PrepayRequest{
     Mchid:       core.String("1230000109"),
     Description: core.String("充值套餐-月度版"),
     OutTradeNo:  core.String("ORDER20240101120000001"),
-    NotifyUrl:   core.String("https://your-domain.com/api/payment/wechat/notify"),
+    NotifyUrl:   core.String("https://your-domain.com/api/pay/wechat/notify"),
     Amount: &h5.Amount{
         Total: core.Int64(2980),
     },

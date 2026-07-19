@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/types"
 )
@@ -15,6 +16,7 @@ type StatusCodeRange struct {
 }
 
 var AutomaticDisableStatusCodeRanges = []StatusCodeRange{{Start: 401, End: 401}}
+var statusCodeRangesMutex sync.RWMutex
 
 // Default behavior matches legacy hardcoded retry rules in controller/relay.go shouldRetry:
 // retry for 1xx, 3xx, 4xx(except 400/408), 5xx(except 504/524), and no retry for 2xx.
@@ -38,6 +40,8 @@ var alwaysSkipRetryCodes = map[types.ErrorCode]struct{}{
 }
 
 func AutomaticDisableStatusCodesToString() string {
+	statusCodeRangesMutex.RLock()
+	defer statusCodeRangesMutex.RUnlock()
 	return statusCodeRangesToString(AutomaticDisableStatusCodeRanges)
 }
 
@@ -46,15 +50,21 @@ func AutomaticDisableStatusCodesFromString(s string) error {
 	if err != nil {
 		return err
 	}
+	statusCodeRangesMutex.Lock()
 	AutomaticDisableStatusCodeRanges = ranges
+	statusCodeRangesMutex.Unlock()
 	return nil
 }
 
 func ShouldDisableByStatusCode(code int) bool {
+	statusCodeRangesMutex.RLock()
+	defer statusCodeRangesMutex.RUnlock()
 	return shouldMatchStatusCodeRanges(AutomaticDisableStatusCodeRanges, code)
 }
 
 func AutomaticRetryStatusCodesToString() string {
+	statusCodeRangesMutex.RLock()
+	defer statusCodeRangesMutex.RUnlock()
 	return statusCodeRangesToString(AutomaticRetryStatusCodeRanges)
 }
 
@@ -63,7 +73,9 @@ func AutomaticRetryStatusCodesFromString(s string) error {
 	if err != nil {
 		return err
 	}
+	statusCodeRangesMutex.Lock()
 	AutomaticRetryStatusCodeRanges = ranges
+	statusCodeRangesMutex.Unlock()
 	return nil
 }
 
@@ -81,6 +93,8 @@ func ShouldRetryByStatusCode(code int) bool {
 	if IsAlwaysSkipRetryStatusCode(code) {
 		return false
 	}
+	statusCodeRangesMutex.RLock()
+	defer statusCodeRangesMutex.RUnlock()
 	return shouldMatchStatusCodeRanges(AutomaticRetryStatusCodeRanges, code)
 }
 

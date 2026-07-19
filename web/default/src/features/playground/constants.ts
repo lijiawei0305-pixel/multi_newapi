@@ -56,7 +56,11 @@ export const VIDEO_POLL = {
 } as const
 
 // Video terminal status sets
-export const VIDEO_STATUS_SUCCESS = new Set(['SUCCESS', 'succeeded', 'completed'])
+export const VIDEO_STATUS_SUCCESS = new Set([
+  'SUCCESS',
+  'succeeded',
+  'completed',
+])
 export const VIDEO_STATUS_FAILURE = new Set(['FAILURE', 'failed'])
 
 // Task success code

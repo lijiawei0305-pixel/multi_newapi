@@ -87,8 +87,8 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 			continue
 		}
 		var chunk ollamaChatStreamChunk
-		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
-			logger.LogError(c, "ollama stream json decode error: "+err.Error()+" line="+line)
+		if err := common.Unmarshal([]byte(line), &chunk); err != nil {
+			logger.LogError(c, fmt.Sprintf("ollama stream json decode error: error_type=%T response_%s", err, logger.PayloadMetadata([]byte(line))))
 			return usage, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 		if chunk.Model != "" {
@@ -122,7 +122,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				if raw != "" && raw != "null" {
 					// Unmarshal the JSON string to get the actual content without quotes
 					var thinkingContent string
-					if err := json.Unmarshal(chunk.Message.Thinking, &thinkingContent); err == nil {
+					if err := common.Unmarshal(chunk.Message.Thinking, &thinkingContent); err == nil {
 						delta.Choices[0].Delta.SetReasoningContent(thinkingContent)
 					} else {
 						// Fallback to raw string if it's not a JSON string
@@ -135,7 +135,7 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 				delta.Choices[0].Delta.ToolCalls = make([]dto.ToolCallResponse, 0, len(chunk.Message.ToolCalls))
 				for _, tc := range chunk.Message.ToolCalls {
 					// arguments -> string
-					argBytes, _ := json.Marshal(tc.Function.Arguments)
+					argBytes, _ := common.Marshal(tc.Function.Arguments)
 					toolId := fmt.Sprintf("call_%d", toolCallIndex)
 					tr := dto.ToolCallResponse{ID: toolId, Type: "function", Function: dto.FunctionResponse{Name: tc.Function.Name, Arguments: string(argBytes)}}
 					tr.SetIndex(toolCallIndex)
@@ -181,11 +181,11 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 
 // non-stream handler for chat/generate
 func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
-	body, err := io.ReadAll(resp.Body)
+	defer service.CloseResponseBodyGracefully(resp)
+	body, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
-	service.CloseResponseBodyGracefully(resp)
 	raw := string(body)
 	if common.DebugEnabled {
 		println("ollama non-stream raw resp:", raw)
@@ -204,7 +204,7 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 			continue
 		}
 		var ck ollamaChatStreamChunk
-		if err := json.Unmarshal([]byte(ln), &ck); err != nil {
+		if err := common.Unmarshal([]byte(ln), &ck); err != nil {
 			if len(lines) == 1 {
 				return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 			}
@@ -217,7 +217,7 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 			if raw != "" && raw != "null" {
 				// Unmarshal the JSON string to get the actual content without quotes
 				var thinkingContent string
-				if err := json.Unmarshal(ck.Message.Thinking, &thinkingContent); err == nil {
+				if err := common.Unmarshal(ck.Message.Thinking, &thinkingContent); err == nil {
 					reasoningBuilder.WriteString(thinkingContent)
 				} else {
 					// Fallback to raw string if it's not a JSON string
@@ -234,7 +234,7 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 
 	if !parsedAny {
 		var single ollamaChatStreamChunk
-		if err := json.Unmarshal(body, &single); err != nil {
+		if err := common.Unmarshal(body, &single); err != nil {
 			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 		}
 		lastChunk = single
@@ -244,7 +244,7 @@ func ollamaChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.R
 				if raw != "" && raw != "null" {
 					// Unmarshal the JSON string to get the actual content without quotes
 					var thinkingContent string
-					if err := json.Unmarshal(single.Message.Thinking, &thinkingContent); err == nil {
+					if err := common.Unmarshal(single.Message.Thinking, &thinkingContent); err == nil {
 						reasoningBuilder.WriteString(thinkingContent)
 					} else {
 						// Fallback to raw string if it's not a JSON string

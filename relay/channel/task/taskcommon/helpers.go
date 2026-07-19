@@ -38,12 +38,13 @@ func DefaultString(val, fallback string) string {
 	return val
 }
 
-// DefaultInt returns val if non-zero, otherwise fallback.
-func DefaultInt(val, fallback int) int {
-	if val == 0 {
+// DefaultInt returns the explicitly supplied value, including zero, or fallback
+// when the client omitted the field.
+func DefaultInt(val *int, fallback int) int {
+	if val == nil {
 		return fallback
 	}
-	return val
+	return *val
 }
 
 // EncodeLocalTaskID encodes an upstream operation name to a URL-safe base64 string.

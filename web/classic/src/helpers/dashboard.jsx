@@ -36,6 +36,10 @@ import {
   DEFAULTS,
   ILLUSTRATION_SIZE,
 } from '../constants/dashboard.constants';
+import {
+  normalizeHttpNavigationUrl,
+  openHttpUrlInNewTab,
+} from './safeNavigation';
 
 // ========== 时间相关工具函数 ==========
 export const getDefaultTime = () => {
@@ -155,9 +159,11 @@ export const handleCopyUrl = async (url, t) => {
 };
 
 export const handleSpeedTest = (apiUrl) => {
-  const encodedUrl = encodeURIComponent(apiUrl);
+  const safeApiUrl = normalizeHttpNavigationUrl(apiUrl);
+  if (!safeApiUrl) return false;
+  const encodedUrl = encodeURIComponent(safeApiUrl);
   const speedTestUrl = `https://www.tcptest.cn/http/${encodedUrl}`;
-  window.open(speedTestUrl, '_blank', 'noopener,noreferrer');
+  return openHttpUrlInNewTab(speedTestUrl);
 };
 
 // ========== 状态映射函数 ==========

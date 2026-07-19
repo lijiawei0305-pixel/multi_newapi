@@ -16,12 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Globe, Link2, RefreshCw, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getApiErrorCode } from '@/lib/api'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,14 +36,16 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { getApiErrorCode } from '@/lib/api'
+
 import {
   bindCustomDomain,
   getCustomDomain,
   unbindCustomDomain,
   verifyCustomDomain,
 } from './api'
-import type { DnsRecord } from './types'
 import { CertificateSeal } from './certificate-seal'
+import type { DnsRecord } from './types'
 
 // Map the stable backend error code to a localized message (skipErrorHandler path).
 function domainErrorMessage(t: (k: string) => string, err: unknown): string {
@@ -144,7 +146,9 @@ export function CustomDomain() {
     try {
       const res = await bindCustomDomain(d)
       if (res.success) {
-        toast.success(t('Domain bound. Add the DNS records below, then verify.'))
+        toast.success(
+          t('Domain bound. Add the DNS records below, then verify.')
+        )
         setDomainInput('')
         refresh()
       }
@@ -186,17 +190,19 @@ export function CustomDomain() {
 
   const bound = data?.bound
   const status = data?.status
+  const showLoading = isLoading && !data
 
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Custom Domain')}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='mx-auto flex w-full max-w-2xl flex-col gap-4'>
-          {isLoading && !data ? (
+          {showLoading && (
             <div className='flex justify-center py-10'>
               <Spinner />
             </div>
-          ) : !bound ? (
+          )}
+          {!showLoading && !bound && (
             <Card>
               <CardHeader>
                 <CardTitle className='flex items-center gap-2'>
@@ -227,7 +233,8 @@ export function CustomDomain() {
                 </div>
               </CardContent>
             </Card>
-          ) : (
+          )}
+          {!showLoading && bound && (
             <>
               <Card>
                 <CardHeader>
@@ -246,7 +253,8 @@ export function CustomDomain() {
                     data?.cert_expires_at &&
                     (() => {
                       const d = Math.ceil(
-                        (Date.parse(data.cert_expires_at) - Date.now()) / 86400000
+                        (Date.parse(data.cert_expires_at) - Date.now()) /
+                          86400000
                       )
                       if (d > 30) return null
                       return (

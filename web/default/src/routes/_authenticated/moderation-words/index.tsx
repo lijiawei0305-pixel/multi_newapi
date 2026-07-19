@@ -17,9 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
+
+import { ModerationWords } from '@/features/moderation-words'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
-import { ModerationWords } from '@/features/moderation-words'
 
 export const Route = createFileRoute('/_authenticated/moderation-words/')({
   beforeLoad: () => {

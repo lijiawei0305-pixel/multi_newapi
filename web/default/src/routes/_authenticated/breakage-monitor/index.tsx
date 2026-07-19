@@ -17,9 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { useAuthStore } from '@/stores/auth-store'
-import { ROLE } from '@/lib/roles'
+
 import { BreakageMonitor } from '@/features/breakage-monitor'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 // breakage 监控（额度沉淀）。管理员可见：主站看全平台，命中代理租户则隔离本租户
 // （作用域由后端 tenantFrom(c) 决定；前端仅按 admin 角色门禁）。

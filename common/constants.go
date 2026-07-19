@@ -74,6 +74,8 @@ var DefaultCollapseSidebar = false // default value of collapse sidebar
 
 var SessionSecret = uuid.New().String()
 var CryptoSecret = uuid.New().String()
+var SessionCookieSecure = false
+var ProductionDeployment = false
 
 var OptionMap map[string]string
 var OptionMapRWMutex sync.RWMutex
@@ -181,14 +183,12 @@ var SyncFrequency int // unit is second
 var BatchUpdateEnabled = false
 var BatchUpdateInterval int
 
-// AgentHookAsyncEnabled 开启后，自研计费 hook 的两类「每请求同步写」——mt_wallet_consume_log 的 INSERT、
-// agent_earning_logs + agent_wallets 的收益事务——改为进程内缓冲 + 定时批量落库（internal/mtwire/billing_writer.go）：
-// 消除 vanilla New API 没有的自研写放大与 agent_wallets 热行的跨请求争用。默认关闭：关闭时 hook 维持逐请求
-// 同步写（与优化前完全一致），可低峰期灰度开启（对齐 BATCH_UPDATE 的分级放量）。两条路径均以 requestID 幂等。
+// AgentHookAsyncEnabled 只把 display-only 的 mt_wallet_consume_log 改为进程内缓冲 + 定时批量落库
+// （internal/mtwire/billing_writer.go）。真实可提现收益 agent_earning_logs + agent_wallets 始终在请求路径
+// 同步事务入账，绝不进入易受 kill -9/OOM 影响的进程缓冲。默认关闭时展示台账也逐请求同步写。
 var AgentHookAsyncEnabled = false
 
-// AgentHookAsyncInterval 异步计费 writer 的批量 flush 周期（秒），亦为硬崩溃（kill -9/OOM/panic 杀进程）
-// 最坏丢账窗口上界；计划重启（SIGTERM）由 writer 的信号钩子优雅 flush 兜底，不受此窗口影响。
+// AgentHookAsyncInterval 展示台账 writer 的批量 flush 周期（秒）；不影响真实收益的持久化时点。
 var AgentHookAsyncInterval int
 
 var RelayTimeout int // unit is second

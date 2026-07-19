@@ -315,8 +315,8 @@ func TestNetIncomeTrend_BucketsAndExcludesPlatform(t *testing.T) {
 	// api 返现（仅代理；平台租户 ratio_markup 排除；manual_adjustment 不进任一 rebate）。
 	seedEarning(t, db, agentID, "ratio_markup", 4, day1)
 	seedEarning(t, db, agentID, "consume_commission", 1, day1)
-	seedEarning(t, db, platformID, "ratio_markup", 999, day1)    // 平台：排除
-	seedEarning(t, db, agentID, "manual_adjustment", 50, day1)   // 既不进套餐也不进 api 返现
+	seedEarning(t, db, platformID, "ratio_markup", 999, day1)  // 平台：排除
+	seedEarning(t, db, agentID, "manual_adjustment", 50, day1) // 既不进套餐也不进 api 返现
 
 	// 钱包消耗额度（全站含主站）：day1 主站 200000 + 代理 300000；day2 代理 100000。
 	seedWalletConsume(t, db, platformID, 501, 200000, "w-main-1", day1)

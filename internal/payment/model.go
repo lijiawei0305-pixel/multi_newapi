@@ -9,9 +9,9 @@ import (
 type Provider string
 
 const (
-	// ProviderWxpay 微信支付。回调 POST /pay/wxpay/notify（proposal §12.6）。
+	// ProviderWxpay 微信支付。回调 POST /api/pay/wechat/notify。
 	ProviderWxpay Provider = "wxpay"
-	// ProviderAlipay 支付宝。回调 POST /auth/alipay/notify（proposal §12.6）。
+	// ProviderAlipay 支付宝。回调 POST /api/pay/alipay/notify。
 	ProviderAlipay Provider = "alipay"
 )
 
@@ -25,14 +25,13 @@ func (p Provider) Valid() bool {
 	}
 }
 
-// NotifyPath 返回该渠道异步回调的固定路径（proposal §12.6 / detailed-design §3.3）。
-// Nginx 以 `^~ /pay/`、`^~ /auth/` 转发到 auth-service。未知渠道返回空串。
+// NotifyPath 返回当前进程承载的渠道异步回调固定路径。未知渠道返回空串。
 func (p Provider) NotifyPath() string {
 	switch p {
 	case ProviderWxpay:
-		return "/pay/wxpay/notify"
+		return "/api/pay/wechat/notify"
 	case ProviderAlipay:
-		return "/auth/alipay/notify"
+		return "/api/pay/alipay/notify"
 	default:
 		return ""
 	}
@@ -63,9 +62,13 @@ func (t OrderType) Valid() bool {
 //	created ──验签+CAS──▶ paid ──OnPaid 成功──▶ credited（终态）
 //	   │                   │
 //	   │                   └──OnPaid 失败──▶ created（回滚，允许网关重试再分发）
-//	   └──平台明确失败──────────────────────▶ failed（终态）
+//	   └──平台明确未付/本地超时──────────────▶ failed
+//	                                           │
+//	                         后续可信已付事实 ──┘──▶ paid
 //
-// order_no 唯一约束 + created→paid 的原子 CAS 共同实现「重复回调幂等、不重复入账」。
+// failed 是本地基于当时事实作出的停止扫描状态，不得压过支付平台后续给出的可信已付事实；因此允许
+// failed→paid 恢复。order_no 唯一约束 + {created,failed}→paid 的原子 CAS 共同实现「重复回调幂等、
+// 不重复入账」。
 type OrderStatus string
 
 const (
@@ -89,7 +92,8 @@ func (s OrderStatus) Valid() bool {
 	}
 }
 
-// IsTerminal 判断是否为终态（credited / failed）。
+// IsTerminal 判断是否为日常扫描终态（credited / failed）。failed 仍可被后续可信已付事实恢复到 paid；
+// 此处的「终态」只表示普通未付对账不再自动推进。
 func (s OrderStatus) IsTerminal() bool {
 	return s == OrderCredited || s == OrderFailed
 }
@@ -103,7 +107,10 @@ func (s OrderStatus) CanTransitionTo(to OrderStatus) bool {
 	case OrderPaid:
 		// credited=入账成功；created=入账失败回滚；failed=作废。
 		return to == OrderCredited || to == OrderCreated || to == OrderFailed
-	default: // credited / failed 为终态
+	case OrderFailed:
+		// 本地过期/失败判断不得覆盖支付平台后续给出的可信已付事实。
+		return to == OrderPaid
+	default: // credited 为绝对终态
 		return false
 	}
 }
@@ -166,7 +173,7 @@ type PayOrder struct {
 	Reference  string      // 外部业务引用
 	Status     OrderStatus // 状态机
 	NotifyURL  string      // 回填的异步回调地址
-	PayURL     string      // 支付平台返回的支付跳转/二维码内容（mock）
+	PayURL     string      // 支付平台返回的支付跳转/二维码内容
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
@@ -229,7 +236,7 @@ type CallbackInfo struct {
 	Provider   Provider
 	OrderNo    string  // 商户订单号（幂等定位）
 	Success    bool    // 交易是否成功（平台 trade_status）
-	PaidAmount float64 // 平台回传金额（对账用；TODO 与订单金额比对）
+	PaidAmount float64 // 平台回传金额；公网回调和可信入账路径都会与库内订单金额比对
 	TxnID      string  // 平台交易号
 }
 

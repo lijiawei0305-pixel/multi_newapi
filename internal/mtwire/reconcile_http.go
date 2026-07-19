@@ -19,7 +19,7 @@ type stuckOrderOut struct {
 	StuckSecs int64   `json:"stuck_secs"` // 卡了多久（秒）
 }
 
-// HandleAdminListStuck GET /api/admin/reconcile/stuck —— 列当前卡单（RCG paid + SUB pending +
+// HandleAdminListStuck GET /api/admin/reconcile/stuck —— 列当前卡单（RCG paid + SUB 平台建单中/失败/pending +
 // AGT pending、早于对账阈值）。只读、不触发入账。AdminAuth。
 func (a *App) HandleAdminListStuck(c *gin.Context) {
 	ctx := reqCtx(c)
@@ -83,7 +83,7 @@ func (a *App) HandleAdminRunReconcile(c *gin.Context) {
 	respondOK(c, gin.H{
 		"rcg":         gin.H{"scanned": paid.Scanned, "credited": paid.Reconciled, "failed": paid.Failed},
 		"rcg_created": gin.H{"scanned": created.Scanned, "credited": created.Reconciled, "expired": created.Expired, "failed": created.Failed},
-		"sub":         gin.H{"scanned": sub.Scanned, "activated": sub.Activated, "unpaid": sub.Unpaid, "failed": sub.Failed},
+		"sub":         gin.H{"scanned": sub.Scanned, "activated": sub.Activated, "unpaid": sub.Unpaid, "expired": sub.Expired, "failed": sub.Failed},
 		"agt":         gin.H{"scanned": agt.Scanned, "activated": agt.Activated, "unpaid": agt.Unpaid, "expired": agt.Expired, "failed": agt.Failed},
 	})
 }

@@ -17,14 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
+
 import type { StatusVariant } from '@/components/status-badge'
 import dayjs from '@/lib/dayjs'
-import type {
-  Granularity,
-  Lens,
-  SourceType,
-  WithdrawalStatus,
-} from '../types'
+
+import type { Granularity, Lens, SourceType, WithdrawalStatus } from '../types'
 
 // ============================================================================
 // Financial Reporting — presentation helpers. Money/number formatting follows
@@ -114,7 +111,10 @@ export function sourceTypeLabel(
 }
 
 /** i18n label for one of the four data lenses. */
-export function lensLabel(lens: Lens | string | undefined, t: TFunction): string {
+export function lensLabel(
+  lens: Lens | string | undefined,
+  t: TFunction
+): string {
   switch (lens) {
     case 'earnings':
       return t('Earnings')
@@ -200,5 +200,7 @@ export function formatBucketTs(
 ): string {
   const n = toFinite(bucketTs)
   if (n <= 0) return '-'
-  return dayjs(n * 1000).tz().format(bucketFormatToken(granularity))
+  return dayjs(n * 1000)
+    .tz()
+    .format(bucketFormatToken(granularity))
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -288,10 +289,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		}
 	}
 
-	//// 创建一个用于日志的 info 副本，移除 ApiKey
-	//logInfo := info
-	//logInfo.ApiKey = ""
-	common.SysLog(fmt.Sprintf("testing channel %d with model %s , info %+v ", channel.Id, testModel, info.ToString()))
+	common.SysLog(fmt.Sprintf("testing channel %d with model %s relay_format=%s api_type=%d stream=%t", channel.Id, testModel, info.RelayFormat, info.ApiType, info.IsStream))
 
 	priceData, err := helper.ModelPriceHelper(c, info, 0, request.GetTokenCountMeta())
 	if err != nil {
@@ -438,18 +436,27 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 	var httpResp *http.Response
 	if resp != nil {
-		httpResp = resp.(*http.Response)
+		var ok bool
+		httpResp, ok = resp.(*http.Response)
+		if !ok || httpResp == nil {
+			err := errors.New("upstream returned an invalid response")
+			return testResult{
+				context:     c,
+				localErr:    err,
+				newAPIError: types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway),
+			}
+		}
 		if httpResp.StatusCode != http.StatusOK {
 			err := service.RelayErrorHandler(c.Request.Context(), httpResp, true)
 			common.SysError(fmt.Sprintf(
-				"channel test bad response: channel_id=%d name=%s type=%d model=%s endpoint_type=%s status=%d err=%v",
+				"channel test bad response: channel_id=%d name=%s type=%d model=%s endpoint_type=%s status=%d error_%s",
 				channel.Id,
 				channel.Name,
 				channel.Type,
 				testModel,
 				endpointType,
 				httpResp.StatusCode,
-				err,
+				logger.PayloadMetadata([]byte(err.Error())),
 			))
 			return testResult{
 				context:     c,
@@ -510,7 +517,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		Group:            info.UsingGroup,
 		Other:            other,
 	})
-	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
+	common.SysLog(fmt.Sprintf("testing channel #%d, response_%s", channel.Id, logger.PayloadMetadata(respBody)))
 	return testResult{
 		context:     c,
 		localErr:    nil,
@@ -562,30 +569,19 @@ func buildTestLogOther(c *gin.Context, info *relaycommon.RelayInfo, priceData ty
 	return other
 }
 
-func coerceTestUsage(usageAny any, isStream bool, estimatePromptTokens int) (*dto.Usage, error) {
+func coerceTestUsage(usageAny any, _ bool, _ int) (*dto.Usage, error) {
 	switch u := usageAny.(type) {
 	case *dto.Usage:
+		if u == nil {
+			return nil, errors.New("usage is nil")
+		}
 		return u, nil
 	case dto.Usage:
 		return &u, nil
 	case nil:
-		if !isStream {
-			return nil, errors.New("usage is nil")
-		}
-		usage := &dto.Usage{
-			PromptTokens: estimatePromptTokens,
-		}
-		usage.TotalTokens = usage.PromptTokens
-		return usage, nil
+		return nil, errors.New("usage is nil")
 	default:
-		if !isStream {
-			return nil, fmt.Errorf("invalid usage type: %T", usageAny)
-		}
-		usage := &dto.Usage{
-			PromptTokens: estimatePromptTokens,
-		}
-		usage.TotalTokens = usage.PromptTokens
-		return usage, nil
+		return nil, fmt.Errorf("invalid usage type: %T", usageAny)
 	}
 }
 
@@ -595,7 +591,7 @@ func readTestResponseBody(body io.ReadCloser, isStream bool) ([]byte, error) {
 	if isStream {
 		return io.ReadAll(io.LimitReader(body, maxStreamLogBytes))
 	}
-	return io.ReadAll(body)
+	return common.ReadAllWithLimit(body)
 }
 
 func detectErrorFromTestResponseBody(respBody []byte) error {
@@ -751,7 +747,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 				MaxTokens: lo.ToPtr(maxTokens),
 			}
 			if isStream {
-				req.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
+				req.StreamOptions = &dto.StreamOptions{IncludeUsage: lo.ToPtr(true)}
 			}
 			return req
 		}
@@ -807,7 +803,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 		},
 	}
 	if isStream {
-		testRequest.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
+		testRequest.StreamOptions = &dto.StreamOptions{IncludeUsage: lo.ToPtr(true)}
 	}
 
 	if dto.IsOpenAIReasoningOModel(model) {

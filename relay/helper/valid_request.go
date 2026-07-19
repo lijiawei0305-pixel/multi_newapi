@@ -91,6 +91,9 @@ func GetAndValidateRerankRequest(c *gin.Context) (*dto.RerankRequest, error) {
 	if len(rerankRequest.Documents) == 0 {
 		return nil, types.NewError(fmt.Errorf("documents is empty"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
+	if rerankRequest.TopN != nil && *rerankRequest.TopN <= 0 {
+		return nil, types.NewError(fmt.Errorf("top_n must be greater than zero"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+	}
 	return rerankRequest, nil
 }
 
@@ -126,6 +129,9 @@ func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest
 	if request.Input == nil {
 		return nil, errors.New("input is required")
 	}
+	if lo.FromPtrOr(request.MaxOutputTokens, uint(0)) > math.MaxInt32/2 {
+		return nil, errors.New("max_output_tokens is invalid")
+	}
 	return request, nil
 }
 
@@ -155,7 +161,13 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			c.Request.PostForm = formData
 			imageRequest.Prompt = formData.Get("prompt")
 			imageRequest.Model = formData.Get("model")
-			imageRequest.N = common.GetPointer(uint(common.String2Int(formData.Get("n"))))
+			if formData.Has("n") {
+				n, err := strconv.ParseUint(strings.TrimSpace(formData.Get("n")), 10, 32)
+				if err != nil {
+					return nil, fmt.Errorf("invalid n value: %w", err)
+				}
+				imageRequest.N = common.GetPointer(uint(n))
+			}
 			imageRequest.Quality = formData.Get("quality")
 			imageRequest.Size = formData.Get("size")
 			if streamValue := strings.TrimSpace(formData.Get("stream")); streamValue != "" {
@@ -174,10 +186,6 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 					imageRequest.Quality = "standard"
 				}
 			}
-			if imageRequest.N == nil || *imageRequest.N == 0 {
-				imageRequest.N = common.GetPointer(uint(1))
-			}
-
 			hasWatermark := formData.Has("watermark")
 			if hasWatermark {
 				watermark := formData.Get("watermark") == "true"
@@ -229,9 +237,13 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 		//	return nil, errors.New("prompt is required")
 		//}
 
-		if imageRequest.N == nil || *imageRequest.N == 0 {
-			imageRequest.N = common.GetPointer(uint(1))
-		}
+	}
+	if imageRequest.N == nil {
+		imageRequest.N = common.GetPointer(uint(1))
+	} else if *imageRequest.N == 0 {
+		return nil, errors.New("n must be greater than zero")
+	} else if *imageRequest.N > math.MaxInt32/2 {
+		return nil, errors.New("n is invalid")
 	}
 
 	return imageRequest, nil
@@ -248,6 +260,10 @@ func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest
 	}
 	if textRequest.Model == "" {
 		return nil, errors.New("field model is required")
+	}
+	if lo.FromPtrOr(textRequest.MaxTokens, uint(0)) > math.MaxInt32/2 ||
+		lo.FromPtrOr(textRequest.MaxTokensToSample, uint(0)) > math.MaxInt32/2 {
+		return nil, errors.New("max_tokens is invalid")
 	}
 
 	//if textRequest.Stream {
@@ -271,7 +287,8 @@ func GetAndValidateTextRequest(c *gin.Context, relayMode int) (*dto.GeneralOpenA
 		textRequest.Model = c.Param("model")
 	}
 
-	if lo.FromPtrOr(textRequest.MaxTokens, uint(0)) > math.MaxInt32/2 {
+	if lo.FromPtrOr(textRequest.MaxTokens, uint(0)) > math.MaxInt32/2 ||
+		lo.FromPtrOr(textRequest.MaxCompletionTokens, uint(0)) > math.MaxInt32/2 {
 		return nil, errors.New("max_tokens is invalid")
 	}
 	if textRequest.Model == "" {
@@ -323,6 +340,9 @@ func GetAndValidateGeminiRequest(c *gin.Context) (*dto.GeminiChatRequest, error)
 	}
 	if len(request.Contents) == 0 && len(request.Requests) == 0 {
 		return nil, errors.New("contents is required")
+	}
+	if lo.FromPtrOr(request.GenerationConfig.MaxOutputTokens, uint(0)) > math.MaxInt32/2 {
+		return nil, errors.New("maxOutputTokens is invalid")
 	}
 
 	//if c.Query("alt") == "sse" {

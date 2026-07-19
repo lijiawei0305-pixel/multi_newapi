@@ -24,6 +24,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react'
+
 import { Main } from './main'
 import { PageFooterProvider } from './page-footer'
 
@@ -74,13 +75,13 @@ export function SectionPageLayout(props: SectionPageLayoutProps) {
     if (!isValidElement(node)) return
     const child = node as ReactElement<SlotProps>
     if (child.type === SectionPageLayoutTitle) title = child.props.children
-    else if (child.type === SectionPageLayoutActions)
+    else if (child.type === SectionPageLayoutActions) {
       actions = child.props.children
-    else if (child.type === SectionPageLayoutContent)
+    } else if (child.type === SectionPageLayoutContent) {
       content = child.props.children
-    else if (child.type === SectionPageLayoutBreadcrumb)
+    } else if (child.type === SectionPageLayoutBreadcrumb) {
       breadcrumb = child.props.children
-    else extras.push(<Fragment key={index}>{child}</Fragment>)
+    } else extras.push(<Fragment key={index}>{child}</Fragment>)
   })
 
   return (

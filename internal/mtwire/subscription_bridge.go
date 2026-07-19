@@ -39,12 +39,18 @@ import (
 // ActivatePaidTokenplanOrder（与 Track 2 钱包充值订单前缀 RCG 分开存、分开分发）。
 const SubscriptionOrderPrefix = "SUB"
 
-// 订单激活状态机（最简两态）。激活 = 建原生订阅 + 落我们订阅记录/分润。
+// 订单激活状态机。激活 = 建原生订阅 + 落我们订阅记录/分润。
 const (
-	subOrderPending   = "pending"
+	// subOrderPayCreating 表示本地订单与购买快照已原子提交，但支付平台建单尚未确认完成。
+	// 该显式中间态封住「外部 CreatePay 调用 / 本地状态回写」崩溃窗口，避免把平台建单失败
+	// 误记为普通用户未付款的 pending。
+	subOrderPayCreating = "pay_creating"
+	// subOrderPayFailed 表示支付平台建单明确返回失败；买家可重试购买，对账/卡单页也能区分于普通未付款。
+	subOrderPayFailed = "pay_failed"
+	subOrderPending   = "pending" // 支付凭据已创建，等待用户付款
 	subOrderActivated = "activated"
-	// subOrderExpired 终态：pending 单下单超时仍未付 / 网关查无此单（永不会被支付），由对账过期兜底置此。
-	// 非 pending/activated → 不再被对账扫描（见 ReconcileStuckSubscriptions 的 WHERE）。
+	// subOrderExpired 表示 pending 单已超时且当时确认未付，因此不再被对账扫描。
+	// 若之后收到网关可信的已付事实，ActivatePaidTokenplanOrder 仍会原子恢复为 activated；付款事实优先于本地超时。
 	subOrderExpired = "expired"
 )
 
@@ -106,33 +112,102 @@ func (s *subOrderStore) create(ctx context.Context, row *subscriptionOrderRow) e
 	return s.db.WithContext(ctx).Create(row).Error
 }
 
-// setProvider 回填订单支付渠道（下单选定 wxpay/alipay 后调用；仅在仍为 pending 时更新，幂等）。
+// setProvider 在向平台发起 CreatePay 前回填订单支付渠道；仅允许 pay_creating 状态写入。
 // 与 tokenplan 包解耦：订单由 subPayment.CreateOrder 落库（不含渠道），此处由 mtwire 装配层补写。
 func (s *subOrderStore) setProvider(ctx context.Context, orderNo, provider string) error {
 	if orderNo == "" || provider == "" {
+		return errors.New("subscription payment provider is required")
+	}
+	res := s.db.WithContext(ctx).Model(&subscriptionOrderRow{}).
+		Where("order_no = ? AND status = ?", orderNo, subOrderPayCreating).
+		Updates(map[string]any{"provider": provider, "updated_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errors.New("subscription order is not awaiting payment creation")
+	}
+	return nil
+}
+
+// finishPaymentCreation 原子收束平台建单结果：成功进入 pending，失败进入显式可重试的 pay_failed。
+// 若可信支付回调抢先把订单激活，则视为幂等成功，不允许较晚的 CreatePay 返回覆盖 activated。
+func (s *subOrderStore) finishPaymentCreation(ctx context.Context, orderNo, target string) error {
+	if target != subOrderPending && target != subOrderPayFailed {
+		return errors.New("invalid subscription payment creation status")
+	}
+	res := s.db.WithContext(ctx).Model(&subscriptionOrderRow{}).
+		Where("order_no = ? AND status = ?", orderNo, subOrderPayCreating).
+		Updates(map[string]any{"status": target, "updated_at": time.Now()})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected > 0 {
 		return nil
 	}
-	return s.db.WithContext(ctx).Model(&subscriptionOrderRow{}).
-		Where("order_no = ? AND status = ?", orderNo, subOrderPending).
-		Update("provider", provider).Error
+	var row subscriptionOrderRow
+	if err := s.db.WithContext(ctx).Take(&row, "order_no = ?", orderNo).Error; err != nil {
+		return err
+	}
+	if row.Status == target || row.Status == subOrderActivated {
+		return nil
+	}
+	return errors.New("subscription payment creation state changed concurrently")
 }
 
 // ---- subPayment：tokenplan.PaymentGateway 实现，取代 wire.go 的 stubPayment ----
 //
-// 下单 = 落一条真实 pending 订单（前缀 SUB），可被支付回调用 ActivatePaidTokenplanOrder 激活。
-// 本网关只持久化订单意图 + 返回占位支付页 URL；真实支付凭据由 HTTP 装配层
+// 下单 = 同事务落一条真实 pay_creating 订单（前缀 SUB）与购买快照，可被支付回调用
+// ActivatePaidTokenplanOrder 激活；真实支付凭据由 HTTP 装配层
 // （mtwire.HandlePurchase → subscriptionPayURL → providerManager.CreatePay 进程内向平台下单）按
 // order_no 取回并覆盖（与 RCG 充值同形），故下方 PayURL 仅作 providerMgr 未装配时的回退占位。
-type subPayment struct{ orders *subOrderStore }
+type pendingPurchaseTxWriter interface {
+	SavePendingPurchaseTx(ctx context.Context, tx *gorm.DB, pending *tokenplan.PendingPurchase) error
+}
 
-func newSubPayment(orders *subOrderStore) *subPayment { return &subPayment{orders: orders} }
+type subPayment struct {
+	orders  *subOrderStore
+	pending pendingPurchaseTxWriter
+}
+
+func newSubPayment(orders *subOrderStore, pending pendingPurchaseTxWriter) *subPayment {
+	return &subPayment{orders: orders, pending: pending}
+}
 
 var _ tokenplan.PaymentGateway = (*subPayment)(nil)
+var _ tokenplan.AtomicPurchaseGateway = (*subPayment)(nil)
 
-// CreateOrder 生成 SUB 订单号、落一条 pending 订单，返回支付凭据（占位支付页）。
-// 套餐快照（month_limit/valid_days/agent_cost）由 Purchase 流程随后 SavePendingPurchase 落到
-// pending_subscription_orders（同 order_no），激活时据此还原。
+// CreateOrder 是兼容纯 PaymentGateway 的单订单写路径；生产 Purchase 会优先调用下方
+// CreateOrderWithPending，在同一事务落订单与套餐快照。
 func (p *subPayment) CreateOrder(ctx context.Context, in tokenplan.OrderInput) (*tokenplan.PayOrder, error) {
+	row, order := p.newOrder(in)
+	if err := p.orders.create(ctx, row); err != nil {
+		return nil, err
+	}
+	return order, nil
+}
+
+// CreateOrderWithPending 把 SUB 本地订单与购买快照放在同一个共享 GORM 事务中。快照 INSERT 失败时
+// 订单 INSERT 一并回滚，不会留下 provider 为空、永远无法激活却被对账反复扫描的孤儿订单。
+func (p *subPayment) CreateOrderWithPending(ctx context.Context, in tokenplan.OrderInput, pending *tokenplan.PendingPurchase) (*tokenplan.PayOrder, error) {
+	if p.pending == nil || pending == nil {
+		return nil, errors.New("subscription purchase transaction is not configured")
+	}
+	row, order := p.newOrder(in)
+	pending.OrderID = order.OrderID
+	err := p.orders.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(row).Error; err != nil {
+			return err
+		}
+		return p.pending.SavePendingPurchaseTx(ctx, tx, pending)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return order, nil
+}
+
+func (p *subPayment) newOrder(in tokenplan.OrderInput) (*subscriptionOrderRow, *tokenplan.PayOrder) {
 	orderNo := SubscriptionOrderPrefix + strings.ToUpper(randToken(12))
 	now := time.Now()
 	row := &subscriptionOrderRow{
@@ -140,17 +215,14 @@ func (p *subPayment) CreateOrder(ctx context.Context, in tokenplan.OrderInput) (
 		TenantID:  in.TenantID,
 		UserID:    in.UserID,
 		AmountCNY: in.AmountCNY,
-		Status:    subOrderPending,
+		Status:    subOrderPayCreating,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := p.orders.create(ctx, row); err != nil {
-		return nil, err
-	}
-	return &tokenplan.PayOrder{
+	return row, &tokenplan.PayOrder{
 		OrderID: orderNo,
 		PayURL:  "/console/tokenplan/pay?order=" + orderNo,
-	}, nil
+	}
 }
 
 // ---- 原生订阅激活（核心桥接） ----
@@ -257,8 +329,9 @@ func (a *App) defaultActivateNativeSub(ctx context.Context, tx *gorm.DB, snap *t
 //	③ 调 tokenplan.ActivateFromPayment 落我们订阅记录 + 首次发代理差价分润。
 //
 // 幂等（同 orderNo 重复调用只激活一次）：
-//   - 原生订阅：订单行 pending→activated 的条件 UPDATE（CAS）守门，只有抢到迁移的调用方建原生订阅，
-//     且与建订阅同事务（失败回滚→订单退回 pending 可重试，不留半成品）；
+//   - 原生订阅：订单行 pay_creating/pay_failed/pending/expired→activated 的条件 UPDATE（CAS）守门，
+//     只有抢到迁移的调用方建原生订阅，
+//     且与建订阅同事务（失败回滚至原状态可重试，不留半成品）；
 //   - 我们记录/分润：ActivateFromPayment 自身按 source_order_id / (SourceType,SourceID) 幂等，
 //     即便重复调用（如步骤②已 activated 但②③之间崩溃后重试）也只落一次、只入账一次。
 //
@@ -285,21 +358,20 @@ func (a *App) ActivatePaidTokenplanOrder(ctx context.Context, orderNo string, pa
 		if ord.Status == subOrderActivated {
 			return nil // 已激活：原生订阅不再重复建（步骤③仍会幂等补齐我们的记录）
 		}
-		if ord.Status != subOrderPending {
-			// 过期终态单收到「已确认支付」驱动＝网关自相矛盾（2h 边界迟到回调竞态）：钱已收但订单已
-			// 终态，大声留痕供人工核查退款或手工激活（audit 2026-07-17 #7，与 AGT 同款）。
-			if ord.Status == subOrderExpired {
-				common.SysError("SUB 已付驱动命中过期终态单 " + orderNo + "：钱已收但订单已过期，需人工核查（退款或手工激活）")
-			}
+		if ord.Status != subOrderPayCreating && ord.Status != subOrderPayFailed &&
+			ord.Status != subOrderPending && ord.Status != subOrderExpired {
 			return tokenplan.ErrSubscriptionNotFound
 		}
 		// 反篡改：回传实付金额必须与库内订单一致（仅对未激活单校验；激活额度以快照为准）。
 		if !amountMatchesCNY(paidAmountCNY, ord.AmountCNY) {
 			return payment.ErrAmountMismatch
 		}
-		// CAS：pending→activated，抢到者负责建原生订阅。
+		// CAS：所有未激活支付态→activated。可信付款事实覆盖平台建单返回错误、本地回写崩溃与本地超时；
+		// 抢到者负责建原生订阅。
 		res := tx.Model(&subscriptionOrderRow{}).
-			Where("order_no = ? AND status = ?", orderNo, subOrderPending).
+			Where("order_no = ? AND status IN ?", orderNo, []string{
+				subOrderPayCreating, subOrderPayFailed, subOrderPending, subOrderExpired,
+			}).
 			Updates(map[string]any{"status": subOrderActivated, "updated_at": time.Now()})
 		if res.Error != nil {
 			return res.Error
@@ -316,7 +388,7 @@ func (a *App) ActivatePaidTokenplanOrder(ctx context.Context, orderNo string, pa
 		}
 		nativeSubID, nativePlanID, e := activateNativeSubHook(a, ctx, tx, snap)
 		if e != nil {
-			return e // 回滚 → 订单退回 pending，可重试
+			return e // 回滚至进入事务前的支付状态，可重试
 		}
 		return tx.Model(&subscriptionOrderRow{}).Where("order_no = ?", orderNo).
 			Updates(map[string]any{

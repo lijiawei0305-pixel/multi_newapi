@@ -77,8 +77,6 @@ export interface ModelGroupPayload {
 }
 
 /** PUT /api/admin/model-groups/:name — name is immutable after creation. */
-export type ModelGroupUpdatePayload = Partial<
-  Omit<ModelGroupPayload, 'name'>
->
+export type ModelGroupUpdatePayload = Partial<Omit<ModelGroupPayload, 'name'>>
 
 export type ModelGroupsDialogType = 'create' | 'update' | 'delete'

@@ -17,8 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
+
 import type { StatusVariant } from '@/components/status-badge'
 import { getApiErrorCode } from '@/lib/api'
+
 import type { AuthorRole, TicketPriority, TicketStatus } from './types'
 
 // ============================================================================
@@ -66,7 +68,10 @@ export function priorityMeta(
 }
 
 /** Author role → localized label for the message thread. */
-export function authorRoleLabel(role: AuthorRole | string, t: TFunction): string {
+export function authorRoleLabel(
+  role: AuthorRole | string,
+  t: TFunction
+): string {
   switch (role) {
     case 'user':
       return t('User')

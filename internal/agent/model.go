@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -117,7 +120,9 @@ type EarningEntry struct {
 
 // Validate 校验收益条目；非法返回 ErrEarningInvalid（EARNING_INVALID）。
 func (e EarningEntry) Validate() error {
-	if !e.SourceType.Valid() || e.SourceID == "" || e.TenantID <= 0 {
+	if !e.SourceType.Valid() || strings.TrimSpace(e.SourceID) == "" || len(e.SourceID) > 128 || len(e.Remark) > 255 || e.TenantID <= 0 ||
+		math.IsNaN(e.Amount) || math.IsInf(e.Amount, 0) ||
+		(e.SourceType != SourceManualAdjustment && e.Amount <= 0) || (e.SourceType == SourceManualAdjustment && e.Amount == 0) {
 		return ErrEarningInvalid
 	}
 	return nil
@@ -126,7 +131,8 @@ func (e EarningEntry) Validate() error {
 // IdempotencyKey 返回 (TenantID, SourceType, SourceID) 复合幂等去重键。
 // 含 TenantID 以保证跨租户隔离：不同租户即使复用同一 SourceID 也各自独立入账。
 func (e EarningEntry) IdempotencyKey() string {
-	return strconv.FormatInt(e.TenantID, 10) + "\x00" + string(e.SourceType) + "\x00" + e.SourceID
+	raw := strconv.FormatInt(e.TenantID, 10) + "\x00" + string(e.SourceType) + "\x00" + e.SourceID
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))
 }
 
 // ---- 代理钱包（detailed-design §2.3 / proposal §7：两类余额）----

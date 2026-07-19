@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# reconcile.sh — 测试栈 newapi_test 账目对账（**服务器上运行**）。
+# reconcile.sh — 唯一现网 / 生产栈 newapi_test 账目对账（**服务器上运行**）。
 #
 #   只读 SQL 校验（绝不写库），逐项 PASS/FAIL + 末尾汇总。校验五类账目一致性：
 #     1) 充值对账   payment_orders 无卡在 paid（瞬态）；order_no 唯一（无重复入账）。
@@ -33,9 +33,10 @@ MYSQL_CID="$(docker ps \
 [ -n "$MYSQL_CID" ] || die "找不到栈 $STACK 的 $MYSQL_SVC 容器（栈未启动？）"
 
 # db：执行 SQL，-N 无表头（供 check 比对违规行）。库名含连字符需反引号。
-db()  { docker exec -i "$MYSQL_CID" mysql -u"$DB_USER" -p"$DB_PASS" -N -e "USE \`$DB_NAME\`; $1" 2>/dev/null; }
+# 密码经 stdin 送入容器内短命 0600 option file，不出现在 docker/mysql argv。
+db()  { mysql_with_secret mysql -u"$DB_USER" -N -e "USE \`$DB_NAME\`; $1" 2>/dev/null; }
 # dbt：带表格边框输出（供概览/台账展示）。
-dbt() { docker exec -i "$MYSQL_CID" mysql -u"$DB_USER" -p"$DB_PASS" -t  -e "USE \`$DB_NAME\`; $1" 2>/dev/null; }
+dbt() { mysql_with_secret mysql -u"$DB_USER" -t -e "USE \`$DB_NAME\`; $1" 2>/dev/null; }
 
 PASS=0; FAIL=0
 section() { printf '\n\033[1;36m── %s ─────────────────────────────\033[0m\n' "$*"; }

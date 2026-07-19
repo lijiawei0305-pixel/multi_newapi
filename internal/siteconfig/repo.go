@@ -8,7 +8,7 @@ import (
 )
 
 // MemRepo 是 SiteConfigRepo 的并发安全内存假实现，用于本轮纯逻辑开发与单测。
-// 真实 GORM 实现（迁移 + tenant_id scope + 唯一约束）顺延（见报告 TODO）。
+// 生产 GORM 实现（迁移 + tenant_id scope + 唯一约束）位于 gormrepo 子包。
 type MemRepo struct {
 	mu        sync.RWMutex
 	configs   map[int64]SiteConfig

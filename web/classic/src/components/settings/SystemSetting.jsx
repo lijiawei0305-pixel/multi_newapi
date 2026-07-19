@@ -784,7 +784,7 @@ const SystemSetting = () => {
                     <a
                       href='https://github.com/Calcium-Ion/new-api-worker'
                       target='_blank'
-                      rel='noreferrer'
+                      rel='noopener noreferrer'
                     >
                       new-api-worker
                     </a>{' '}
@@ -1548,7 +1548,7 @@ const SystemSetting = () => {
                     <a
                       href='https://connect.linux.do/'
                       target='_blank'
-                      rel='noreferrer'
+                      rel='noopener noreferrer'
                       style={{
                         display: 'inline-block',
                         marginLeft: 4,

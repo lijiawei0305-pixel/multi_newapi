@@ -84,7 +84,7 @@ func fetchCodexChannelWhamData(
 
 	oauthKey, err := codex.ParseOAuthKey(strings.TrimSpace(ch.Key))
 	if err != nil {
-		common.SysError("failed to parse oauth key: " + err.Error())
+		common.SysError(fmt.Sprintf("failed to parse oauth key: error_type=%T", err))
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "解析凭证失败，请检查渠道配置"})
 		return
 	}
@@ -110,7 +110,7 @@ func fetchCodexChannelWhamData(
 
 	statusCode, body, err := fetch(ctx, client, ch.GetBaseURL(), accessToken, accountID)
 	if err != nil {
-		common.SysError(logPrefix + ": " + err.Error())
+		common.SysError(fmt.Sprintf("%s: error_type=%T", logPrefix, err))
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": userMessage})
 		return
 	}
@@ -140,7 +140,7 @@ func fetchCodexChannelWhamData(
 			defer cancel2()
 			statusCode, body, err = fetch(ctx2, client, ch.GetBaseURL(), oauthKey.AccessToken, accountID)
 			if err != nil {
-				common.SysError(logPrefix + " after refresh: " + err.Error())
+				common.SysError(fmt.Sprintf("%s after refresh: error_type=%T", logPrefix, err))
 				c.JSON(http.StatusOK, gin.H{"success": false, "message": userMessage})
 				return
 			}

@@ -35,12 +35,10 @@ import { Button, Tooltip, Toast } from '@douyinfe/semi-ui';
 import { copy, rehypeSplitWordsIntoSpans } from '../../../helpers';
 import { IconCopy } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
+import { MERMAID_CONFIG } from './mermaid-config';
+import { normalizeHttpNavigationUrl } from '../../../helpers/safeNavigation';
 
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'default',
-  securityLevel: 'loose',
-});
+mermaid.initialize(MERMAID_CONFIG);
 
 export function Mermaid(props) {
   const ref = useRef(null);
@@ -66,7 +64,9 @@ export function Mermaid(props) {
     const text = new XMLSerializer().serializeToString(svg);
     const blob = new Blob([text], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (opened) opened.opener = null;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
   if (hasError) {
@@ -123,6 +123,7 @@ function SandboxedHtmlPreview({ code }) {
       ref={iframeRef}
       sandbox='allow-same-origin'
       srcDoc={code}
+      referrerPolicy='no-referrer'
       title='HTML Preview'
       style={{
         width: '100%',
@@ -428,15 +429,28 @@ function _MarkdownContent(props) {
           />
         ),
         a: (aProps) => {
-          const href = aProps.href || '';
-          if (/\.(aac|mp3|opus|wav)$/.test(href)) {
+          const rawHref = aProps.href || '';
+          const externalHref = normalizeHttpNavigationUrl(rawHref);
+          const internalHref =
+            typeof rawHref === 'string' &&
+            (/^\/(?!\/)/.test(rawHref) || rawHref.startsWith('#'))
+              ? rawHref
+              : null;
+          const href = externalHref || internalHref;
+          if (!href) {
+            return <span>{aProps.children}</span>;
+          }
+          if (externalHref && /\.(aac|mp3|opus|wav)(?:[?#]|$)/i.test(href)) {
             return (
               <figure style={{ margin: '12px 0' }}>
                 <audio controls src={href} style={{ width: '100%' }}></audio>
               </figure>
             );
           }
-          if (/\.(3gp|3g2|webm|ogv|mpeg|mp4|avi)$/.test(href)) {
+          if (
+            externalHref &&
+            /\.(3gp|3g2|webm|ogv|mpeg|mp4|avi)(?:[?#]|$)/i.test(href)
+          ) {
             return (
               <video
                 controls
@@ -446,12 +460,13 @@ function _MarkdownContent(props) {
               </video>
             );
           }
-          const isInternal = /^\/#/i.test(href);
-          const target = isInternal ? '_self' : (aProps.target ?? '_blank');
+          const target = internalHref ? '_self' : '_blank';
           return (
             <a
               {...aProps}
+              href={href}
               target={target}
+              rel={target === '_blank' ? 'noopener noreferrer' : undefined}
               style={{
                 color: isUserMessage ? '#87CEEB' : 'var(--semi-color-primary)',
                 textDecoration: 'none',

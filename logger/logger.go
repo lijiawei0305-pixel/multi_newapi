@@ -6,14 +6,12 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
-	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
 
@@ -24,14 +22,10 @@ const (
 	loggerDebug = "DEBUG"
 )
 
-const maxLogCount = 1000000
-
-var logCount int
 var setupLogLock sync.Mutex
-var setupLogWorking bool
 var currentLogPath string
 var currentLogPathMu sync.RWMutex
-var currentLogFile *os.File
+var currentLogWriter *rotatingFileWriter
 
 func GetCurrentLogPath() string {
 	currentLogPathMu.RLock()
@@ -40,34 +34,26 @@ func GetCurrentLogPath() string {
 }
 
 func SetupLogger() {
-	defer func() {
-		setupLogWorking = false
-	}()
 	if *common.LogDir != "" {
-		ok := setupLogLock.TryLock()
-		if !ok {
-			log.Println("setup log is already working")
-			return
-		}
-		defer func() {
-			setupLogLock.Unlock()
-		}()
-		logPath := filepath.Join(*common.LogDir, fmt.Sprintf("oneapi-%s.log", time.Now().Format("20060102150405")))
-		fd, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		setupLogLock.Lock()
+		defer setupLogLock.Unlock()
+
+		writer, err := newRotatingFileWriter(*common.LogDir, defaultLogMaxBytes, defaultLogMaxAge, defaultLogMaxBackups)
 		if err != nil {
-			log.Fatal("failed to open log file")
+			log.Fatalf("failed to open log file: %v", err)
 		}
+
 		currentLogPathMu.Lock()
-		oldFile := currentLogFile
-		currentLogPath = logPath
-		currentLogFile = fd
+		oldWriter := currentLogWriter
+		currentLogPath = writer.activePath
+		currentLogWriter = writer
 		currentLogPathMu.Unlock()
 
 		common.LogWriterMu.Lock()
-		gin.DefaultWriter = io.MultiWriter(os.Stdout, fd)
-		gin.DefaultErrorWriter = io.MultiWriter(os.Stderr, fd)
-		if oldFile != nil {
-			_ = oldFile.Close()
+		gin.DefaultWriter = io.MultiWriter(os.Stdout, writer)
+		gin.DefaultErrorWriter = io.MultiWriter(os.Stderr, writer)
+		if oldWriter != nil {
+			_ = oldWriter.Close()
 		}
 		common.LogWriterMu.Unlock()
 	}
@@ -109,14 +95,16 @@ func logHelper(ctx context.Context, level string, msg string) {
 	}
 	_, _ = fmt.Fprintf(writer, "[%s] %v | %s | %s \n", level, now.Format("2006/01/02 - 15:04:05"), id, msg)
 	common.LogWriterMu.RUnlock()
-	logCount++ // we don't need accurate count, so no lock here
-	if logCount > maxLogCount && !setupLogWorking {
-		logCount = 0
-		setupLogWorking = true
-		gopool.Go(func() {
-			SetupLogger()
-		})
-	}
+}
+
+// PayloadMetadata returns non-reversible diagnostic metadata for sensitive data.
+func PayloadMetadata(data []byte) string {
+	return common.PayloadMetadata(data)
+}
+
+// LogPayload records only payload metadata and only when debug logging is enabled.
+func LogPayload(ctx context.Context, msg string, data []byte) {
+	LogDebug(ctx, "%s | %s", msg, PayloadMetadata(data))
 }
 
 func LogQuota(quota int) string {
@@ -172,7 +160,7 @@ func FormatQuota(quota int) string {
 	}
 }
 
-// LogJson 仅供测试使用 only for test
+// LogJson serializes an object for metadata-only diagnostics; it never logs the JSON itself.
 func LogJson(ctx context.Context, msg string, obj any) {
 	if !common.DebugEnabled {
 		return
@@ -182,5 +170,5 @@ func LogJson(ctx context.Context, msg string, obj any) {
 		LogError(ctx, fmt.Sprintf("json marshal failed: %s", err.Error()))
 		return
 	}
-	LogDebug(ctx, "%s | %s", msg, jsonStr)
+	LogPayload(ctx, msg, jsonStr)
 }

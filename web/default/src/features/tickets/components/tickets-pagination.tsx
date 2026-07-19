@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+
 import {
   Pagination,
   PaginationContent,
@@ -38,7 +39,10 @@ export function TicketsPagination(props: {
   onPageChange: (page: number) => void
 }) {
   const { t } = useTranslation()
-  const totalPages = Math.max(1, Math.ceil(props.total / Math.max(1, props.pageSize)))
+  const totalPages = Math.max(
+    1,
+    Math.ceil(props.total / Math.max(1, props.pageSize))
+  )
   const canPrev = props.page > 1
   const canNext = props.page < totalPages
 
@@ -50,7 +54,10 @@ export function TicketsPagination(props: {
         className='text-muted-foreground text-xs'
         data-testid='tickets-pagination-info'
       >
-        {t('Page {{page}} of {{total}}', { page: props.page, total: totalPages })}
+        {t('Page {{page}} of {{total}}', {
+          page: props.page,
+          total: totalPages,
+        })}
       </span>
       <Pagination className='mx-0 w-auto justify-end'>
         <PaginationContent>
@@ -58,7 +65,9 @@ export function TicketsPagination(props: {
             <PaginationPrevious
               text={t('Previous')}
               aria-disabled={!canPrev}
-              className={!canPrev ? 'pointer-events-none opacity-50' : undefined}
+              className={
+                !canPrev ? 'pointer-events-none opacity-50' : undefined
+              }
               onClick={(e) => {
                 e.preventDefault()
                 if (canPrev) props.onPageChange(props.page - 1)
@@ -69,7 +78,9 @@ export function TicketsPagination(props: {
             <PaginationNext
               text={t('Next')}
               aria-disabled={!canNext}
-              className={!canNext ? 'pointer-events-none opacity-50' : undefined}
+              className={
+                !canNext ? 'pointer-events-none opacity-50' : undefined
+              }
               onClick={(e) => {
                 e.preventDefault()
                 if (canNext) props.onPageChange(props.page + 1)

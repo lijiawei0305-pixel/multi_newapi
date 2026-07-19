@@ -16,10 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ReactNode, useMemo, useState } from 'react'
 import { Check, Plus, Trash2 } from 'lucide-react'
+import { type ReactNode, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
+import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -34,7 +36,7 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
-import { Dialog } from '@/components/dialog'
+
 import {
   ADVANCED_CUSTOM_AUTH_MODE_OPTIONS,
   ADVANCED_CUSTOM_CONVERTER_OPTIONS,
@@ -112,6 +114,13 @@ export function AdvancedCustomEditorDialog({
     [config]
   )
   const routes = normalizedConfig.advanced_routes || []
+  const routeKeysRef = useRef<string[]>([])
+  const nextRouteKeyRef = useRef(0)
+  while (routeKeysRef.current.length < routes.length) {
+    nextRouteKeyRef.current += 1
+    routeKeysRef.current.push(`advanced-route-${nextRouteKeyRef.current}`)
+  }
+  routeKeysRef.current.length = routes.length
   const validationError = useMemo(
     () => validateAdvancedCustomConfig(normalizedConfig),
     [normalizedConfig]
@@ -140,6 +149,7 @@ export function AdvancedCustomEditorDialog({
   }
 
   const removeRoute = (index: number) => {
+    routeKeysRef.current.splice(index, 1)
     setConfig((current) => {
       const next = normalizeAdvancedCustomConfig(current)
       return {
@@ -297,7 +307,7 @@ export function AdvancedCustomEditorDialog({
               )
             }
           >
-            <SelectTrigger className='h-8 min-w-[260px] max-w-full flex-1 sm:w-[320px]'>
+            <SelectTrigger className='h-8 max-w-full min-w-[260px] flex-1 sm:w-[320px]'>
               <SelectValue className='min-w-0 truncate'>
                 {t(templateLabel)}
               </SelectValue>
@@ -313,7 +323,7 @@ export function AdvancedCustomEditorDialog({
                     value={option.value}
                     className={longSelectItemClass}
                   >
-                    <span className='min-w-0 whitespace-normal break-words leading-snug'>
+                    <span className='min-w-0 leading-snug break-words whitespace-normal'>
                       {t(option.label)}
                     </span>
                   </SelectItem>
@@ -368,7 +378,7 @@ export function AdvancedCustomEditorDialog({
           <div className='flex flex-col gap-4'>
             {routes.map((route, index) => (
               <RouteEditor
-                key={index}
+                key={routeKeysRef.current[index]}
                 route={route}
                 index={index}
                 onChange={(patch) => updateRoute(index, patch)}
@@ -434,8 +444,10 @@ function RouteEditor({
     [converter]
   )
   const incomingPathLabel = getAdvancedCustomIncomingPathLabel(incomingPath)
-  const converterLabel =
-    getOptionLabel(ADVANCED_CUSTOM_CONVERTER_OPTIONS, converter)
+  const converterLabel = getOptionLabel(
+    ADVANCED_CUSTOM_CONVERTER_OPTIONS,
+    converter
+  )
   const authLabel = getOptionLabel(ADVANCED_CUSTOM_AUTH_MODE_OPTIONS, authMode)
 
   const setConverter = (nextConverter: AdvancedCustomConverter) => {
@@ -510,9 +522,9 @@ function RouteEditor({
                     value={option.value}
                     className={longSelectItemClass}
                   >
-                    <div className='flex min-w-0 flex-col gap-1 whitespace-normal leading-snug'>
+                    <div className='flex min-w-0 flex-col gap-1 leading-snug whitespace-normal'>
                       <span>{t(option.label)}</span>
-                      <span className='text-muted-foreground break-all font-mono text-xs'>
+                      <span className='text-muted-foreground font-mono text-xs break-all'>
                         {option.value}
                       </span>
                     </div>
@@ -565,7 +577,7 @@ function RouteEditor({
                     value={option.value}
                     className={longSelectItemClass}
                   >
-                    <span className='min-w-0 whitespace-normal break-words leading-snug'>
+                    <span className='min-w-0 leading-snug break-words whitespace-normal'>
                       {t(option.label)}
                     </span>
                   </SelectItem>

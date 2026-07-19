@@ -16,30 +16,44 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import i18n from 'i18next'
+import i18n, { type BackendModule, type ReadCallback } from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import { initReactI18next } from 'react-i18next'
-import en from './locales/en.json'
-import fr from './locales/fr.json'
-import ja from './locales/ja.json'
-import ru from './locales/ru.json'
-import vi from './locales/vi.json'
-import zh from './locales/zh.json'
 
-export const resources = {
-  en,
-  zh,
-  fr,
-  ru,
-  ja,
-  vi,
-} as const
+type LocaleMessages = Record<string, string>
+type LocaleModule = { default: { translation: LocaleMessages } }
+
+// Keep locale catalogs out of the bootstrap bundle. The detector chooses a
+// language first, then i18next fetches only that catalog (and the English
+// fallback if a key is genuinely absent) as an async chunk.
+const localeLoaders: Record<string, () => Promise<LocaleModule>> = {
+  en: () => import('./locales/en.json'),
+  fr: () => import('./locales/fr.json'),
+  ja: () => import('./locales/ja.json'),
+  ru: () => import('./locales/ru.json'),
+  vi: () => import('./locales/vi.json'),
+  zh: () => import('./locales/zh.json'),
+}
+
+const localeBackend: BackendModule = {
+  type: 'backend',
+  init: () => undefined,
+  async read(language: string, _namespace: string, callback: ReadCallback) {
+    const loader = localeLoaders[language] ?? localeLoaders.en
+    try {
+      const module = await loader()
+      callback(null, module.default.translation)
+    } catch (error: unknown) {
+      callback(error as Error, false)
+    }
+  },
+}
 
 i18n
+  .use(localeBackend)
   .use(LanguageDetector)
   .use(initReactI18next)
   .init({
-    resources,
     fallbackLng: 'en',
     supportedLngs: ['en', 'zh', 'fr', 'ru', 'ja', 'vi'],
     load: 'languageOnly', // Convert zh-CN -> zh

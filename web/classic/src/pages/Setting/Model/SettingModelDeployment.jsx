@@ -36,6 +36,7 @@ import {
 } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 import { Server, Cloud, Zap, ArrowUpRight } from 'lucide-react';
+import { openHttpUrlInNewTab } from '../../../helpers/safeNavigation';
 
 const { Text } = Typography;
 
@@ -310,7 +311,7 @@ export default function SettingModelDeployment(props) {
                       theme='solid'
                       style={{ width: '100%' }}
                       onClick={() =>
-                        window.open('https://ai.io.net/ai/api-keys', '_blank')
+                        openHttpUrlInNewTab('https://ai.io.net/ai/api-keys')
                       }
                     >
                       {t('前往 io.net API Keys')}

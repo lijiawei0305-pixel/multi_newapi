@@ -3,13 +3,11 @@ package relay
 import (
 	"fmt"
 
-	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 )
 
 func WssHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
@@ -30,10 +28,12 @@ func WssHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.
 		return types.NewError(err, types.ErrorCodeDoRequestFailed)
 	}
 
-	if resp != nil {
-		info.TargetWs = resp.(*websocket.Conn)
-		defer info.TargetWs.Close()
+	targetWs, connectionErr := requiredWebSocketConnection(resp)
+	if connectionErr != nil {
+		return connectionErr
 	}
+	info.TargetWs = targetWs
+	defer info.TargetWs.Close()
 
 	usage, newAPIError := adaptor.DoResponse(c, nil, info)
 	if newAPIError != nil {
@@ -41,6 +41,13 @@ func WssHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
 	}
-	service.PostWssConsumeQuota(c, info, info.UpstreamModelName, usage.(*dto.RealtimeUsage), "")
+	service.MarkUpstreamAccepted(c)
+	resolvedUsage, usageErr := acceptedRealtimeUsage(usage)
+	if usageErr != nil {
+		return usageErr
+	}
+	if billingErr := service.PostWssConsumeQuota(c, info, info.UpstreamModelName, resolvedUsage, ""); billingErr != nil {
+		return billingErr
+	}
 	return nil
 }

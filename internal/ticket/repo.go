@@ -11,12 +11,12 @@ import (
 // MemRepo 是 TicketRepo 的并发安全内存假实现，作为单测默认替身（真实持久化见 gormrepo 子包）。
 // 隔离与真实实现同口径：*ForUser 按 user_id、*ForTenant 按 tenant_id 过滤，跨作用域读返回 ErrNotFound。
 type MemRepo struct {
-	mu         sync.RWMutex
-	tickets    map[int64]SupportTicket
-	messages   map[int64][]TicketMessage // ticketID -> messages
-	nextTID    int64
-	nextMID    int64
-	now        func() time.Time
+	mu       sync.RWMutex
+	tickets  map[int64]SupportTicket
+	messages map[int64][]TicketMessage // ticketID -> messages
+	nextTID  int64
+	nextMID  int64
+	now      func() time.Time
 }
 
 // NewMemRepo 构造内存仓储。

@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Plus } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import {
@@ -44,6 +45,7 @@ import {
 } from '@/components/ui/table'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { fmtDateTime } from '@/lib/agent-format'
+
 import { createPromotionChannel, getPromotionChannels } from './api'
 
 /** Build the agent's dedicated sign-up link for a channel on the current host. */
@@ -98,7 +100,9 @@ function CreateChannelDialog({
         <DialogHeader>
           <DialogTitle>{t('New Channel')}</DialogTitle>
           <DialogDescription>
-            {t('Create a promotion channel to attribute sign-ups from your link.')}
+            {t(
+              'Create a promotion channel to attribute sign-ups from your link.'
+            )}
           </DialogDescription>
         </DialogHeader>
         <div className='flex flex-col gap-2'>
@@ -175,7 +179,7 @@ export function PromotionChannels() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading ? (
+                {isLoading && (
                   <TableRow>
                     <TableCell
                       colSpan={5}
@@ -184,7 +188,8 @@ export function PromotionChannels() {
                       {t('Loading...')}
                     </TableCell>
                   </TableRow>
-                ) : rows.length === 0 ? (
+                )}
+                {!isLoading && rows.length === 0 && (
                   <TableRow>
                     <TableCell
                       colSpan={5}
@@ -193,7 +198,9 @@ export function PromotionChannels() {
                       {t('No channels yet')}
                     </TableCell>
                   </TableRow>
-                ) : (
+                )}
+                {!isLoading &&
+                  rows.length > 0 &&
                   rows.map((row) => {
                     const link = signupLink(row.code)
                     return (
@@ -229,8 +236,7 @@ export function PromotionChannels() {
                         </TableCell>
                       </TableRow>
                     )
-                  })
-                )}
+                  })}
               </TableBody>
             </Table>
           </div>

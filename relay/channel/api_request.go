@@ -20,10 +20,38 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
-	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+const (
+	defaultNonStreamUpstreamTimeoutSeconds = 600
+	minimumNonStreamUpstreamTimeoutSeconds = 5
+)
+
+type cancelOnCloseBody struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *cancelOnCloseBody) Close() error {
+	defer b.cancel()
+	return b.ReadCloser.Close()
+}
+
+func nonStreamUpstreamTimeout() time.Duration {
+	seconds := common2.GetEnvOrDefault("RELAY_NON_STREAM_TIMEOUT_SECONDS", defaultNonStreamUpstreamTimeoutSeconds)
+	if seconds < minimumNonStreamUpstreamTimeoutSeconds {
+		seconds = minimumNonStreamUpstreamTimeoutSeconds
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+// NonStreamUpstreamTimeout is the total provider I/O deadline used by relay
+// implementations that do not go through the shared net/http request path.
+func NonStreamUpstreamTimeout() time.Duration {
+	return nonStreamUpstreamTimeout()
+}
 
 // applyUpstreamContentLength populates req.ContentLength when the upstream
 // body is wrapped in a BodyStorage (see relay/common/outbound_body.go).
@@ -307,12 +335,14 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
-		return nil, fmt.Errorf("get request url failed: %w", err)
+		logger.LogError(c, fmt.Sprintf("build upstream request URL failed: error_type=%T", err))
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: invalid request URL"))
 	}
-	logger.LogDebug(c, "fullRequestURL: %s", fullRequestURL)
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	logger.LogPayload(c, "Upstream request URL", []byte(fullRequestURL))
+	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("new request failed: %w", err)
+		logger.LogError(c, fmt.Sprintf("create upstream request failed url_%s error_type=%T", logger.PayloadMetadata([]byte(fullRequestURL)), err))
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: invalid request URL"))
 	}
 	applyUpstreamContentLength(req, info)
 	headers := req.Header
@@ -337,12 +367,14 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
-		return nil, fmt.Errorf("get request url failed: %w", err)
+		logger.LogError(c, fmt.Sprintf("build upstream form URL failed: error_type=%T", err))
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: invalid request URL"))
 	}
-	logger.LogDebug(c, "fullRequestURL: %s", fullRequestURL)
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	logger.LogPayload(c, "Upstream form request URL", []byte(fullRequestURL))
+	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("new request failed: %w", err)
+		logger.LogError(c, fmt.Sprintf("create upstream form request failed url_%s error_type=%T", logger.PayloadMetadata([]byte(fullRequestURL)), err))
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: invalid request URL"))
 	}
 	applyUpstreamContentLength(req, info)
 	// set form data
@@ -369,7 +401,8 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*websocket.Conn, error) {
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
-		return nil, fmt.Errorf("get request url failed: %w", err)
+		logger.LogError(c, fmt.Sprintf("build upstream websocket URL failed: error_type=%T", err))
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: invalid websocket URL"))
 	}
 	targetHeader := http.Header{}
 	err = a.SetupRequestHeader(c, &targetHeader, info)
@@ -386,9 +419,10 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		targetHeader.Set(key, value)
 	}
 	targetHeader.Set("Content-Type", c.Request.Header.Get("Content-Type"))
-	targetConn, _, err := websocket.DefaultDialer.Dial(fullRequestURL, targetHeader)
+	targetConn, _, err := websocket.DefaultDialer.DialContext(c.Request.Context(), fullRequestURL, targetHeader)
 	if err != nil {
-		return nil, fmt.Errorf("dial failed to %s: %w", fullRequestURL, err)
+		logger.LogError(c, fmt.Sprintf("dial upstream websocket failed url_%s error_type=%T", logger.PayloadMetadata([]byte(fullRequestURL)), err))
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: websocket dial failed"))
 	}
 	// send request body
 	//all, err := io.ReadAll(requestBody)
@@ -396,150 +430,175 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	return targetConn, nil
 }
 
-func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) context.CancelFunc {
-	pingerCtx, stopPinger := context.WithCancel(context.Background())
-
-	gopool.Go(func() {
-		defer func() {
-			// 增加panic恢复处理
-			if r := recover(); r != nil {
-				logger.LogDebug(c, "SSE ping goroutine panic recovered: %v", r)
-			}
-			logger.LogDebug(c, "SSE ping goroutine stopped")
-		}()
-
-		if pingInterval <= 0 {
-			pingInterval = helper.DefaultPingInterval
-		}
-
-		ticker := time.NewTicker(pingInterval)
-		// 确保在任何情况下都清理ticker
-		defer func() {
-			ticker.Stop()
-			logger.LogDebug(c, "SSE ping ticker stopped")
-		}()
-
-		var pingMutex sync.Mutex
-		logger.LogDebug(c, "SSE ping goroutine started")
-
-		// 增加超时控制，防止goroutine长时间运行
-		maxPingDuration := 120 * time.Minute // 最大ping持续时间
-		pingTimeout := time.NewTimer(maxPingDuration)
-		defer pingTimeout.Stop()
-
-		for {
-			select {
-			// 发送 ping 数据
-			case <-ticker.C:
-				if err := sendPingData(c, &pingMutex); err != nil {
-					logger.LogDebug(c, "SSE ping error, stopping goroutine: %s", err.Error())
-					return
-				}
-			// 收到退出信号
-			case <-pingerCtx.Done():
-				return
-			// request 结束
-			case <-c.Request.Context().Done():
-				return
-			// 超时保护，防止goroutine无限运行
-			case <-pingTimeout.C:
-				logger.LogDebug(c, "SSE ping goroutine timeout, stopping")
-				return
-			}
-		}
-	})
-
-	return stopPinger
+type upstreamRequestResult struct {
+	response *http.Response
+	err      error
 }
 
-func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
-	// 增加超时控制，防止锁死等待
-	done := make(chan error, 1)
+// doRequestWithPreHeaderPings keeps slow-to-start streams alive without ever
+// writing to the downstream response concurrently. The upstream request runs
+// in the worker; this goroutine alone owns all pre-header response writes and
+// does not return until the worker has finished. Once this function returns,
+// protocol handlers can safely take over the same response writer.
+func doRequestWithPreHeaderPings(
+	c *gin.Context,
+	pingInterval time.Duration,
+	doUpstreamRequest func() (*http.Response, error),
+) (*http.Response, error) {
+	if pingInterval <= 0 {
+		pingInterval = helper.DefaultPingInterval
+	}
+
+	resultChan := make(chan upstreamRequestResult, 1)
+	workerDone := make(chan struct{})
 	go func() {
-		mutex.Lock()
-		defer mutex.Unlock()
-
-		err := helper.PingData(c)
-		if err != nil {
-			logger.LogError(c, "SSE ping error: "+err.Error())
-			done <- err
-			return
-		}
-
-		logger.LogDebug(c, "SSE ping data sent")
-		done <- nil
+		defer close(workerDone)
+		response, err := doUpstreamRequest()
+		resultChan <- upstreamRequestResult{response: response, err: err}
 	}()
 
-	// 设置发送ping数据的超时时间
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(10 * time.Second):
-		return errors.New("SSE ping data send timeout")
-	case <-c.Request.Context().Done():
-		return errors.New("request context cancelled during ping")
+	ticker := time.NewTicker(pingInterval)
+	defer ticker.Stop()
+	pingChan := ticker.C
+
+	for {
+		select {
+		case result := <-resultChan:
+			<-workerDone
+			return result.response, result.err
+		case <-pingChan:
+			if err := sendPreHeaderPing(c); err != nil {
+				// A failed downstream ping must not create a detached writer or
+				// abort an otherwise valid provider request. Match the previous
+				// behavior by disabling further pre-header pings and waiting for
+				// client.Do to finish under the downstream request context.
+				logger.LogDebug(c, "SSE pre-header ping stopped after write failure: %s", err.Error())
+				ticker.Stop()
+				pingChan = nil
+				continue
+			}
+			logger.LogDebug(c, "SSE pre-header ping data sent")
+		}
 	}
+}
+
+func sendPreHeaderPing(c *gin.Context) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("SSE pre-header ping panic recovered: panic_type=%T", recovered)
+		}
+	}()
+	return helper.PingData(c)
 }
 
 func DoRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
 	return doRequest(c, req, info)
 }
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	if c == nil || c.Request == nil {
+		return nil, errors.New("missing downstream request context")
+	}
+	if req == nil {
+		return nil, errors.New("upstream request is nil")
+	}
+	if info == nil {
+		return nil, errors.New("relay info is nil")
+	}
+	if info.ChannelMeta == nil {
+		return nil, errors.New("relay channel metadata is nil")
+	}
+	// Constructors in this package already inherit the downstream context, but
+	// callers may pass a pre-built request through DoRequest. Rebinding here is
+	// the final safety net that makes disconnects and deadlines abort provider
+	// I/O instead of leaving an orphaned request running in the background.
+	requestContext := c.Request.Context()
+	var cancelRequest context.CancelFunc
+	if !info.IsStream {
+		requestContext, cancelRequest = context.WithTimeout(requestContext, nonStreamUpstreamTimeout())
+	}
+	req = req.WithContext(requestContext)
+
 	var client *http.Client
 	var err error
 	if info.ChannelSetting.Proxy != "" {
 		client, err = service.NewProxyHttpClient(info.ChannelSetting.Proxy)
 		if err != nil {
-			return nil, fmt.Errorf("new proxy http client failed: %w", err)
+			if cancelRequest != nil {
+				cancelRequest()
+			}
+			logger.LogError(c, fmt.Sprintf("create upstream proxy client failed: error_type=%T", err))
+			return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 		}
 	} else {
 		client = service.GetHttpClient()
 	}
+	if client == nil {
+		if cancelRequest != nil {
+			cancelRequest()
+		}
+		return nil, types.NewError(errors.New("upstream HTTP client is unavailable"), types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
+	}
 
-	var stopPinger context.CancelFunc
+	var resp *http.Response
 	if info.IsStream {
 		helper.SetEventStreamHeaders(c)
-		// 处理流式请求的 ping 保活
+		// Keep the downstream connection alive while waiting for provider
+		// headers. The helper serializes pings with the handoff to the stream
+		// handler, so the response writer never has concurrent owners.
 		generalSettings := operation_setting.GetGeneralSetting()
 		if generalSettings.PingIntervalEnabled && !info.DisablePing {
 			pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
-			stopPinger = startPingKeepAlive(c, pingInterval)
-			// 使用defer确保在任何情况下都能停止ping goroutine
-			defer func() {
-				if stopPinger != nil {
-					stopPinger()
-					logger.LogDebug(c, "SSE ping goroutine stopped by defer")
-				}
-			}()
+			resp, err = doRequestWithPreHeaderPings(c, pingInterval, func() (*http.Response, error) {
+				return client.Do(req)
+			})
+		} else {
+			resp, err = client.Do(req)
 		}
+	} else {
+		resp, err = client.Do(req)
 	}
-
-	resp, err := client.Do(req)
 	if err != nil {
-		logger.LogError(c, "do request failed: "+err.Error())
+		if cancelRequest != nil {
+			cancelRequest()
+		}
+		logger.LogError(c, fmt.Sprintf("do request failed: error_type=%T", err))
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
 	if resp == nil {
+		if cancelRequest != nil {
+			cancelRequest()
+		}
 		return nil, errors.New("resp is nil")
+	}
+	if cancelRequest != nil {
+		// Keep the total non-stream deadline alive while the caller consumes the
+		// response body, then release its timer as soon as the body is closed.
+		resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancelRequest}
 	}
 
 	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 
-	_ = req.Body.Close()
-	_ = c.Request.Body.Close()
+	if req.Body != nil {
+		_ = req.Body.Close()
+	}
+	if c.Request.Body != nil {
+		_ = c.Request.Body.Close()
+	}
 	return resp, nil
 }
 
 func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
 	fullRequestURL, err := a.BuildRequestURL(info)
 	if err != nil {
-		return nil, err
+		logger.LogError(c, fmt.Sprintf("build upstream task URL failed: error_type=%T", err))
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: invalid request URL"))
 	}
-	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
+	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("new request failed: %w", err)
+		logger.LogError(c, fmt.Sprintf("create upstream task request failed url_%s error_type=%T", logger.PayloadMetadata([]byte(fullRequestURL)), err))
+		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: invalid request URL"))
 	}
 	applyUpstreamContentLength(req, info)
 	req.GetBody = func() (io.ReadCloser, error) {

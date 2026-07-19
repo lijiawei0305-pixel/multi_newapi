@@ -131,6 +131,8 @@ docker pull calciumion/new-api:latest
 # SQLiteを使用（デフォルト）
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -138,7 +140,9 @@ docker run --name new-api -d --restart always \
 # MySQLを使用
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
+  -e SQL_DSN="${SQL_DSN:?export SQL_DSN first}" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -314,9 +318,11 @@ docker run --name new-api -d --restart always \
 
 | 変数名 | 説明 | デフォルト値 |
 |--------|------|--------|
-| `SESSION_SECRET` | セッションシークレット（マルチマシンデプロイに必須） | - |
-| `CRYPTO_SECRET` | 暗号化シークレット（Redisに必須） | - |
-| `SQL_DSN** | データベース接続文字列 | - |
+| `DEPLOYMENT_ENV` | セキュリティモード。未設定または不明な値は `production` として扱われ、ローカル HTTP 開発では `development` の明示が必要 | `production`（fail-closed） |
+| `SESSION_COOKIE_SECURE` | セッション Cookie を HTTPS に限定。本番では `true` 必須、`false` はローカルの `DEPLOYMENT_ENV=development` のみ | `false` |
+| `SESSION_SECRET` | 明示的なセッション署名シークレット。本番環境で必須 | - |
+| `CRYPTO_SECRET` | 明示的な暗号化/HMAC シークレット。本番環境で必須で、`SESSION_SECRET` と異なる値が必要 | - |
+| `SQL_DSN` | データベース接続文字列 | - |
 | `REDIS_CONN_STRING` | Redis接続文字列 | - |
 | `STREAMING_TIMEOUT` | ストリーミング応答のタイムアウト時間（秒） | `300` |
 | `STREAM_SCANNER_MAX_BUFFER_MB` | ストリームスキャナの1行あたりバッファ上限（MB）。4K画像など巨大なbase64 `data:` ペイロードを扱う場合は値を増加させてください | `64` |
@@ -330,6 +336,9 @@ docker run --name new-api -d --restart always \
 | `PYROSCOPE_MUTEX_RATE` | Pyroscope mutexサンプリング率 | `5` |
 | `PYROSCOPE_BLOCK_RATE` | Pyroscope blockサンプリング率 | `5` |
 | `HOSTNAME` | Pyroscope用のホスト名タグ | `new-api` |
+
+> [!IMPORTANT]
+> `DEPLOYMENT_ENV` を省略しても、安全でない開発モードには切り替わりません。公開環境では production モードと HTTPS を使用し、`SESSION_COOKIE_SECURE=true` に設定し、異なるランダム値の `SESSION_SECRET` / `CRYPTO_SECRET` を与えてください。シークレットをリポジトリにコミットしないでください。
 
 📖 **完全な設定:** [環境変数ドキュメント](https://docs.newapi.pro/ja/docs/installation/config-maintenance/environment-variables)
 
@@ -361,6 +370,8 @@ docker-compose up -d
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -370,7 +381,9 @@ docker run --name new-api -d --restart always \
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
+  -e SQL_DSN="${SQL_DSN:?export SQL_DSN first}" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest

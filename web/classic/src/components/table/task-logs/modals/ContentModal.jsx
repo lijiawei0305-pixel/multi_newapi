@@ -21,6 +21,10 @@ import React, { useState, useEffect } from 'react';
 import { Modal, Button, Typography, Spin } from '@douyinfe/semi-ui';
 import { IconExternalOpen, IconCopy } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
+import {
+  normalizeHttpNavigationUrl,
+  openHttpUrlInNewTab,
+} from '../../../../helpers/safeNavigation';
 
 const { Text } = Typography;
 
@@ -33,6 +37,7 @@ const ContentModal = ({
   const { t } = useTranslation();
   const [videoError, setVideoError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const videoUrl = normalizeHttpNavigationUrl(modalContent);
 
   useEffect(() => {
     if (isModalOpen && isVideo) {
@@ -51,15 +56,15 @@ const ContentModal = ({
   };
 
   const handleCopyUrl = () => {
-    navigator.clipboard.writeText(modalContent);
+    if (videoUrl) navigator.clipboard.writeText(videoUrl);
   };
 
   const handleOpenInNewTab = () => {
-    window.open(modalContent, '_blank');
+    openHttpUrlInNewTab(videoUrl);
   };
 
   const renderVideoContent = () => {
-    if (videoError) {
+    if (videoError || !videoUrl) {
       return (
         <div style={{ textAlign: 'center', padding: '40px' }}>
           <Text
@@ -91,11 +96,16 @@ const ContentModal = ({
             <Button
               icon={<IconExternalOpen />}
               onClick={handleOpenInNewTab}
+              disabled={!videoUrl}
               style={{ marginRight: '8px' }}
             >
               {t('在新标签页中打开')}
             </Button>
-            <Button icon={<IconCopy />} onClick={handleCopyUrl}>
+            <Button
+              icon={<IconCopy />}
+              onClick={handleCopyUrl}
+              disabled={!videoUrl}
+            >
               {t('复制链接')}
             </Button>
           </div>
@@ -112,7 +122,7 @@ const ContentModal = ({
               type='tertiary'
               style={{ fontSize: '10px', wordBreak: 'break-all' }}
             >
-              {modalContent}
+              {videoUrl || modalContent}
             </Text>
           </div>
         </div>
@@ -135,7 +145,7 @@ const ContentModal = ({
           </div>
         )}
         <video
-          src={modalContent}
+          src={videoUrl}
           controls
           style={{
             width: '100%',

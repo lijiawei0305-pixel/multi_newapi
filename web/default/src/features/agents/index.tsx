@@ -17,7 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+
 import { SectionPageLayout } from '@/components/layout'
+
 import { AgentsDialogs } from './components/agents-dialogs'
 import { AgentsPrimaryButtons } from './components/agents-primary-buttons'
 import { AgentsProvider } from './components/agents-provider'

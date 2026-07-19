@@ -87,3 +87,59 @@ func TestGeminiChatGenerationConfigPreservesExplicitZeroValuesSnakeCase(t *testi
 	assert.Equal(t, float64(0), generationConfig["seed"])
 	assert.Equal(t, false, generationConfig["responseLogprobs"])
 }
+
+func TestGeminiThinkingConfigPreservesExplicitFalse(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "camel case", body: `{"includeThoughts":false}`},
+		{name: "snake case", body: `{"include_thoughts":false}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var config GeminiThinkingConfig
+			require.NoError(t, common.Unmarshal([]byte(test.body), &config))
+			require.NotNil(t, config.IncludeThoughts)
+			assert.False(t, *config.IncludeThoughts)
+
+			encoded, err := common.Marshal(config)
+			require.NoError(t, err)
+			var out map[string]any
+			require.NoError(t, common.Unmarshal(encoded, &out))
+			assert.Contains(t, out, "includeThoughts")
+			assert.Equal(t, false, out["includeThoughts"])
+		})
+	}
+}
+
+func TestGeminiEmbeddingRequestPreservesExplicitZeroDimensions(t *testing.T) {
+	var request GeminiEmbeddingRequest
+	require.NoError(t, common.Unmarshal([]byte(`{
+		"model":"models/gemini-embedding-001",
+		"content":{"parts":[{"text":"hello"}]},
+		"outputDimensionality":0
+	}`), &request))
+	require.NotNil(t, request.OutputDimensionality)
+	assert.Zero(t, *request.OutputDimensionality)
+
+	encoded, err := common.Marshal(request)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &out))
+	assert.Contains(t, out, "outputDimensionality")
+	assert.Equal(t, float64(0), out["outputDimensionality"])
+}
+
+func TestGeminiPartPreservesExplicitFalseThought(t *testing.T) {
+	var part GeminiPart
+	require.NoError(t, common.Unmarshal([]byte(`{"text":"answer","thought":false}`), &part))
+	require.NotNil(t, part.Thought)
+	assert.False(t, *part.Thought)
+
+	encoded, err := common.Marshal(part)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &out))
+	assert.Contains(t, out, "thought")
+	assert.Equal(t, false, out["thought"])
+}

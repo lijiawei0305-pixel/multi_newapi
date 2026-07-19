@@ -16,10 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useRef, useState } from 'react'
 import i18next from 'i18next'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+
 import { api } from '@/lib/api'
+import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
+
 import { createTenantRecharge, isApiSuccess } from '../api'
 
 // $1 minimum recharge (USD); native quota credit is $1 = 500k units.
@@ -163,7 +166,12 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           toast.error(i18next.t('Payment request failed'))
           return false
         }
-        window.location.href = url
+        const safeUrl = normalizeHttpNavigationUrl(url)
+        if (!safeUrl) {
+          toast.error(i18next.t('Invalid payment redirect URL'))
+          return false
+        }
+        window.location.href = safeUrl
         return true
       } catch {
         // 仅传输层失败 / 后端 5xx（含跨境微信下单超时、后端重试耗尽）会到这里；业务错误走上面

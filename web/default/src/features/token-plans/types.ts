@@ -78,6 +78,8 @@ export interface ApiResponse<T = unknown> {
   data?: T
 }
 
-export type TokenPlanPayload = Partial<Omit<AdminTokenPlan, 'id' | 'retail_price_cny'>>
+export type TokenPlanPayload = Partial<
+  Omit<AdminTokenPlan, 'id' | 'retail_price_cny'>
+>
 
 export type TokenPlansDialogType = 'create' | 'update' | 'toggle-status'

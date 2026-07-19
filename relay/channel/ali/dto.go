@@ -1,6 +1,7 @@
 package ali
 
 import (
+	"context"
 	"strings"
 
 	"github.com/QuantumNous/new-api/dto"
@@ -26,11 +27,11 @@ type AliInput struct {
 }
 
 type AliParameters struct {
-	TopP              float64 `json:"top_p,omitempty"`
-	TopK              int     `json:"top_k,omitempty"`
-	Seed              uint64  `json:"seed,omitempty"`
-	EnableSearch      bool    `json:"enable_search,omitempty"`
-	IncrementalOutput bool    `json:"incremental_output,omitempty"`
+	TopP              *float64 `json:"top_p,omitempty"`
+	TopK              *int     `json:"top_k,omitempty"`
+	Seed              *uint64  `json:"seed,omitempty"`
+	EnableSearch      *bool    `json:"enable_search,omitempty"`
+	IncrementalOutput *bool    `json:"incremental_output,omitempty"`
 }
 
 type AliChatRequest struct {
@@ -100,7 +101,7 @@ type AliOutput struct {
 	} `json:"choices,omitempty"`
 }
 
-func (o *AliOutput) ChoicesToOpenAIImageDate(c *gin.Context, responseFormat string) []dto.ImageData {
+func (o *AliOutput) ChoicesToOpenAIImageDate(c *gin.Context, responseFormat string, budget *service.ImageResponseEncodedBudget) []dto.ImageData {
 	var imageData []dto.ImageData
 	if len(o.Choices) > 0 {
 		for _, choice := range o.Choices {
@@ -110,9 +111,13 @@ func (o *AliOutput) ChoicesToOpenAIImageDate(c *gin.Context, responseFormat stri
 					if strings.HasPrefix(content.Image, "http") {
 						var b64Json string
 						if responseFormat == "b64_json" {
-							_, b64, err := service.GetImageFromUrl(content.Image)
+							_, b64, err := service.GetImageFromURLContextWithLimit(aliImageDownloadContext(c), content.Image, budget.RemainingRawBytes())
 							if err != nil {
 								logger.LogError(c, "get_image_data_failed: "+err.Error())
+								continue
+							}
+							if err := budget.ConsumeBase64(b64); err != nil {
+								logger.LogError(c, "image_response_budget_failed: "+err.Error())
 								continue
 							}
 							b64Json = b64
@@ -120,32 +125,51 @@ func (o *AliOutput) ChoicesToOpenAIImageDate(c *gin.Context, responseFormat stri
 						data.Url = content.Image
 						data.B64Json = b64Json
 					} else {
+						if err := budget.ConsumeBase64(content.Image); err != nil {
+							logger.LogError(c, "image_response_budget_failed: "+err.Error())
+							continue
+						}
 						data.B64Json = content.Image
 					}
 				} else if content.Text != "" {
 					data.RevisedPrompt = content.Text
 				}
 			}
-			imageData = append(imageData, data)
+			if data.Url != "" || data.B64Json != "" {
+				imageData = append(imageData, data)
+			}
 		}
 	}
 
 	return imageData
 }
 
-func (o *AliOutput) ResultToOpenAIImageDate(c *gin.Context, responseFormat string) []dto.ImageData {
+func (o *AliOutput) ResultToOpenAIImageDate(c *gin.Context, responseFormat string, budget *service.ImageResponseEncodedBudget) []dto.ImageData {
 	var imageData []dto.ImageData
 	for _, data := range o.Results {
 		var b64Json string
 		if responseFormat == "b64_json" {
-			_, b64, err := service.GetImageFromUrl(data.Url)
-			if err != nil {
-				logger.LogError(c, "get_image_data_failed: "+err.Error())
-				continue
+			if data.B64Image != "" {
+				b64Json = data.B64Image
+			} else {
+				_, b64, err := service.GetImageFromURLContextWithLimit(aliImageDownloadContext(c), data.Url, budget.RemainingRawBytes())
+				if err != nil {
+					logger.LogError(c, "get_image_data_failed: "+err.Error())
+					continue
+				}
+				b64Json = b64
 			}
-			b64Json = b64
 		} else {
 			b64Json = data.B64Image
+		}
+		if b64Json != "" {
+			if err := budget.ConsumeBase64(b64Json); err != nil {
+				logger.LogError(c, "image_response_budget_failed: "+err.Error())
+				continue
+			}
+		}
+		if data.Url == "" && b64Json == "" {
+			continue
 		}
 
 		imageData = append(imageData, dto.ImageData{
@@ -155,6 +179,13 @@ func (o *AliOutput) ResultToOpenAIImageDate(c *gin.Context, responseFormat strin
 		})
 	}
 	return imageData
+}
+
+func aliImageDownloadContext(c *gin.Context) context.Context {
+	if c != nil && c.Request != nil {
+		return c.Request.Context()
+	}
+	return context.Background()
 }
 
 type AliResponse struct {
@@ -172,7 +203,7 @@ type AliImageRequest struct {
 
 type AliImageParameters struct {
 	Size             string `json:"size,omitempty"`
-	N                int    `json:"n,omitempty"`
+	N                *int   `json:"n,omitempty"`
 	Steps            string `json:"steps,omitempty"`
 	Scale            string `json:"scale,omitempty"`
 	Watermark        *bool  `json:"watermark,omitempty"`
@@ -204,10 +235,10 @@ type WanImageInput struct {
 }
 
 type WanImageParameters struct {
-	N         int     `json:"n,omitempty"`         // 生成图片数量，取值范围1-4，默认4
-	Watermark *bool   `json:"watermark,omitempty"` // 是否添加水印标识，默认false
-	Seed      int     `json:"seed,omitempty"`      // 随机数种子，取值范围[0, 2147483647]
-	Strength  float64 `json:"strength,omitempty"`  // 修改幅度 0.0-1.0，默认0.5（部分模型支持）
+	N         *int     `json:"n,omitempty"`         // 生成图片数量，取值范围1-4，默认4
+	Watermark *bool    `json:"watermark,omitempty"` // 是否添加水印标识，默认false
+	Seed      *int     `json:"seed,omitempty"`      // 随机数种子，取值范围[0, 2147483647]
+	Strength  *float64 `json:"strength,omitempty"`  // 修改幅度 0.0-1.0，默认0.5（部分模型支持）
 }
 
 type AliRerankParameters struct {

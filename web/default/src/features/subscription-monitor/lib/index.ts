@@ -17,8 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
+
 import type { StatusVariant } from '@/components/status-badge'
 import dayjs from '@/lib/dayjs'
+
 import type { AlertLevel } from '../types'
 
 export const usd = (v: number | undefined) => `$${Number(v || 0).toFixed(2)}`

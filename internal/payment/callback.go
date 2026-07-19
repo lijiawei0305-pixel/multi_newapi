@@ -14,7 +14,7 @@ func (g *Gateway) HandleAlipay(ctx context.Context, raw []byte) error {
 
 // handle 是回调统一编排（detailed-design §2.8 / §3.3）：
 //
-//	验签 → 定位订单 → [平台失败则置 failed] → CAS(created→paid) 幂等占位
+//	验签 → 定位订单 → [平台失败则置 failed] → CAS(created|failed→paid) 幂等占位
 //	  → 已 paid/credited 短路成功（不重复入账）
 //	  → 首个推进者：按 type 分发 OnPaid → 成功置 credited / 失败回滚 created 供网关重试
 //
@@ -38,13 +38,14 @@ func (g *Gateway) handle(ctx context.Context, provider Provider, raw []byte) err
 		return nil
 	}
 
-	// 4) 幂等占位：created→paid 原子 CAS。并发/重复回调中只有一个胜者继续入账。
-	first, err := g.repo.CompareAndSetStatus(ctx, ord.OrderNo, OrderCreated, OrderPaid)
+	// 4) 幂等占位：可信成功回调可从 created 或本地 failed 状态认领。后者覆盖「本地过期与迟到
+	// 成功回调竞态」；不能因 created→paid CAS 失败就把 failed 静默当成已处理。
+	first, err := g.claimPaidOrder(ctx, ord.OrderNo, ord.Status)
 	if err != nil {
 		return err // ORDER_NOT_FOUND（极端竞态：订单被删）
 	}
 	if !first {
-		// 已 paid/credited（或已 failed）→ 幂等短路，返回成功，不重复入账（ORDER_ALREADY_PAID）。
+		// 已 paid/credited → 幂等短路，返回成功，不重复入账（ORDER_ALREADY_PAID）。
 		return nil
 	}
 

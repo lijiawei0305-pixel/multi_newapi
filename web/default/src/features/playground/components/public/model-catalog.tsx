@@ -18,13 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { PackageOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import type { PricingModel } from '@/features/pricing/types'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
-import type { PricingModel } from '@/features/pricing/types'
+
 import {
   CAPABILITY_LABELS,
   CATALOG_FILTERS,
@@ -92,18 +94,18 @@ function ModelCard({ model, selected, onSelect }: ModelCardProps) {
           {iconKey ? (
             getLobeIcon(iconKey, 22)
           ) : (
-            <span className='text-sm font-semibold text-muted-foreground'>
+            <span className='text-muted-foreground text-sm font-semibold'>
               {initial}
             </span>
           )}
         </div>
 
         <div className='min-w-0 flex-1'>
-          <div className='truncate text-sm font-medium text-foreground'>
+          <div className='text-foreground truncate text-sm font-medium'>
             {model.model_name}
           </div>
           {vendorName && (
-            <div className='truncate text-xs text-muted-foreground'>
+            <div className='text-muted-foreground truncate text-xs'>
               {vendorName}
             </div>
           )}
@@ -130,7 +132,7 @@ function ModelCard({ model, selected, onSelect }: ModelCardProps) {
 
       {/* 描述（仅在有值时显示；无简介不占位，保持清爽） */}
       {model.description && (
-        <p className='mt-1.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground'>
+        <p className='text-muted-foreground mt-1.5 line-clamp-2 text-xs leading-relaxed'>
           {model.description}
         </p>
       )}
@@ -159,8 +161,10 @@ export function ModelCatalog({
     <div className='flex h-full flex-col gap-3'>
       {/* Header */}
       <div className='flex shrink-0 items-baseline justify-between px-1'>
-        <h2 className='text-sm font-semibold text-foreground'>{t('Model catalog')}</h2>
-        <span className='text-xs tabular-nums text-muted-foreground'>
+        <h2 className='text-foreground text-sm font-semibold'>
+          {t('Model catalog')}
+        </h2>
+        <span className='text-muted-foreground text-xs tabular-nums'>
           {t('{{count}} models', { count: counts.all })}
         </span>
       </div>
@@ -205,24 +209,25 @@ export function ModelCatalog({
 
       {/* Model list */}
       <ScrollArea className='min-h-0 flex-1 px-1'>
-        {loading ? (
+        {loading && (
           <div className='space-y-2 pt-1'>
-            {Array.from({ length: 5 }).map((_, i) => (
+            {['one', 'two', 'three', 'four', 'five'].map((slot) => (
               <div
-                key={i}
-                className='flex items-start gap-2.5 rounded-xl bg-card p-3 ring-1 ring-foreground/10'
+                key={slot}
+                className='bg-card ring-foreground/10 flex items-start gap-2.5 rounded-xl p-3 ring-1'
               >
-                <div className='size-8 shrink-0 animate-pulse rounded-md bg-muted' />
+                <div className='bg-muted size-8 shrink-0 animate-pulse rounded-md' />
                 <div className='flex-1 space-y-2 py-0.5'>
-                  <div className='h-3.5 w-1/2 animate-pulse rounded bg-muted' />
-                  <div className='h-3 w-4/5 animate-pulse rounded bg-muted' />
+                  <div className='bg-muted h-3.5 w-1/2 animate-pulse rounded' />
+                  <div className='bg-muted h-3 w-4/5 animate-pulse rounded' />
                 </div>
               </div>
             ))}
           </div>
-        ) : error ? (
+        )}
+        {!loading && error && (
           <div className='flex h-40 flex-col items-center justify-center gap-3 px-4 text-center'>
-            <p className='text-sm text-muted-foreground'>
+            <p className='text-muted-foreground text-sm'>
               {t('Failed to load models, please try again later')}
             </p>
             {onRetry && (
@@ -231,15 +236,19 @@ export function ModelCatalog({
               </Button>
             )}
           </div>
-        ) : models.length === 0 ? (
-          <div className='flex h-40 flex-col items-center justify-center gap-3 px-4 text-center text-muted-foreground'>
-            <div className='flex size-12 items-center justify-center rounded-full bg-muted'>
+        )}
+        {!loading && !error && models.length === 0 && (
+          <div className='text-muted-foreground flex h-40 flex-col items-center justify-center gap-3 px-4 text-center'>
+            <div className='bg-muted flex size-12 items-center justify-center rounded-full'>
               <PackageOpen className='size-6' />
             </div>
-            <p className='text-sm'>{t('No matching models; try other keywords or filters')}</p>
+            <p className='text-sm'>
+              {t('No matching models; try other keywords or filters')}
+            </p>
           </div>
-        ) : (
-          <div className='space-y-2 pb-2 pt-1'>
+        )}
+        {!loading && !error && models.length > 0 && (
+          <div className='space-y-2 pt-1 pb-2'>
             {models.map((m) => (
               <ModelCard
                 key={m.model_name}

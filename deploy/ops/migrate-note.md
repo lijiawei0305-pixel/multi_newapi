@@ -1,6 +1,6 @@
 # 迁移版本化说明（migrate-note）
 
-> 适用：测试栈 `newapi_test`（即将正式化）。本文说明 Phase 2 fork 当前的 schema 迁移机制、
+> 适用：唯一现网 / 生产栈 `newapi_test`。本文说明 Phase 2 fork 当前的 schema 迁移机制、
 > 升级/回滚注意点、以及"表撞名"检查规程。改表结构（加表/加字段/写迁移）前必读，
 > 详细数据模型见 [`doc/data-model.md`](../../doc/data-model.md)。
 
@@ -32,6 +32,7 @@
 - **给我们自己的表加列** → 直接改 struct，`AutoMigrate` 会补列（加列是幂等增量，安全）。
 - **给 new-api 原生表加列** → **不要改原生 struct**；照 `migrateUsersTenantID` 套路写一个新的"information_schema 探测 + raw ALTER"幂等函数，挂进 `Migrate()`。原因：改原生 struct 会污染 new-api 自身 `AutoMigrate` 并在 upstream rebase 时冲突。
 - **索引/唯一约束** → 谨慎对存量大表加 `UNIQUE`（历史脏数据会令 ALTER 失败）；新表随建随加无碍。
+- **`quota_data.bucket_key` 升级（停机切换，不支持滚动升级）** → 部署包含该迁移的版本前，必须先 drain/停止全部旧版本应用节点并备份数据库。只在一个新版 master 上临时设置 `QUOTA_DATA_BUCKET_MIGRATION_ACK_DRAINED=1`，由它完成回填、重复 bucket 归并和唯一索引 `idx_quota_data_bucket_key` 创建；确认成功后删除该变量，再扩容新版节点。旧版本不会写 `bucket_key`，不得与此 schema 迁移并行运行，也不要把确认变量写进常驻 Compose/systemd/集群配置。既有表缺少索引且未确认时，应用会拒绝启动；索引建成后不再需要确认变量。
 - 迁移**只在 app 启动时**跑一次（master 节点）；多副本部署须保证迁移幂等（已满足）。
 
 ## 3. 表撞名检查（硬规程，RETRO 已固化）
@@ -45,14 +46,14 @@ grep -rin "TableName() string { return \"<新表名>\"" model/
 ```
 
 - 与原生共存的功能**优先复用原生表**，不另建同名表；必须新建时用模块前缀（`agent_`/`tenant_`/`tokenplan_`/`mt_`）。
-- 已污染的原生表清理（仅限测试栈、确认 0 原生数据）：`DROP TABLE <表>` → 重启 app 让原生 `InitDB` 重建干净表。**生产前务必先 `backup.sh`。**
+- 早期「仅限测试栈、0 原生数据」的 `DROP TABLE <表>` 清理流程已退役；当前栈是生产，禁止使用该做法。如需处理存量表，必须单独设计可回滚迁移、先做配对备份并在一次性隔离环境演练。
 
 ## 4. 回滚注意点（关键：AutoMigrate 无 down-migration）
 
-- **代码回滚 ≠ schema 回滚**：`AutoMigrate`/raw ALTER 都是**前向、不可逆**的；回退代码**不会**自动删除已加的列/表。镜像/`git` 回滚（见 `rollback.sh`）只回退**程序**，新加的列/表仍在库里（多为良性：旧程序不读新列）。
-- **真正回退 schema** 需人工 `DROP/ALTER` + 必要时 `restore.sh` 从备份恢复 → 因此**部署前必备份**（`deploy.sh` 已自动 `backup.sh`）。
-- **破坏性变更**（删列/改名/缩类型）风险最高：务必先 `backup.sh`，并准备手写逆向 SQL；测试栈演练通过再上正式。
-- 回滚顺序建议：① 先 `rollback.sh`（程序回上一版镜像，秒级）→ ② 如新版已写入不兼容数据，再评估 `restore.sh`（覆盖式恢复 DB，会丢回滚点之后的数据，需确认）。
+- **代码回滚 ≠ schema 回滚**：`AutoMigrate`/raw ALTER 都是**前向、不可逆**的；回退代码**不会**自动删除已加的列/表。镜像或服务器归档 `--to <ts>` 回滚（见 `rollback.sh`）只回退**程序/release 树**，新加的列/表仍在库里。
+- **真正回退 schema** 需人工 `DROP/ALTER` + 必要时用 `restore.sh <backup-*.manifest>` 配对恢复 MySQL + Redis → 因此**部署前必备份**（`deploy.sh` 已将备份失败设为阻断闸门）。
+- **破坏性变更**（删列/改名/缩类型）风险最高：务必先 `backup.sh`，并准备手写逆向 SQL；在一次性隔离数据库演练通过后，才能进入标准生产发布链路。
+- 回滚顺序建议：① 先 `rollback.sh`（镜像 `:prev`）或 `rollback.sh --to <ts>`（无 git 归档）→ ② 如新版已写入不兼容数据，进入外部维护停流后再评估配对恢复（会丢失恢复点之后的 DB/Redis 状态）。
 
 ## 5. 版本化建议（演进方向）
 

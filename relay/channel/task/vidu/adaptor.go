@@ -2,6 +2,7 @@ package vidu
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,11 +31,11 @@ type requestPayload struct {
 	Model             string   `json:"model"`
 	Images            []string `json:"images"`
 	Prompt            string   `json:"prompt,omitempty"`
-	Duration          int      `json:"duration,omitempty"`
-	Seed              int      `json:"seed,omitempty"`
+	Duration          *int     `json:"duration,omitempty"`
+	Seed              *int     `json:"seed,omitempty"`
 	Resolution        string   `json:"resolution,omitempty"`
 	MovementAmplitude string   `json:"movement_amplitude,omitempty"`
-	Bgm               bool     `json:"bgm,omitempty"`
+	Bgm               *bool    `json:"bgm,omitempty"`
 	Payload           string   `json:"payload,omitempty"`
 	CallbackUrl       string   `json:"callback_url,omitempty"`
 }
@@ -162,7 +163,8 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 }
 
 func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *dto.TaskError) {
-	responseBody, err := io.ReadAll(resp.Body)
+	defer resp.Body.Close()
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		taskErr = service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
 		return
@@ -171,12 +173,12 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	var vResp responsePayload
 	err = common.Unmarshal(responseBody, &vResp)
 	if err != nil {
-		taskErr = service.TaskErrorWrapper(errors.Wrap(err, fmt.Sprintf("%s", responseBody)), "unmarshal_response_failed", http.StatusInternalServerError)
+		taskErr = service.TaskErrorWrapper(errors.Wrap(err, "response_"+common.PayloadMetadata(responseBody)), "unmarshal_response_failed", http.StatusInternalServerError)
 		return
 	}
 
 	if vResp.State == "failed" {
-		taskErr = service.TaskErrorWrapperLocal(fmt.Errorf("task failed"), "task_failed", http.StatusBadRequest)
+		taskErr = service.TaskErrorWrapperLocal(service.ExplicitTaskSubmissionRejection(fmt.Errorf("task failed")), "task_failed", http.StatusBadRequest)
 		return
 	}
 
@@ -189,7 +191,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	return vResp.TaskId, responseBody, nil
 }
 
-func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
+func (a *TaskAdaptor) FetchTask(ctx context.Context, baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
 	taskID, ok := body["task_id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid task_id")
@@ -197,7 +199,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 
 	url := fmt.Sprintf("%s/ent/v2/tasks/%s/creations", baseUrl, taskID)
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -229,10 +231,9 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq, in
 		Model:             taskcommon.DefaultString(info.UpstreamModelName, "viduq1"),
 		Images:            req.Images,
 		Prompt:            req.Prompt,
-		Duration:          taskcommon.DefaultInt(req.Duration, 5),
+		Duration:          common.GetPointer(taskcommon.DefaultInt(req.Duration, 5)),
 		Resolution:        taskcommon.DefaultString(req.Size, "1080p"),
 		MovementAmplitude: "auto",
-		Bgm:               false,
 	}
 	if err := taskcommon.UnmarshalMetadata(req.Metadata, &r); err != nil {
 		return nil, errors.Wrap(err, "unmarshal metadata failed")

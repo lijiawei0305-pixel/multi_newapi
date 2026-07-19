@@ -50,6 +50,7 @@ import {
   IconAlertTriangle,
 } from '@douyinfe/semi-icons';
 import { FaRandom } from 'react-icons/fa';
+import { openSameOriginPathInNewTab } from '../../../helpers/safeNavigation';
 
 // Render functions
 const renderType = (type, record = {}, t) => {
@@ -105,7 +106,7 @@ const renderType = (type, record = {}, t) => {
       return;
     }
     const targetUrl = `/console/deployment?deployment_id=${ionetMeta.deployment_id}`;
-    window.open(targetUrl, '_blank', 'noopener');
+    openSameOriginPathInNewTab(targetUrl);
   };
 
   return (

@@ -16,18 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CircleCheck, ImageIcon, Upload } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getApiErrorCode } from '@/lib/api'
-import {
-  THEME_PRESETS,
-  type ThemePreset,
-} from '@/lib/theme-customization'
-import { cn } from '@/lib/utils'
-import { useThemeCustomization } from '@/context/theme-customization-provider'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import {
@@ -41,6 +35,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
+import { useThemeCustomization } from '@/context/theme-customization-provider'
+import { getApiErrorCode } from '@/lib/api'
+import { THEME_PRESETS, type ThemePreset } from '@/lib/theme-customization'
+import { cn } from '@/lib/utils'
+
 import { getSiteConfig, updateSiteConfig, uploadLogo } from './api'
 
 export function SiteBranding() {
@@ -125,7 +124,9 @@ export function SiteBranding() {
     } catch (err) {
       const code = getApiErrorCode(err)
       const map: Record<string, string> = {
-        ASSET_TYPE_FORBIDDEN: t('Image type not allowed (jpg / png / webp only)'),
+        ASSET_TYPE_FORBIDDEN: t(
+          'Image type not allowed (jpg / png / webp only)'
+        ),
         ASSET_TOO_LARGE: t('Image too large (max 2MB)'),
       }
       toast.error((code && map[code]) || t('Upload failed'))
@@ -173,7 +174,9 @@ export function SiteBranding() {
                     id='site-footer'
                     value={footer}
                     onChange={(e) => setFooter(e.target.value)}
-                    placeholder={t('e.g. © 2026 Your Brand. All rights reserved.')}
+                    placeholder={t(
+                      'e.g. © 2026 Your Brand. All rights reserved.'
+                    )}
                   />
                   <p className='text-muted-foreground text-xs'>
                     {t(

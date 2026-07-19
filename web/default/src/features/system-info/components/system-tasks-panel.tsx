@@ -19,8 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { ListChecks, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { formatTimestampRelative, formatTimestampToDate } from '@/lib/format'
-import { cn } from '@/lib/utils'
+
 import { ErrorState } from '@/components/error-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -39,6 +38,8 @@ import type {
   SystemTask,
   SystemTaskStatus,
 } from '@/features/system-settings/types'
+import { formatTimestampRelative, formatTimestampToDate } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 const TASK_LIMIT = 20
 const ACTIVE_POLL_INTERVAL_MS = 8000
@@ -51,7 +52,8 @@ const STATUS_VARIANT: Record<SystemTaskStatus, 'secondary' | 'destructive'> = {
 }
 
 const STATUS_CLASS_NAME: Record<SystemTaskStatus, string> = {
-  pending: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
+  pending:
+    'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
   running:
     'bg-sky-50 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300 [&_span]:bg-sky-500',
   succeeded:
@@ -173,11 +175,11 @@ function SystemTasksTable(props: SystemTasksTableProps) {
                     </span>
                   </div>
                 </TableCell>
-                <TableCell className='text-muted-foreground max-w-[280px] truncate py-3 font-mono text-xs align-middle'>
+                <TableCell className='text-muted-foreground max-w-[280px] truncate py-3 align-middle font-mono text-xs'>
                   {task.locked_by || '-'}
                 </TableCell>
                 <TableCell
-                  className='text-muted-foreground py-3 text-xs whitespace-nowrap align-middle'
+                  className='text-muted-foreground py-3 align-middle text-xs whitespace-nowrap'
                   title={formatTimestampToDate(task.updated_at)}
                 >
                   {formatTimestampRelative(
@@ -187,7 +189,7 @@ function SystemTasksTable(props: SystemTasksTableProps) {
                   )}
                 </TableCell>
                 <TableCell
-                  className='text-destructive max-w-[220px] truncate py-3 pr-4 text-xs align-middle'
+                  className='text-destructive max-w-[220px] truncate py-3 pr-4 align-middle text-xs'
                   title={task.error || undefined}
                 >
                   {task.error || '-'}
@@ -282,13 +284,14 @@ export function SystemTasksPanel() {
       </div>
 
       <div aria-busy={tasksQuery.isFetching}>
-        {loading ? (
+        {loading && (
           <div className='space-y-2 p-4 sm:p-5'>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className='h-9 w-full rounded-md' />
+            {['task-one', 'task-two', 'task-three', 'task-four'].map((slot) => (
+              <Skeleton key={slot} className='h-9 w-full rounded-md' />
             ))}
           </div>
-        ) : tasksQuery.isError ? (
+        )}
+        {!loading && tasksQuery.isError && (
           <ErrorState
             title={t('We could not load system tasks.')}
             description={
@@ -301,7 +304,8 @@ export function SystemTasksPanel() {
             }}
             className='min-h-[260px]'
           />
-        ) : tasks.length === 0 ? (
+        )}
+        {!loading && !tasksQuery.isError && tasks.length === 0 && (
           <div className='px-4 py-10 text-center sm:px-5'>
             <div className='bg-muted mx-auto mb-3 flex size-10 items-center justify-center rounded-lg'>
               <ListChecks
@@ -313,7 +317,8 @@ export function SystemTasksPanel() {
               {t('No system tasks yet.')}
             </p>
           </div>
-        ) : (
+        )}
+        {!loading && !tasksQuery.isError && tasks.length > 0 && (
           <div className='space-y-4 p-4 sm:p-5'>
             <div>
               <div className='mb-2 flex items-center justify-between gap-3'>

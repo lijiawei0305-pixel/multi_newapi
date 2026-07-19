@@ -25,6 +25,7 @@ import {
   IllustrationConstructionDark,
 } from '@douyinfe/semi-illustrations';
 import ScrollableContainer from '../common/ui/ScrollableContainer';
+import { openHttpUrlInNewTab } from '../../helpers/safeNavigation';
 
 const ApiInfoPanel = ({
   apiInfoData,
@@ -78,9 +79,7 @@ const ApiInfoPanel = ({
                         size='small'
                         color='white'
                         shape='circle'
-                        onClick={() =>
-                          window.open(api.url, '_blank', 'noopener,noreferrer')
-                        }
+                        onClick={() => openHttpUrlInNewTab(api.url)}
                         className='cursor-pointer hover:opacity-80 text-xs'
                       >
                         {t('跳转')}

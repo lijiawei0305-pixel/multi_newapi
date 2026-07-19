@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { z } from 'zod'
 import type { TFunction } from 'i18next'
+import { z } from 'zod'
+
 import type { AdminTokenPlan, TokenPlanPayload } from '../types'
 
 export function getTokenPlanFormSchema(t: TFunction) {

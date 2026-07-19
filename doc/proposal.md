@@ -3,7 +3,8 @@
 > **文档定位**：本文件是项目的**权威需求文档（完整替代版）**，整合并取代 `../newapi-multitenant-development-plan.md`，对标 `../TOKEN HUB 文档.md`，并新增 **tokenplan 套餐**、**可行性分析**、**改进建议**、**技术选型/实现细节** 与 **第二阶段前端接口预留**。
 > **范围**：本期只交付**第一阶段**，但所有第二阶段前端能力均在第一阶段**预留接口/字段/插槽**。
 > **基座**：基于 New API（One API 衍生）二次开发；前期 UI 沿用 New API 风格，第二阶段再做品牌化。
-> 版本 v2.0 ｜ 替代 plan v1.0 ｜ 栈：Go 1.21+ / Node 18+ / MySQL 8.0+ / Nginx 1.18+ / Docker Compose
+> 版本 v2.0 ｜ 替代 plan v1.0 ｜ 栈：Go 1.25.1+ / Bun / MySQL 8.0+ / Nginx 1.18+ / Docker Compose（工具链版本以 `go.mod` 与 `web/bun.lock` 为准）
+> **读法**：本文定义业务需求；其中“一期/二期/待开发/工期”是方案形成时的规划语境，不能据此判断当前完成度。已建成功能与真实剩余项只看 [`tasks/STATUS.md`](tasks/STATUS.md)，验收决策看 [`acceptance.md`](acceptance.md)。
 
 ---
 
@@ -21,7 +22,7 @@
 | 一期范围 | tokenplan **后端完整 + New API 风格购买/展示页 + 代理上架开关** |
 | 二期前端预留 | OEM 品牌换肤、代理自定义首页/装修、tokenplan 营销化展示、多语言/多币种/移动端 — **全部预留** |
 
-> 仍待你最终确认的小项（已在文中标 `[待确认]`）：套餐耗尽/过期后是否**绝对不回退钱包**；x1 是否=按模型上游成本价 1:1 计量；是否引入 Redis 与独立 auth-service；Trial 限购口径。
+> 仍待你最终确认的小项（已在文中标 `[待确认]`）：x1 是否=按模型上游成本价 1:1 计量；Trial 限购口径。套餐耗尽/过期**绝对不回退钱包**已由验收决策 D5 锁定；Redis 已作为缓存/风控依赖引入（数据库仍是财务权威），支付已确定为主站进程内 SDK，不再使用独立 auth-service。
 
 ---
 
@@ -130,8 +131,8 @@ TOKEN HUB 已实现的能力本方案**全部对标复刻**：品牌配置 / 首
 2. **隔离下沉到 ORM 层**：不要每个查询手写 `WHERE tenant_id=?`（易漏 → 越权）。建议 GORM **global scope / 统一 `scopeByTenant`** + 中间件注入 `ctx.tenant`，从框架层强制租户边界。
 3. **统一「额度桶」抽象**：把"钱包 quota"和"tokenplan 桶"抽象为 `QuotaSource` 接口（`Charge()/Balance()`），扣费按路由规则选桶，避免两套扣费逻辑分叉。
 4. **统一定价/保护服务**：分组倍率、tokenplan 零售价共用一个 `PricingGuard.validate(price, cost, minMargin)`，保护线只实现一处。
-5. **Redis 定位明确**：plan 多处引用 Redis 但技术栈表未列。建议引入 Redis 做 **Host→tenant 解析缓存 / 限流 / 会话**；若不引入需说明降级方案。`[待确认]`
-6. **auth-service 边界明确**：plan 把支付回调放独立 `auth-service`(:8080)。需明确一期是**沿用独立 auth-service** 还是**单体内置回调**，影响部署与 Nginx 转发。`[待确认]`
+5. **Redis 定位明确**：Redis 用于 **Host→tenant 解析缓存 / 限流 / 会话**；财务、额度和订单写入不得以 Redis 成功代替数据库持久化。
+6. **支付边界明确**：一期采用**主站单体内置回调**，微信/支付宝 SDK 与回调路由都由主站提供，无独立支付容器或 Nginx upstream。
 7. **tokenplan 纳入主数据模型**：新增 4 张表 + `tenants.tokenplan_enabled` 开关（见 §6.17–6.20），与现有计费同源。
 8. **工期重估**：3 天 MVP 已偏满，叠加 tokenplan 需现实加时（见 §10.5），避免承诺落空。
 
@@ -142,7 +143,7 @@ TOKEN HUB 已实现的能力本方案**全部对标复刻**：品牌配置 / 首
 ```text
 用户访问 aaa.yourbrand.com / ai.example.com（二期自定义域名）
         ↓
-Nginx / 网关（443，wildcard 证书；/pay/ /auth/ 转发支付回调）
+Nginx / 网关（443，wildcard 证书；所有 `/api/` 请求统一转发主站）
         ↓
 Tenant Router：按 Host 识别租户（tenant_domains / slug，Redis 缓存）
         ↓
@@ -278,7 +279,7 @@ subscription_usage_logs
 > **买套餐（固定价）→ 获得 30 天有效期 + 月度上游额度封顶（month_limit USD）→ 调用按 multiplier(x1) 从套餐桶扣减 USD → 用满 month_limit 或到期 → 套餐失效、拦截后续调用、需手动重购。无日/周限额。套餐桶独立于钱包余额。**
 
 - **x1 含义**：套餐内调用按"模型上游成本价 × 1.0"计入 `used_usd`，**不叠加分组倍率**（套餐是"成本价直供"型）。`[待确认]`
-- **桶路由规则**（独立计量）：用户存在 `active` 套餐 → 调用走套餐桶；**套餐耗尽/过期 → 调用被拦截并提示重购，不自动回退钱包**（`[待确认]` 是否允许回退）；无套餐的用户 → 走钱包 quota（原逻辑）。
+- **桶路由规则**（独立计量）：用户存在 `active` 套餐 → 调用走套餐桶；**套餐耗尽/过期 → 调用被拦截并提示重购，不自动回退钱包**（验收决策 D5 已确认）；无套餐的用户 → 走钱包 quota（原逻辑）。
 - **到期**：`expire_at < now()` → 状态置 `expired`（定时任务 + 调用时惰性校验双保险）。
 
 ### 8.2 套餐表（主站基准，Trial~Max）
@@ -384,11 +385,11 @@ plan 原定 **3 天** MVP 已偏满（plan §13.1 自承时间风险）。叠加
 ## 12. 技术选型 / 实现细节 ★
 
 ### 12.1 选型
-- **后端**：Go 1.21+（New API fork，Gin + GORM）。**单体优先**；支付回调按 plan 沿用 `auth-service`(:8080) 或内置 `[待确认]`。
-- **前端**：New API 现有 React + Semi-UI（一期沿用其风格）。
+- **后端**：Go 1.25.1+（以 `go.mod` 为准；New API fork，Gin + GORM）。**单体优先**；微信/支付宝 SDK 与回调均在主站进程内。
+- **前端**：`web/default` 使用 React 19 + TypeScript + Rsbuild + Base UI/shadcn + Tailwind；`web/classic` 为兼容主题并由独立门禁维护。包管理与脚本统一优先使用 Bun。
 - **DB**：MySQL 8.0 / utf8mb4 / UTC 存储；迁移用版本化脚本（含回滚）。
-- **缓存/限流**：Redis（Host→tenant 解析缓存、限流、会话）`[待确认]`。
-- **部署**：Docker Compose（Go 后端 + 前端静态 + MySQL + Redis + Nginx）。
+- **缓存/限流**：Redis（Host→tenant 解析缓存、限流、会话）；账务、额度与订单仍以数据库为权威。
+- **部署**：单一 Docker Compose 应用栈（主站 app + MySQL + Redis），Nginx 统一反代到主站。
 
 ### 12.2 多租户实现
 ```text
@@ -419,8 +420,8 @@ PricingGuard.validate(price, cost, minMarginRatio):
   require price >= cost * (1 + minMarginRatio)   // 分组倍率 & tokenplan 共用
 ```
 
-### 12.6 支付回调（沿用 TOKEN HUB）
-- `POST /pay/wxpay/notify`、`POST /auth/alipay/notify`；Nginx `^~ /pay/`、`^~ /auth/` 转发到回调服务。
+### 12.6 支付回调（主站进程内）
+- `POST /api/pay/wechat/notify`、`POST /api/pay/alipay/notify`；Nginx 与其他 `/api/` 请求一样统一反代到主站，不设独立支付 upstream。
 - 回调必须：验签 → 订单号唯一约束**幂等** → 绑定 `tenant_id/user_id/order` → 入账（钱包充值 or 创建订阅）→ 触发代理收益。
 
 ### 12.7 关键接口签名（示例）
@@ -473,12 +474,12 @@ GET    /api/admin/subscriptions             # 全站订阅/计量监控（满额
 
 ```text
 DNS（A: yourbrand.com / www / api / admin / *.yourbrand.com → 64.90.4.114）
-  ↓ Nginx(443, wildcard 证书; /pay/ /auth/ 转发)
-  ↓ 后端服务(Go) ── auth-service/支付回调
+  ↓ Nginx(443, wildcard 证书; `/api/` 统一转发主站)
+  ↓ 后端服务(Go，内置微信/支付宝 SDK 与回调)
   ↓ MySQL 8.0 + Redis
 ```
 - 一期 `*.yourbrand.com` 通配符证书；二期自定义域名管理员手动配证书；国内服务器注意备案。
-- 支付回调配置见 plan §12.1/§12.2（wxpay/alipay config.yaml + Nginx 转发），回调验签 + 幂等 + 绑定 tenant。
+- 支付回调配置见 §12.6；凭据由管理后台写入 options 数据库配置，回调必须验签 + 幂等 + 绑定 tenant。
 - DNS 调试注意：macOS 若返回 `198.18.x.x` 为 Clash/TUN fake-ip，用 `dig @1.1.1.1` / `dig +trace` / 服务器侧 dig 对比。
 
 ---
@@ -495,7 +496,7 @@ DNS（A: yourbrand.com / www / api / admin / *.yourbrand.com → 64.90.4.114）
 | 自定义域名/SSL（§13.7） | 一期只做二级域名；二期 A 记录 + 管理员配证书 |
 | **★ tokenplan 满额巨亏 / 被刷**（§2.4） | month_limit 按真实成本标定；**Trial/各档限购**；满额逼近**监控告警**；保留主站随时下调月限额能力；Pro/Max 可先灰度 |
 | **★ tokenplan 计量超额穿透** | 条件 UPDATE / 行锁 / 乐观重试；定时 + 惰性双校验到期；兜底对账 |
-| **★ 双桶混淆** | 明确路由规则（有 active 套餐走套餐桶）；UI 显示计量来源；耗尽/过期是否回退钱包需确认 |
+| **★ 双桶混淆** | 明确路由规则（有 active 套餐走套餐桶）；UI 显示计量来源；耗尽/过期按 D5 拦截重购，绝不回退钱包 |
 | **★ Key 共享/倒卖** | 调用风控（并发/IP/UA 指纹）、异常告警、单 Token RPM 限制 |
 
 ---
@@ -524,4 +525,4 @@ DNS（A: yourbrand.com / www / api / admin / *.yourbrand.com → 64.90.4.114）
 
 ---
 
-> **后续**：本文为权威需求文档；建议同步更新根级 `CLAUDE.md` 的「项目定位/路由」指向本文件，并把 tokenplan 细化为 `doc/billing.md` 或独立 `doc/tokenplan.md`。待你确认文中 `[待确认]` 各项与工期方案 A/B/C 后即可进入开发。
+> **后续维护**：本文继续作为需求权威；根级 `CLAUDE.md` 已路由到本文件，实际实现状态维护在 `doc/tasks/STATUS.md`。仍标 `[待确认]` 的业务口径以 `doc/acceptance.md` 决策表为准，不得用早期工期方案推断发布状态。

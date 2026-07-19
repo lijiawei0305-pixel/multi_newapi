@@ -2,10 +2,12 @@ package openai
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -25,20 +27,35 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 	clientConn := info.ClientWs
 	targetConn := info.TargetWs
 
-	clientClosed := make(chan struct{})
-	targetClosed := make(chan struct{})
-	sendChan := make(chan []byte, 100)
-	receiveChan := make(chan []byte, 100)
+	readerDone := make(chan struct{}, 2)
 	errChan := make(chan error, 2)
+	var readers sync.WaitGroup
+	var stateMu sync.Mutex
 
 	usage := &dto.RealtimeUsage{}
 	localUsage := &dto.RealtimeUsage{}
 	sumUsage := &dto.RealtimeUsage{}
+	settlementFailed := false
 
+	reportError := func(err error) {
+		select {
+		case errChan <- err:
+		default:
+		}
+	}
+	reportDone := func() {
+		select {
+		case readerDone <- struct{}{}:
+		default:
+		}
+	}
+
+	readers.Add(1)
 	gopool.Go(func() {
+		defer readers.Done()
 		defer func() {
 			if r := recover(); r != nil {
-				errChan <- fmt.Errorf("panic in client reader: %v", r)
+				reportError(fmt.Errorf("panic in client reader: %v", r))
 			}
 		}()
 		for {
@@ -49,19 +66,21 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 				_, message, err := clientConn.ReadMessage()
 				if err != nil {
 					if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-						errChan <- fmt.Errorf("error reading from client: %v", err)
+						reportError(fmt.Errorf("error reading from client: %v", err))
+					} else {
+						reportDone()
 					}
-					close(clientClosed)
 					return
 				}
 
 				realtimeEvent := &dto.RealtimeEvent{}
 				err = common.Unmarshal(message, realtimeEvent)
 				if err != nil {
-					errChan <- fmt.Errorf("error unmarshalling message: %v", err)
+					reportError(fmt.Errorf("error unmarshalling message: %v", err))
 					return
 				}
 
+				stateMu.Lock()
 				if realtimeEvent.Type == dto.RealtimeEventTypeSessionUpdate {
 					if realtimeEvent.Session != nil {
 						if realtimeEvent.Session.Tools != nil {
@@ -72,7 +91,8 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 
 				textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
 				if err != nil {
-					errChan <- fmt.Errorf("error counting text token: %v", err)
+					stateMu.Unlock()
+					reportError(fmt.Errorf("error counting text token: %v", err))
 					return
 				}
 				logger.LogInfo(c, fmt.Sprintf("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
@@ -80,25 +100,23 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 				localUsage.InputTokens += textToken + audioToken
 				localUsage.InputTokenDetails.TextTokens += textToken
 				localUsage.InputTokenDetails.AudioTokens += audioToken
+				stateMu.Unlock()
 
 				err = helper.WssString(c, targetConn, string(message))
 				if err != nil {
-					errChan <- fmt.Errorf("error writing to target: %v", err)
+					reportError(fmt.Errorf("error writing to target: %v", err))
 					return
-				}
-
-				select {
-				case sendChan <- message:
-				default:
 				}
 			}
 		}
 	})
 
+	readers.Add(1)
 	gopool.Go(func() {
+		defer readers.Done()
 		defer func() {
 			if r := recover(); r != nil {
-				errChan <- fmt.Errorf("panic in target reader: %v", r)
+				reportError(fmt.Errorf("panic in target reader: %v", r))
 			}
 		}()
 		for {
@@ -109,20 +127,29 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 				_, message, err := targetConn.ReadMessage()
 				if err != nil {
 					if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-						errChan <- fmt.Errorf("error reading from target: %v", err)
+						reportError(fmt.Errorf("error reading from target: %v", err))
+					} else {
+						reportDone()
 					}
-					close(targetClosed)
 					return
 				}
+				service.MarkUpstreamAccepted(c)
+				stateMu.Lock()
 				info.SetFirstResponseTime()
 				realtimeEvent := &dto.RealtimeEvent{}
 				err = common.Unmarshal(message, realtimeEvent)
 				if err != nil {
-					errChan <- fmt.Errorf("error unmarshalling message: %v", err)
+					stateMu.Unlock()
+					reportError(fmt.Errorf("error unmarshalling message: %v", err))
 					return
 				}
 
 				if realtimeEvent.Type == dto.RealtimeEventTypeResponseDone {
+					if realtimeEvent.Response == nil {
+						stateMu.Unlock()
+						reportError(fmt.Errorf("response.done event is missing response payload"))
+						return
+					}
 					realtimeUsage := realtimeEvent.Response.Usage
 					if realtimeUsage != nil {
 						usage.TotalTokens += realtimeUsage.TotalTokens
@@ -135,7 +162,9 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 						usage.OutputTokenDetails.TextTokens += realtimeUsage.OutputTokenDetails.TextTokens
 						err := preConsumeUsage(c, info, usage, sumUsage)
 						if err != nil {
-							errChan <- fmt.Errorf("error consume usage: %v", err)
+							settlementFailed = true
+							stateMu.Unlock()
+							reportError(fmt.Errorf("error consume usage: %v", err))
 							return
 						}
 						// 本次计费完成，清除
@@ -145,7 +174,8 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					} else {
 						textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
 						if err != nil {
-							errChan <- fmt.Errorf("error counting text token: %v", err)
+							stateMu.Unlock()
+							reportError(fmt.Errorf("error counting text token: %v", err))
 							return
 						}
 						logger.LogInfo(c, fmt.Sprintf("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
@@ -156,7 +186,9 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 						localUsage.InputTokenDetails.AudioTokens += audioToken
 						err = preConsumeUsage(c, info, localUsage, sumUsage)
 						if err != nil {
-							errChan <- fmt.Errorf("error consume usage: %v", err)
+							settlementFailed = true
+							stateMu.Unlock()
+							reportError(fmt.Errorf("error consume usage: %v", err))
 							return
 						}
 						// 本次计费完成，清除
@@ -177,7 +209,8 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 				} else {
 					textToken, audioToken, err := service.CountTokenRealtime(info, *realtimeEvent, info.UpstreamModelName)
 					if err != nil {
-						errChan <- fmt.Errorf("error counting text token: %v", err)
+						stateMu.Unlock()
+						reportError(fmt.Errorf("error counting text token: %v", err))
 						return
 					}
 					logger.LogInfo(c, fmt.Sprintf("type: %s, textToken: %d, audioToken: %d", realtimeEvent.Type, textToken, audioToken))
@@ -186,39 +219,60 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 					localUsage.OutputTokenDetails.TextTokens += textToken
 					localUsage.OutputTokenDetails.AudioTokens += audioToken
 				}
+				stateMu.Unlock()
 
 				err = helper.WssString(c, clientConn, string(message))
 				if err != nil {
-					errChan <- fmt.Errorf("error writing to client: %v", err)
+					reportError(fmt.Errorf("error writing to client: %v", err))
 					return
-				}
-
-				select {
-				case receiveChan <- message:
-				default:
 				}
 			}
 		}
 	})
 
+	var relayErr error
 	select {
-	case <-clientClosed:
-	case <-targetClosed:
-	case err := <-errChan:
-		//return service.OpenAIErrorWrapper(err, "realtime_error", http.StatusInternalServerError), nil
-		logger.LogError(c, "realtime error: "+err.Error())
+	case <-readerDone:
+	case relayErr = <-errChan:
 	case <-c.Done():
 	}
 
-	if usage.TotalTokens != 0 {
-		_ = preConsumeUsage(c, info, usage, sumUsage)
+	// Closing both sockets interrupts the other reader before the final usage
+	// snapshot is settled. Without this join, a reader can mutate usage after the
+	// handler has returned and race the final billing step.
+	_ = clientConn.Close()
+	_ = targetConn.Close()
+	readers.Wait()
+
+	if relayErr != nil {
+		logger.LogError(c, "realtime error: "+relayErr.Error())
 	}
 
-	if localUsage.TotalTokens != 0 {
-		_ = preConsumeUsage(c, info, localUsage, sumUsage)
+	if !settlementFailed && usage.TotalTokens != 0 {
+		if err := preConsumeUsage(c, info, usage, sumUsage); err != nil {
+			settlementFailed = true
+			logger.LogError(c, "realtime final upstream settlement error: "+err.Error())
+			if relayErr == nil {
+				relayErr = fmt.Errorf("error consume final upstream usage: %w", err)
+			}
+		}
 	}
 
-	// check usage total tokens, if 0, use local usage
+	if !settlementFailed && localUsage.TotalTokens != 0 {
+		if err := preConsumeUsage(c, info, localUsage, sumUsage); err != nil {
+			logger.LogError(c, "realtime final local settlement error: "+err.Error())
+			if relayErr == nil {
+				relayErr = fmt.Errorf("error consume final local usage: %w", err)
+			}
+		}
+	}
+
+	if relayErr != nil {
+		if service.IsUpstreamAccepted(c) {
+			return channel.AcceptedResponseDeliveryError(), sumUsage
+		}
+		return types.NewError(relayErr, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry()), sumUsage
+	}
 
 	return nil, sumUsage
 }
@@ -226,6 +280,10 @@ func OpenaiRealtimeHandler(c *gin.Context, info *relaycommon.RelayInfo) (*types.
 func preConsumeUsage(ctx *gin.Context, info *relaycommon.RelayInfo, usage *dto.RealtimeUsage, totalUsage *dto.RealtimeUsage) error {
 	if usage == nil || totalUsage == nil {
 		return fmt.Errorf("invalid usage pointer")
+	}
+
+	if err := service.PreWssConsumeQuota(ctx, info, usage); err != nil {
+		return err
 	}
 
 	totalUsage.TotalTokens += usage.TotalTokens
@@ -236,7 +294,5 @@ func preConsumeUsage(ctx *gin.Context, info *relaycommon.RelayInfo, usage *dto.R
 	totalUsage.InputTokenDetails.AudioTokens += usage.InputTokenDetails.AudioTokens
 	totalUsage.OutputTokenDetails.TextTokens += usage.OutputTokenDetails.TextTokens
 	totalUsage.OutputTokenDetails.AudioTokens += usage.OutputTokenDetails.AudioTokens
-	// clear usage
-	err := service.PreWssConsumeQuota(ctx, info, usage)
-	return err
+	return nil
 }

@@ -23,7 +23,7 @@ type PromotionService interface {
 // --- 消费者定义的依赖接口（本包声明，main 装配具体实现）---
 
 // PromotionRepo 是推广渠道与归属的持久化抽象。本轮提供内存假实现（MemRepo）；
-// 真实 GORM 实现（迁移 + prefix 唯一约束 + scopeByTenant + 原子 registered_count++）顺延（见报告 TODO）。
+// 生产 GORM 实现（迁移 + prefix 唯一约束 + scopeByTenant + 原子 registered_count++）位于 gormrepo 子包。
 //
 // 注：detailed-design §2.9 还列出对 TenantService 的依赖（建渠道时校验租户存在/有效、
 // 以及“经代理域名注册→归属对应代理”的 Host→tenant 解析）。该依赖不在本轮范围内，

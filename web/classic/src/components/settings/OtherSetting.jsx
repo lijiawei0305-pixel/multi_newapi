@@ -29,10 +29,14 @@ import {
   Card,
 } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess, timestamp2string } from '../../helpers';
-import { marked } from 'marked';
+import {
+  renderSafeMarkdown,
+  sanitizeHtmlContent,
+} from '../../helpers/sanitize';
 import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../../context/Status';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
+import { openHttpUrlInNewTab } from '../../helpers/safeNavigation';
 
 const LEGAL_USER_AGREEMENT_KEY = 'legal.user_agreement';
 const LEGAL_PRIVACY_POLICY_KEY = 'legal.privacy_policy';
@@ -265,7 +269,7 @@ const OtherSetting = () => {
       } else {
         setUpdateData({
           tag_name: tag_name,
-          content: marked.parse(body),
+          content: renderSafeMarkdown(body),
         });
         setShowUpdateModal(true);
       }
@@ -345,9 +349,8 @@ const OtherSetting = () => {
 
   // Function to open GitHub release page
   const openGitHubRelease = () => {
-    window.open(
+    openHttpUrlInNewTab(
       `https://github.com/Calcium-Ion/new-api/releases/tag/${updateData.tag_name}`,
-      '_blank',
     );
   };
 
@@ -564,7 +567,11 @@ const OtherSetting = () => {
           </Button>,
         ]}
       >
-        <div dangerouslySetInnerHTML={{ __html: updateData.content }}></div>
+        <div
+          dangerouslySetInnerHTML={{
+            __html: sanitizeHtmlContent(updateData.content),
+          }}
+        ></div>
       </Modal>
     </Row>
   );

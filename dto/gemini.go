@@ -44,9 +44,9 @@ func (r *GeminiChatRequest) UnmarshalJSON(data []byte) error {
 }
 
 type ToolConfig struct {
-	FunctionCallingConfig *FunctionCallingConfig `json:"functionCallingConfig,omitempty"`
-	RetrievalConfig       *RetrievalConfig       `json:"retrievalConfig,omitempty"`
-	IncludeServerSideToolInvocations *bool       `json:"includeServerSideToolInvocations,omitempty"`
+	FunctionCallingConfig            *FunctionCallingConfig `json:"functionCallingConfig,omitempty"`
+	RetrievalConfig                  *RetrievalConfig       `json:"retrievalConfig,omitempty"`
+	IncludeServerSideToolInvocations *bool                  `json:"includeServerSideToolInvocations,omitempty"`
 }
 
 type FunctionCallingConfig struct {
@@ -71,7 +71,7 @@ func (r *GeminiChatRequest) GetTokenCountMeta() *types.TokenCountMeta {
 	var maxTokens int
 
 	if r.GenerationConfig.MaxOutputTokens != nil && *r.GenerationConfig.MaxOutputTokens > 0 {
-		maxTokens = int(*r.GenerationConfig.MaxOutputTokens)
+		maxTokens = common.SaturatingUintToInt(*r.GenerationConfig.MaxOutputTokens)
 	}
 
 	var inputTexts []string
@@ -160,8 +160,8 @@ func (r *GeminiChatRequest) SetTools(tools []GeminiChatTool) {
 }
 
 type GeminiThinkingConfig struct {
-	IncludeThoughts bool `json:"includeThoughts,omitempty"`
-	ThinkingBudget  *int `json:"thinkingBudget,omitempty"`
+	IncludeThoughts *bool `json:"includeThoughts,omitempty"`
+	ThinkingBudget  *int  `json:"thinkingBudget,omitempty"`
 	// TODO Conflict with thinkingbudget.
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 }
@@ -183,7 +183,7 @@ func (c *GeminiThinkingConfig) UnmarshalJSON(data []byte) error {
 	*c = GeminiThinkingConfig(aux.Alias)
 
 	if aux.IncludeThoughtsSnake != nil {
-		c.IncludeThoughts = *aux.IncludeThoughtsSnake
+		c.IncludeThoughts = aux.IncludeThoughtsSnake
 	}
 
 	if aux.ThinkingBudgetSnake != nil {
@@ -268,7 +268,7 @@ type GeminiFileData struct {
 
 type GeminiPart struct {
 	Text             string                  `json:"text,omitempty"`
-	Thought          bool                    `json:"thought,omitempty"`
+	Thought          *bool                   `json:"thought,omitempty"`
 	InlineData       *GeminiInlineData       `json:"inlineData,omitempty"`
 	FunctionCall     *FunctionCall           `json:"functionCall,omitempty"`
 	ThoughtSignature json.RawMessage         `json:"thoughtSignature,omitempty"`
@@ -488,7 +488,7 @@ type GeminiImageInstance struct {
 }
 
 type GeminiImageParameters struct {
-	SampleCount      int    `json:"sampleCount,omitempty"`
+	SampleCount      *int   `json:"sampleCount,omitempty"`
 	AspectRatio      string `json:"aspectRatio,omitempty"`
 	PersonGeneration string `json:"personGeneration,omitempty"`
 	ImageSize        string `json:"imageSize,omitempty"`
@@ -511,7 +511,7 @@ type GeminiEmbeddingRequest struct {
 	Content              GeminiChatContent `json:"content"`
 	TaskType             string            `json:"taskType,omitempty"`
 	Title                string            `json:"title,omitempty"`
-	OutputDimensionality int               `json:"outputDimensionality,omitempty"`
+	OutputDimensionality *int              `json:"outputDimensionality,omitempty"`
 }
 
 func (r *GeminiEmbeddingRequest) IsStream(c *gin.Context) bool {

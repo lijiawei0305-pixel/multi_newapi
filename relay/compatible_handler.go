@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func streamUsageRequested(options *dto.StreamOptions) bool {
+	if options == nil {
+		return true
+	}
+	return lo.FromPtrOr(options.IncludeUsage, false)
+}
 
 func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
@@ -44,11 +52,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
 
-	includeUsage := true
-	// 判断用户是否需要返回使用情况
-	if request.StreamOptions != nil {
-		includeUsage = request.StreamOptions.IncludeUsage
-	}
+	includeUsage := streamUsageRequested(request.StreamOptions)
 
 	// 如果不支持StreamOptions，将StreamOptions设置为nil
 	if !info.SupportStreamOptions || !lo.FromPtrOr(request.Stream, false) {
@@ -57,7 +61,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		// 如果支持StreamOptions，且请求中没有设置StreamOptions，根据配置文件设置StreamOptions
 		if constant.ForceStreamOption {
 			request.StreamOptions = &dto.StreamOptions{
-				IncludeUsage: true,
+				IncludeUsage: common.GetPointer(true),
 			}
 		}
 	}
@@ -80,14 +84,23 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		if newApiErr != nil {
 			return newApiErr
 		}
+		resolvedUsage, usageErr := acceptedResponseUsage(c, usage)
+		if usageErr != nil {
+			return usageErr
+		}
+		service.MarkUpstreamAccepted(c)
 
-		var containAudioTokens = usage.CompletionTokenDetails.AudioTokens > 0 || usage.PromptTokensDetails.AudioTokens > 0
+		var containAudioTokens = resolvedUsage.CompletionTokenDetails.AudioTokens > 0 || resolvedUsage.PromptTokensDetails.AudioTokens > 0
 		var containsAudioRatios = ratio_setting.ContainsAudioRatio(info.OriginModelName) || ratio_setting.ContainsAudioCompletionRatio(info.OriginModelName)
 
 		if containAudioTokens && containsAudioRatios {
-			service.PostAudioConsumeQuota(c, info, usage, "")
+			if billingErr := service.PostAudioConsumeQuota(c, info, resolvedUsage, ""); billingErr != nil {
+				return billingErr
+			}
 		} else {
-			service.PostTextConsumeQuota(c, info, usage, nil)
+			if billingErr := service.PostTextConsumeQuota(c, info, resolvedUsage, nil); billingErr != nil {
+				return billingErr
+			}
 		}
 		return nil
 	}
@@ -101,7 +114,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 		}
 		if common.DebugEnabled {
 			if debugBytes, bErr := storage.Bytes(); bErr == nil {
-				logger.LogDebug(c, "requestBody: %s", debugBytes)
+				logger.LogPayload(c, "Pass-through request body", debugBytes)
 			}
 		}
 		requestBody = common.ReaderOnly(storage)
@@ -173,7 +186,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 			}
 		}
 
-		logger.LogDebug(c, "text request body: %s", jsonData)
+		logger.LogPayload(c, "Text request body", jsonData)
 
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
@@ -188,15 +201,22 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	var httpResp *http.Response
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
+		var apiErr *types.NewAPIError
+		if errors.As(err, &apiErr) {
+			return apiErr
+		}
 		return types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 
-	if resp != nil {
-		httpResp = resp.(*http.Response)
+	httpResp, newAPIError = resolveSynchronousHTTPResponse(resp, info)
+	if newAPIError != nil {
+		return newAPIError
+	}
+	if httpResp != nil {
 		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
-		if httpResp.StatusCode != http.StatusOK {
+		if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
 			newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			// reset status code 重置状态码
 			service.ResetStatusCode(newApiErr, statusCodeMappingStr)
@@ -205,19 +225,28 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	}
 
 	usage, newApiErr := adaptor.DoResponse(c, httpResp, info)
+	recordSynchronousUpstreamResult(c, httpResp, newApiErr)
 	if newApiErr != nil {
 		// reset status code 重置状态码
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 		return newApiErr
 	}
+	resolvedUsage, usageErr := acceptedResponseUsage(c, usage)
+	if usageErr != nil {
+		return usageErr
+	}
 
-	var containAudioTokens = usage.(*dto.Usage).CompletionTokenDetails.AudioTokens > 0 || usage.(*dto.Usage).PromptTokensDetails.AudioTokens > 0
+	var containAudioTokens = resolvedUsage.CompletionTokenDetails.AudioTokens > 0 || resolvedUsage.PromptTokensDetails.AudioTokens > 0
 	var containsAudioRatios = ratio_setting.ContainsAudioRatio(info.OriginModelName) || ratio_setting.ContainsAudioCompletionRatio(info.OriginModelName)
 
 	if containAudioTokens && containsAudioRatios {
-		service.PostAudioConsumeQuota(c, info, usage.(*dto.Usage), "")
+		if billingErr := service.PostAudioConsumeQuota(c, info, resolvedUsage, ""); billingErr != nil {
+			return billingErr
+		}
 	} else {
-		service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
+		if billingErr := service.PostTextConsumeQuota(c, info, resolvedUsage, nil); billingErr != nil {
+			return billingErr
+		}
 	}
 	return nil
 }

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { cn } from '@/lib/utils'
+
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -32,6 +32,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 
 type RequiredTextPart = {
   type: 'input' | 'static'
@@ -41,6 +42,7 @@ type RequiredTextPart = {
 
 type NormalizedRequiredTextPart = RequiredTextPart & {
   inputIndex?: number
+  key: string
 }
 
 type RiskAcknowledgementDialogProps = {
@@ -64,7 +66,7 @@ type RiskAcknowledgementDialogProps = {
 }
 
 function getRequiredTextRows(text: string) {
-  return Math.max(1, Math.ceil(Array.from(text).length / 42))
+  return Math.max(1, Math.ceil([...text].length / 42))
 }
 
 export function RiskAcknowledgementDialog({
@@ -97,17 +99,33 @@ export function RiskAcknowledgementDialog({
     return requiredTextParts.reduce<{
       parts: NormalizedRequiredTextPart[]
       inputIndex: number
+      staticIndex: number
     }>(
       (acc, part) => {
         if (part.type !== 'input') {
-          return { ...acc, parts: [...acc.parts, part] }
+          return {
+            ...acc,
+            parts: [
+              ...acc.parts,
+              { ...part, key: `static-${acc.staticIndex}` },
+            ],
+            staticIndex: acc.staticIndex + 1,
+          }
         }
         return {
-          parts: [...acc.parts, { ...part, inputIndex: acc.inputIndex }],
+          ...acc,
+          parts: [
+            ...acc.parts,
+            {
+              ...part,
+              inputIndex: acc.inputIndex,
+              key: `input-${acc.inputIndex}`,
+            },
+          ],
           inputIndex: acc.inputIndex + 1,
         }
       },
-      { parts: [], inputIndex: 0 }
+      { parts: [], inputIndex: 0, staticIndex: 0 }
     ).parts
   }, [requiredTextParts])
 
@@ -243,17 +261,17 @@ export function RiskAcknowledgementDialog({
               </div>
               {hasSegmentedRequiredText ? (
                 <div className='flex flex-col gap-2'>
-                  {normalizedRequiredTextParts.map((part, index) =>
+                  {normalizedRequiredTextParts.map((part) =>
                     part.type === 'static' ? (
                       <span
-                        key={`static-${index}`}
+                        key={part.key}
                         className='text-muted-foreground bg-background/70 border-border w-fit rounded-md border px-2 py-1.5 font-mono text-sm select-none'
                       >
                         {part.text}
                       </span>
                     ) : (
                       <Textarea
-                        key={`input-${index}`}
+                        key={part.key}
                         value={typedTextParts[part.inputIndex ?? 0] ?? ''}
                         onChange={(event) =>
                           handleTextPartChange(

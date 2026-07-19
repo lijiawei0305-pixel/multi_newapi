@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
@@ -18,7 +19,6 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
-	"github.com/samber/lo"
 )
 
 type Adaptor struct {
@@ -50,7 +50,11 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, err
 	}
-	return a.ConvertOpenAIRequest(c, info, oaiReq.(*dto.GeneralOpenAIRequest))
+	openAIRequest, ok := oaiReq.(*dto.GeneralOpenAIRequest)
+	if !ok || openAIRequest == nil {
+		return nil, fmt.Errorf("OpenAI adaptor returned invalid Claude conversion type %T", oaiReq)
+	}
+	return a.ConvertOpenAIRequest(c, info, openAIRequest)
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
@@ -84,6 +88,10 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 			}
 		}
 	}
+	sampleCount := 1
+	if request.N != nil {
+		sampleCount = common.SaturatingUintToInt(*request.N)
+	}
 
 	// build gemini imagen request
 	geminiRequest := dto.GeminiImageRequest{
@@ -93,7 +101,7 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 			},
 		},
 		Parameters: dto.GeminiImageParameters{
-			SampleCount:      int(lo.FromPtrOr(request.N, uint(1))),
+			SampleCount:      &sampleCount,
 			AspectRatio:      aspectRatio,
 			PersonGeneration: "allow_adult", // default allow adult
 		},
@@ -225,9 +233,8 @@ func (a *Adaptor) ConvertEmbeddingRequest(c *gin.Context, info *relaycommon.Rela
 		switch info.UpstreamModelName {
 		case "text-embedding-004", "gemini-embedding-exp-03-07", "gemini-embedding-001":
 			// Only newer models introduced after 2024 support OutputDimensionality
-			dimensions := lo.FromPtrOr(request.Dimensions, 0)
-			if dimensions > 0 {
-				geminiRequest["outputDimensionality"] = dimensions
+			if request.Dimensions != nil {
+				geminiRequest["outputDimensionality"] = *request.Dimensions
 			}
 		}
 		geminiRequests = append(geminiRequests, geminiRequest)

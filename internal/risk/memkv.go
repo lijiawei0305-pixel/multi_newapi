@@ -15,7 +15,7 @@ type kvEntry struct {
 
 // MemKVCache 是 KVCache 的并发安全内存假实现（限流计数 / 限购去重）。
 // 过期按注入时钟惰性回收，保证与限流窗口/去重 TTL 的确定性单测一致。
-// 真实 Redis 适配（INCR/EXPIRE/SET NX/TTL）顺延（见报告 TODO）。
+// 生产多副本使用同契约的 RedisKVCache。
 type MemKVCache struct {
 	mu    sync.Mutex
 	data  map[string]kvEntry
@@ -55,6 +55,23 @@ func (c *MemKVCache) Incr(_ context.Context, key string) (int64, error) {
 		e = kvEntry{}
 	}
 	e.num++
+	c.data[key] = e
+	return e.num, nil
+}
+
+// Decr 原子递减已存在的计数；不存在返回 0，结果 <=0 时原子删键。
+func (c *MemKVCache) Decr(_ context.Context, key string) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.live(key)
+	if !ok {
+		return 0, nil
+	}
+	e.num--
+	if e.num <= 0 {
+		delete(c.data, key)
+		return 0, nil
+	}
 	c.data[key] = e
 	return e.num, nil
 }

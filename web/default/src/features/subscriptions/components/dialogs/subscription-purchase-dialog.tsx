@@ -16,13 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect } from 'react'
 import { Crown, CalendarClock, Package } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
-import { formatQuota } from '@/lib/format'
-import { useSystemConfig } from '@/hooks/use-system-config'
+
+import { Dialog } from '@/components/dialog'
+import { GroupBadge } from '@/components/group-badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -34,8 +34,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { Dialog } from '@/components/dialog'
-import { GroupBadge } from '@/components/group-badge'
+import { useSystemConfig } from '@/hooks/use-system-config'
+import { formatQuota } from '@/lib/format'
+import {
+  normalizeHttpNavigationUrl,
+  openHttpUrlInNewTab,
+} from '@/lib/safe-navigation'
+import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
+
 import {
   paySubscriptionStripe,
   paySubscriptionCreem,
@@ -117,7 +123,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
     try {
       const res = await paySubscriptionStripe({ plan_id: plan.id })
       if (res.message === 'success' && res.data?.pay_link) {
-        window.open(res.data.pay_link, '_blank')
+        if (!openHttpUrlInNewTab(res.data.pay_link)) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
         toast.success(t('Payment page opened'))
         props.onOpenChange(false)
       } else {
@@ -139,7 +148,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
     try {
       const res = await paySubscriptionCreem({ plan_id: plan.id })
       if (res.message === 'success' && res.data?.checkout_url) {
-        window.open(res.data.checkout_url, '_blank')
+        if (!openHttpUrlInNewTab(res.data.checkout_url)) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
         toast.success(t('Payment page opened'))
         props.onOpenChange(false)
       } else {
@@ -163,8 +175,13 @@ export function SubscriptionPurchaseDialog(props: Props) {
     try {
       const res = await paySubscriptionWaffoPancake({ plan_id: plan.id })
       if (res.message === 'success' && res.data?.checkout_url) {
+        const checkoutUrl = normalizeHttpNavigationUrl(res.data.checkout_url)
+        if (!checkoutUrl) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
         toast.success(t('Redirecting to payment page...'))
-        window.location.href = res.data.checkout_url
+        window.location.href = checkoutUrl
       } else {
         toast.error(
           res.message && res.message !== 'success'
@@ -195,11 +212,17 @@ export function SubscriptionPurchaseDialog(props: Props) {
         payment_method: selectedEpayMethod,
       })
       if (res.message === 'success' && res.url) {
+        const paymentUrl = normalizeHttpNavigationUrl(res.url)
+        if (!paymentUrl) {
+          toast.error(t('Invalid payment redirect URL'))
+          return
+        }
         const form = document.createElement('form')
-        form.action = res.url
+        form.action = paymentUrl
         form.method = 'POST'
         if (!isSafari) {
           form.target = '_blank'
+          form.rel = 'noopener noreferrer'
         }
         Object.entries(res.data || {}).forEach(([key, value]) => {
           const input = document.createElement('input')
@@ -403,12 +426,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
             {hasEpay && (
               <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-2'>
                 <Select
-                  items={[
-                    ...(props.epayMethods || []).map((m) => ({
-                      value: m.type,
-                      label: m.name || m.type,
-                    })),
-                  ]}
+                  items={(props.epayMethods || []).map((m) => ({
+                    value: m.type,
+                    label: m.name || m.type,
+                  }))}
                   value={selectedEpayMethod}
                   onValueChange={(v) => v !== null && setSelectedEpayMethod(v)}
                   disabled={limitReached}

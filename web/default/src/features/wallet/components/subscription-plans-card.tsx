@@ -16,13 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useCallback } from 'react'
 import type { TFunction } from 'i18next'
 import { Crown, RefreshCw } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { formatQuota } from '@/lib/format'
-import { cn } from '@/lib/utils'
+
+import {
+  StatusBadge,
+  dotColorMap,
+  textColorMap,
+} from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -43,15 +47,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import {
-  StatusBadge,
-  dotColorMap,
-  textColorMap,
-} from '@/components/status-badge'
-import {
   getSelfSubscriptionFull,
   updateBillingPreference,
 } from '@/features/subscriptions/api'
 import type { UserSubscriptionRecord } from '@/features/subscriptions/types'
+import { formatQuota } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 // ============================================================================
 // "我的订阅" — read-only view of the buyer's already-purchased subscriptions.
@@ -310,7 +311,8 @@ export function SubscriptionPlansCard() {
                 billingPreference === 'subscription_only'
                   ? t('Subscription Only', { defaultValue: '仅用订阅余额' })
                   : t('Subscription First', { defaultValue: '订阅余额优先' }),
-              defaultValue: '偏好已设为 {{pref}}，但当前无生效订阅，系统将自动改用钱包余额扣费。',
+              defaultValue:
+                '偏好已设为 {{pref}}，但当前无生效订阅，系统将自动改用钱包余额扣费。',
             }
           )}
         </p>
@@ -332,6 +334,18 @@ export function SubscriptionPlansCard() {
               const isExpired = (subscription?.end_time || 0) < now
               const isCancelled = subscription?.status === 'cancelled'
               const isActive = subscription?.status === 'active' && !isExpired
+              const nextResetTime = subscription?.next_reset_time ?? 0
+              let statusLabel = t('Expired', { defaultValue: '已过期' })
+              let statusVariant: 'success' | 'neutral' = 'neutral'
+              let endTimeLabel = t('Expired at', { defaultValue: '过期于' })
+              if (isActive) {
+                statusLabel = t('Active', { defaultValue: '生效中' })
+                statusVariant = 'success'
+                endTimeLabel = t('Until', { defaultValue: '有效期至' })
+              } else if (isCancelled) {
+                statusLabel = t('Cancelled', { defaultValue: '已取消' })
+                endTimeLabel = t('Cancelled at', { defaultValue: '取消于' })
+              }
 
               return (
                 <div
@@ -344,25 +358,11 @@ export function SubscriptionPlansCard() {
                         {t('Subscription', { defaultValue: '订阅' })} #
                         {subscription?.id}
                       </span>
-                      {isActive ? (
-                        <StatusBadge
-                          label={t('Active', { defaultValue: '生效中' })}
-                          variant='success'
-                          copyable={false}
-                        />
-                      ) : isCancelled ? (
-                        <StatusBadge
-                          label={t('Cancelled', { defaultValue: '已取消' })}
-                          variant='neutral'
-                          copyable={false}
-                        />
-                      ) : (
-                        <StatusBadge
-                          label={t('Expired', { defaultValue: '已过期' })}
-                          variant='neutral'
-                          copyable={false}
-                        />
-                      )}
+                      <StatusBadge
+                        label={statusLabel}
+                        variant={statusVariant}
+                        copyable={false}
+                      />
                     </div>
                     {isActive && (
                       <span className='text-muted-foreground'>
@@ -374,23 +374,20 @@ export function SubscriptionPlansCard() {
                     )}
                   </div>
                   <div className='text-muted-foreground mt-1.5'>
-                    {isActive
-                      ? t('Until', { defaultValue: '有效期至' })
-                      : isCancelled
-                        ? t('Cancelled at', { defaultValue: '取消于' })
-                        : t('Expired at', { defaultValue: '过期于' })}{' '}
+                    {endTimeLabel}{' '}
                     {new Date(
                       (subscription?.end_time || 0) * 1000
                     ).toLocaleString(undefined, { timeZone: 'Asia/Shanghai' })}
                   </div>
-                  {isActive && (subscription?.next_reset_time ?? 0) > 0 && (
+                  {isActive && nextResetTime > 0 && (
                     <div className='text-muted-foreground mt-1'>
                       {t('Next reset', { defaultValue: '下次重置' })}:{' '}
-                      {new Date(
-                        subscription!.next_reset_time! * 1000
-                      ).toLocaleString(undefined, {
-                        timeZone: 'Asia/Shanghai',
-                      })}
+                      {new Date(nextResetTime * 1000).toLocaleString(
+                        undefined,
+                        {
+                          timeZone: 'Asia/Shanghai',
+                        }
+                      )}
                     </div>
                   )}
                   <div className='text-muted-foreground mt-1'>
@@ -400,8 +397,8 @@ export function SubscriptionPlansCard() {
                         <TooltipTrigger
                           render={<span className='cursor-help' />}
                         >
-                          {formatQuota(usedAmount)}/{formatQuota(totalAmount)}{' '}
-                          · {t('Remaining', { defaultValue: '剩余' })}{' '}
+                          {formatQuota(usedAmount)}/{formatQuota(totalAmount)} ·{' '}
+                          {t('Remaining', { defaultValue: '剩余' })}{' '}
                           {formatQuota(remainAmount)}
                         </TooltipTrigger>
                         <TooltipContent>

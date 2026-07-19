@@ -1,23 +1,23 @@
 package vertex
 
 import (
+	"context"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/bytedance/gopkg/cache/asynccache"
 	"github.com/golang-jwt/jwt/v5"
-
-	"fmt"
-	"time"
 )
 
 type Credentials struct {
@@ -37,7 +37,13 @@ var Cache = asynccache.NewAsyncCache(asynccache.Options{
 	},
 })
 
-func getAccessToken(a *Adaptor, info *relaycommon.RelayInfo) (string, error) {
+func getAccessToken(ctx context.Context, a *Adaptor, info *relaycommon.RelayInfo) (string, error) {
+	if ctx == nil {
+		return "", errors.New("Vertex OAuth context is nil")
+	}
+	if a == nil || info == nil {
+		return "", errors.New("Vertex OAuth configuration is unavailable")
+	}
 	var cacheKey string
 	if info.ChannelIsMultiKey {
 		cacheKey = fmt.Sprintf("access-token-%d-%d", info.ChannelId, info.ChannelMultiKeyIndex)
@@ -46,14 +52,19 @@ func getAccessToken(a *Adaptor, info *relaycommon.RelayInfo) (string, error) {
 	}
 	val, err := Cache.Get(cacheKey)
 	if err == nil {
-		return val.(string), nil
+		if token, ok := val.(string); ok && strings.TrimSpace(token) != "" {
+			return token, nil
+		}
 	}
+	// Get caches fetch errors and may also surface an invalid interface value.
+	// Remove that exact entry so SetDefault below can install the refreshed token.
+	Cache.DeleteIf(func(key string) bool { return key == cacheKey })
 
 	signedJWT, err := createSignedJWT(a.AccountCredentials.ClientEmail, a.AccountCredentials.PrivateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to create signed JWT: %w", err)
 	}
-	newToken, err := exchangeJwtForAccessToken(signedJWT, info)
+	newToken, err := exchangeJwtForAccessTokenWithContext(ctx, signedJWT, info.ChannelSetting.Proxy)
 	if err != nil {
 		return "", fmt.Errorf("failed to exchange JWT for access token: %w", err)
 	}
@@ -104,51 +115,8 @@ func createSignedJWT(email, privateKeyPEM string) (string, error) {
 	return signedToken, nil
 }
 
-func exchangeJwtForAccessToken(signedJWT string, info *relaycommon.RelayInfo) (string, error) {
+func exchangeJwtForAccessTokenWithContext(ctx context.Context, signedJWT string, proxy string) (string, error) {
 
-	authURL := "https://www.googleapis.com/oauth2/v4/token"
-	data := url.Values{}
-	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
-	data.Set("assertion", signedJWT)
-
-	var client *http.Client
-	var err error
-	if info.ChannelSetting.Proxy != "" {
-		client, err = service.NewProxyHttpClient(info.ChannelSetting.Proxy)
-		if err != nil {
-			return "", fmt.Errorf("new proxy http client failed: %w", err)
-		}
-	} else {
-		client = service.GetHttpClient()
-	}
-
-	resp, err := client.PostForm(authURL, data)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
-	}
-
-	if accessToken, ok := result["access_token"].(string); ok {
-		return accessToken, nil
-	}
-
-	return "", fmt.Errorf("failed to get access token: %v", result)
-}
-
-func AcquireAccessToken(creds Credentials, proxy string) (string, error) {
-	signedJWT, err := createSignedJWT(creds.ClientEmail, creds.PrivateKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to create signed JWT: %w", err)
-	}
-	return exchangeJwtForAccessTokenWithProxy(signedJWT, proxy)
-}
-
-func exchangeJwtForAccessTokenWithProxy(signedJWT string, proxy string) (string, error) {
 	authURL := "https://www.googleapis.com/oauth2/v4/token"
 	data := url.Values{}
 	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
@@ -159,25 +127,61 @@ func exchangeJwtForAccessTokenWithProxy(signedJWT string, proxy string) (string,
 	if proxy != "" {
 		client, err = service.NewProxyHttpClient(proxy)
 		if err != nil {
-			return "", fmt.Errorf("new proxy http client failed: %w", err)
+			return "", errors.New("Vertex OAuth proxy client is unavailable")
 		}
 	} else {
 		client = service.GetHttpClient()
 	}
 
-	resp, err := client.PostForm(authURL, data)
+	if client == nil {
+		return "", errors.New("Vertex OAuth client is unavailable")
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, authURL, strings.NewReader(data.Encode()))
 	if err != nil {
-		return "", err
+		return "", errors.New("failed to create Vertex OAuth request")
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	clientWithTimeout := *client
+	if clientWithTimeout.Timeout <= 0 || clientWithTimeout.Timeout > 15*time.Second {
+		clientWithTimeout.Timeout = 15 * time.Second
+	}
+	resp, err := clientWithTimeout.Do(req)
+	if err != nil {
+		if ctxErr := requestCtx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
+		return "", errors.New("Vertex OAuth request failed")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", errors.New("Vertex OAuth request was rejected")
+	}
 
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+	if err := common.DecodeJsonWithLimit(resp.Body, &result, common.ControlPlaneJSONMaxBytes); err != nil {
+		return "", errors.New("Vertex OAuth response is invalid")
 	}
 
 	if accessToken, ok := result["access_token"].(string); ok {
 		return accessToken, nil
 	}
-	return "", fmt.Errorf("failed to get access token: %v", result)
+
+	return "", errors.New("Vertex OAuth response is missing access token")
+}
+
+func AcquireAccessToken(creds Credentials, proxy string) (string, error) {
+	return AcquireAccessTokenWithContext(context.Background(), creds, proxy)
+}
+
+func AcquireAccessTokenWithContext(ctx context.Context, creds Credentials, proxy string) (string, error) {
+	if ctx == nil {
+		return "", errors.New("Vertex OAuth context is nil")
+	}
+	signedJWT, err := createSignedJWT(creds.ClientEmail, creds.PrivateKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create signed JWT: %w", err)
+	}
+	return exchangeJwtForAccessTokenWithContext(ctx, signedJWT, proxy)
 }

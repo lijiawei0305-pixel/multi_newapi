@@ -9,6 +9,7 @@ package agenthook
 
 import (
 	"context"
+	"time"
 
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/types"
@@ -21,8 +22,48 @@ import (
 // （区分钱包桶/套餐桶）；usingGroup=本次计费实际使用的分组（relayInfo.UsingGroup）；chargedGroupRatio=
 // 本次计费实际生效的组合倍率（用户层级优惠×分组倍率，relayInfo.PriceData.GroupRatioInfo.GroupRatio）——
 // 后两者供 L1 差价入账精确反推 token×ModelRatio，spec agent-tiering §9.4。
-// nil = 未装配。实现必须自身幂等且 best-effort（失败仅记日志，不返回错误）。
-var ConsumeCommission func(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64)
+// nil = 未装配。实现必须自身幂等；错误返回给 durable settlement dispatcher，事件保持 pending 重放。
+var ConsumeCommission func(userID int64, quotaUnits int64, sourceID, billingSource, usingGroup string, chargedGroupRatio float64) error
+
+// CommissionSnapshot freezes every economic input needed to persist wallet
+// consumption and any payable earning. It is prepared before the billing
+// settlement transaction and stored with that transaction, so delayed replay
+// never reads changed agent pricing/profile configuration.
+type CommissionSnapshot struct {
+	SourceID          string
+	OccurredAt        time.Time
+	WalletTenantID    int64
+	WalletUserID      int64
+	WalletQuota       int64
+	EarningApplicable bool
+	EarningTenantID   int64
+	EarningUserID     int64
+	EarningSourceType string
+	EarningAmount     float64
+	EarningRemark     string
+}
+
+// CommissionPolicy freezes attribution and the formula inputs before
+// upstream work. Final quota is deliberately absent and is supplied only when
+// materializing the immutable payable snapshot.
+type CommissionPolicy struct {
+	OccurredAt        time.Time `json:"occurred_at"`
+	WalletTenantID    int64     `json:"wallet_tenant_id"`
+	WalletUserID      int64     `json:"wallet_user_id"`
+	EarningMode       string    `json:"earning_mode"`
+	EarningTenantID   int64     `json:"earning_tenant_id"`
+	EarningUserID     int64     `json:"earning_user_id"`
+	EarningSourceType string    `json:"earning_source_type"`
+	EarningRemark     string    `json:"earning_remark"`
+	DirectRate        float64   `json:"direct_rate"`
+	MarkupFactor      float64   `json:"markup_factor"`
+	QuotaCNYRate      float64   `json:"quota_cny_rate"`
+}
+
+var PrepareConsumeCommission func(userID int64, quotaUnits int64, sourceID, billingSource, usingGroup string, chargedGroupRatio float64) (CommissionSnapshot, error)
+var PersistConsumeCommission func(snapshot CommissionSnapshot) error
+var PrepareConsumeCommissionPolicy func(userID int64, billingSource, usingGroup string, chargedGroupRatio float64) (CommissionPolicy, error)
+var MaterializeConsumeCommissionPolicy func(policy CommissionPolicy, quotaUnits int64, sourceID string) (CommissionSnapshot, error)
 
 // AttributeRegistration 在新用户创建后被调用，把用户归属到对应代理（租户）。
 // 归属优先级：渠道码 channelCode（经代理推广链接 /sign-up?channel=<code> 注册）> 注册 Host >

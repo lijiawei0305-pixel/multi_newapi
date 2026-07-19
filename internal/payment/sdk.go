@@ -5,16 +5,17 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"strconv"
 	"strings"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 // StubPaySDK 是 PaySDK 的占位实现，仅依赖 Go 标准库（crypto/hmac + sha256）。
 //
 // 它用 HMAC-SHA256（共享密钥）模拟支付平台的签名/验签语义，使下单与「验签 → 入账」
 // 全链路可在无外部依赖下端到端跑通与单测；**它不是生产用微信/支付宝 SDK**。
-// 真实 wxpay/alipay SDK 适配器（证书、RSA/V3 验签、对账）顺延（见报告 TODO）。
+// 生产 wxpay/alipay 适配器位于 realpay 子包，负责平台签名与回调验签。
 type StubPaySDK struct {
 	secret []byte
 }
@@ -60,7 +61,7 @@ func (s *StubPaySDK) CreatePay(_ context.Context, req PayRequest) (*PayCredentia
 // Verify 校验回调签名并解析：报文非法 → ErrCallbackInvalid；验签失败 → ErrSignInvalid。
 func (s *StubPaySDK) Verify(_ context.Context, provider Provider, raw []byte) (*CallbackInfo, error) {
 	var p stubPayload
-	if err := json.Unmarshal(raw, &p); err != nil || p.OrderNo == "" {
+	if err := common.Unmarshal(raw, &p); err != nil || p.OrderNo == "" {
 		return nil, ErrCallbackInvalid
 	}
 	want := s.sign(p)
@@ -85,6 +86,6 @@ func (s *StubPaySDK) Encode(info CallbackInfo) []byte {
 		TxnID:   info.TxnID,
 	}
 	p.Sign = s.sign(p)
-	b, _ := json.Marshal(p)
+	b, _ := common.Marshal(p)
 	return b
 }

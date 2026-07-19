@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Wallet } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import {
@@ -33,6 +34,7 @@ import type {
   RangeParams,
 } from '@/features/financial-report/types'
 import { computeTimeRange } from '@/lib/time'
+
 import { getMyWithdrawals, getPayoutAccount, getTenantEarnings } from './api'
 import { EarningsSummaryCards } from './components/earnings-summary-cards'
 import { EarningsTrendChart } from './components/earnings-trend-chart'
@@ -77,7 +79,10 @@ export function AgentEarnings() {
   })
   const payoutAccount = payoutRes?.data
 
-  const { summary } = useMemo(() => parseEarnings(earningsRes?.data), [earningsRes])
+  const { summary } = useMemo(
+    () => parseEarnings(earningsRes?.data),
+    [earningsRes]
+  )
 
   // v3 概览卡 + 3 线趋势图：固定近 30 天（与 financial-report 页一致的默认口径），本页精简后不
   // 提供交互式区间选择器（doc/agent-earnings-simplify.md §一）。
@@ -90,7 +95,11 @@ export function AgentEarnings() {
     placeholderData: (prev) => prev,
   })
 
-  const trendParams = { ...range, lens: 'earnings' as const, granularity: 'day' as const }
+  const trendParams = {
+    ...range,
+    lens: 'earnings' as const,
+    granularity: 'day' as const,
+  }
   const financeTrendQuery = useQuery({
     queryKey: ['tenant-finance-trend', trendParams],
     queryFn: () => getTenantFinanceTrend(trendParams),
@@ -98,7 +107,9 @@ export function AgentEarnings() {
     placeholderData: (prev) => prev,
   })
   const trendSeries = (
-    financeTrendQuery.data?.lens === 'earnings' ? financeTrendQuery.data.series : []
+    financeTrendQuery.data?.lens === 'earnings'
+      ? financeTrendQuery.data.series
+      : []
   ) as EarningsTrendPoint[]
 
   const refreshAll = () => {

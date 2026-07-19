@@ -4,15 +4,22 @@ package mtwire
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/QuantumNous/new-api/internal/agent"
+	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
 	"github.com/QuantumNous/new-api/internal/pricing"
+	"github.com/QuantumNous/new-api/internal/promotion"
+	promotionrepo "github.com/QuantumNous/new-api/internal/promotion/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tenant"
+	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
 )
 
 type agentOut struct {
@@ -76,9 +83,9 @@ type agentPatchIn struct {
 
 // HandleAdminCreateAgent POST /api/admin/agents —— 设代理。需 AdminAuth。
 //
-// 流程：① 校验参数/折扣（pricing.Guard，失败即返回，不建租户）；② 校验 owner 用户存在且未占用
-// （1:1）；③ 建租户（复用 tenant.Create，自动派生域名）；④ 写 owner_user_id + agent_profile + 钱包。
-// 注：③④ 跨仓储非单一 DB 事务（已前置强校验把常见失败挡在建租户前，详见报告「风险/未决」）。
+// 流程：① 校验参数/折扣；② 锁定 owner 用户并在锁内复查 1:1 占用；③ 建租户/域名；
+// ④ 写 owner_user_id、重置 owner 归属、agent_profile 与钱包。生产 GORM 仓储下②—④在同一事务中，
+// 任一步失败都不会留下孤立租户或半初始化代理。
 func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 	var in agentCreateIn
 	if err := c.ShouldBindJSON(&in); err != nil {
@@ -105,47 +112,73 @@ func (a *App) HandleAdminCreateAgent(c *gin.Context) {
 		return
 	}
 	ctx := reqCtx(c)
-	// ② owner 用户存在性 + 1:1 占用校验。
-	if in.OwnerUserID <= 0 || !a.userExists(ctx, in.OwnerUserID) {
+	if in.OwnerUserID <= 0 {
 		respondErr(c, errAgentUserNotFound)
 		return
 	}
-	if a.ownerTaken(ctx, in.OwnerUserID, 0) {
-		respondErr(c, errAgentOwnerTaken)
-		return
-	}
-	// ③ 建租户（复用 tenant.Create：slug 校验 + 派生 <slug>.wedreamhub.com 域名）。
-	t, err := a.TenantService.Create(ctx, tenant.CreateTenantInput{
-		Slug:             in.Slug,
-		Name:             in.Name,
-		TokenplanEnabled: true,
-		SkipSubdomain:    params.Level < 1, // L0 普通：不发子域名（spec §5.2.2）
+	var created *tenant.Tenant
+	err := a.runAgentAdminMutation(ctx, a.TenantRepo != nil && a.AgentRepo != nil, func(m *agentAdminMutation) error {
+		var owner struct {
+			ID int64 `gorm:"column:id"`
+		}
+		ownerQuery := m.db.WithContext(ctx).Table("users").Select("id").Where("id = ?", in.OwnerUserID)
+		if m.transactional {
+			// MySQL/PostgreSQL 上串行化同一 owner 的并发设代理；SQLite 由写事务串行化。
+			ownerQuery = ownerQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := ownerQuery.Take(&owner).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errAgentUserNotFound
+			}
+			return err
+		}
+		var occupied struct {
+			ID int64 `gorm:"column:id"`
+		}
+		occupiedErr := m.db.WithContext(ctx).Table("tenants").
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").Where("owner_user_id = ?", in.OwnerUserID).Limit(1).Take(&occupied).Error
+		if occupiedErr == nil {
+			return errAgentOwnerTaken
+		}
+		if !errors.Is(occupiedErr, gorm.ErrRecordNotFound) {
+			return occupiedErr
+		}
+
+		// 建租户（复用 tenant.Create：slug 校验 + 按档位派生子域名）。
+		t, err := m.tenantService.Create(ctx, tenant.CreateTenantInput{
+			Slug:             in.Slug,
+			Name:             in.Name,
+			TokenplanEnabled: true,
+			SkipSubdomain:    params.Level < 1, // L0 普通：不发子域名（spec §5.2.2）
+		})
+		if err != nil {
+			return err
+		}
+		if err := m.tenantRepo.SetOwnerUserID(ctx, t.ID, in.OwnerUserID); err != nil {
+			return err
+		}
+		// owner 自身落「主站基准」(tenant_id=0)：代理 owner 自用按进货价/平台基准，不落任何代理店。
+		res := m.db.WithContext(ctx).Table("users").Where("id = ?", in.OwnerUserID).Update("tenant_id", 0)
+		if res.Error != nil {
+			return res.Error
+		}
+		// owner 行已在上方加锁并验证存在。不用 RowsAffected 判定存在性：MySQL 对
+		// tenant_id 本来就是 0 的幂等 UPDATE 可返回 0，误判会让主站用户无法设代理。
+		if err := m.agentService.SetAgentType(ctx, t.ID, params); err != nil {
+			return err
+		}
+		if err := m.agentRepo.EnsureWallet(ctx, t.ID, in.OwnerUserID); err != nil {
+			return err
+		}
+		created = t
+		return nil
 	})
 	if err != nil {
-		respondErr(c, err) // SLUG_INVALID / SLUG_RESERVED / SLUG_DUPLICATE
-		return
-	}
-	// ④ owner 归属 + agent_profile + 钱包。
-	if err := a.TenantRepo.SetOwnerUserID(ctx, t.ID, in.OwnerUserID); err != nil {
 		respondErr(c, err)
 		return
 	}
-	// owner 自身落「主站基准」(tenant_id=0)：代理 owner 自用按进货价/平台基准，**不落任何代理店**
-	// （他设的模型分组加价只对其名下用户生效；见 doc/detailed-design.md §2.15，用户确认 Option B）。
-	// 否则 owner 若仍带注册时的 tenant_id（甚至别人的店），自用会错按那家的覆盖计费。
-	if err := a.DB.WithContext(ctx).Table("users").Where("id = ?", in.OwnerUserID).Update("tenant_id", 0).Error; err != nil {
-		respondErr(c, err)
-		return
-	}
-	if err := a.AgentService.SetAgentType(ctx, t.ID, params); err != nil {
-		respondErr(c, err)
-		return
-	}
-	if err := a.AgentRepo.EnsureWallet(ctx, t.ID, in.OwnerUserID); err != nil {
-		respondErr(c, err)
-		return
-	}
-	respondOK(c, a.buildAgentOut(ctx, t.ID, in.OwnerUserID, t.Slug, t.Name, string(t.Status), params))
+	respondOK(c, a.buildAgentOut(ctx, created.ID, in.OwnerUserID, created.Slug, created.Name, string(created.Status), params))
 }
 
 // HandleAdminListAgents GET /api/admin/agents —— 代理列表（含 owner 用户名 + 钱包）。需 AdminAuth。
@@ -204,11 +237,6 @@ func (a *App) HandleAdminSetAgentDomain(c *gin.Context) {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
-	ctx := reqCtx(c)
-	if _, err := a.TenantService.Get(ctx, tenantID); err != nil {
-		respondErr(c, err) // TENANT_NOT_FOUND
-		return
-	}
 	var in struct {
 		Label string `json:"label"`
 	}
@@ -216,15 +244,41 @@ func (a *App) HandleAdminSetAgentDomain(c *gin.Context) {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
-	domain, removed, err := a.TenantService.AddSubdomain(ctx, tenantID, strings.ToLower(strings.TrimSpace(in.Label)))
+	ctx := reqCtx(c)
+	var domain string
+	var removed []string
+	err = a.runAgentAdminMutation(ctx, a.TenantRepo != nil, func(m *agentAdminMutation) error {
+		if err := lockAgentAdminTenant(ctx, m, tenantID); err != nil {
+			return err
+		}
+		t, err := m.tenantService.Get(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		if isPlatformTenant(t) {
+			return errAgentNotFound
+		}
+		if m.agentRepo == nil {
+			return errAgentNotFound
+		}
+		if _, found, err := m.agentRepo.GetAgentType(ctx, tenantID); err != nil {
+			return err
+		} else if !found {
+			return errAgentNotFound
+		}
+		domain, removed, err = m.tenantService.AddSubdomain(ctx, tenantID, strings.ToLower(strings.TrimSpace(in.Label)))
+		return err
+	})
 	if err != nil {
 		respondErr(c, err) // SLUG_INVALID / SLUG_RESERVED / DOMAIN_TAKEN
 		return
 	}
-	for _, h := range removed {
-		a.tenantCache.Invalidate(ctx, h)
+	if a.tenantCache != nil {
+		for _, h := range removed {
+			a.tenantCache.Invalidate(ctx, h)
+		}
+		a.tenantCache.Invalidate(ctx, domain)
 	}
-	a.tenantCache.Invalidate(ctx, domain)
 	respondOK(c, gin.H{"subdomain": domain})
 }
 
@@ -238,33 +292,89 @@ func (a *App) HandleAdminDeleteAgent(c *gin.Context) {
 		return
 	}
 	ctx := reqCtx(c)
-	if _, err := a.TenantService.Get(ctx, tenantID); err != nil {
-		respondErr(c, err) // TENANT_NOT_FOUND
+	var removed []string
+	var customDomain string
+	err = a.runAgentAdminMutation(ctx, a.TenantRepo != nil && a.AgentRepo != nil, func(m *agentAdminMutation) error {
+		if err := lockAgentAdminTenant(ctx, m, tenantID); err != nil {
+			return err
+		}
+		t, err := m.tenantService.Get(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		if isPlatformTenant(t) {
+			return errAgentNotFound
+		}
+		if m.agentRepo == nil {
+			return errAgentNotFound
+		}
+		if _, found, err := m.agentRepo.GetAgentType(ctx, tenantID); err != nil {
+			return err
+		} else if !found {
+			return errAgentNotFound
+		}
+
+		// 结算闸门必须 fail-closed：读钱包失败不得当作零余额继续删除。
+		var w *agent.AgentWallet
+		if m.transactional {
+			var row struct {
+				TenantID             int64   `gorm:"column:tenant_id"`
+				WithdrawableBalance  float64 `gorm:"column:withdrawable_balance"`
+				FrozenWithdrawAmount float64 `gorm:"column:frozen_withdraw_amount"`
+			}
+			walletErr := m.db.WithContext(ctx).Table("agent_wallets").
+				Clauses(clause.Locking{Strength: "UPDATE"}).
+				Select("tenant_id", "withdrawable_balance", "frozen_withdraw_amount").
+				Where("tenant_id = ?", tenantID).Take(&row).Error
+			if walletErr != nil && !errors.Is(walletErr, gorm.ErrRecordNotFound) {
+				return walletErr
+			}
+			w = &agent.AgentWallet{
+				TenantID:             tenantID,
+				WithdrawableBalance:  row.WithdrawableBalance,
+				FrozenWithdrawAmount: row.FrozenWithdrawAmount,
+			}
+		} else {
+			var walletErr error
+			w, walletErr = m.agentService.GetWallet(ctx, tenantID)
+			if walletErr != nil {
+				return walletErr
+			}
+		}
+		if w != nil && w.WithdrawableBalance+w.FrozenWithdrawAmount > 0 {
+			return errAgentUnsettled
+		}
+		if err := m.tenantService.SetStatus(ctx, tenantID, tenant.StatusDeleted); err != nil {
+			return err
+		}
+		removed, err = m.tenantRepo.DeleteDomainsByTenant(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		if m.customDomains != nil {
+			customDomain, err = m.customDomains.Unbind(ctx, tenantID)
+			if err != nil && !errors.Is(err, tenant.ErrCustomDomainNotFound) {
+				return err
+			}
+			if errors.Is(err, tenant.ErrCustomDomainNotFound) {
+				customDomain = ""
+			}
+		}
+		return m.db.WithContext(ctx).Exec("UPDATE users SET tenant_id = 0 WHERE tenant_id = ?", tenantID).Error
+	})
+	if err != nil {
+		respondErr(c, err)
 		return
 	}
-	// 结算闸门：钱包尚有未提现/冻结中收益 → 拒删（避免钱蒸发）。
-	if w, werr := a.AgentService.GetWallet(ctx, tenantID); werr == nil && w != nil &&
-		w.WithdrawableBalance+w.FrozenWithdrawAmount > 0 {
-		respondErr(c, errAgentUnsettled)
-		return
-	}
-	// 软删：active/suspended → deleted。
-	if err := a.TenantService.SetStatus(ctx, tenantID, tenant.StatusDeleted); err != nil {
-		respondErr(c, err) // STATUS_TRANSITION / TENANT_NOT_FOUND
-		return
-	}
-	// 回收子域名 + 失效缓存（删了站点即不再解析，配合 getActiveTenant 的 status 过滤双保险）。
-	if removed, derr := a.TenantRepo.DeleteDomainsByTenant(ctx, tenantID); derr == nil {
+	// 只在事务成功后失效缓存，回滚时保留原有可解析状态。
+	if a.tenantCache != nil {
 		for _, h := range removed {
 			a.tenantCache.Invalidate(ctx, h)
 		}
+		if customDomain != "" {
+			a.tenantCache.Invalidate(ctx, customDomain)
+		}
 	}
-	// 解绑自定义域名（若有）。
-	if dom, uerr := a.CustomDomains.Unbind(ctx, tenantID); uerr == nil && dom != "" {
-		a.tenantCache.Invalidate(ctx, dom)
-	}
-	// 终端用户迁回主站：tenant_id=0，账号/余额/历史留存、并入主站继续用。
-	a.DB.WithContext(ctx).Exec("UPDATE users SET tenant_id = 0 WHERE tenant_id = ?", tenantID)
 	respondOK(c, gin.H{"id": tenantID, "status": string(tenant.StatusDeleted)})
 }
 
@@ -276,80 +386,100 @@ func (a *App) HandleAdminUpdateAgent(c *gin.Context) {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
-	ctx := reqCtx(c)
-	t, err := a.TenantService.Get(ctx, tenantID)
-	if err != nil {
-		respondErr(c, err) // TENANT_NOT_FOUND
-		return
-	}
-	curParams, _, err := a.AgentRepo.GetAgentType(ctx, tenantID)
-	if err != nil {
-		respondErr(c, err)
-		return
-	}
 	var in agentPatchIn
 	if err := c.ShouldBindJSON(&in); err != nil {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
-	if in.Level != nil {
-		curParams.Level = *in.Level
-	}
-	if in.CostPriceCNY != nil {
-		curParams.CostPrice = *in.CostPriceCNY
-	}
-	if in.PackageDiscount != nil {
-		curParams.PackageDiscount = *in.PackageDiscount
-	}
-	if in.CommissionRatio != nil {
-		curParams.CommissionRatio = *in.CommissionRatio
-	}
-	if in.DiscountFloor != nil {
-		curParams.DiscountFloor = *in.DiscountFloor
-	}
-	if in.BottomPriceRatio != nil {
-		curParams.BottomPriceRatio = *in.BottomPriceRatio
-	}
-	if in.DiscountRatio != nil {
-		curParams.DiscountRatio = *in.DiscountRatio
-	}
-	// 升档 → 独立档：先幂等派生子域名 `<slug>.wedreamhub.com`（resolver 不缓存负结果，无需失效缓存），
-	// 再自动作废该代理名下的全部推广渠道（邀请链接不再向*新*注册归属，见 attributeByChannel 的
-	// Voided 跳过分支；已归属的历史用户不受影响，语义见 promotion.PromotionRepo.VoidChannelsByTenant），
-	// 成功后才落 level（原子性：任一步失败绝不能让代理停在「level=1 但基建/清理未完成」——那会解锁
-	// 独立档自助能力却留下不一致状态，见复盘 Fix 3）。两步都幂等，对已是 L1 的代理重复调用无副作用，
-	// 故重排序对既有（已是 L1 / 不升档）流程安全。
-	if in.Level != nil && *in.Level >= 1 {
-		if err := a.TenantService.EnsureSubdomain(ctx, tenantID, t.Slug); err != nil {
-			respondErr(c, err)
-			return
-		}
-		if err := a.Promotion.VoidChannelsByTenant(ctx, tenantID); err != nil {
-			respondErr(c, err)
-			return
-		}
-	}
-	// SetAgentType 内含参数 + 折扣保护线校验（非法即上浮，不落库）。
-	if err := a.AgentService.SetAgentType(ctx, tenantID, curParams); err != nil {
+	ctx := reqCtx(c)
+	var updated *tenant.Tenant
+	var updatedParams agent.AgentParams
+	err = a.runAgentAdminMutation(
+		ctx,
+		a.TenantRepo != nil && a.AgentRepo != nil && a.PromotionRepo != nil,
+		func(m *agentAdminMutation) error {
+			if err := lockAgentAdminTenant(ctx, m, tenantID); err != nil {
+				return err
+			}
+			t, err := m.tenantService.Get(ctx, tenantID)
+			if err != nil {
+				return err
+			}
+			if isPlatformTenant(t) {
+				return errAgentNotFound
+			}
+			if m.agentRepo == nil {
+				return errAgentNotFound
+			}
+			curParams, found, err := m.agentRepo.GetAgentType(ctx, tenantID)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return errAgentNotFound
+			}
+			if in.Level != nil {
+				curParams.Level = *in.Level
+			}
+			if in.CostPriceCNY != nil {
+				curParams.CostPrice = *in.CostPriceCNY
+			}
+			if in.PackageDiscount != nil {
+				curParams.PackageDiscount = *in.PackageDiscount
+			}
+			if in.CommissionRatio != nil {
+				curParams.CommissionRatio = *in.CommissionRatio
+			}
+			if in.DiscountFloor != nil {
+				curParams.DiscountFloor = *in.DiscountFloor
+			}
+			if in.BottomPriceRatio != nil {
+				curParams.BottomPriceRatio = *in.BottomPriceRatio
+			}
+			if in.DiscountRatio != nil {
+				curParams.DiscountRatio = *in.DiscountRatio
+			}
+			// 先做无副作用校验，避免测试桩/非 GORM 适配下先改基建再发现参数非法。
+			if err := curParams.Validate(); err != nil {
+				return err
+			}
+			if err := pricing.NewGuard().ValidateGroupRatio(curParams.PackageDiscount, curParams.DiscountFloor); err != nil {
+				return err
+			}
+			// 升档所需的子域名、渠道作废、档位落库以及同请求的名称/状态变更统一提交。
+			if in.Level != nil && *in.Level >= 1 {
+				if err := m.tenantService.EnsureSubdomain(ctx, tenantID, t.Slug); err != nil {
+					return err
+				}
+				if err := m.promotion.VoidChannelsByTenant(ctx, tenantID); err != nil {
+					return err
+				}
+			}
+			if err := m.agentService.SetAgentType(ctx, tenantID, curParams); err != nil {
+				return err
+			}
+			if in.Name != nil && *in.Name != "" && *in.Name != t.Name {
+				if err := m.tenantRepo.UpdateName(ctx, tenantID, *in.Name); err != nil {
+					return err
+				}
+				t.Name = *in.Name
+			}
+			if in.Status != nil {
+				if err := m.tenantService.SetStatus(ctx, tenantID, tenant.TenantStatus(*in.Status)); err != nil {
+					return err
+				}
+				t.Status = tenant.TenantStatus(*in.Status)
+			}
+			updated = t
+			updatedParams = curParams
+			return nil
+		},
+	)
+	if err != nil {
 		respondErr(c, err)
 		return
 	}
-	// 可选：更新租户名 / 状态。
-	if in.Name != nil && *in.Name != "" {
-		if err := a.TenantRepo.UpdateName(ctx, tenantID, *in.Name); err != nil {
-			respondErr(c, err)
-			return
-		}
-		t.Name = *in.Name
-	}
-	if in.Status != nil {
-		if err := a.TenantService.SetStatus(ctx, tenantID, tenant.TenantStatus(*in.Status)); err != nil {
-			respondErr(c, err)
-			return
-		}
-		t.Status = tenant.TenantStatus(*in.Status)
-	}
-	respondOK(c, a.buildAgentOut(ctx, tenantID, t.OwnerUserID, t.Slug, t.Name, string(t.Status), curParams))
+	respondOK(c, a.buildAgentOut(ctx, tenantID, updated.OwnerUserID, updated.Slug, updated.Name, string(updated.Status), updatedParams))
 }
 
 // HandleAdminAgentMetrics GET /api/admin/agents/:id/metrics —— 代理升档决策指标（需 AdminAuth；id=tenant_id）。
@@ -433,7 +563,10 @@ func (a *App) reviewWithdrawal(c *gin.Context, approve bool) {
 	var body struct {
 		Remark string `json:"remark"`
 	}
-	_ = c.ShouldBindJSON(&body) // remark 可选
+	if err := decodeOptionalJSONObject(c, &body, purchaseRequestBodyLimit); err != nil {
+		respondErr(c, errAgentInputInvalid)
+		return
+	}
 	if err := a.Withdrawals.Review(reqCtx(c), id, approve, body.Remark); err != nil {
 		respondErr(c, err) // WITHDRAW_NOT_PENDING / WITHDRAW_NOT_FOUND
 		return
@@ -488,24 +621,68 @@ func (a *App) buildAgentOut(ctx context.Context, tenantID, ownerUserID int64, sl
 	}
 }
 
-// userExists 轻量校验 new-api 用户存在（不经 model.User）。
-func (a *App) userExists(ctx context.Context, userID int64) bool {
-	var n int64
-	if err := a.DB.WithContext(ctx).Table("users").Where("id = ?", userID).Count(&n).Error; err != nil {
-		return false
-	}
-	return n > 0
+// agentAdminMutation 是管理端代理聚合的单次写入边界。生产路径中所有仓储和领域
+// 服务都重绑到同一 *gorm.DB 事务，确保 tenant/agent/promotion/custom-domain/users 同成同败。
+// transactional=false 仅供注入内存仓储/失败桩的领域单测使用。
+type agentAdminMutation struct {
+	db            *gorm.DB
+	tenantRepo    *tenantrepo.Repo
+	tenantService tenant.TenantService
+	agentRepo     *agentrepo.Repo
+	agentService  agent.AgentService
+	promotion     promotion.PromotionService
+	customDomains tenant.CustomDomainService
+	transactional bool
 }
 
-// ownerTaken 报告某 owner 用户是否已是其他租户的 owner（1:1 占用校验；excludeTenantID 排除自身）。
-func (a *App) ownerTaken(ctx context.Context, ownerUserID, excludeTenantID int64) bool {
-	var n int64
-	q := a.DB.WithContext(ctx).Table("tenants").Where("owner_user_id = ?", ownerUserID)
-	if excludeTenantID > 0 {
-		q = q.Where("id <> ?", excludeTenantID)
+// runAgentAdminMutation 为设代理、换子域名、删除与升档提供统一事务边界。
+func (a *App) runAgentAdminMutation(
+	ctx context.Context,
+	transactional bool,
+	fn func(*agentAdminMutation) error,
+) error {
+	if !transactional {
+		return fn(&agentAdminMutation{
+			db:            a.DB,
+			tenantRepo:    a.TenantRepo,
+			tenantService: a.TenantService,
+			agentRepo:     a.AgentRepo,
+			agentService:  a.AgentService,
+			promotion:     a.Promotion,
+			customDomains: a.CustomDomains,
+		})
 	}
-	if err := q.Count(&n).Error; err != nil {
-		return false
+	return a.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		tr := tenantrepo.New(tx)
+		ar := agentrepo.New(tx)
+		pr := promotionrepo.New(tx)
+		return fn(&agentAdminMutation{
+			db:            tx,
+			tenantRepo:    tr,
+			tenantService: tenant.NewService(tr, tenant.NewSlugValidator()),
+			agentRepo:     ar,
+			agentService:  agent.NewService(ar, pricing.NewGuard()),
+			promotion:     promotion.NewService(pr),
+			customDomains: tenant.NewCustomDomainService(tr, nil),
+			transactional: true,
+		})
+	})
+}
+
+// lockAgentAdminTenant 串行化同一租户的删除/升档/状态变更，避免两个管理请求
+// 同时基于旧状态计算并互相覆盖。SQLite 由写事务本身串行，MySQL/PostgreSQL 使用 FOR UPDATE。
+func lockAgentAdminTenant(ctx context.Context, m *agentAdminMutation, tenantID int64) error {
+	if !m.transactional {
+		return nil
 	}
-	return n > 0
+	var row struct {
+		ID int64 `gorm:"column:id"`
+	}
+	err := m.db.WithContext(ctx).Table("tenants").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").Where("id = ?", tenantID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return tenant.ErrTenantNotFound
+	}
+	return err
 }

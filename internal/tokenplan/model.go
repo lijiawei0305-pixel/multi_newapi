@@ -274,7 +274,7 @@ type PurchaseTicket struct {
 	PayURL    string
 	AmountCNY float64
 	PlanID    int64
-	PlanCode  string // 供补偿判定 Trial 档；HandlePurchase 归还占键时需要
+	PlanCode  string // 供补偿选择 Trial 维度键或非 Trial 计数递减
 }
 
 // OrderType 标识下单类型（与 detailed-design §2.8 Payment 对齐）。

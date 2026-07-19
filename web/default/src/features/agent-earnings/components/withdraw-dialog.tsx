@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getApiErrorCode } from '@/lib/api'
+
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -32,6 +32,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { getApiErrorCode } from '@/lib/api'
+
 import { requestWithdrawal } from '../api'
 import { cny } from '../lib'
 
@@ -121,7 +123,7 @@ export function WithdrawDialog({
             max={max}
             value={amount || ''}
             onChange={(e) => {
-              const parsed = parseFloat(e.target.value)
+              const parsed = Number.parseFloat(e.target.value)
               setAmount(Number.isNaN(parsed) ? 0 : parsed)
             }}
             placeholder='0.00'

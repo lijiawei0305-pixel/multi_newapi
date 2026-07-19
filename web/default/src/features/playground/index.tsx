@@ -16,33 +16,32 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useNavigate } from '@tanstack/react-router'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from '@tanstack/react-router'
 import { toast } from 'sonner'
 
 import { PublicLayout } from '@/components/layout'
-import { useAuthStore } from '@/stores/auth-store'
 import { API_KEY_STATUS } from '@/features/keys/constants'
 import type { PricingModel } from '@/features/pricing/types'
+import { useAuthStore } from '@/stores/auth-store'
 
-import './playground-i18n' // AI 工坊多语言补丁：启动即注入 ja/ru/fr/vi 缺失译文(自安装,幂等)
+import { ChatWorkspace } from './components/public/chat-workspace'
+import { CreateKeyButton } from './components/public/create-key-button'
+import { GatingAlert } from './components/public/gating-alert'
+import { ImageWorkspace } from './components/public/image-workspace'
+import { KeySelector } from './components/public/key-selector'
+import { ModelCatalog } from './components/public/model-catalog'
+import { ModelIntroHero } from './components/public/model-intro-card'
+import { VideoWorkspace } from './components/public/video-workspace'
+import { AUTO_GROUP } from './constants'
 import {
   PlaygroundCredentialProvider,
   usePlaygroundCredential,
 } from './context/credential-context'
-import { usePlaygroundKeys, useKeyReveal } from './hooks/use-playground-keys'
 import { useModelCatalog } from './hooks/use-model-catalog'
+import { usePlaygroundKeys, useKeyReveal } from './hooks/use-playground-keys'
 import { getPrimaryCapability } from './lib/capabilities'
-import { KeySelector } from './components/public/key-selector'
-import { CreateKeyButton } from './components/public/create-key-button'
-import { ModelCatalog } from './components/public/model-catalog'
-import { ModelIntroHero } from './components/public/model-intro-card'
-import { GatingAlert } from './components/public/gating-alert'
-import { ChatWorkspace } from './components/public/chat-workspace'
-import { ImageWorkspace } from './components/public/image-workspace'
-import { VideoWorkspace } from './components/public/video-workspace'
-import { AUTO_GROUP } from './constants'
 import type { CatalogFilter } from './types'
 
 // ============================================================================
@@ -73,9 +72,9 @@ function PlaygroundPublicContent() {
   const selectedKey = useMemo(
     () =>
       selectedKeyId != null
-        ? keys.find((k) => k.id === selectedKeyId) ?? null
+        ? (keys.find((k) => k.id === selectedKeyId) ?? null)
         : null,
-    [keys, selectedKeyId],
+    [keys, selectedKeyId]
   )
 
   // 选中 key 的分组 → 目录按此过滤；未选则传 null（全部/公开组）
@@ -104,7 +103,11 @@ function PlaygroundPublicContent() {
     // auto 分组：登录态即可发送聊天（session），不需要 sk- 密钥
     if (selectedKeyId == null) {
       setRevealedKey(null)
-      setCredential({ apiKey: null, authMode: 'session', sendGroup: AUTO_GROUP })
+      setCredential({
+        apiKey: null,
+        authMode: 'session',
+        sendGroup: AUTO_GROUP,
+      })
       return
     }
 
@@ -116,7 +119,11 @@ function PlaygroundPublicContent() {
     if (key == null) {
       setSelectedKeyId(null)
       setRevealedKey(null)
-      setCredential({ apiKey: null, authMode: 'session', sendGroup: AUTO_GROUP })
+      setCredential({
+        apiKey: null,
+        authMode: 'session',
+        sendGroup: AUTO_GROUP,
+      })
       return
     }
 
@@ -148,7 +155,7 @@ function PlaygroundPublicContent() {
     return () => {
       cancelled = true
     }
-  }, [isAuthed, selectedKeyId, keys, reveal, setCredential])
+  }, [isAuthed, selectedKeyId, keys, reveal, setCredential, t])
 
   // ── 选择 key 回调（id=选中密钥；null=切回 auto 分组，浏览全部模型）──────────────
   const handleSelectKey = useCallback((id: number | null) => {
@@ -156,7 +163,9 @@ function PlaygroundPublicContent() {
   }, [])
 
   // ── 当前能力（video>image>chat；未选模型按 chat）─────────────────────────────
-  const capability = selectedModel ? getPrimaryCapability(selectedModel) : 'chat'
+  const capability = selectedModel
+    ? getPrimaryCapability(selectedModel)
+    : 'chat'
 
   // ── 门控判定（§5，按能力区分）───────────────────────────────────────────────
   // - auto（session）：聊天可发送；图片/视频后端无对应端点，仍需选具体密钥
@@ -174,17 +183,23 @@ function PlaygroundPublicContent() {
     }
   } else if (selectedKeyId != null && !tokenReady) {
     // 选中了具体密钥但不可用 / 尚未就绪
-    gatingMessage = t('The selected key is unavailable; please reselect, or switch to auto')
+    gatingMessage = t(
+      'The selected key is unavailable; please reselect, or switch to auto'
+    )
   } else if (capability !== 'chat' && !tokenReady) {
     // 图片 / 视频：auto 分组无对应后端端点，必须选一个可用密钥
     if (hasNoKeys) {
-      gatingMessage = t('Image / video generation requires an API key; please create one first')
+      gatingMessage = t(
+        'Image / video generation requires an API key; please create one first'
+      )
       gatingAction = {
         label: t('Create API key'),
         onClick: () => void navigate({ to: '/keys' }),
       }
     } else {
-      gatingMessage = t('The auto group does not support image / video generation yet; please select an API key at the top')
+      gatingMessage = t(
+        'The auto group does not support image / video generation yet; please select an API key at the top'
+      )
     }
   }
   // 其余：聊天 + auto(session) 或 token 就绪 → 无门控，可发送
@@ -213,10 +228,14 @@ function PlaygroundPublicContent() {
         // capability===null：选中的模型既非聊天/图片/视频（embedding/rerank 等），
         // 不给可发送的工作区，改渲染禁用占位，避免对错误能力的模型发请求。
         return (
-          <div className='flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground'>
-            <p className='text-sm'>{t('This model is not yet supported in the studio')}</p>
+          <div className='text-muted-foreground flex h-full flex-col items-center justify-center gap-2 p-6 text-center'>
+            <p className='text-sm'>
+              {t('This model is not yet supported in the studio')}
+            </p>
             <p className='text-xs'>
-              {t('Only non-creative endpoints like embedding / rerank are supported; please choose a chat / image / video model on the left')}
+              {t(
+                'Only non-creative endpoints like embedding / rerank are supported; please choose a chat / image / video model on the left'
+              )}
             </p>
           </div>
         )
@@ -226,12 +245,12 @@ function PlaygroundPublicContent() {
   return (
     <div className='flex h-[calc(100svh-3.5rem)] min-h-0 flex-col overflow-hidden pt-14'>
       {/* 页面工具条 */}
-      <div className='flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-3'>
+      <div className='border-border flex shrink-0 flex-wrap items-center gap-3 border-b px-4 py-3'>
         <div className='mr-auto flex min-w-0 flex-col gap-0.5'>
-          <h1 className='truncate text-lg font-semibold text-foreground'>
+          <h1 className='text-foreground truncate text-lg font-semibold'>
             {t('AI Model Aggregation Platform')}
           </h1>
-          <p className='truncate text-[0.8rem] leading-tight text-muted-foreground'>
+          <p className='text-muted-foreground truncate text-[0.8rem] leading-tight'>
             {t('Select a key and model to start chat / image / video creation')}
           </p>
         </div>
@@ -274,7 +293,7 @@ function PlaygroundPublicContent() {
 
         {/* 右：工作区（未选模型时以「模型介绍」英雄区占据主区居中引导；
             选中后由各工作区在空态内渲染介绍卡作为中央主角） */}
-        <div className='min-h-0 overflow-hidden rounded-xl border border-border bg-card'>
+        <div className='border-border bg-card min-h-0 overflow-hidden rounded-xl border'>
           {selectedModel ? (
             renderWorkspace()
           ) : (

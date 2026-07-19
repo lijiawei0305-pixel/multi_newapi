@@ -1,0 +1,651 @@
+/* ==========================================
+   Wedream AI - Deep Sea Design System (CSS)
+   ========================================== */
+
+:root {
+  --font-title: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Deep Sea Color Palette (Harmonious HSL) */
+  --bg-deep: hsl(224, 71%, 3%);       /* Dark navy ocean bottom */
+  --bg-abyss: #010408;
+  --glow-cyan: hsl(184, 100%, 50%);    /* Bioluminescent cyan */
+  --glow-teal: hsl(160, 100%, 50%);
+  --glow-blue: hsl(217, 100%, 50%);
+  --glow-violet: hsl(265, 100%, 60%);
+  --glow-gold: hsl(43, 100%, 65%);
+
+  --text-primary: hsl(210, 40%, 98%);  /* Clean bright white */
+  --text-muted: hsl(215, 20%, 65%);    /* Subdued ocean mist */
+  --text-dim: hsl(215, 12%, 40%);      /* Dark shadow text */
+
+  --glass-bg: rgba(3, 10, 24, 0.35);   /* Super thin transparent glass */
+  --glass-border: rgba(255, 255, 255, 0.05);
+  --glass-glow: rgba(0, 240, 255, 0.05);
+
+  --transition-speed: 0.3s;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Canvas Base */
+#webgl-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1;
+  pointer-events: auto;
+  background: radial-gradient(circle at 50% 50%, #061730 0%, #020712 60%, #000206 100%);
+}
+
+/* Vignette & Ambient Background Glows */
+.vignette {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(circle, transparent 35%, rgba(1, 4, 8, 0.8) 100%);
+}
+
+.glow-bg {
+  position: fixed;
+  width: 50vmax;
+  height: 50vmax;
+  border-radius: 50%;
+  filter: blur(140px);
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.12;
+  mix-blend-mode: screen;
+}
+
+.glow-bg-1 {
+  top: -15%;
+  right: -5%;
+  background: radial-gradient(circle, var(--glow-blue) 0%, transparent 70%);
+  animation: floatGlow 20s ease-in-out infinite alternate;
+}
+
+.glow-bg-2 {
+  bottom: -15%;
+  left: -5%;
+  background: radial-gradient(circle, var(--glow-cyan) 0%, transparent 70%);
+  animation: floatGlow 28s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes floatGlow {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(-4%, 4%) scale(1.15); }
+  100% { transform: translate(4%, -4%) scale(0.85); }
+}
+
+/* UI Wrapper Layout (Floating layer over WebGL) */
+.ui-wrapper {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  height: 100vh;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* Enable pointer events for active UI elements */
+.navbar,
+.hero-left,
+.hud-panel,
+.footer-dashboard {
+  pointer-events: auto;
+}
+
+/* ==========================================
+   Header Navbar
+   ========================================== */
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 3.5rem;
+  background: linear-gradient(to bottom, rgba(1, 4, 8, 0.6) 0%, rgba(1, 4, 8, 0) 100%);
+  z-index: 100;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.logo-svg {
+  animation: logoPulse 16s linear infinite;
+}
+
+@keyframes logoPulse {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.logo-text {
+  font-family: var(--font-title);
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  background: linear-gradient(120deg, #ffffff, var(--glow-cyan));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0.4rem 1.25rem;
+  border-radius: 100px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(8px);
+}
+
+.nav-item {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--transition-speed);
+}
+
+.nav-item:hover, .nav-item.active {
+  color: var(--glow-cyan);
+}
+
+.nav-cta {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.btn-text {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: color var(--transition-speed);
+}
+
+.btn-text:hover {
+  color: var(--text-primary);
+}
+
+.btn-primary-sm {
+  background: linear-gradient(135deg, var(--glow-cyan), var(--glow-blue));
+  color: #010408;
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.5rem 1.1rem;
+  border-radius: 100px;
+  box-shadow: 0 4px 12px rgba(0, 240, 255, 0.15);
+  transition: transform var(--transition-speed), box-shadow var(--transition-speed);
+}
+
+.btn-primary-sm:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 16px rgba(0, 240, 255, 0.25);
+}
+
+/* ==========================================
+   Hero Layout
+   ========================================== */
+.hero-container {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  padding: 0 4.5rem;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  width: 100%;
+  align-items: center;
+  gap: 3rem;
+}
+
+.hero-left {
+  max-width: 580px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  text-shadow: 0 4px 20px rgba(1, 4, 8, 0.5);
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  align-self: flex-start;
+  padding: 0.35rem 0.85rem;
+  border-radius: 100px;
+  background: rgba(0, 240, 255, 0.04);
+  border: 1px solid rgba(0, 240, 255, 0.12);
+}
+
+.badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--glow-cyan);
+  box-shadow: 0 0 8px var(--glow-cyan);
+  animation: pulseGlow 2s infinite alternate;
+}
+
+@keyframes pulseGlow {
+  0% { transform: scale(0.9); opacity: 0.6; }
+  100% { transform: scale(1.3); opacity: 1; }
+}
+
+.badge-text {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: var(--glow-cyan);
+  text-transform: uppercase;
+}
+
+.hero-title {
+  font-family: var(--font-title);
+  font-size: 3.25rem;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -1.2px;
+  color: var(--text-primary);
+}
+
+.gradient-text {
+  background: linear-gradient(120deg, var(--glow-cyan), var(--glow-blue) 45%, var(--glow-violet));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 30px rgba(0, 240, 255, 0.1);
+}
+
+.hero-desc {
+  font-size: 1rem;
+  line-height: 1.55;
+  font-weight: 300;
+  color: var(--text-muted);
+}
+
+.hero-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.25rem;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--glow-cyan), var(--glow-blue));
+  border: none;
+  color: #010408;
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.85rem 1.75rem;
+  border-radius: 100px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  box-shadow: 0 4px 15px rgba(0, 240, 255, 0.2);
+  transition: transform var(--transition-speed), box-shadow var(--transition-speed);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 240, 255, 0.35);
+}
+
+.btn-primary svg {
+  transition: transform var(--transition-speed);
+}
+
+.btn-primary:hover svg {
+  transform: translateX(3px);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.85rem 1.75rem;
+  border-radius: 100px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: background-color var(--transition-speed), border-color var(--transition-speed), transform var(--transition-speed);
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--glow-cyan);
+  transform: translateY(-1px);
+}
+
+/* Hero Metrics Panel */
+.hero-metrics {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  margin-top: 1rem;
+}
+
+.metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.metric-value {
+  font-family: var(--font-title);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--text-primary);
+}
+
+.metric-label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metric-divider {
+  width: 1px;
+  height: 2rem;
+  background-color: var(--glass-border);
+}
+
+/* ==========================================
+   Minimalist HUD Panel (Floating HUD Style)
+   ========================================== */
+.hud-panel {
+  align-self: center;
+  justify-self: end;
+  width: 280px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 1.15rem;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), inset 0 0 15px rgba(255, 255, 255, 0.01);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transform: translateY(15px);
+  animation: hudFadeIn 0.8s forwards cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  border-left: 2px solid var(--glow-cyan);
+  transition: border-color 0.5s ease;
+}
+
+@keyframes hudFadeIn {
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.hud-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.hud-status-dot {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--glow-cyan);
+  box-shadow: 0 0 6px var(--glow-cyan);
+  animation: pulseGreen 1.5s infinite alternate;
+  transition: background-color 0.5s ease, box-shadow 0.5s ease;
+}
+
+@keyframes pulseGreen {
+  0% { transform: scale(0.85); opacity: 0.5; }
+  100% { transform: scale(1.25); opacity: 1; }
+}
+
+.hud-title {
+  font-family: var(--font-title);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.2px;
+}
+
+.hud-subtitle {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--glow-cyan);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  transition: color 0.5s ease;
+}
+
+.hud-desc {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  padding-top: 0.6rem;
+  min-height: 54px;
+}
+
+.hud-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.7rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  padding-top: 0.6rem;
+}
+
+.hud-label {
+  color: var(--text-dim);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+.hud-value {
+  color: var(--glow-cyan);
+  font-weight: 600;
+  font-family: var(--font-title);
+  transition: color 0.5s ease;
+}
+
+/* ==========================================
+   Footer Minimalist Widget
+   ========================================== */
+.footer-dashboard {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 3.5rem;
+  background: linear-gradient(to top, rgba(1, 4, 8, 0.6) 0%, rgba(1, 4, 8, 0) 100%);
+  z-index: 10;
+}
+
+/* Scroll Discover */
+.scroll-discover {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.scroll-text {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+}
+
+.mouse-icon {
+  width: 14px;
+  height: 22px;
+  border-radius: 8px;
+  border: 1.2px solid var(--text-dim);
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.mouse-wheel {
+  width: 2px;
+  height: 4px;
+  border-radius: 100px;
+  background-color: var(--glow-cyan);
+  position: absolute;
+  top: 3px;
+  animation: scrollAnim 1.8s infinite ease-in-out;
+}
+
+@keyframes scrollAnim {
+  0% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(4px); opacity: 0.4; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* Minimalist Status Indicator */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--glass-border);
+  padding: 0.4rem 0.9rem;
+  border-radius: 100px;
+  backdrop-filter: blur(8px);
+}
+
+.status-indicator-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--glow-teal);
+  box-shadow: 0 0 6px var(--glow-teal);
+  animation: pulseGreen 1.5s infinite alternate;
+}
+
+.status-indicator-text {
+  letter-spacing: 0.2px;
+  color: var(--text-muted);
+}
+
+/* ==========================================
+   Micro-animations & Utilities
+   ========================================== */
+.animate-fade-in {
+  opacity: 0;
+  transform: translateY(8px);
+  animation: fadeInUp 0.8s forwards;
+}
+
+.animate-slide-up {
+  opacity: 0;
+  transform: translateY(15px);
+  animation: fadeInUp 0.8s forwards;
+}
+
+.animate-fade-in-delayed {
+  opacity: 0;
+  animation: fadeIn 1s forwards 0.4s;
+}
+
+.hero-left > .animate-slide-up:nth-child(2) { animation-delay: 0.08s; }
+.hero-left > .animate-slide-up:nth-child(3) { animation-delay: 0.16s; }
+.hero-left > .animate-slide-up:nth-child(4) { animation-delay: 0.24s; }
+
+@keyframes fadeInUp {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  to { opacity: 1; }
+}
+
+/* ==========================================
+   Responsive Adaptation
+   ========================================== */
+@media (max-width: 1200px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+    gap: 3rem;
+  }
+
+  .hero-right {
+    justify-self: center;
+  }
+
+  .hud-panel {
+    width: 100%;
+    max-width: 360px;
+    align-self: center;
+  }
+
+  .footer-dashboard {
+    padding: 1rem 1.5rem;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .scroll-discover {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .navbar {
+    padding: 1rem 1.5rem;
+  }
+
+  .nav-links {
+    display: none;
+  }
+
+  .hero-container {
+    padding: 0 1.5rem;
+  }
+
+  .hero-title {
+    font-size: 2.25rem;
+  }
+
+  .hero-actions {
+    flex-direction: column;
+  }
+}

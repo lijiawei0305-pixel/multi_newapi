@@ -1,114 +1,78 @@
-# 真实微信/支付宝支付上线指南（auth-service 真实模式）
+# 真实微信/支付宝支付上线指南（主站进程内模式）
 
-> ⚠️ **已过时（2026-07-01）**：auth-service 独立支付网关**已退役**。真实微信(Native)/支付宝(电脑网站)
-> 现由**主站进程内真实 SDK** 落地（`internal/payment/realpay` + `internal/mtwire/payment_inprocess.go`），
-> 凭据存 **DB 后台表单**（系统设置 → 支付 → 微信/支付宝 选项卡），回调走 `/api/pay/{wechat,alipay}/notify`
-> （经主站 nginx `location /` 反代，无需独立 auth-service 块）。买家入口：钱包页官方微信/支付宝卡片，
-> 由管理员在「新增支付方式」里以 `wxpay_official` / `alipay_official` 标识上架。
-> 本文档下方的 auth-service 部署/nginx/config.yaml 步骤**仅作历史参考**，请勿据此部署。
+> 当前生产拓扑只有 `app + mysql + redis`。微信 Native 与支付宝电脑网站支付 SDK 运行在主站进程内，
+> 商户凭据通过管理后台写入现有 options 数据库配置，不需要独立支付进程、额外回环端口或单独的 Nginx upstream。请用数据库访问控制和受限备份保护这些凭据。
 
-- **整理时间**: 2026-06-30
-- **Purpose**: 把 auth-service 从 mock 切到真实微信 Native + 支付宝电脑网站支付的服务器上线步骤。
-- **前置**: 已拿到商户凭据（见 `CLAUDE.md` 待办看板 🔴）。私钥/证书**绝不入库**，只放服务器。
+## 1. 上线前置
 
-> 入账侧（主站 internal/payment + internal/mtwire + 原生订阅/钱包）零改；本指南只动 auth-service 部署 + nginx + 凭据。
+- 按 [`deploy/.env.test.example`](../../../deploy/.env.test.example) 创建服务器 `.env`，权限设为 `600`。
+- `MT_PAY_NOTIFY_BASE` 必须是外部可访问的 HTTPS 规范域名，例如 `https://tokendream.wedreamhub.com`；不要带路径或末尾 `/`。
+- 按 [`deploy/docker-compose.test.yml`](../../../deploy/docker-compose.test.yml) 启动唯一生产栈。
+- Nginx 使用仓库 `deploy/nginx/` 下对应 vhost：HTTP 只做 308 HTTPS 跳转，HTTPS 的普通流量统一反代主站回环端口，`/api/internal/` 保持公网 404。
+- Cloudflare 使用 Full strict，并确认源站证书覆盖实际回调域名。
 
----
+主站会按渠道生成以下固定异步通知地址：
 
-## 1. 代码侧改动（已完成，待服务器构建验证 W4）
+- 微信：`$MT_PAY_NOTIFY_BASE/api/pay/wechat/notify`
+- 支付宝：`$MT_PAY_NOTIFY_BASE/api/pay/alipay/notify`
 
-- 真实适配器：`auth-service/realpay/{realpay,wxpay,alipay}.go`（微信 `wechatpay-go`、支付宝 `smartwalle/alipay/v3`）。
-- auth-service 真实模式接线：`auth-service/{config.go,server.go}`（`mock:false` 放行 + 无状态 verify-and-forward）。
-- 依赖：`go.mod` 已加 `wechatpay-apiv3/wechatpay-go`、`smartwalle/alipay/v3`。
-- 金额反篡改：主站内网入账比对 `paid_amount` 与库内订单（`internal/payment/credit.go`、`internal/mtwire`）。
-- notify 路径修复：微信回调 `/pay/wxpay/notify` 已在 auth-service 与 nginx 注册/转发。
+回调 handler 内执行平台验签、订单金额核对与幂等入账。不要用手工 HTTP 请求伪造成功回调。
 
-**服务器首次构建（W4）**：
+## 2. 配置商户凭据
+
+1. 以管理员身份进入「系统设置 → 集成 → 支付」。
+2. 分别在微信、支付宝选项卡填写商户号、应用 ID、平台证书/公钥及商户私钥等字段。
+3. 使用管理页连接验证；验证不通过时不要启用对应渠道。
+4. 在「新增支付方式」中按需上架 `wxpay_official` 或 `alipay_official`。
+
+私钥、API v3 key 与平台证书不得写进仓库、Compose 文件、命令历史或本指南。轮换凭据时先在受控窗口验证新配置，再删除旧密钥。
+
+## 3. 部署与依赖验收
+
+从仓库根执行受支持的发布入口：
+
+```bash
+./deploy/ops/deploy.sh
+```
+
+在服务器确认三服务拓扑、依赖 readiness 与运行制品版本：
+
+```bash
+cd /root/newapi-test/deploy/ops
+./healthcheck.sh
+docker compose -p newapi_test --env-file /root/newapi-test/.env \
+  -f /root/newapi-test/deploy/docker-compose.test.yml ps
+```
+
+`healthcheck.sh` 必须同时通过 `/health/live`、依赖感知的 `/health/ready` 以及 app/mysql/redis 容器检查。`/api/status` 仅用于版本身份，不可替代 readiness。
+
+## 4. 受控小额验收
+
+真实资金演示默认拒绝运行；必须显式确认后执行：
+
 ```bash
 ssh newapi628
-cd /path/to/repo
-go mod tidy                      # 拉取两个支付 SDK + go.sum
-go build ./...                   # 全量编译
-go test ./internal/payment/... ./internal/mtwire/... ./auth-service/...
+cd /root/newapi-test/deploy/demo
+export ADMIN_PASS='当前管理员口令'
+ALLOW_REAL_PAYMENT_DEMO=1 PAY_PROVIDER=wxpay ./demo.sh
 ```
-> ⚠️ `auth-service/realpay/alipay.go` 中 `TradePagePay` / `TradeQuery` 标了 `NOTE(W4)`：
-> 若 pinned 的 smartwalle/alipay/v3 版本方法签名/字段不同，按注释微调（1-2 行）。
 
----
+验收至少覆盖：
 
-## 2. 放置凭据文件（服务器，chmod 600）
+1. 充值下单返回支付凭据；真实付款后订单只入账一次。
+2. 套餐付款后 SUB 订单激活一条原生订阅，重复通知不重复发货或分润。
+3. 暂时中断回调后，支付对账能通过平台主动查单补入账。
+4. 平台返回金额与本地订单不一致时拒绝入账并保留可审计错误。
+5. 演示后执行只读账目对账：
 
 ```bash
-mkdir -p /root/newapi-test/secrets && chmod 700 /root/newapi-test/secrets
-# 微信商户私钥
-cp apiclient_key.pem            /root/newapi-test/secrets/wx_apiclient_key.pem
-# 支付宝应用私钥（PKCS#8）+ 支付宝公钥
-cp alipay_app_private_key.pem   /root/newapi-test/secrets/alipay_app_private_key.pem
-cp alipay_public_key.pem        /root/newapi-test/secrets/alipay_public_key.pem
-chmod 600 /root/newapi-test/secrets/*
+cd /root/newapi-test/deploy/ops
+./reconcile.sh
 ```
 
----
+## 5. 故障处置与回退
 
-## 3. 填环境变量（服务器 .env，不入库）
-
-参照 `deploy/.env.test.example` 取消注释并填值，关键项：
-```ini
-AUTH_MOCK=false
-MT_PAY_NOTIFY_BASE=https://tokendream.wedreamhub.com      # 与下方 nginx 域名一致
-MT_INTERNAL_SECRET=<强随机，主站与 auth-service 同值>
-AUTH_USD_TO_CNY_RATE=7.3                                  # 必须与主站 USDExchangeRate 同值（否则金额校验失败）
-# 微信
-AUTH_WXPAY_APP_ID / AUTH_WXPAY_MCH_ID / AUTH_WXPAY_APIV3_KEY / AUTH_WXPAY_CERT_SERIAL
-AUTH_WXPAY_PRIVATE_KEY_PATH=/etc/auth-service/secrets/wx_apiclient_key.pem
-# 支付宝
-AUTH_ALIPAY_APP_ID
-AUTH_ALIPAY_PRIVATE_KEY_PATH=/etc/auth-service/secrets/alipay_app_private_key.pem
-AUTH_ALIPAY_PUBLIC_KEY_PATH=/etc/auth-service/secrets/alipay_public_key.pem
-AUTH_ALIPAY_RETURN_URL=https://tokendream.wedreamhub.com/order/status
-AUTH_ALIPAY_SANDBOX=false                                 # 先 true 沙箱验收，再切 false
-```
-并在 `deploy/docker-compose.test.yml` 的 auth-service 取消注释挂载 secrets 目录：
-```yaml
-    volumes:
-      - /root/newapi-test/secrets:/etc/auth-service/secrets:ro
-```
-> 容器内路径 `/etc/auth-service/secrets/...` 须与 `AUTH_*_KEY_PATH` 一致。
-
----
-
-## 4. nginx（已在 `deploy/nginx/tokendream.wedreamhub.com.conf` 配好，核对即可）
-
-- `^~ /auth/` → 127.0.0.1:8180（支付宝回调 `/auth/alipay/notify`、mock 页）
-- `^~ /pay/`  → 127.0.0.1:8180（**微信回调 `/pay/wxpay/notify`**）
-- `^~ /api/internal/` → `return 404`（内网入账端点，绝不暴露公网）
-
-商户后台回调地址需登记：
-- 微信「支付结果通知」域名 → `https://<域名>/pay/wxpay/notify`
-- 支付宝 `notify_url` 由下单参数动态传，无需后台登记；但需 ICP 备案 + 应用网关可达。
-
----
-
-## 5. 重建并启动
-
-```bash
-docker compose -p newapi_test --env-file /root/newapi-test/.env \
-  -f deploy/docker-compose.test.yml up -d --build
-curl -s https://<域名>/auth/healthz        # 期望 {"success":true,"mock":false}
-```
-
----
-
-## 6. 沙箱/小额验收（先沙箱，后正式）
-
-1. 充值：前端发起 → 微信出二维码 / 支付宝跳转 → 支付 → 回调验签入账 → 余额到账。
-2. 套餐：购买 → 激活原生订阅 → `/v1` 走订阅桶。
-3. 幂等：人为重推回调（或等平台重推）→ 余额只加一次。
-4. 兜底：临时停 app（断回调）→ 支付 → 恢复 → 5min 内对账循环主动查单补入账。
-5. 金额：构造金额不一致回调（仅测试环境）→ 主站拒绝入账并告警（PAY_AMOUNT_MISMATCH）。
-
----
-
-## 7. 回滚
-
-设 `AUTH_MOCK=true` 重新 `up -d` 即退回 mock；主站入账链路不变，不影响 System 1（epay/stripe/waffo）。
+- 单渠道异常：先在管理后台停用该渠道，保留订单与回调记录供对账，不切换到伪支付或手工确认。
+- 回调超时：先查商户后台真实交易状态，再看支付对账页；不得直接修改订单状态。
+- 发布回退：使用 [`deploy/ops/rollback.sh`](../../../deploy/ops/rollback.sh) 的成对 release 回滚，并要求版本/readiness 验收通过。
+- 数据恢复：只能使用配对 MySQL + Redis manifest，严格遵循 [`deploy/ops/README.md`](../../../deploy/ops/README.md) 的维护停流流程。

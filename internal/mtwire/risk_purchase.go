@@ -43,13 +43,15 @@ func (a tokenplanRiskAdapter) ReleasePurchaseClaim(ctx context.Context, in token
 	if a.eng == nil {
 		return nil // 无风控引擎（Redis 关）→ 无键可释放
 	}
+	if in.PlanCode != "trial" {
+		compensator, ok := a.eng.(risk.PurchaseLimitCompensator)
+		if !ok || compensator == nil {
+			return nil
+		}
+		return compensator.RollbackPurchaseLimit(ctx, in.PlanID, in.UserID)
+	}
 	admin, ok := a.eng.(risk.PurchaseLimitAdmin)
 	if !ok || admin == nil {
-		return nil
-	}
-	if in.PlanCode != "trial" {
-		// 非 Trial 用 Incr 计数键，ReleasePurchaseLimit 的 Del 会整键清零→过度释放（PerUserLimit≥2
-		// 且已有合法计数时），正确做法是原子递减原语，列为后续。故此处 no-op，不引入过度释放。
 		return nil
 	}
 	_, err := admin.ReleaseTrialLimit(ctx, in.UserID, risk.PurchaseIdentity{

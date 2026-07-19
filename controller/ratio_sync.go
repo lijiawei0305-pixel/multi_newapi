@@ -253,7 +253,7 @@ func FetchUpstreamRatios(c *gin.Context) {
 
 			httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 			if err != nil {
-				logger.LogWarn(c.Request.Context(), "build request failed: "+err.Error())
+				logger.LogWarn(c.Request.Context(), fmt.Sprintf("build request failed: error_type=%T", err))
 				ch <- upstreamResult{Name: uniqueName, Err: err.Error()}
 				return
 			}
@@ -291,7 +291,7 @@ func FetchUpstreamRatios(c *gin.Context) {
 				time.Sleep(time.Duration(200*(1<<attempt)) * time.Millisecond)
 			}
 			if lastErr != nil {
-				logger.LogWarn(c.Request.Context(), "http error on "+chItem.Name+": "+lastErr.Error())
+				logger.LogWarn(c.Request.Context(), fmt.Sprintf("http error on %s: error_type=%T", chItem.Name, lastErr))
 				ch <- upstreamResult{Name: uniqueName, Err: lastErr.Error()}
 				return
 			}

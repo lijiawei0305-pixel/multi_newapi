@@ -20,8 +20,8 @@ import { MousePointerClick } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/ui/badge'
-import { getLobeIcon } from '@/lib/lobe-icon'
 import type { PricingModel } from '@/features/pricing/types'
+import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
 import {
@@ -57,13 +57,17 @@ export function ModelIntroHero({ model, className }: ModelIntroHeroProps) {
           className
         )}
       >
-        <div className='flex size-14 items-center justify-center rounded-2xl bg-muted ring-1 ring-foreground/10'>
-          <MousePointerClick className='size-6 text-muted-foreground' />
+        <div className='bg-muted ring-foreground/10 flex size-14 items-center justify-center rounded-2xl ring-1'>
+          <MousePointerClick className='text-muted-foreground size-6' />
         </div>
         <div className='flex flex-col gap-1'>
-          <p className='text-sm font-medium text-foreground'>{t('Select a model')}</p>
-          <p className='text-xs text-muted-foreground'>
-            {t('Pick from the catalog on the left to view capabilities, pricing and details, then start creating')}
+          <p className='text-foreground text-sm font-medium'>
+            {t('Select a model')}
+          </p>
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'Pick from the catalog on the left to view capabilities, pricing and details, then start creating'
+            )}
           </p>
         </div>
       </div>
@@ -88,11 +92,11 @@ export function ModelIntroHero({ model, className }: ModelIntroHeroProps) {
       )}
     >
       {/* 厂商 logo */}
-      <div className='flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-muted ring-1 ring-foreground/10'>
+      <div className='bg-muted ring-foreground/10 flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl ring-1'>
         {iconKey ? (
           getLobeIcon(iconKey, 40)
         ) : (
-          <span className='text-2xl font-semibold text-muted-foreground'>
+          <span className='text-muted-foreground text-2xl font-semibold'>
             {initial}
           </span>
         )}
@@ -100,7 +104,7 @@ export function ModelIntroHero({ model, className }: ModelIntroHeroProps) {
 
       {/* 名称 + 能力 / 计费徽章 */}
       <div className='flex flex-col items-center gap-2'>
-        <h2 className='text-xl font-semibold tracking-tight text-foreground'>
+        <h2 className='text-foreground text-xl font-semibold tracking-tight'>
           {model.model_name}
         </h2>
         <div className='flex flex-wrap items-center justify-center gap-1.5'>
@@ -117,8 +121,8 @@ export function ModelIntroHero({ model, className }: ModelIntroHeroProps) {
 
       {/* 介绍正文（独立成块，保留换行） */}
       {model.description && (
-        <div className='w-full rounded-xl bg-muted/40 px-5 py-4'>
-          <p className='whitespace-pre-line text-left text-sm leading-relaxed text-muted-foreground'>
+        <div className='bg-muted/40 w-full rounded-xl px-5 py-4'>
+          <p className='text-muted-foreground text-left text-sm leading-relaxed whitespace-pre-line'>
             {model.description}
           </p>
         </div>

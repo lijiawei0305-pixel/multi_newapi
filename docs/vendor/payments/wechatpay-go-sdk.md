@@ -248,17 +248,16 @@ github.com/wechatpay-apiv3/wechatpay-go/
 
 ## 本项目接入配置示例
 
-```yaml
-# auth-service/config.yaml（仅示意，不含真实值）
-wxpay:
-  mock: false                        # true=Mock，false=真实
-  app_id: "wx_YOUR_APPID"
-  mch_id: "YOUR_MCH_ID"
-  api_v3_key: "YOUR_32_CHAR_KEY"
-  cert_serial: "YOUR_CERT_SERIAL"
-  private_key_path: "/etc/secrets/apiclient_key.pem"
-  notify_url: "https://your-domain.com/api/payment/wechat/notify"
+本项目不通过仓库 YAML 组装 SDK。管理员在「系统设置 → 集成 → 支付 → 微信」维护并验证 AppID、商户号、
+API v3 key、证书序列号和商户私钥；主站进程内 provider manager 从现有 options 配置初始化 SDK。数据库和备份必须限制访问。
+
+异步通知固定为：
+
+```text
+https://your-domain.com/api/pay/wechat/notify
 ```
+
+完整上线步骤见 [`deploy-real-payments.md`](deploy-real-payments.md)。
 
 ---
 

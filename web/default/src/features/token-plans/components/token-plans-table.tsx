@@ -16,10 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { DataTablePage, useDataTable } from '@/components/data-table'
+
 import { getAdminTokenPlans } from '../api'
 import { useTokenPlansColumns } from './token-plans-columns'
 import { useTokenPlans } from './token-plans-provider'
@@ -53,9 +55,7 @@ export function TokenPlansTable() {
       columns={columns}
       isLoading={isLoading}
       emptyTitle={t('No token plans yet')}
-      emptyDescription={t(
-        'Click "Create Token Plan" to add your first plan'
-      )}
+      emptyDescription={t('Click "Create Token Plan" to add your first plan')}
       skeletonKeyPrefix='token-plans-skeleton'
       applyHeaderSize
     />

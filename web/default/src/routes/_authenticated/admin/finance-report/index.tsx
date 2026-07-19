@@ -17,9 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { useAuthStore } from '@/stores/auth-store'
-import { ROLE } from '@/lib/roles'
+
 import { AdminFinancialReport } from '@/features/financial-report/admin'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 // Admin platform-wide financial report. Cross-tenant (AdminAuth backend); the
 // route gate mirrors `withdrawals` — anything below ROLE.ADMIN is redirected to

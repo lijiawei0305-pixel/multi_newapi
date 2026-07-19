@@ -2,15 +2,12 @@ package model
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 
 	"github.com/gin-gonic/gin"
-
-	"github.com/bytedance/gopkg/util/gopool"
 )
 
 // UserBase struct remains the same as it represents the cached data structure
@@ -54,7 +51,7 @@ func invalidateUserCache(userId int) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisDelKey(getUserCacheKey(userId))
+	return invalidateAuthCache(getUserCacheKey(userId))
 }
 
 // InvalidateUserCache is the exported version of invalidateUserCache.
@@ -63,29 +60,22 @@ func InvalidateUserCache(userId int) error {
 	return invalidateUserCache(userId)
 }
 
-// updateUserCache updates all user cache fields using hash
-func updateUserCache(user User) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-
-	return common.RedisHSetObj(
-		getUserCacheKey(user.Id),
-		user.ToBaseUser(),
-		time.Duration(common.RedisKeyCacheSeconds())*time.Second,
-	)
+func cacheFillUser(user User, generation authCacheGenerationSnapshot) error {
+	return fillAuthCacheIfCurrent(getUserCacheKey(user.Id), generation, user.ToBaseUser())
 }
 
 // GetUserCache gets complete user cache from hash
 func GetUserCache(userId int) (userCache *UserBase, err error) {
 	var user *User
 	var fromDB bool
+	var generation authCacheGenerationSnapshot
 	defer func() {
 		// Update Redis cache asynchronously on successful DB read
-		if shouldUpdateRedis(fromDB, err) && user != nil {
-			gopool.Go(func() {
-				if err := updateUserCache(*user); err != nil {
-					common.SysLog("failed to update user status cache: " + err.Error())
+		if shouldUpdateRedis(fromDB, err) && user != nil && generation.valid {
+			loadedUser := *user
+			scheduleAuthCacheFill(func() {
+				if fillErr := cacheFillUser(loadedUser, generation); fillErr != nil {
+					common.SysLog("failed to fill user cache: " + fillErr.Error())
 				}
 			})
 		}
@@ -95,6 +85,14 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 	userCache, err = cacheGetUserBase(userId)
 	if err == nil {
 		return userCache, nil
+	}
+
+	if common.RedisEnabled {
+		generation, err = snapshotAuthCacheGeneration(getUserCacheKey(userId))
+		if err != nil {
+			common.SysLog("failed to snapshot user cache generation: " + err.Error())
+			generation = authCacheGenerationSnapshot{}
+		}
 	}
 
 	// If Redis fails, get from DB
@@ -136,7 +134,7 @@ func cacheIncrUserQuota(userId int, delta int64) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisHIncrBy(getUserCacheKey(userId), "Quota", delta)
+	return incrementAuthCacheField(getUserCacheKey(userId), "Quota", delta)
 }
 
 func cacheDecrUserQuota(userId int, delta int64) error {
@@ -184,48 +182,11 @@ func getUserSettingCache(userId int) (dto.UserSetting, error) {
 	return cache.GetSetting(), nil
 }
 
-// New functions for individual field updates
-func updateUserStatusCache(userId int, status bool) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	statusInt := common.UserStatusEnabled
-	if !status {
-		statusInt = common.UserStatusDisabled
-	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Status", fmt.Sprintf("%d", statusInt))
-}
-
-func updateUserQuotaCache(userId int, quota int) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Quota", fmt.Sprintf("%d", quota))
-}
-
-func updateUserGroupCache(userId int, group string) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Group", group)
-}
-
 func UpdateUserGroupCache(userId int, group string) error {
-	return updateUserGroupCache(userId, group)
-}
-
-func updateUserNameCache(userId int, username string) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Username", username)
-}
-
-func updateUserSettingCache(userId int, setting string) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Setting", setting)
+	_ = group
+	// The caller has already committed the authoritative group change. Delete
+	// the full hash so a subsequent request reloads a coherent user snapshot.
+	return invalidateUserCache(userId)
 }
 
 // GetUserLanguage returns the user's language preference from cache

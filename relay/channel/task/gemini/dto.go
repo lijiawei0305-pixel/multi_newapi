@@ -18,7 +18,7 @@ type VeoInstance struct {
 // VeoParameters represents the parameters block for Veo predictLongRunning.
 type VeoParameters struct {
 	SampleCount        int    `json:"sampleCount"`
-	DurationSeconds    int    `json:"durationSeconds,omitempty"`
+	DurationSeconds    *int   `json:"durationSeconds,omitempty"`
 	AspectRatio        string `json:"aspectRatio,omitempty"`
 	Resolution         string `json:"resolution,omitempty"`
 	NegativePrompt     string `json:"negativePrompt,omitempty"`

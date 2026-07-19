@@ -66,7 +66,7 @@ type rechargeCreditLedgerRow struct {
 	OrderNo   string    `gorm:"column:order_no;primaryKey;type:varchar(64)"`
 	TenantID  int64     `gorm:"column:tenant_id;not null;index"`
 	UserID    int64     `gorm:"column:user_id;not null;index"`
-	Quota     int64     `gorm:"column:quota;not null"`                              // 入账的原生 quota 单位
+	Quota     int64     `gorm:"column:quota;not null"`                                   // 入账的原生 quota 单位
 	AmountUSD float64   `gorm:"column:amount_usd;type:decimal(20,4);not null;default:0"` // 入账美元额（审计）
 	CreatedAt time.Time `gorm:"column:created_at"`
 }

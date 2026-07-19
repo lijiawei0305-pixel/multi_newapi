@@ -5,7 +5,11 @@ package mtwire
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"math"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agent"
@@ -23,6 +27,10 @@ import (
 // 由 SetMtRouter 在所有节点调用一次。所有钩子都装：原生 service/controller/计费侧旁路调用，nil 即未装配回退。
 func (a *App) InstallHooks() {
 	agenthook.ConsumeCommission = a.creditConsumeCommission
+	agenthook.PrepareConsumeCommission = a.prepareConsumeCommission
+	agenthook.PersistConsumeCommission = a.persistConsumeCommission
+	agenthook.PrepareConsumeCommissionPolicy = a.prepareConsumeCommissionPolicy
+	agenthook.MaterializeConsumeCommissionPolicy = materializeConsumeCommissionPolicy
 	agenthook.AttributeRegistration = a.attributeRegistration
 	a.InstallModelGroup2DHook()
 	agenthook.ScanUserInput = a.scanUserInputHook // 6e 违禁词：/v1 转发前扫描用户输入
@@ -116,40 +124,164 @@ func (a *App) attributeByHost(ctx context.Context, host string, userID int64) {
 //   - L0 曾经会在此场景改发 tokenplan_commission（现已删除，见下方 creditL0Commission）；
 //   - L1 的 creditRatioMarkup 自身不感知/不判断 billingSource，若不在此拦截，命中卖价覆盖的 L1
 //     租户即便是套餐桶消耗也会误发 ratio_markup——这里统一堵死，两个档位都不再有例外。
-func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64) {
+func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID, billingSource, usingGroup string, chargedGroupRatio float64) (returnErr error) {
 	defer func() {
 		if r := recover(); r != nil {
 			common.SysError("mtwire: creditConsumeCommission panic recovered")
+			returnErr = fmt.Errorf("credit consume commission panic")
 		}
 	}()
-	if userID <= 0 || quotaUnits <= 0 || requestID == "" {
-		return
+	snapshot, err := a.prepareConsumeCommission(userID, quotaUnits, requestID, billingSource, usingGroup, chargedGroupRatio)
+	if err != nil {
+		return err
 	}
-	if billingSource == "subscription" {
-		return // 套餐桶消耗：不入账（无论 L0/L1），套餐收益只在购买时结一次（tokenplan_spread）
+	if snapshot.WalletTenantID > 0 && snapshot.WalletQuota > 0 {
+		a.recordWalletConsume(context.Background(), snapshot.WalletTenantID, snapshot.WalletUserID, snapshot.WalletQuota, snapshot.SourceID)
+	}
+	if !snapshot.EarningApplicable {
+		return nil
+	}
+	return a.creditEarning(context.Background(), agent.EarningEntry{
+		TenantID: snapshot.EarningTenantID, UserID: snapshot.EarningUserID,
+		SourceType: agent.EarningSource(snapshot.EarningSourceType), SourceID: snapshot.SourceID,
+		Amount: snapshot.EarningAmount, Remark: snapshot.EarningRemark, CreatedAt: snapshot.OccurredAt,
+	})
+}
+
+func (a *App) prepareConsumeCommission(userID int64, quotaUnits int64, sourceID, billingSource, usingGroup string, chargedGroupRatio float64) (snapshot agenthook.CommissionSnapshot, returnErr error) {
+	policy, err := a.prepareConsumeCommissionPolicy(userID, billingSource, usingGroup, chargedGroupRatio)
+	if err != nil {
+		return snapshot, err
+	}
+	return materializeConsumeCommissionPolicy(policy, quotaUnits, sourceID)
+}
+
+func (a *App) prepareConsumeCommissionPolicy(userID int64, billingSource, usingGroup string, chargedGroupRatio float64) (policy agenthook.CommissionPolicy, returnErr error) {
+	defer func() {
+		if recover() != nil {
+			returnErr = errors.New("prepare consume commission panic")
+		}
+	}()
+	policy.OccurredAt = time.Now().UTC().Truncate(time.Millisecond)
+	if userID <= 0 || billingSource == "subscription" {
+		return policy, nil
 	}
 	ctx := context.Background()
-	tenantID := a.userTenantID(ctx, userID)
+	tenantID, err := a.userTenantIDStrict(ctx, userID)
+	if err != nil {
+		return policy, err
+	}
 	if tenantID <= 0 {
-		return // 主站用户 / 未归属：无代理分润
+		return policy, nil
 	}
-	// 钱包桶消耗台账（display-only；不产生收益、不动额度，与下方按档分润完全正交）：上方已短路套餐桶
-	// 消耗（billingSource=="subscription" 直接 return），故此处必为钱包桶，quotaUnits 即本次全额走钱包桶
-	// 的消耗额度（单事件资金来源单一，见 service/billing_session.go）。tenant 复用刚解析的 userTenantID，
-	// 与消耗透镜 users.tenant_id 同口径，保证财务报表主站/代理站拆分不变。写在 GetAgentType 之前——
-	// 平台租户/无 agent_profile 的租户也要记其钱包消耗（否则「主站钱包消耗」永远为 0）。best-effort 幂等。
-	a.recordWalletConsume(ctx, tenantID, userID, quotaUnits, requestID)
+	policy.WalletTenantID = tenantID
+	policy.WalletUserID = userID
 	params, found, err := a.AgentRepo.GetAgentType(ctx, tenantID)
-	if err != nil || !found {
-		return // 该租户未设代理
+	if err != nil {
+		return policy, err
 	}
-	// 按档二选一（spec §9.9）：level==0 → L0 提成通路；level≥1 → L1 差价通路。NEVER both——两条路径
-	// 在此分支互斥，绝不重叠调用。
+	if !found {
+		return policy, nil
+	}
+	ownerUserID := params.UserID
+	if ownerUserID <= 0 {
+		ownerUserID = userID
+	}
 	if params.Level == 0 {
-		a.creditL0Commission(ctx, tenantID, userID, quotaUnits, requestID, billingSource, params.CommissionRatio)
-		return
+		if params.CommissionRatio > 0 && operation_setting.USDExchangeRate > 0 && common.QuotaPerUnit > 0 {
+			policy.EarningMode = "direct"
+			policy.EarningTenantID = tenantID
+			policy.EarningUserID = ownerUserID
+			policy.EarningSourceType = string(agent.SourceConsumeCommission)
+			policy.EarningRemark = "consume:" + billingSource
+			policy.DirectRate = params.CommissionRatio * operation_setting.USDExchangeRate / common.QuotaPerUnit
+		}
+		return policy, nil
 	}
-	a.creditRatioMarkup(ctx, tenantID, userID, quotaUnits, usingGroup, requestID, billingSource, chargedGroupRatio, params.DiscountRatio, params.BottomPriceRatio)
+	if usingGroup == "" || chargedGroupRatio <= 0 || a.ModelGroupRepo == nil || !a.ModelGroupRepo.IsModelGroup(usingGroup) {
+		return policy, nil
+	}
+	if a.TenantRepo == nil {
+		return policy, errors.New("tenant group repository is unavailable")
+	}
+	if _, hit, lookupErr := a.TenantRepo.LookupEnabledGroupRatio(ctx, tenantID, usingGroup); lookupErr != nil {
+		return policy, lookupErr
+	} else if !hit {
+		return policy, nil
+	}
+	bottom := consumeFloorRatio(params.DiscountRatio, params.BottomPriceRatio, usingGroup)
+	if chargedGroupRatio <= bottom || common.QuotaPerUnit <= 0 || operation_setting.USDExchangeRate <= 0 {
+		return policy, nil
+	}
+	policy.EarningMode = "markup"
+	policy.EarningTenantID = tenantID
+	policy.EarningUserID = ownerUserID
+	policy.EarningSourceType = string(agent.SourceRatioMarkup)
+	policy.EarningRemark = "ratio_markup:" + usingGroup + ":" + billingSource
+	policy.MarkupFactor = 1 - bottom/chargedGroupRatio
+	policy.QuotaCNYRate = operation_setting.USDExchangeRate / common.QuotaPerUnit
+	return policy, nil
+}
+
+func materializeConsumeCommissionPolicy(policy agenthook.CommissionPolicy, quotaUnits int64, sourceID string) (agenthook.CommissionSnapshot, error) {
+	if sourceID == "" || len(sourceID) > 128 || quotaUnits < 0 || policy.OccurredAt.IsZero() {
+		return agenthook.CommissionSnapshot{}, errors.New("consume commission policy materialization is invalid")
+	}
+	snapshot := agenthook.CommissionSnapshot{
+		SourceID: sourceID, OccurredAt: policy.OccurredAt.UTC().Truncate(time.Millisecond),
+		WalletTenantID: policy.WalletTenantID,
+		WalletUserID:   policy.WalletUserID,
+		WalletQuota:    quotaUnits,
+	}
+	if policy.WalletTenantID <= 0 {
+		snapshot.WalletUserID = 0
+		snapshot.WalletQuota = 0
+	}
+	if quotaUnits == 0 || policy.EarningMode == "" {
+		return snapshot, nil
+	}
+	amount := 0.0
+	switch policy.EarningMode {
+	case "direct":
+		amount = float64(quotaUnits) * policy.DirectRate
+	case "markup":
+		markupQuota := int64(float64(quotaUnits) * policy.MarkupFactor)
+		amount = float64(markupQuota) * policy.QuotaCNYRate
+	default:
+		return agenthook.CommissionSnapshot{}, errors.New("consume commission policy mode is invalid")
+	}
+	amount = math.Round(amount*1e8) / 1e8
+	if amount <= 0 {
+		return snapshot, nil
+	}
+	snapshot.EarningApplicable = true
+	snapshot.EarningTenantID = policy.EarningTenantID
+	snapshot.EarningUserID = policy.EarningUserID
+	snapshot.EarningSourceType = policy.EarningSourceType
+	snapshot.EarningAmount = amount
+	snapshot.EarningRemark = policy.EarningRemark
+	return snapshot, nil
+}
+
+func (a *App) persistConsumeCommission(snapshot agenthook.CommissionSnapshot) error {
+	ctx := context.Background()
+	if snapshot.WalletTenantID > 0 && snapshot.WalletQuota > 0 {
+		if err := a.persistWalletConsume(ctx, snapshot.WalletTenantID, snapshot.WalletUserID, snapshot.WalletQuota, snapshot.SourceID, snapshot.OccurredAt); err != nil {
+			return err
+		}
+	}
+	if !snapshot.EarningApplicable {
+		return nil
+	}
+	return a.creditEarning(ctx, agent.EarningEntry{
+		TenantID:   snapshot.EarningTenantID,
+		UserID:     snapshot.EarningUserID,
+		SourceType: agent.EarningSource(snapshot.EarningSourceType),
+		SourceID:   snapshot.SourceID,
+		Amount:     snapshot.EarningAmount,
+		Remark:     snapshot.EarningRemark,
+		CreatedAt:  snapshot.OccurredAt,
+	})
 }
 
 // creditL0Commission 是 L0（普通档）计费通路：官方原价提成（commission_ratio × quotaUnits，公式不变，
@@ -159,15 +291,15 @@ func (a *App) creditConsumeCommission(userID int64, quotaUnits int64, requestID,
 // 只有钱包桶消耗会走到这里——creditConsumeCommission 已在套餐(订阅)桶消耗时提前返回（见上方），
 // 故 source 恒为 consume_commission；tokenplan_commission 不再从此处（或任何地方）发出
 // （doc/finance-model-report-v3.md §一.A：套餐消耗不再二次分成）。billingSource 仅保留用于备注。
-func (a *App) creditL0Commission(ctx context.Context, tenantID, userID, quotaUnits int64, requestID, billingSource string, commissionRatio float64) {
+func (a *App) creditL0Commission(ctx context.Context, tenantID, userID, quotaUnits int64, requestID, billingSource string, commissionRatio float64) error {
 	if commissionRatio <= 0 {
-		return
+		return nil
 	}
 	cny := consumeCommissionCNY(quotaUnits, commissionRatio, operation_setting.USDExchangeRate)
 	if cny <= 0 {
-		return
+		return nil
 	}
-	a.creditEarning(ctx, agent.EarningEntry{
+	return a.creditEarning(ctx, agent.EarningEntry{
 		TenantID:   tenantID,
 		UserID:     userID,
 		SourceType: agent.SourceConsumeCommission,
@@ -177,18 +309,30 @@ func (a *App) creditL0Commission(ctx context.Context, tenantID, userID, quotaUni
 	})
 }
 
-// creditEarning 是「消耗分润入账」的统一收口（L0 提成 / L1 差价共用）：AGENT_HOOK_ASYNC_ENABLED 开启时进程内
-// 缓冲 + 定时批量落库（单事务多行 INSERT + 按租户合并 UPSERT 钱包，消除 agent_wallets 热行的跨请求争用），
-// 关闭时维持逐请求同步入账。两条路径语义完全一致：同 requestID 幂等键不重复增余额，best-effort 失败只记日志、
-// 绝不阻断扣费（异步路径的校验在 enqueueEarning 内复刻 earningSink 的 Validate）。
-func (a *App) creditEarning(ctx context.Context, e agent.EarningEntry) {
-	if common.AgentHookAsyncEnabled && a.billing != nil {
-		a.billing.enqueueEarning(e)
-		return
+// creditEarning first persists an exact-payload payable intent, then submits to
+// the idempotent earning sink. A failed sink or status update leaves a pending
+// row for startup/periodic reconciliation instead of dropping payable money.
+func (a *App) creditEarning(ctx context.Context, e agent.EarningEntry) error {
+	e = normalizePayableEarning(e)
+	var row *payableEarningIntentRow
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		row, err = a.ensurePayableEarningIntent(ctx, e)
+		if err == nil {
+			break
+		}
 	}
-	if err := a.AgentEarnings.AddEarning(ctx, e); err != nil {
-		common.SysError("mtwire: credit earning failed: " + err.Error())
+	if err != nil {
+		common.SysError(fmt.Sprintf("mtwire: persist payable earning intent failed error_type=%T earning_%s", err, common.PayloadMetadata([]byte(e.IdempotencyKey()))))
+		return err
 	}
+	for attempt := 0; attempt < 3; attempt++ {
+		if err = a.applyPayableEarningIntent(ctx, row.IdemKey); err == nil {
+			return nil
+		}
+	}
+	common.SysError(fmt.Sprintf("mtwire: credit earning remains pending after retries error_type=%T earning_%s", err, common.PayloadMetadata([]byte(e.IdempotencyKey()))))
+	return err
 }
 
 // consumeCommissionCNY 计算消耗分润（¥）= 消耗USD × ratio × usdRate，其中 USD = quotaUnits / QuotaPerUnit。

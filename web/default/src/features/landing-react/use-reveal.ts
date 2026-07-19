@@ -22,7 +22,7 @@ export function useReveal<T extends HTMLElement>(threshold = 0.15) {
           }
         }
       },
-      { threshold },
+      { threshold }
     )
     io.observe(el)
     return () => io.disconnect()

@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import type { Row } from '@tanstack/react-table'
 import { Pencil, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +38,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+
 import { deleteAgent } from '../api'
 import type { Agent } from '../types'
 import { useAgents } from './agents-provider'
@@ -118,7 +120,8 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t('Delete agent warning', {
-                defaultValue: '将归档该代理并下线其站点：回收子域名、把其名下用户迁回主站（账号/余额保留、继续可用）、数据留存归档。若代理钱包有未提现/冻结中收益需先结清才能删除。此操作会关停该代理站。',
+                defaultValue:
+                  '将归档该代理并下线其站点：回收子域名、把其名下用户迁回主站（账号/余额保留、继续可用）、数据留存归档。若代理钱包有未提现/冻结中收益需先结清才能删除。此操作会关停该代理站。',
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -132,7 +135,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
                 handleDelete()
               }}
               disabled={isDeleting}
-              className='bg-destructive text-white hover:bg-destructive/90'
+              className='bg-destructive hover:bg-destructive/90 text-white'
             >
               {isDeleting
                 ? t('Deleting...', { defaultValue: '删除中…' })

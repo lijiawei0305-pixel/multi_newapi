@@ -17,8 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { agentContextQueryOptions } from '@/lib/agent-context'
+
 import { SiteBranding } from '@/features/site-branding'
+import { agentContextQueryOptions } from '@/lib/agent-context'
 
 // Agent self-service (site branding): an independent-tier capability, so this
 // is accessible only to the agent owner of the current Host's tenant AND only

@@ -1,41 +1,77 @@
 {
   "base": "en.json",
+  "source": {
+    "sourceFileCount": 1228,
+    "literalCallCount": 6984,
+    "literalSourceKeyCount": 4622,
+    "staticAllowlistKeyCount": 454,
+    "requiredKeyCount": 4778,
+    "dynamicCallCount": 327,
+    "dynamicUniqueCallCount": 255,
+    "dynamicAllowlistCount": 255,
+    "unexpectedDynamicCalls": [],
+    "staleDynamicAllowlist": []
+  },
   "locales": {
     "en": {
-      "file": "en.json",
-      "missingCount": 0,
-      "extrasCount": 0,
-      "untranslatedCount": 0
-    },
-    "fr": {
-      "file": "fr.json",
-      "missingCount": 0,
-      "extrasCount": 0,
-      "untranslatedCount": 0
-    },
-    "ja": {
-      "file": "ja.json",
-      "missingCount": 0,
-      "extrasCount": 0,
-      "untranslatedCount": 0
-    },
-    "ru": {
-      "file": "ru.json",
-      "missingCount": 0,
-      "extrasCount": 0,
-      "untranslatedCount": 0
-    },
-    "vi": {
-      "file": "vi.json",
-      "missingCount": 0,
-      "extrasCount": 0,
-      "untranslatedCount": 0
+      "keyCount": 5905,
+      "unchangedValueAllowlistCount": 0,
+      "missingSourceKeys": [],
+      "missingBaseKeys": [],
+      "extraKeys": [],
+      "placeholderMismatches": [],
+      "untranslatedKeys": [],
+      "staleUnchangedValueAllowlist": []
     },
     "zh": {
-      "file": "zh.json",
-      "missingCount": 0,
-      "extrasCount": 0,
-      "untranslatedCount": 0
+      "keyCount": 5905,
+      "unchangedValueAllowlistCount": 0,
+      "missingSourceKeys": [],
+      "missingBaseKeys": [],
+      "extraKeys": [],
+      "placeholderMismatches": [],
+      "untranslatedKeys": [],
+      "staleUnchangedValueAllowlist": []
+    },
+    "fr": {
+      "keyCount": 5905,
+      "unchangedValueAllowlistCount": 118,
+      "missingSourceKeys": [],
+      "missingBaseKeys": [],
+      "extraKeys": [],
+      "placeholderMismatches": [],
+      "untranslatedKeys": [],
+      "staleUnchangedValueAllowlist": []
+    },
+    "ja": {
+      "keyCount": 5905,
+      "unchangedValueAllowlistCount": 0,
+      "missingSourceKeys": [],
+      "missingBaseKeys": [],
+      "extraKeys": [],
+      "placeholderMismatches": [],
+      "untranslatedKeys": [],
+      "staleUnchangedValueAllowlist": []
+    },
+    "ru": {
+      "keyCount": 5905,
+      "unchangedValueAllowlistCount": 0,
+      "missingSourceKeys": [],
+      "missingBaseKeys": [],
+      "extraKeys": [],
+      "placeholderMismatches": [],
+      "untranslatedKeys": [],
+      "staleUnchangedValueAllowlist": []
+    },
+    "vi": {
+      "keyCount": 5905,
+      "unchangedValueAllowlistCount": 28,
+      "missingSourceKeys": [],
+      "missingBaseKeys": [],
+      "extraKeys": [],
+      "placeholderMismatches": [],
+      "untranslatedKeys": [],
+      "staleUnchangedValueAllowlist": []
     }
   }
 }

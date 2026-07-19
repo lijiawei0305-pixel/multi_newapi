@@ -1,10 +1,10 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -66,14 +66,17 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 }
 
 func Relay(c *gin.Context, relayFormat types.RelayFormat) {
+	c.Header("Cache-Control", "no-store, private")
 
 	requestId := c.GetString(common.RequestIdKey)
 	//group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	//originalModel := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 
 	var (
-		newAPIError *types.NewAPIError
-		ws          *websocket.Conn
+		newAPIError    *types.NewAPIError
+		ws             *websocket.Conn
+		deferredWriter *common.BufferedResponseWriter
+		relayInfo      *relaycommon.RelayInfo
 	)
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
@@ -87,23 +90,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	defer func() {
-		if newAPIError != nil {
-			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
-			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
-			switch relayFormat {
-			case types.RelayFormatOpenAIRealtime:
-				helper.WssError(c, ws, newAPIError.ToOpenAIError())
-			case types.RelayFormatClaude:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"type":  "error",
-					"error": newAPIError.ToClaudeError(),
-				})
-			default:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"error": newAPIError.ToOpenAIError(),
-				})
+		if panicValue := recover(); panicValue != nil {
+			if handleRelayPanic(c, relayInfo, deferredWriter, ws) {
+				return
 			}
+			panic(panicValue)
 		}
+		finishRelayResponse(c, relayFormat, ws, requestId, deferredWriter, newAPIError)
 	}()
 
 	request, err := helper.GetAndValidateRequest(c, relayFormat)
@@ -116,8 +109,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		return
 	}
+	bufferNonStreamingResponse := relayFormat != types.RelayFormatOpenAIRealtime && !request.IsStream(c)
 
-	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
+	relayInfo, err = relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
@@ -176,11 +170,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	defer func() {
 		// Only return quota if downstream failed and quota was actually pre-consumed
 		if newAPIError != nil {
-			newAPIError = service.NormalizeViolationFeeError(newAPIError)
-			if relayInfo.Billing != nil {
-				relayInfo.Billing.Refund(c)
-			}
-			service.ChargeViolationFeeIfNeeded(c, relayInfo, newAPIError)
+			newAPIError = finalizeRelayBillingFailure(c, relayInfo, newAPIError)
 		}
 	}()
 
@@ -202,6 +192,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = channelErr
 			break
 		}
+		relayInfo.InitChannelMeta(c)
+		if capabilityErr := relay.ValidateMediaStreamingCapability(relayInfo); capabilityErr != nil {
+			newAPIError = capabilityErr
+			break
+		}
 
 		addUsedChannel(c, channel.Id)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
@@ -215,16 +210,21 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
-
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
+		newAPIError, bodyErr = invokeRelayAttemptAfterAdmission(c, bufferNonStreamingResponse, &deferredWriter, func() *types.NewAPIError {
+			switch relayFormat {
+			case types.RelayFormatOpenAIRealtime:
+				return relay.WssHelper(c, relayInfo)
+			case types.RelayFormatClaude:
+				return relay.ClaudeHelper(c, relayInfo)
+			case types.RelayFormatGemini:
+				return geminiRelayHandler(c, relayInfo)
+			default:
+				return relayHandler(c, relayInfo)
+			}
+		})
+		if bodyErr != nil {
+			newAPIError = relayResponseAdmissionError(bodyErr)
+			break
 		}
 
 		if newAPIError == nil {
@@ -234,6 +234,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+		discardRelayAttemptResponse(c, deferredWriter)
+		deferredWriter = nil
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
@@ -250,6 +252,161 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	if newAPIError != nil {
 		gopool.Go(func() {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
+		})
+	}
+}
+
+func relayResponseAdmissionError(err error) *types.NewAPIError {
+	common.SysError(fmt.Sprintf("relay response admission failed before provider call: error_type=%T", err))
+	return types.NewErrorWithStatusCode(
+		errors.New("response capacity is temporarily unavailable; retry later"),
+		types.ErrorCodeDoRequestFailed,
+		http.StatusServiceUnavailable,
+		types.ErrOptionWithSkipRetry(),
+	)
+}
+
+var finalizeAcceptedBillingFailure = service.FinalizeAcceptedBillingFailure
+
+// invokeRelayAttemptAfterAdmission exposes the admitted writer to the caller
+// before invoking any provider code. The caller's panic cleanup can therefore
+// always discard the private spool and release its reservation.
+func invokeRelayAttemptAfterAdmission(c *gin.Context, enabled bool, writer **common.BufferedResponseWriter, invoke func() *types.NewAPIError) (*types.NewAPIError, error) {
+	admitted, err := beginRelayAttemptResponse(c, enabled)
+	if err != nil {
+		return nil, err
+	}
+	if writer != nil {
+		*writer = admitted
+	}
+	return invoke(), nil
+}
+
+func beginRelayAttemptResponse(c *gin.Context, enabled bool) (*common.BufferedResponseWriter, error) {
+	if !enabled || c == nil || c.Writer == nil {
+		return nil, nil
+	}
+	ctx := context.Background()
+	if c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	writer, err := common.NewBufferedResponseWriterContext(ctx, c.Writer)
+	if err != nil {
+		return nil, err
+	}
+	c.Writer = writer
+	return writer, nil
+}
+
+func discardRelayAttemptResponse(c *gin.Context, writer *common.BufferedResponseWriter) {
+	if writer == nil {
+		return
+	}
+	writer.Discard()
+	if c != nil {
+		c.Writer = writer.Underlying()
+	}
+}
+
+func compensateRelayPanic(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
+	if relayInfo == nil || relayInfo.Billing == nil || service.IsUpstreamAccepted(c) || !relayInfo.Billing.NeedsRefund() {
+		return
+	}
+	if err := relayInfo.Billing.Refund(c); err != nil {
+		common.SysError(fmt.Sprintf("billing refund after relay panic failed: error_type=%T", err))
+	}
+}
+
+func cleanupRelayPanic(c *gin.Context, relayInfo *relaycommon.RelayInfo, writer *common.BufferedResponseWriter) {
+	if writer != nil {
+		defer func() {
+			writer.Discard()
+			if c != nil {
+				c.Writer = writer.Underlying()
+			}
+		}()
+	}
+	if !service.IsUpstreamAccepted(c) {
+		compensateRelayPanic(c, relayInfo)
+		return
+	}
+	defer func() {
+		if panicValue := recover(); panicValue != nil {
+			common.SysError(fmt.Sprintf("accepted relay panic billing finalization panicked: panic_type=%T", panicValue))
+		}
+	}()
+	apiErr := types.NewErrorWithStatusCode(
+		errors.New("upstream accepted; response unavailable; do not retry/contact admin"),
+		types.ErrorCodeBadResponseBody,
+		http.StatusBadGateway,
+		types.ErrOptionWithSkipRetry(),
+	)
+	if terminalErr := finalizeAcceptedBillingFailure(c, relayInfo, apiErr); terminalErr != nil && !service.IsBillingTerminalAttempted(c) {
+		common.SysError(fmt.Sprintf("accepted relay panic billing terminal state remains unavailable: error_code=%s", terminalErr.GetErrorCode()))
+	}
+}
+
+func handleRelayPanic(c *gin.Context, relayInfo *relaycommon.RelayInfo, writer *common.BufferedResponseWriter, ws *websocket.Conn) bool {
+	suppressRepanic := service.IsUpstreamAccepted(c) && writer == nil && (ws != nil || c != nil && c.Writer != nil && c.Writer.Written())
+	cleanupRelayPanic(c, relayInfo, writer)
+	if !suppressRepanic {
+		return false
+	}
+	common.SysLog("accepted streaming relay panicked after response publication; connection closed without appending an error payload")
+	if c != nil {
+		c.Abort()
+	}
+	return true
+}
+
+func finalizeRelayBillingFailure(c *gin.Context, relayInfo *relaycommon.RelayInfo, apiErr *types.NewAPIError) *types.NewAPIError {
+	apiErr = service.NormalizeViolationFeeError(apiErr)
+	if relayInfo != nil && !service.IsUpstreamAccepted(c) {
+		if relayInfo.Billing != nil {
+			if err := relayInfo.Billing.Refund(c); err != nil {
+				common.SysError(fmt.Sprintf("billing refund failed: error_type=%T", err))
+			}
+		}
+	} else if relayInfo != nil {
+		apiErr = finalizeAcceptedBillingFailure(c, relayInfo, apiErr)
+	}
+	service.ChargeViolationFeeIfNeeded(c, relayInfo, apiErr)
+	return apiErr
+}
+
+func finishRelayResponse(c *gin.Context, relayFormat types.RelayFormat, ws *websocket.Conn, requestId string, deferredWriter *common.BufferedResponseWriter, apiErr *types.NewAPIError) {
+	if apiErr == nil {
+		if deferredWriter == nil {
+			return
+		}
+		c.Writer = deferredWriter.Underlying()
+		if err := deferredWriter.Commit(); err != nil {
+			common.SysLog("critical: failed to flush accepted relay response after durable billing: " + err.Error())
+		}
+		return
+	}
+
+	logger.LogError(c, fmt.Sprintf("relay error status=%d error_%s", apiErr.StatusCode, logger.PayloadMetadata([]byte(apiErr.Error()))))
+	if deferredWriter != nil {
+		deferredWriter.Discard()
+		c.Writer = deferredWriter.Underlying()
+	}
+	apiErr.SetMessage(common.MessageWithRequestId(apiErr.Error(), requestId))
+	if deferredWriter == nil && service.IsUpstreamAccepted(c) && c.Writer != nil && c.Writer.Written() {
+		common.SysLog("critical: post-upstream billing failed after a streaming response was written; closing without appending an invalid error payload")
+		return
+	}
+	switch relayFormat {
+	case types.RelayFormatOpenAIRealtime:
+		helper.WssError(c, ws, apiErr.ToOpenAIError())
+	case types.RelayFormatClaude:
+		c.JSON(apiErr.StatusCode, gin.H{
+			"type":  "error",
+			"error": apiErr.ToClaudeError(),
+		})
+	default:
+		c.JSON(apiErr.StatusCode, gin.H{
+			"error": apiErr.ToOpenAIError(),
 		})
 	}
 }
@@ -279,14 +436,14 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 		maxCompletionTokens := lo.FromPtrOr(r.MaxCompletionTokens, uint(0))
 		maxTokens := lo.FromPtrOr(r.MaxTokens, uint(0))
 		if maxCompletionTokens > maxTokens {
-			meta.MaxTokens = int(maxCompletionTokens)
+			meta.MaxTokens = common.SaturatingUintToInt(maxCompletionTokens)
 		} else {
-			meta.MaxTokens = int(maxTokens)
+			meta.MaxTokens = common.SaturatingUintToInt(maxTokens)
 		}
 	case *dto.OpenAIResponsesRequest:
-		meta.MaxTokens = int(lo.FromPtrOr(r.MaxOutputTokens, uint(0)))
+		meta.MaxTokens = common.SaturatingUintToInt(lo.FromPtrOr(r.MaxOutputTokens, uint(0)))
 	case *dto.ClaudeRequest:
-		meta.MaxTokens = int(lo.FromPtr(r.MaxTokens))
+		meta.MaxTokens = common.SaturatingUintToInt(lo.FromPtr(r.MaxTokens))
 	case *dto.ImageRequest:
 		// Pricing for image requests depends on ImagePriceRatio; safe to compute even when CountToken is disabled.
 		return r.GetTokenCountMeta()
@@ -332,6 +489,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr == nil {
 		return false
 	}
+	if service.IsUpstreamAccepted(c) {
+		return false
+	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
 	}
@@ -361,7 +521,7 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
-	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
+	logger.LogError(c, fmt.Sprintf("channel error channel_id=%d status_code=%d error_%s", channelError.ChannelId, err.StatusCode, logger.PayloadMetadata([]byte(err.Error()))))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
 	if service.ShouldDisableChannel(err) && channelError.AutoBan {
@@ -432,8 +592,6 @@ func RelayMidjourney(c *gin.Context) {
 	default:
 		mjErr = relay.RelayMidjourneySubmit(c, relayInfo)
 	}
-	//err = relayMidjourneySubmit(c, relayMode)
-	log.Println(mjErr)
 	if mjErr != nil {
 		statusCode := http.StatusBadRequest
 		if mjErr.Code == 30 {
@@ -446,7 +604,8 @@ func RelayMidjourney(c *gin.Context) {
 			"code":        mjErr.Code,
 		})
 		channelId := c.GetInt("channel_id")
-		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
+		errorMetadata := logger.PayloadMetadata([]byte(mjErr.Description + "\x00" + mjErr.Result))
+		logger.LogError(c, fmt.Sprintf("relay error channel_id=%d status_code=%d code=%d error_%s", channelId, statusCode, mjErr.Code, errorMetadata))
 	}
 }
 
@@ -508,8 +667,15 @@ func RelayTask(c *gin.Context) {
 	var result *relay.TaskSubmitResult
 	var taskErr *dto.TaskError
 	defer func() {
-		if taskErr != nil && relayInfo.Billing != nil {
-			relayInfo.Billing.Refund(c)
+		panicValue := recover()
+		if panicValue != nil && result != nil && result.ClientResponse != nil {
+			result.ClientResponse.Discard()
+		}
+		if (taskErr != nil || panicValue != nil) && !relayInfo.TaskSubmissionRecoveryProtected {
+			cleanupFailedTaskSubmission(c, relayInfo)
+		}
+		if panicValue != nil {
+			panic(panicValue)
 		}
 	}()
 
@@ -558,6 +724,12 @@ func RelayTask(c *gin.Context) {
 		if taskErr == nil {
 			break
 		}
+		if !taskSubmissionRetryAllowed(relayInfo) {
+			break
+		}
+		if errors.Is(taskErr.Error, common.ErrBufferedResponseCapacity) {
+			break
+		}
 
 		if !taskErr.LocalError {
 			processChannelError(c,
@@ -578,16 +750,13 @@ func RelayTask(c *gin.Context) {
 	}
 
 	// ── 成功：结算 + 日志 + 插入任务 ──
-	if taskErr == nil {
-		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-			common.SysError("settle task billing error: " + settleErr.Error())
-		}
-		service.LogTaskConsumption(c, relayInfo)
-
+	if taskErr == nil && result != nil && !result.Replayed {
 		task := model.InitTask(result.Platform, relayInfo)
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 		task.PrivateData.BillingSource = relayInfo.BillingSource
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
+		task.PrivateData.SubscriptionResetEpoch = relayInfo.SubscriptionResetEpoch
+		task.PrivateData.SubscriptionOccurredAt = relayInfo.SubscriptionOccurredAt
 		task.PrivateData.TokenId = relayInfo.TokenId
 		task.PrivateData.NodeName = common.NodeName
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
@@ -601,13 +770,92 @@ func RelayTask(c *gin.Context) {
 		task.Quota = result.Quota
 		task.Data = result.TaskData
 		task.Action = relayInfo.Action
-		if insertErr := task.Insert(); insertErr != nil {
-			common.SysError("insert task error: " + insertErr.Error())
-		}
+		taskErr = finalizeTaskSubmissionResponse(c, relayInfo, result, task, service.CommitTaskSubmissionWithRecoveryAndResponse)
 	}
 
 	if taskErr != nil {
 		respondTaskError(c, taskErr)
+	}
+}
+
+func taskSubmissionRetryAllowed(relayInfo *relaycommon.RelayInfo) bool {
+	return relayInfo == nil || !relayInfo.TaskSubmissionRecoveryProtected
+}
+
+func cleanupFailedTaskSubmission(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
+	cleanupFailedTaskSubmissionWithAbort(c, relayInfo, model.AbortPreparingTaskSubmission)
+}
+
+func cleanupFailedTaskSubmissionWithAbort(c *gin.Context, relayInfo *relaycommon.RelayInfo, abort func(string, string) error) {
+	if relayInfo == nil || relayInfo.TaskSubmissionRecoveryProtected {
+		return
+	}
+	if relayInfo.TaskSubmissionRecoveryPrepared {
+		abortErr := abort(relayInfo.RequestId, relayInfo.TaskSubmissionRecoveryKind)
+		var pending *model.BillingSettlementApplyPendingError
+		if abortErr != nil && !errors.As(abortErr, &pending) {
+			relayInfo.TaskSubmissionRecoveryProtected = true
+			common.SysError(fmt.Sprintf("task submission abort failed; refund suppressed: error_type=%T", abortErr))
+			return
+		}
+		if pending != nil {
+			common.SysError("task submission cancellation committed with pending financial application")
+		}
+		return
+	}
+	if relayInfo.Billing != nil {
+		if refundErr := relayInfo.Billing.Refund(c); refundErr != nil {
+			common.SysError(fmt.Sprintf("task billing fallback refund failed: error_type=%T", refundErr))
+		}
+	}
+}
+
+type taskSubmissionFinalizer func(*gin.Context, *relaycommon.RelayInfo, *model.Task, int, *model.TaskSubmissionPublicResponse) (service.TaskSubmissionCommitOutcome, error)
+
+func finalizeTaskSubmissionResponse(c *gin.Context, relayInfo *relaycommon.RelayInfo, result *relay.TaskSubmitResult, task *model.Task, finalize taskSubmissionFinalizer) *dto.TaskError {
+	if result == nil || result.ClientResponse == nil || finalize == nil {
+		if result != nil && result.ClientResponse != nil {
+			result.ClientResponse.Discard()
+		}
+		if relayInfo != nil {
+			relayInfo.TaskSubmissionRecoveryProtected = true
+		}
+		return service.TaskErrorWrapperLocal(errors.New("task submission durability finalizer is unavailable"), "accepted_state_unknown", http.StatusInternalServerError)
+	}
+	publicResponse, snapshotErr := relay.TaskSubmissionPublicResponse(result.ClientResponse)
+	if snapshotErr != nil {
+		result.ClientResponse.Discard()
+		if relayInfo != nil {
+			relayInfo.TaskSubmissionRecoveryProtected = true
+		}
+		return &dto.TaskError{
+			Code: "accepted_state_unknown", Message: fmt.Sprintf("upstream accepted the task but its replayable response could not be frozen; do not retry; contact an administrator with request_id=%s", relayInfo.RequestId),
+			StatusCode: http.StatusInternalServerError, LocalError: true, Error: snapshotErr,
+		}
+	}
+	outcome, err := finalize(c, relayInfo, task, result.Quota, publicResponse)
+	if outcome.Durable {
+		relayInfo.TaskSubmissionRecoveryProtected = true
+		if err != nil {
+			common.SysError("accepted task submission has a pending durable follow-up: " + err.Error())
+		}
+		if commitErr := result.ClientResponse.Commit(); commitErr != nil {
+			common.SysError("commit buffered task response failed: " + commitErr.Error())
+		}
+		return nil
+	}
+
+	result.ClientResponse.Discard()
+	relayInfo.TaskSubmissionRecoveryProtected = true
+	if err == nil {
+		err = errors.New("task submission ACK could not be frozen")
+	}
+	return &dto.TaskError{
+		Code:       "accepted_state_unknown",
+		Message:    fmt.Sprintf("upstream accepted the task but local acceptance state is unknown; do not retry; contact an administrator with request_id=%s", relayInfo.RequestId),
+		StatusCode: http.StatusInternalServerError,
+		LocalError: true,
+		Error:      err,
 	}
 }
 

@@ -1,11 +1,15 @@
-// @ts-nocheck
 /* WeDream 落地页统一 3D 场景 —— 资源/工具纯函数。
    纯函数 sampleAlphaToPoints / approach 由 scene3d-assets.test.ts 单测(bun test);
    svgToTexture / loadImageTexture / makeGlowTexture 依赖 DOM+three,靠 playwright 视觉验证。 */
 import { CanvasTexture } from 'three'
 
 /** 指数逼近缓动:每帧把 current 朝 target 靠拢,帧率无关。 */
-export function approach(current: number, target: number, ease: number, dt: number): number {
+export function approach(
+  current: number,
+  target: number,
+  ease: number,
+  dt: number
+): number {
   return current + (target - current) * (1 - Math.exp(-ease * dt))
 }
 
@@ -15,7 +19,7 @@ export function sampleAlphaToPoints(
   img: { data: Uint8ClampedArray; width: number; height: number },
   count: number,
   zJitter: number,
-  rng: () => number = Math.random,
+  rng: () => number = Math.random
 ): Float32Array {
   const { data, width: w, height: h } = img
   const opaque: number[] = []
@@ -35,37 +39,51 @@ export function sampleAlphaToPoints(
 
 /** logo(内联 `<svg…>` 或 `<img src="…">`)→ 画到 size² 离屏 canvas 并返回。
     画一次,既做 billboard 纹理(CanvasTexture 包它)又采 alpha 生成光晕点云。 */
-export function drawLogoCanvas(logo: string, size: number): Promise<HTMLCanvasElement> {
+export function drawLogoCanvas(
+  logo: string,
+  size: number
+): Promise<HTMLCanvasElement> {
   return new Promise((resolve, reject) => {
     const c = document.createElement('canvas')
     c.width = c.height = size
     const ctx = c.getContext('2d')
+    if (!ctx) {
+      reject(new Error('2D canvas is unavailable'))
+      return
+    }
     const image = new Image()
     let url = ''
     const trimmed = logo.trim()
     if (trimmed.startsWith('<img')) {
       const m = trimmed.match(/src="([^"]+)"/)
-      if (!m) { reject(new Error('img 缺 src')); return }
+      if (!m) {
+        reject(new Error('img 缺 src'))
+        return
+      }
       image.crossOrigin = 'anonymous'
       image.src = m[1]
     } else {
       // 内联 SVG 作为独立图片必须带 xmlns 命名空间(DOM 里隐式,blob 里必需);补 width/height 保内在尺寸。
       let svg = trimmed
-      if (!/\bxmlns=/.test(svg)) svg = svg.replace(/<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"')
-      if (!/<svg[^>]*\bwidth=/.test(svg)) svg = svg.replace(/<svg/i, `<svg width="${size}" height="${size}"`)
+      if (!/\bxmlns=/.test(svg)) {
+        svg = svg.replace(/<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"')
+      }
+      if (!/<svg[^>]*\bwidth=/.test(svg)) {
+        svg = svg.replace(/<svg/i, `<svg width="${size}" height="${size}"`)
+      }
       const blob = new Blob([svg], { type: 'image/svg+xml' })
       url = URL.createObjectURL(blob)
       image.src = url
     }
-    image.onload = () => {
+    image.addEventListener('load', () => {
       ctx.drawImage(image, 0, 0, size, size)
       if (url) URL.revokeObjectURL(url)
       resolve(c)
-    }
-    image.onerror = (e) => {
+    })
+    image.addEventListener('error', (error) => {
       if (url) URL.revokeObjectURL(url)
-      reject(e)
-    }
+      reject(error)
+    })
   })
 }
 
@@ -74,6 +92,7 @@ export function makeGlowTexture(colorHex: string): CanvasTexture {
   const c = document.createElement('canvas')
   c.width = c.height = 64
   const ctx = c.getContext('2d')
+  if (!ctx) throw new Error('2D canvas is unavailable')
   const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
   g.addColorStop(0, colorHex)
   g.addColorStop(0.2, colorHex)

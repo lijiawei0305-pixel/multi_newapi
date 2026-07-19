@@ -1,9 +1,8 @@
 package ollama
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -22,7 +21,7 @@ import (
 func openAIChatToOllamaChat(c *gin.Context, r *dto.GeneralOpenAIRequest) (*OllamaChatRequest, error) {
 	chatReq := &OllamaChatRequest{
 		Model:   r.Model,
-		Stream:  lo.FromPtrOr(r.Stream, false),
+		Stream:  r.Stream,
 		Options: map[string]any{},
 		Think:   r.Think,
 	}
@@ -32,7 +31,7 @@ func openAIChatToOllamaChat(c *gin.Context, r *dto.GeneralOpenAIRequest) (*Ollam
 		} else if r.ResponseFormat.Type == "json_schema" {
 			if len(r.ResponseFormat.JsonSchema) > 0 {
 				var schema any
-				_ = json.Unmarshal(r.ResponseFormat.JsonSchema, &schema)
+				_ = common.Unmarshal(r.ResponseFormat.JsonSchema, &schema)
 				chatReq.Format = schema
 			}
 		}
@@ -57,8 +56,8 @@ func openAIChatToOllamaChat(c *gin.Context, r *dto.GeneralOpenAIRequest) (*Ollam
 	if r.Seed != nil {
 		chatReq.Options["seed"] = int(lo.FromPtr(r.Seed))
 	}
-	if mt := r.GetMaxTokens(); mt != 0 {
-		chatReq.Options["num_predict"] = int(mt)
+	if r.MaxCompletionTokens != nil || r.MaxTokens != nil {
+		chatReq.Options["num_predict"] = common.SaturatingUintToInt(r.GetMaxTokens())
 	}
 
 	if r.Stop != nil {
@@ -127,7 +126,7 @@ func openAIChatToOllamaChat(c *gin.Context, r *dto.GeneralOpenAIRequest) (*Ollam
 				for _, tc := range parsed {
 					var args interface{}
 					if tc.Function.Arguments != "" {
-						_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+						_ = common.Unmarshal([]byte(tc.Function.Arguments), &args)
 					}
 					if args == nil {
 						args = map[string]any{}
@@ -149,7 +148,7 @@ func openAIChatToOllamaChat(c *gin.Context, r *dto.GeneralOpenAIRequest) (*Ollam
 func openAIToGenerate(c *gin.Context, r *dto.GeneralOpenAIRequest) (*OllamaGenerateRequest, error) {
 	gen := &OllamaGenerateRequest{
 		Model:   r.Model,
-		Stream:  lo.FromPtrOr(r.Stream, false),
+		Stream:  r.Stream,
 		Options: map[string]any{},
 		Think:   r.Think,
 	}
@@ -180,7 +179,7 @@ func openAIToGenerate(c *gin.Context, r *dto.GeneralOpenAIRequest) (*OllamaGener
 			gen.Format = "json"
 		} else if r.ResponseFormat.Type == "json_schema" {
 			var schema any
-			_ = json.Unmarshal(r.ResponseFormat.JsonSchema, &schema)
+			_ = common.Unmarshal(r.ResponseFormat.JsonSchema, &schema)
 			gen.Format = schema
 		}
 	}
@@ -202,8 +201,8 @@ func openAIToGenerate(c *gin.Context, r *dto.GeneralOpenAIRequest) (*OllamaGener
 	if r.Seed != nil {
 		gen.Options["seed"] = int(lo.FromPtr(r.Seed))
 	}
-	if mt := r.GetMaxTokens(); mt != 0 {
-		gen.Options["num_predict"] = int(mt)
+	if r.MaxCompletionTokens != nil || r.MaxTokens != nil {
+		gen.Options["num_predict"] = common.SaturatingUintToInt(r.GetMaxTokens())
 	}
 	if r.Stop != nil {
 		switch v := r.Stop.(type) {
@@ -249,23 +248,23 @@ func requestOpenAI2Embeddings(r dto.EmbeddingRequest) *OllamaEmbeddingRequest {
 	}
 	input := r.ParseInput()
 	if len(input) == 1 {
-		return &OllamaEmbeddingRequest{Model: r.Model, Input: input[0], Options: opts, Dimensions: dimensions}
+		return &OllamaEmbeddingRequest{Model: r.Model, Input: input[0], Options: opts, Dimensions: r.Dimensions}
 	}
-	return &OllamaEmbeddingRequest{Model: r.Model, Input: input, Options: opts, Dimensions: dimensions}
+	return &OllamaEmbeddingRequest{Model: r.Model, Input: input, Options: opts, Dimensions: r.Dimensions}
 }
 
 func ollamaEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	var oResp OllamaEmbeddingResponse
-	body, err := io.ReadAll(resp.Body)
+	defer service.CloseResponseBodyGracefully(resp)
+	body, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	service.CloseResponseBodyGracefully(resp)
 	if err = common.Unmarshal(body, &oResp); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
 	if oResp.Error != "" {
-		return nil, types.NewOpenAIError(fmt.Errorf("ollama error: %s", oResp.Error), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
+		return nil, service.MarkExplicitUpstreamRejection(types.NewOpenAIError(fmt.Errorf("ollama error: %s", oResp.Error), types.ErrorCodeBadResponseBody, http.StatusBadGateway))
 	}
 	data := make([]dto.OpenAIEmbeddingResponseItem, 0, len(oResp.Embeddings))
 	for i, emb := range oResp.Embeddings {
@@ -279,10 +278,19 @@ func ollamaEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 }
 
 func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModel, error) {
+	return FetchOllamaModelsWithContext(context.Background(), baseURL, apiKey)
+}
+
+func FetchOllamaModelsWithContext(ctx context.Context, baseURL, apiKey string) ([]OllamaModel, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	url := fmt.Sprintf("%s/api/tags", baseURL)
 
-	client := &http.Client{}
-	request, err := http.NewRequest("GET", url, nil)
+	client := &http.Client{Timeout: 30 * time.Second}
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %v", err)
 	}
@@ -299,12 +307,15 @@ func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModel, error) {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(response.Body)
-		return nil, fmt.Errorf("服务器返回错误 %d: %s", response.StatusCode, string(body))
+		body, readErr := common.ReadAllWithLimit(response.Body, common.ControlPlaneJSONMaxBytes)
+		if readErr != nil {
+			return nil, fmt.Errorf("读取错误响应失败: %w", readErr)
+		}
+		return nil, fmt.Errorf("服务器返回错误 %d: response_%s", response.StatusCode, common.PayloadMetadata(body))
 	}
 
 	var tagsResponse OllamaTagsResponse
-	body, err := io.ReadAll(response.Body)
+	body, err := common.ReadAllWithLimit(response.Body, common.ControlPlaneJSONMaxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("读取响应失败: %v", err)
 	}
@@ -319,11 +330,20 @@ func FetchOllamaModels(baseURL, apiKey string) ([]OllamaModel, error) {
 
 // 拉取 Ollama 模型 (非流式)
 func PullOllamaModel(baseURL, apiKey, modelName string) error {
+	return PullOllamaModelWithContext(context.Background(), baseURL, apiKey, modelName)
+}
+
+func PullOllamaModelWithContext(ctx context.Context, baseURL, apiKey, modelName string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
 	url := fmt.Sprintf("%s/api/pull", baseURL)
 
 	pullRequest := OllamaPullRequest{
 		Name:   modelName,
-		Stream: false, // 非流式，简化处理
+		Stream: common.GetPointer(false), // 非流式，简化处理
 	}
 
 	requestBody, err := common.Marshal(pullRequest)
@@ -334,7 +354,7 @@ func PullOllamaModel(baseURL, apiKey, modelName string) error {
 	client := &http.Client{
 		Timeout: 30 * 60 * 1000 * time.Millisecond, // 30分钟超时，支持大模型
 	}
-	request, err := http.NewRequest("POST", url, strings.NewReader(string(requestBody)))
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, url, strings.NewReader(string(requestBody)))
 	if err != nil {
 		return fmt.Errorf("创建请求失败: %v", err)
 	}
@@ -351,8 +371,11 @@ func PullOllamaModel(baseURL, apiKey, modelName string) error {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("拉取模型失败 %d: %s", response.StatusCode, string(body))
+		body, readErr := common.ReadAllWithLimit(response.Body, common.ControlPlaneJSONMaxBytes)
+		if readErr != nil {
+			return fmt.Errorf("读取错误响应失败: %w", readErr)
+		}
+		return fmt.Errorf("拉取模型失败 %d: response_%s", response.StatusCode, common.PayloadMetadata(body))
 	}
 
 	return nil
@@ -360,11 +383,20 @@ func PullOllamaModel(baseURL, apiKey, modelName string) error {
 
 // 流式拉取 Ollama 模型 (支持进度回调)
 func PullOllamaModelStream(baseURL, apiKey, modelName string, progressCallback func(OllamaPullResponse)) error {
+	return PullOllamaModelStreamWithContext(context.Background(), baseURL, apiKey, modelName, progressCallback)
+}
+
+func PullOllamaModelStreamWithContext(ctx context.Context, baseURL, apiKey, modelName string, progressCallback func(OllamaPullResponse)) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, time.Hour)
+	defer cancel()
 	url := fmt.Sprintf("%s/api/pull", baseURL)
 
 	pullRequest := OllamaPullRequest{
 		Name:   modelName,
-		Stream: true, // 启用流式
+		Stream: common.GetPointer(true), // 启用流式
 	}
 
 	requestBody, err := common.Marshal(pullRequest)
@@ -375,7 +407,7 @@ func PullOllamaModelStream(baseURL, apiKey, modelName string, progressCallback f
 	client := &http.Client{
 		Timeout: 60 * 60 * 1000 * time.Millisecond, // 1小时超时，支持超大模型
 	}
-	request, err := http.NewRequest("POST", url, strings.NewReader(string(requestBody)))
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, url, strings.NewReader(string(requestBody)))
 	if err != nil {
 		return fmt.Errorf("创建请求失败: %v", err)
 	}
@@ -392,8 +424,11 @@ func PullOllamaModelStream(baseURL, apiKey, modelName string, progressCallback f
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("拉取模型失败 %d: %s", response.StatusCode, string(body))
+		body, readErr := common.ReadAllWithLimit(response.Body, common.ControlPlaneJSONMaxBytes)
+		if readErr != nil {
+			return fmt.Errorf("读取错误响应失败: %w", readErr)
+		}
+		return fmt.Errorf("拉取模型失败 %d: response_%s", response.StatusCode, common.PayloadMetadata(body))
 	}
 
 	// 读取流式响应
@@ -437,6 +472,15 @@ func PullOllamaModelStream(baseURL, apiKey, modelName string, progressCallback f
 
 // 删除 Ollama 模型
 func DeleteOllamaModel(baseURL, apiKey, modelName string) error {
+	return DeleteOllamaModelWithContext(context.Background(), baseURL, apiKey, modelName)
+}
+
+func DeleteOllamaModelWithContext(ctx context.Context, baseURL, apiKey, modelName string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	url := fmt.Sprintf("%s/api/delete", baseURL)
 
 	deleteRequest := OllamaDeleteRequest{
@@ -448,8 +492,8 @@ func DeleteOllamaModel(baseURL, apiKey, modelName string) error {
 		return fmt.Errorf("序列化请求失败: %v", err)
 	}
 
-	client := &http.Client{}
-	request, err := http.NewRequest("DELETE", url, strings.NewReader(string(requestBody)))
+	client := &http.Client{Timeout: 30 * time.Second}
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodDelete, url, strings.NewReader(string(requestBody)))
 	if err != nil {
 		return fmt.Errorf("创建请求失败: %v", err)
 	}
@@ -466,14 +510,26 @@ func DeleteOllamaModel(baseURL, apiKey, modelName string) error {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("删除模型失败 %d: %s", response.StatusCode, string(body))
+		body, readErr := common.ReadAllWithLimit(response.Body, common.ControlPlaneJSONMaxBytes)
+		if readErr != nil {
+			return fmt.Errorf("读取错误响应失败: %w", readErr)
+		}
+		return fmt.Errorf("删除模型失败 %d: response_%s", response.StatusCode, common.PayloadMetadata(body))
 	}
 
 	return nil
 }
 
 func FetchOllamaVersion(baseURL, apiKey string) (string, error) {
+	return FetchOllamaVersionWithContext(context.Background(), baseURL, apiKey)
+}
+
+func FetchOllamaVersionWithContext(ctx context.Context, baseURL, apiKey string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	trimmedBase := strings.TrimRight(baseURL, "/")
 	if trimmedBase == "" {
 		return "", fmt.Errorf("baseURL 为空")
@@ -482,7 +538,7 @@ func FetchOllamaVersion(baseURL, apiKey string) (string, error) {
 	url := fmt.Sprintf("%s/api/version", trimmedBase)
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	request, err := http.NewRequest("GET", url, nil)
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("创建请求失败: %v", err)
 	}
@@ -497,20 +553,20 @@ func FetchOllamaVersion(baseURL, apiKey string) (string, error) {
 	}
 	defer response.Body.Close()
 
-	body, err := io.ReadAll(response.Body)
+	body, err := common.ReadAllWithLimit(response.Body, common.ControlPlaneJSONMaxBytes)
 	if err != nil {
 		return "", fmt.Errorf("读取响应失败: %v", err)
 	}
 
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("查询版本失败 %d: %s", response.StatusCode, string(body))
+		return "", fmt.Errorf("查询版本失败 %d: response_%s", response.StatusCode, common.PayloadMetadata(body))
 	}
 
 	var versionResp struct {
 		Version string `json:"version"`
 	}
 
-	if err := json.Unmarshal(body, &versionResp); err != nil {
+	if err := common.Unmarshal(body, &versionResp); err != nil {
 		return "", fmt.Errorf("解析响应失败: %v", err)
 	}
 

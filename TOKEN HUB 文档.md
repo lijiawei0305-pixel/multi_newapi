@@ -8,6 +8,14 @@ description:
 tags:
   - "clippings"
 ---
+
+> [!WARNING]
+> **外部历史资料剪藏，不是本项目的可执行运维文档。** 下文保留来源原貌供产品对照；其中
+> `auth-service`、`systemctl start auth-service`、旧配置文件路径以及 `/pay/wxpay/notify`、
+> `/auth/alipay/notify` 回调均不适用于当前仓库，禁止照抄执行。当前项目采用主站进程内支付和
+> `app + mysql + redis` 单栈拓扑，请以 [`deploy/ops/README.md`](deploy/ops/README.md) 与
+> [`docs/vendor/payments/deploy-real-payments.md`](docs/vendor/payments/deploy-real-payments.md) 为准。
+
 ## TOKEN HUB 操作教程
 
 > 适用版本：TOKEN HUB v1.0（基于 new-api 二次开发）

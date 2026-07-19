@@ -26,7 +26,6 @@ import {
 } from '@/components/ai-elements/conversation'
 import { Loader } from '@/components/ai-elements/loader'
 import { Message } from '@/components/ai-elements/message'
-
 import type { PricingModel } from '@/features/pricing/types'
 
 import {

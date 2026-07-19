@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# demo.sh — 一条命令跑通主流程的自动化演示（**服务器上运行**，bash + curl）。
+# demo.sh — 真实支付主流程的交互式演示（**服务器上运行**，bash + curl）。
 #
 #   逐步打印「步骤 → 结果」，每步打印关键数值；任一步失败 set -e 退出。
 #   走真实 API（多租户 Host + 会话 cookie + New-Api-User 头），仅「读取演示账号的
@@ -9,40 +9,44 @@
 #   主流程（对标 Phase 1 已验证闭环）：
 #     ① chanuser1 登录
 #     ② 买 mini 套餐（返 order_no/pay_url）
-#     ③ auth-service /auth/mock/confirm 确认支付
+#     ③ 买家在微信/支付宝真实完成付款，脚本等待可信回调激活
 #     ④ 校验：原生订阅 active + 代理 demoagent 得 tokenplan_spread
 #     ⑤ chanuser1 用 API Key 调 /v1（gpt-5.4-mini），证明走「订阅桶」(logs.billing_source)
 #     ⑥ demoagent 查收益 / 申请提现
 #     ⑦ admin 审核通过（校验金额守恒）
-#     ⑧ 充值 $1（mock）→ quota +500000
+#     ⑧ 真实充值 $1 → quota +500000
 #
 # 用法（服务器）：
-#   cd /root/newapi-test/deploy/demo && ./demo.sh
-#   PLAN_ID=3 WITHDRAW_CNY=20 ./demo.sh        # 任意参数可用环境变量覆盖
+#   cd /root/newapi-test/deploy/demo
+#   ALLOW_REAL_PAYMENT_DEMO=1 PAY_PROVIDER=wxpay ./demo.sh
+#   ALLOW_REAL_PAYMENT_DEMO=1 PLAN_ID=3 WITHDRAW_CNY=20 ./demo.sh
 #
-# 幂等友好：每次跑都是「新订单 / 新充值」（金额累加，无害）；API Key 按名复用、不重复建。
+# 每次跑都会创建真实订单并发生真实资金/余额变更；API Key 按名复用、不重复建。
 # 安全：guard_target（旧名 guard_not_prod）确认目标确为期望栈 newapi_test（挡误配）。
 # ⚠ 注意：newapi_test 现为唯一现网/生产——demo.sh 会在生产上造演示订单/充值，仅限受控演示时运行。
-# 演示口令仅供演示，部署后务必改（见 README）。
+# 脚本不提供任何账号口令；三项口令必须由调用者从密钥管理器或交互输入后注入。
 # ─────────────────────────────────────────────────────────────────────────────
 source "$(dirname "$0")/../ops/lib.sh"
 guard_not_prod
 require curl; require docker; require python3
 require_db_pass  # demo 亦用 DB 口令（db() 函数）→ 显式校验，缺则清晰中止（audit F3 口径一致）
+[ "${ALLOW_REAL_PAYMENT_DEMO:-0}" = 1 ] \
+  || die "本演示会发起真实微信/支付宝付款；确认后请显式设置 ALLOW_REAL_PAYMENT_DEMO=1"
 
 APP="http://127.0.0.1:${APP_PORT}"     # 主站 app（经 Host 头识别租户）
-AUTH="http://127.0.0.1:${AUTH_PORT}"   # auth-service（支付网关，mock）
 
-# ── 演示账号 / 参数（部署后务必改密；可用环境变量覆盖）─────────────────────────
-ADMIN_USER="${ADMIN_USER:-admin}";       ADMIN_PASS="${ADMIN_PASS:?请先 export ADMIN_PASS=<演示栈管理员密码>（不入库）}"
-AGENT_USER="${AGENT_USER:-demoagent}";   AGENT_PASS="${AGENT_PASS:-demoagent123}"
-BUYER_USER="${BUYER_USER:-chanuser1}";   BUYER_PASS="${BUYER_PASS:-chanuser123}"
+# ── 演示账号 / 参数（口令无默认值，必须由运行者安全注入）─────────────────────────
+ADMIN_USER="${ADMIN_USER:-admin}";       ADMIN_PASS="${ADMIN_PASS:?请安全注入 ADMIN_PASS（脚本无默认口令）}"
+AGENT_USER="${AGENT_USER:-demoagent}";   AGENT_PASS="${AGENT_PASS:?请安全注入 AGENT_PASS（脚本无默认口令）}"
+BUYER_USER="${BUYER_USER:-chanuser1}";   BUYER_PASS="${BUYER_PASS:?请安全注入 BUYER_PASS（脚本无默认口令）}"
 TENANT_ID="${TENANT_ID:-1}"              # tokendream（demoagent 为 owner）
 PLAN_ID="${PLAN_ID:-2}"                  # mini（¥119，月限额 $220，代理成本 ¥95.20→差价 ¥23.80）
 PLAN_MODEL="${PLAN_MODEL:-gpt-5.4-mini}" # 上游已配渠道的模型
 TOKEN_NAME="${TOKEN_NAME:-demo-cli}"     # 演示用 API Key 名（按名复用）
 WITHDRAW_CNY="${WITHDRAW_CNY:-10}"       # 演示提现额（¥）
 RECHARGE_USD="${RECHARGE_USD:-1}"        # 演示充值额（$）
+PAY_PROVIDER="${PAY_PROVIDER:-wxpay}"     # wxpay 或 alipay（均由主站进程内 SDK 创建）
+PAYMENT_WAIT_SECONDS="${PAYMENT_WAIT_SECONDS:-300}"
 
 # ── mysql 容器（仅用于「读 API Key」与「校验数值」；主链路全走 API）──────────────
 MYSQL_CID="$(docker ps \
@@ -101,16 +105,32 @@ capi() {
   fi
 }
 
-# confirm_pay <order_no> → echo HTTP code（auth-service mock 确认页 = 合成合法回调）。
-confirm_pay() {
-  curl -sS -o /dev/null -w '%{http_code}' -X POST "$AUTH/auth/mock/confirm" --data-urlencode "order=$1"
+# wait_order_status <table> <order_no> <expected>：等待真实支付回调/主动对账落地。
+wait_order_status() {
+  local table="$1" order_no="$2" expected="$3"
+  local deadline=$(( $(date +%s) + PAYMENT_WAIT_SECONDS )) status=""
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    status="$(db "SELECT status FROM $table WHERE order_no='$order_no';")"
+    [ "$status" = "$expected" ] && return 0
+    sleep 3
+  done
+  die "等待订单 $order_no 进入 $expected 超时（最后状态=${status:-missing}）；请查支付回调与对账页"
+}
+
+show_payment_target() {
+  local url="$1"
+  kv "支付目标" "$url"
+  if command -v qrencode >/dev/null 2>&1; then
+    qrencode -t ANSIUTF8 "$url"
+  fi
+  printf '\n请使用已配置的 %s 完成真实付款；脚本会等待最多 %s 秒。\n' "$PAY_PROVIDER" "$PAYMENT_WAIT_SECONDS"
 }
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 JAR_BUYER="$WORK/buyer.cookie"; JAR_AGENT="$WORK/agent.cookie"; JAR_ADMIN="$WORK/admin.cookie"
 
 echo "════════ newapi628 主流程自动化演示  栈=$STACK  Host=$HOST_HEADER ════════"
-echo "  app=$APP   auth-service=$AUTH   $(date '+%F %T')"
+echo "  app=$APP   payment=in-process/$PAY_PROVIDER   $(date '+%F %T')"
 
 # ════════════════════════════════════════════════════════════════════════════
 # ① 终端用户登录
@@ -126,7 +146,7 @@ kv "归属租户" "$(printf '%s' "$CUR" | jget data.site_name)（slug=$(printf '
 # ════════════════════════════════════════════════════════════════════════════
 step 2 "购买套餐（plan_id=$PLAN_ID）→ 下单"
 EARNED_BEFORE="$(db "SELECT COALESCE(total_earned,0) FROM agent_wallets WHERE tenant_id=$TENANT_ID;")"
-BUY="$(capi POST "/api/tenant/token-plans/$PLAN_ID/purchase" "$JAR_BUYER" "$BUYER_ID" '{"provider":"wxpay"}')"
+BUY="$(capi POST "/api/tenant/token-plans/$PLAN_ID/purchase" "$JAR_BUYER" "$BUYER_ID" "{\"provider\":\"$PAY_PROVIDER\"}")"
 assert_ok "$BUY" "购买下单"
 ORDER="$(printf '%s'  "$BUY" | jget data.order_no)"
 AMT_CNY="$(printf '%s' "$BUY" | jget data.amount_cny)"
@@ -137,12 +157,12 @@ kv "应付金额"   "¥$AMT_CNY"
 kv "支付页 URL" "$PAY_URL"
 
 # ════════════════════════════════════════════════════════════════════════════
-# ③ auth-service 模拟支付确认（合成合法回调 → 主站内网入账）
+# ③ 真实付款 → 主站进程内 SDK 验签、幂等激活
 # ════════════════════════════════════════════════════════════════════════════
-step 3 "auth-service 模拟支付确认（POST /auth/mock/confirm）"
-CODE="$(confirm_pay "$ORDER")"
-[ "$CODE" = "200" ] || die "支付确认 HTTP $CODE（期望 200）"
-res "支付回调成功（HTTP 200）→ 验签 + 幂等 + 主站内网入账 + 激活"
+step 3 "完成真实付款并等待可信回调激活"
+show_payment_target "$PAY_URL"
+wait_order_status mt_subscription_orders "$ORDER" activated
+res "支付事实已验签并幂等激活（SUB status=activated）"
 
 # ════════════════════════════════════════════════════════════════════════════
 # ④ 校验：原生订阅激活 + 代理获得套餐差价
@@ -231,18 +251,19 @@ assert abs(t-(w+f+a)) < 1e-6, f'守恒失败：total_earned={t} != withdrawable+
 res "金额守恒成立：total_earned = withdrawable + frozen + Σapproved"
 
 # ════════════════════════════════════════════════════════════════════════════
-# ⑧ 充值 $1（mock）→ quota +500000
+# ⑧ 真实充值 $1 → quota +500000
 # ════════════════════════════════════════════════════════════════════════════
-step 8 "终端用户充值 \$$RECHARGE_USD（mock）→ quota 入账"
+step 8 "终端用户真实充值 \$$RECHARGE_USD → quota 入账"
 Q0="$(db "SELECT quota FROM users WHERE id=$BUYER_ID;")"
-RC="$(capi POST "/api/tenant/wallet/recharge" "$JAR_BUYER" "$BUYER_ID" "{\"amount_usd\":$RECHARGE_USD,\"provider\":\"wxpay\"}")"
+RC="$(capi POST "/api/tenant/wallet/recharge" "$JAR_BUYER" "$BUYER_ID" "{\"amount_usd\":$RECHARGE_USD,\"provider\":\"$PAY_PROVIDER\"}")"
 assert_ok "$RC" "充值下单"
 RORDER="$(printf '%s' "$RC" | jget data.order_no)"
 RC_CNY="$(printf '%s' "$RC" | jget data.amount_cny)"
+RPAY_URL="$(printf '%s' "$RC" | jget data.pay_url)"
 kv "order_no" "$RORDER"
 kv "应付"     "¥$RC_CNY（= \$$RECHARGE_USD × 汇率）"
-CODE="$(confirm_pay "$RORDER")"
-[ "$CODE" = "200" ] || die "充值确认 HTTP $CODE（期望 200）"
+show_payment_target "$RPAY_URL"
+wait_order_status payment_orders "$RORDER" credited
 Q1="$(db "SELECT quota FROM users WHERE id=$BUYER_ID;")"
 RST="$(db "SELECT status FROM payment_orders WHERE order_no='$RORDER';")"
 DELTA=$((Q1 - Q0))

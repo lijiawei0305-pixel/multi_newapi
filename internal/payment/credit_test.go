@@ -8,7 +8,25 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// expireBeforeCreditRepo 确定性制造「Credit 已读 created、对账先写 failed、随后 created→paid CAS 失败」
+// 的边界竞态。旧实现会把该 CAS 失败直接当幂等成功，导致真实付款永久未入账。
+type expireBeforeCreditRepo struct {
+	*MemRepo
+	once sync.Once
+}
+
+func (r *expireBeforeCreditRepo) CompareAndSetStatus(ctx context.Context, orderNo string, from, to OrderStatus) (bool, error) {
+	if from == OrderCreated && to == OrderPaid {
+		r.once.Do(func() {
+			_, _ = r.MemRepo.CompareAndSetStatus(ctx, orderNo, OrderCreated, OrderFailed)
+		})
+	}
+	return r.MemRepo.CompareAndSetStatus(ctx, orderNo, from, to)
+}
 
 // seedCreatedOrder 直接落一条 created 订单（绕过下单流程），供入账用例复用。
 func seedCreatedOrder(t *testing.T, repo *MemRepo, no string, typ OrderType) {
@@ -126,6 +144,22 @@ func TestCreditPaidOrderAmountMismatch(t *testing.T) {
 	if recharge.count() != 1 {
 		t.Fatalf("sink count = %d, want 1", recharge.count())
 	}
+}
+
+func TestCreditPaidOrderRevivesOrderFailedByConcurrentExpiry(t *testing.T) {
+	base := NewMemRepo()
+	repo := &expireBeforeCreditRepo{MemRepo: base}
+	sink := newFakeSink()
+	g := NewGateway(repo, NewStubPaySDK("secret"), map[OrderType]OrderSink{OrderTypeRecharge: sink})
+	const orderNo = "RCG-expiry-race"
+	seedCreatedOrder(t, base, orderNo, OrderTypeRecharge)
+
+	err := g.CreditPaidOrder(context.Background(), orderNo, "txn-paid", 73)
+	require.NoError(t, err)
+	assert.Equal(t, 1, sink.count(), "verified payment must be credited exactly once")
+	final, err := base.GetByOrderNo(context.Background(), orderNo)
+	require.NoError(t, err)
+	assert.Equal(t, OrderCredited, final.Status)
 }
 
 // TestNewOrderNoPrefixed 订单号带业务前缀且唯一。

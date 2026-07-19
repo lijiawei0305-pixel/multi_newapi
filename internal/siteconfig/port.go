@@ -25,7 +25,7 @@ type AssetService interface {
 // --- 消费者定义的依赖接口（本包声明，main 装配具体实现）---
 
 // SiteConfigRepo 是站点配置与素材元数据的持久化抽象。
-// 本轮提供内存假实现（MemRepo）；真实 GORM 实现 + 迁移顺延（见报告 TODO）。
+// 内存假实现为 MemRepo；生产 GORM 实现及迁移位于 gormrepo 子包。
 type SiteConfigRepo interface {
 	// GetConfig 读取租户配置；未配置返回 found=false（由 Service 回退主站默认）。
 	GetConfig(ctx context.Context, tenantID int64) (cfg *SiteConfig, found bool, err error)

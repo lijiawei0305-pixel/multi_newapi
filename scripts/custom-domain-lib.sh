@@ -11,7 +11,7 @@ ACME_EMAIL="${ACME_EMAIL:-admin@wedreamhub.com}"
 WEBROOT="${WEBROOT:-/www/wwwroot/acme-challenge}"          # HTTP-01 challenge 共享 webroot
 VHOST_DIR="${VHOST_DIR:-/www/server/panel/vhost/nginx}"    # 宝塔 nginx vhost 目录（主 nginx.conf include *.conf）
 CERT_ROOT="${CERT_ROOT:-/www/server/panel/vhost/cert/custom}"  # 各自定义域名证书目录：<CERT_ROOT>/<domain>/
-UPSTREAM="${UPSTREAM:-127.0.0.1:3100}"                     # 多租户测试栈 app（绝不指向现网 3000）
+UPSTREAM="${UPSTREAM:-127.0.0.1:3100}"                     # 唯一现网多租户栈 app（回环口）
 ENV_FILE="${ENV_FILE:-/root/newapi-test/.env}"            # 取 MT_INTERNAL_SECRET
 API_BASE="${API_BASE:-http://127.0.0.1:3100/api/internal/domain}"
 STATE_DIR="${STATE_DIR:-/var/lib/newapi-cert}"             # 签发退避状态
@@ -33,7 +33,7 @@ valid_domain() {
 # conf_path 返回某域名的 vhost 文件路径（custom_ 前缀便于辨识与清理）。
 conf_path() { printf '%s/custom_%s.conf' "$VHOST_DIR" "$1"; }
 
-# write_http_conf 写 HTTP-01 阶段 vhost（仅 80：放行 well-known + 反代 3100）。签发前必须先就位并 reload，
+# write_http_conf 写 HTTP-01 阶段 vhost（仅 80：放行 well-known，其余统一 308 HTTPS）。签发前必须先就位并 reload，
 # 否则 LE 取 challenge 取不到。
 write_http_conf() {
   local domain="$1"
@@ -48,22 +48,12 @@ server {
         default_type "text/plain";
         allow all;
     }
-    location / {
-        proxy_pass http://${UPSTREAM};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 300s;
-    }
+    location / { return 308 https://\$host\$request_uri; }
 }
 NGINX
 }
 
-# write_full_conf 写最终 vhost（80→301 跳 https + 保留 well-known 供续期；443 ssl 反代 3100，Host 透传按 Host 解析租户）。
+# write_full_conf 写最终 vhost（80→308 跳 https + 保留 well-known 供续期；443 ssl 反代 3100，Host 透传按 Host 解析租户）。
 write_full_conf() {
   local domain="$1"
   cat > "$(conf_path "$domain")" <<NGINX
@@ -77,7 +67,7 @@ server {
         default_type "text/plain";
         allow all;
     }
-    location / { return 301 https://\$host\$request_uri; }
+    location / { return 308 https://\$host\$request_uri; }
 }
 server {
     listen 443 ssl;
@@ -86,6 +76,7 @@ server {
     ssl_certificate     ${CERT_ROOT}/${domain}/fullchain.pem;
     ssl_certificate_key ${CERT_ROOT}/${domain}/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
+    location ^~ /api/internal/ { return 404; }
     location / {
         proxy_pass http://${UPSTREAM};
         proxy_http_version 1.1;
@@ -111,13 +102,26 @@ nginx_reload() {
   return 1
 }
 
+# internal_api_curl <secret> <curl args...>：通过 stdin FD（-H @-）传入密钥
+# header，curl argv 不出现密钥本身，也不产生可遗留的临时文件。
+internal_api_curl() (
+  set -euo pipefail
+  local secret="$1"
+  shift
+  [ -n "$secret" ] || return 1
+  case "$secret" in
+    *$'\r'*|*$'\n'*) log "MT_INTERNAL_SECRET contains a forbidden newline"; return 1 ;;
+  esac
+
+  printf 'X-Internal-Secret: %s\n' "$secret" | curl -H @- "$@"
+)
+
 # callback_cert_issued 回写主站内网端点：转 active + 失效缓存。
 callback_cert_issued() {
   local domain="$1" expires="$2" secret
   secret="$(internal_secret)"
   if [[ -z "$secret" ]]; then log "no MT_INTERNAL_SECRET; skip callback for ${domain}"; return 1; fi
-  curl -fsS -X POST "${API_BASE}/cert-issued" \
-    -H "X-Internal-Secret: ${secret}" \
+  internal_api_curl "$secret" -fsS -X POST "${API_BASE}/cert-issued" \
     -H 'Content-Type: application/json' \
     -d "{\"domain\":\"${domain}\",\"cert_status\":\"issued\",\"expires_at\":\"${expires}\"}" \
     >>"$LOG_FILE" 2>&1

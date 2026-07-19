@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { fmtDateTime } from '@/lib/agent-format'
+
 import type { ApiResponse, ViolationEvent, ViolationQuery } from './types'
 
 /** Shared read-only violation-log table; admin & agent inject their own `listFn`. */
@@ -81,7 +83,10 @@ export function ViolationsView({
         </div>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <div className='overflow-hidden rounded-lg border' data-testid='violations-table'>
+        <div
+          className='overflow-hidden rounded-lg border'
+          data-testid='violations-table'
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -96,24 +101,38 @@ export function ViolationsView({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? (
+              {isLoading && (
                 <TableRow>
-                  <TableCell colSpan={showTenant ? 8 : 7} className='text-muted-foreground text-center'>
+                  <TableCell
+                    colSpan={showTenant ? 8 : 7}
+                    className='text-muted-foreground text-center'
+                  >
                     {t('Loading...')}
                   </TableCell>
                 </TableRow>
-              ) : rows.length === 0 ? (
+              )}
+              {!isLoading && rows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={showTenant ? 8 : 7} className='text-muted-foreground text-center'>
+                  <TableCell
+                    colSpan={showTenant ? 8 : 7}
+                    className='text-muted-foreground text-center'
+                  >
                     {t('No violations yet')}
                   </TableCell>
                 </TableRow>
-              ) : (
+              )}
+              {!isLoading &&
+                rows.length > 0 &&
                 rows.map((row: ViolationEvent) => (
-                  <TableRow key={row.id} data-testid={`violation-row-${row.id}`}>
+                  <TableRow
+                    key={row.id}
+                    data-testid={`violation-row-${row.id}`}
+                  >
                     <TableCell className='tabular-nums'>{row.id}</TableCell>
                     {showTenant && (
-                      <TableCell className='tabular-nums'>{row.tenant_id ?? 0}</TableCell>
+                      <TableCell className='tabular-nums'>
+                        {row.tenant_id ?? 0}
+                      </TableCell>
                     )}
                     <TableCell>
                       {row.username
@@ -123,8 +142,8 @@ export function ViolationsView({
                     <TableCell>{row.model || '-'}</TableCell>
                     <TableCell>
                       <div className='flex flex-wrap gap-1'>
-                        {(row.matched_words || []).map((w, i) => (
-                          <Badge key={i} variant='secondary'>
+                        {[...new Set(row.matched_words || [])].map((w) => (
+                          <Badge key={w} variant='secondary'>
                             {w}
                           </Badge>
                         ))}
@@ -134,16 +153,23 @@ export function ViolationsView({
                       {row.excerpt}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={row.action_taken === 'block' ? 'destructive' : 'outline'}>
-                        {row.action_taken === 'block' ? t('Block') : t('Remind')}
+                      <Badge
+                        variant={
+                          row.action_taken === 'block'
+                            ? 'destructive'
+                            : 'outline'
+                        }
+                      >
+                        {row.action_taken === 'block'
+                          ? t('Block')
+                          : t('Remind')}
                       </Badge>
                     </TableCell>
                     <TableCell className='text-muted-foreground text-sm'>
                       {fmtDateTime(row.created_at)}
                     </TableCell>
                   </TableRow>
-                ))
-              )}
+                ))}
             </TableBody>
           </Table>
         </div>

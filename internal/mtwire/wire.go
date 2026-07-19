@@ -87,8 +87,8 @@ type App struct {
 	AgentService  agent.AgentService
 	Withdrawals   agent.WithdrawalService
 	AgentEarnings agent.EarningSink // 真实收益入账口（写 agent_earning_logs，幂等），注入 tokenplan + consume hook
-	// billing 是自研计费 hook 的异步批量落库 writer（消耗台账 + 消耗分润；AGENT_HOOK_ASYNC_ENABLED 开启才启动）。
-	// 关闭时 hook 维持逐请求同步写，此字段不参与。见 billing_writer.go。
+	// billing 只批量 display-only 钱包消耗台账；可提现收益始终同步入账，不经过该进程缓冲。
+	// AGENT_HOOK_ASYNC_ENABLED 关闭时展示台账也维持逐请求同步写。见 billing_writer.go。
 	billing *billingWriter
 
 	// --- 代理自助分销（P1-UI-04）---
@@ -140,6 +140,9 @@ type App struct {
 	// inProcessPaySDK）、SUB 套餐购买下单（HandlePurchase → subscriptionPayURL）、回调验签
 	// （/api/pay/*/notify）、卡单对账主动查单共用同一缓存 SDK。
 	providerMgr *providerManager
+	// subscriptionPayCreator 是 SUB 外部支付创建口；生产指向 providerMgr，测试可注入确定性失败，
+	// 从真实 HandlePurchase 覆盖 CreatePay 后的 Trial claim 补偿分支。
+	subscriptionPayCreator subscriptionPayCreator
 
 	// activateNativeSub 在激活事务内建原生 UserSubscription（由 subscription_bridge.go 使用，
 	// 默认 defaultActivateNativeSub，可注入桩便于单测）。
@@ -213,7 +216,7 @@ func New(db *gorm.DB) *App {
 	// App.ActivatePaidTokenplanOrder 激活（见 subscription_bridge.go）。限购经 tokenplanRiskAdapter 桥接
 	// 真实 risk 引擎（Trial 用户∪实名∪设备三维去重；riskEngine 为 nil 即 Redis 关时放行不回归）；
 	// agent 套餐差价收益经 tokenplanEarningAdapter 真实落到 agent 钱包（ActivateFromPayment 激活事务内、按 source_order_id 幂等）。
-	subs := tokenplan.NewSubscriptionService(tp, tp, newSubPayment(newSubOrderStore(db)), tokenplanRiskAdapter{eng: riskEngine}, newTokenplanEarningAdapter(agentEarnings), nil)
+	subs := tokenplan.NewSubscriptionService(tp, tp, newSubPayment(newSubOrderStore(db), tp), tokenplanRiskAdapter{eng: riskEngine}, newTokenplanEarningAdapter(agentEarnings), nil)
 
 	// agentplan：GORM 仓储（agent_plans）+ 管理员 CRUD 目录。购买/激活在 P3（AGT 订单 → SetAgentType）。
 	agentPlanRepo := agentplanrepo.New(db)
@@ -253,54 +256,54 @@ func New(db *gorm.DB) *App {
 	brkSvc := breakage.NewService(brkRepo, alertSink, alert.LoadConfig(optionGetterAdapter))
 
 	app := &App{
-		DB:              db,
-		TenantRepo:      tr,
-		TenantResolver:  resolver,
-		TenantService:   tsvc,
-		CustomDomains:   customDomains,
-		tenantCache:     tcache,
-		internalSecret:  common.GetEnvOrDefaultString("MT_INTERNAL_SECRET", ""),
-		siteIP:          common.GetEnvOrDefaultString("MT_SITE_IP", ""),
-		SiteConfig:      siteConfigSvc,
-		Assets:          assetSvc,
-		siteConfigRepo:  scRepo,
-		TokenPlanRepo:   tp,
-		Catalog:         catalog,
-		Retail:          retail,
-		Subscriptions:   subs,
-		AgentPlanRepo:   agentPlanRepo,
-		AgentCatalog:    agentCatalog,
-		AgentRepo:       ar,
-		AgentService:    agentSvc,
-		Withdrawals:     withdrawals,
-		AgentEarnings:   agentEarnings,
-		PromotionRepo:   promoRepo,
-		Promotion:       promoSvc,
-		RedemptionRepo:  redemptionRepo,
-		ModelGroupRepo:  mgRepo,
-		ModerationRepo:  modRepo,
-		Moderator:       moderator,
-		TicketRepo:      ticketRepo,
-		TicketService:   ticketSvc,
-		RiskEngine:      riskEngine,
-		ReportRepo:      reportRepo,
-		Breakage:        brkSvc,
-		AlertSink:       alertSink,
-		RechargeGateway: rechargeGateway,
-		rechargeCfg:     rechargeCfg,
-		providerMgr:     providerMgr, // 复用同一进程内适配器供 tokenplan 购买（SUB）下单 + 回调验签 + 对账查单
+		DB:                     db,
+		TenantRepo:             tr,
+		TenantResolver:         resolver,
+		TenantService:          tsvc,
+		CustomDomains:          customDomains,
+		tenantCache:            tcache,
+		internalSecret:         common.GetEnvOrDefaultString("MT_INTERNAL_SECRET", ""),
+		siteIP:                 common.GetEnvOrDefaultString("MT_SITE_IP", ""),
+		SiteConfig:             siteConfigSvc,
+		Assets:                 assetSvc,
+		siteConfigRepo:         scRepo,
+		TokenPlanRepo:          tp,
+		Catalog:                catalog,
+		Retail:                 retail,
+		Subscriptions:          subs,
+		AgentPlanRepo:          agentPlanRepo,
+		AgentCatalog:           agentCatalog,
+		AgentRepo:              ar,
+		AgentService:           agentSvc,
+		Withdrawals:            withdrawals,
+		AgentEarnings:          agentEarnings,
+		PromotionRepo:          promoRepo,
+		Promotion:              promoSvc,
+		RedemptionRepo:         redemptionRepo,
+		ModelGroupRepo:         mgRepo,
+		ModerationRepo:         modRepo,
+		Moderator:              moderator,
+		TicketRepo:             ticketRepo,
+		TicketService:          ticketSvc,
+		RiskEngine:             riskEngine,
+		ReportRepo:             reportRepo,
+		Breakage:               brkSvc,
+		AlertSink:              alertSink,
+		RechargeGateway:        rechargeGateway,
+		rechargeCfg:            rechargeCfg,
+		providerMgr:            providerMgr, // 复用同一进程内适配器供 tokenplan 购买（SUB）下单 + 回调验签 + 对账查单
+		subscriptionPayCreator: providerMgr,
 	}
 	if app.activateNativeSub == nil {
 		app.activateNativeSub = app.defaultActivateNativeSub // 目标③桥接默认实现（subscription_bridge.go）
 	}
-	// 自研计费 hook 异步批量落库 writer（构造但不启动；启动见 StartBillingWriter，仅 flag 开启时）。
-	// 复用同一共享 DB + 具体 AgentRepo（AppendEarningsBatch 走真源钱包/台账）。
-	app.billing = newBillingWriter(app.DB, app.AgentRepo)
+	// 钱包消耗展示台账异步批量 writer（构造但不启动；启动见 StartBillingWriter，仅 flag 开启时）。
+	app.billing = newBillingWriter(app.DB)
 	return app
 }
 
-// StartBillingWriter 启动自研计费 hook 的异步批量落库 writer（**所有节点**，各自缓冲各自 flush——hook 在每个
-// 收 /v1 流量的节点都会触发）。仅当 AGENT_HOOK_ASYNC_ENABLED=true 时启动；否则 hook 维持逐请求同步写。
+// StartBillingWriter 启动钱包消耗展示台账的异步批量 writer（**所有节点**，各自缓冲各自 flush）。
+// 仅当 AGENT_HOOK_ASYNC_ENABLED=true 时启动；可提现收益无论开关状态均保持同步事务入账。
 // 由 router.SetMtRouter 在 InstallHooks 之后调用。
 func (a *App) StartBillingWriter() {
 	if !common.AgentHookAsyncEnabled || a.billing == nil {
@@ -393,6 +396,11 @@ func (a *App) Migrate() error {
 	// 钱包消耗台账 mt_wallet_consume_log（财务报表 v3「钱包消耗」精确口径；(user_id,request_id) 幂等，
 	// (tenant_id,created_at) 覆盖区间扫描，见 wallet_consume_log.go）。
 	if err := migrateWalletConsumeLog(a.DB); err != nil {
+		return err
+	}
+	// Durable payable earnings: request-path intent first, idempotent earning
+	// credit second, with restart-safe pending reconciliation.
+	if err := migratePayableEarningIntents(a.DB); err != nil {
 		return err
 	}
 	// breakage 历史快照一次性回填（幂等）：把「当下应落库」的全平台快照 Upsert 进 breakage_snapshots，

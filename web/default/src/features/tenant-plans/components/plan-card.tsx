@@ -18,10 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { CalendarClock, Loader2, Sparkles, Wallet2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+
 import { cny, usd } from '../lib/format'
 import type { TenantPlan } from '../types'
 
@@ -33,12 +35,7 @@ interface PlanCardProps {
   disabled?: boolean
 }
 
-export function PlanCard({
-  plan,
-  onBuy,
-  purchasing,
-  disabled,
-}: PlanCardProps) {
+export function PlanCard({ plan, onBuy, purchasing, disabled }: PlanCardProps) {
   const { t } = useTranslation()
   const recommended = !!plan.is_recommended
 

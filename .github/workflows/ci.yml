@@ -1,20 +1,10 @@
 name: CI
 
-# 云端质量门 —— 把 scripts/preflight.sh 的 `go build → vet → test -race` 序列
-# 搬进 GitHub Actions，并补上 preflight 从未跑过的前端测试。
-#
-# 背景（audit #10）：此前 7 个 workflow 里，唯一的 PR 门是 peakoss/anti-slop
-# （反 AI 灌水 bot，且只在 opened/reopened 触发）；docker/release/nightly 全是
-# 上游继承的构建推镜像。仓库有 1000+ 个 Go 测试函数与 5 个前端测试，却没有任何
-# CI 执行它们——质量门只剩本地 deploy 时的 preflight，还留了 SKIP_PREFLIGHT=1 逃生口。
-# 本 workflow 在服务器侧强制执行同一套检查，绕不过。
-
 on:
   push:
     branches: [main]
   pull_request:
 
-# 同一分支/PR 有新提交时，取消尚在跑的旧 run，节省 runner 分钟。
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -24,70 +14,195 @@ permissions:
 
 jobs:
   backend:
-    name: backend · go build / vet / test -race
+    name: Backend · build / vet / test -race
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod   # 跟随 go.mod 的 `go 1.25.x`，单一真源
+          go-version-file: go.mod
           cache: true
+      - name: Run backend gates
+        env:
+          PREFLIGHT_SCOPE: backend
+        run: bash scripts/preflight.sh
 
-      # 只检查本项目自有代码（internal/）。仓库其余是上游 new-api fork 代码、并非全部
-      # gofmt-clean。**暂设为仅告警**：首次 CI 发现 committed internal/ 尚有 13 个历史
-      # 未格式化文件，其中 3 个正被并行 WIP 占用，无法此刻干净 `gofmt -w`。待 WIP 落地后
-      # 跑一次 `gofmt -w internal` 清账，再把本步改回 `exit 1` 阻断（TODO）。
-      - name: gofmt (internal, advisory)
-        run: |
-          fmt=$(gofmt -l internal)
-          if [ -n "$fmt" ]; then
-            echo "::warning::internal/ 下列文件未 gofmt（暂不阻断，清账后改回阻断）:"
-            echo "$fmt"
-          fi
-
-      # main.go 有 //go:embed web/*/dist（前端产物）。dist 被 gitignore、不在 checkout 里，
-      # 本 job 又只编译/测试后端不真服务前端 —— 造占位 index.html 满足 embed，令 go build/vet/test
-      # 能跑（真前端产物由 frontend job 的 bun run build 独立校验）。
-      - name: stub frontend dist (satisfy go:embed)
-        run: |
-          mkdir -p web/default/dist web/classic/dist
-          printf '<!doctype html>\n' > web/default/dist/index.html
-          printf '<!doctype html>\n' > web/classic/dist/index.html
-
-      - name: go build
-        run: go build ./...
-
-      # vet/test 只跑我们自己的 internal/。整棵树含上游 new-api 代码（relay/channel/* 等有
-      # unreachable-code 之类 vet 违规、部分测试需外部依赖），非我们所有、不该 gate 我们的 PR。
-      # go build 仍对 ./... 全树编译校验（确保我们对 controller/relay/model 的改动能编过）。
-      - name: go vet (internal)
-        run: go vet ./internal/...
-
-      - name: go test -race (internal)
-        run: go test ./internal/... -race -count=1
-
-  frontend:
-    name: frontend · bun test / build
-    runs-on: ubuntu-latest
+  windows-response-spool:
+    name: Windows · private response spool runtime
+    runs-on: windows-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          bun-version: 1.3.11   # 与本地验证所用版本一致（bun.lock 为真源）
+          go-version-file: go.mod
+          cache: true
+      - name: Assert Windows spool runtime test is present
+        shell: pwsh
+        run: |
+          $tests = go test -list '^TestBufferedResponseWindowsRuntimeUsesProtectedPrivateDACLs$' ./common
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($tests -notcontains 'TestBufferedResponseWindowsRuntimeUsesProtectedPrivateDACLs') {
+            throw 'Windows private spool runtime test was not compiled'
+          }
+      - name: Verify protected private spool DACLs at runtime
+        run: go test -count=1 -run '^TestBufferedResponseWindowsRuntimeUsesProtectedPrivateDACLs$' ./common
+      - name: Verify Windows stale spool lock cleanup
+        run: go test -count=1 -run '^TestBufferedResponseSpoolStaleCleanupIsPrefixAgeAndLockSafe$' ./common
 
-      # bun.lock 在 web/（workspace 根）；--frozen-lockfile 保证与锁文件一致。
-      - name: bun install (frozen)
-        working-directory: web
-        run: bun install --frozen-lockfile
+  database-compatibility:
+    name: Billing durability · MySQL 8 / PostgreSQL 16 / ClickHouse 24.8
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test-password
+          MYSQL_DATABASE: newapi_billing_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ptest-password --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: newapi_billing_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d newapi_billing_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_DB: new_api_logs_test
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: test-only
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd="clickhouse-client --user default --password test-only --query 'SELECT 1'"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Verify MySQL conditional reserve atomicity
+        env:
+          TEST_BILLING_DB_ALLOW_DROP: '1'
+          TEST_BILLING_DB_DIALECT: mysql
+          TEST_BILLING_DB_DSN: root:test-password@tcp(127.0.0.1:3306)/newapi_billing_test?charset=utf8mb4&parseTime=True&loc=UTC
+        run: go test -race -count=1 -run '^TestAtomicQuotaReserveExternalDialect$' ./model
+      - name: Verify PostgreSQL conditional reserve atomicity
+        env:
+          TEST_BILLING_DB_ALLOW_DROP: '1'
+          TEST_BILLING_DB_DIALECT: postgres
+          TEST_BILLING_DB_DSN: host=127.0.0.1 user=postgres password=test-password dbname=newapi_billing_test port=5432 sslmode=disable TimeZone=UTC
+        run: go test -race -count=1 -run '^TestAtomicQuotaReserveExternalDialect$' ./model
+      - name: Verify ClickHouse projection crash replay
+        env:
+          TEST_CLICKHOUSE_ALLOW_DROP: '1'
+          TEST_CLICKHOUSE_DSN: clickhouse://default:test-only@127.0.0.1:9000/new_api_logs_test
+        run: go test -count=1 -run '^TestBillingProjectionRealClickHouseCrashReplay$' ./model
 
-      # 5 个测试混用 node:test 与 vitest 两种写法且无 vitest 依赖/配置；
-      # `bun test` 是唯一能同时跑通两者的命令（内建 node:test + 自动别名 vitest→bun:test）。
-      - name: bun test
-        working-directory: web/default
-        run: bun test
+  default-frontend:
+    name: Default · test / typecheck / lint / format / i18n / size / deps / build / bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.11
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+      - name: Run Default gates
+        env:
+          PREFLIGHT_SCOPE: default
+        run: bash scripts/preflight.sh
 
-      - name: bun run build
-        working-directory: web/default
-        run: bun run build
+  classic-frontend:
+    name: Classic · frozen deps / format / lint / security test / build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.11
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+      - name: Run Classic gates
+        env:
+          PREFLIGHT_SCOPE: classic
+        run: bash scripts/preflight.sh
+
+  orbit:
+    name: Orbit · typecheck / lint / test / build / e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: bulb-orbit/v2/package-lock.json
+      - name: Run Orbit gates
+        env:
+          PREFLIGHT_SCOPE: orbit
+          RUN_ORBIT_E2E: '1'
+        run: bash scripts/preflight.sh
+
+  electron:
+    name: Electron · clean Linux package smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+      - name: Run Electron package smoke
+        env:
+          PREFLIGHT_SCOPE: electron
+        run: bash scripts/preflight.sh

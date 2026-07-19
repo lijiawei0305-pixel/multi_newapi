@@ -1,6 +1,8 @@
 package router
 
 import (
+	"errors"
+
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 
@@ -32,10 +34,9 @@ func SetMtRouter(router *gin.Engine) {
 	// （只对模型分组生效、受组合下限保护，见 §2.15 Phase 2），故不再单设独立钩子。
 	app.InstallHooks()
 
-	// 自研计费 hook 异步批量落库 writer（**所有节点**，各自缓冲各自 flush；AGENT_HOOK_ASYNC_ENABLED 开启才启动）。
-	// 把每请求的 mt_wallet_consume_log INSERT + agent_earning_logs/agent_wallets 收益事务缓冲成定时批量，
-	// 消除自研写放大与 agent_wallets 热行的跨请求争用；SIGTERM 优雅 flush 兜底计划重启。须在 InstallHooks 后
-	// （hook 装配即可能触发 /v1 计费），关闭时无副作用（hook 走同步）。
+	// 钱包消耗展示台账异步批量 writer（**所有节点**，各自缓冲各自 flush；开关开启才启动）。
+	// 可提现收益不经过 writer，始终在请求路径同步事务落 agent_earning_logs + agent_wallets；这里仅合并
+	// mt_wallet_consume_log 的 display-only INSERT。须在 InstallHooks 后启动；开关关闭时展示台账走同步。
 	app.StartBillingWriter()
 
 	if common.IsMasterNode {
@@ -44,6 +45,10 @@ func SetMtRouter(router *gin.Engine) {
 			return
 		}
 		if err := app.Seed(); err != nil {
+			if errors.Is(err, mtwire.ErrDemoAgentSecurity) {
+				common.FatalLog("mt-router: refusing startup after demo-login security reconciliation failure: " + err.Error())
+				return
+			}
 			// seed 失败不致命：记录后继续启动（路由仍注册）。
 			common.SysError("mt-router: seed failed: " + err.Error())
 		}
@@ -95,7 +100,7 @@ func SetMtRouter(router *gin.Engine) {
 		tenantGroup.GET("/tickets/:id", middleware.UserAuth(), app.HandleUserGetTicket)
 		tenantGroup.POST("/tickets/:id/replies", middleware.UserAuth(), app.HandleUserReplyTicket)
 		tenantGroup.POST("/tickets/:id/close", middleware.UserAuth(), app.HandleUserCloseTicket)
-		// 充值下单（目标③）：UserAuth + Host 租户；下单 → 调 auth-service → 返支付凭据。
+		// 充值下单（目标③）：UserAuth + Host 租户；进程内创建支付单并返回支付凭据。
 		// CriticalUserRateLimit：防脚本无限造 pending 订单（DoS + 支付表膨胀）。按认证用户计桶（IP 桶可被伪造 XFF 绕过）。
 		tenantGroup.POST("/wallet/recharge", middleware.UserAuth(), middleware.CriticalUserRateLimit(), app.HandleWalletRecharge)
 		// 充值订单状态查询（目标③ 修复）：UserAuth + Host 租户；前端扫码支付后轮询探活，仅本人订单（越权 404）。

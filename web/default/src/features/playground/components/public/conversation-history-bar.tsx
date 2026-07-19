@@ -16,9 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { History, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { History, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -63,20 +63,24 @@ export function ConversationHistoryBar({
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger
           render={
-            <Button size='sm' variant='outline' className='h-8 gap-1.5 rounded-full' />
+            <Button
+              size='sm'
+              variant='outline'
+              className='h-8 gap-1.5 rounded-full'
+            />
           }
         >
           <History className='size-3.5' />
           {t('History')}
           {conversations.length > 0 && (
-            <span className='tabular-nums text-muted-foreground'>
+            <span className='text-muted-foreground tabular-nums'>
               {conversations.length}
             </span>
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align='start' className='w-72 p-1'>
           {conversations.length === 0 ? (
-            <div className='px-2 py-6 text-center text-sm text-muted-foreground'>
+            <div className='text-muted-foreground px-2 py-6 text-center text-sm'>
               {t('No conversation history yet')}
             </div>
           ) : (
@@ -101,7 +105,7 @@ export function ConversationHistoryBar({
                   >
                     {c.title}
                   </button>
-                  <span className='shrink-0 text-xs tabular-nums text-muted-foreground'>
+                  <span className='text-muted-foreground shrink-0 text-xs tabular-nums'>
                     {c.messageCount}
                   </span>
                   <button

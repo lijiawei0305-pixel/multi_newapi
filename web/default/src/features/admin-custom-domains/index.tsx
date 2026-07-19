@@ -20,6 +20,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { fmtDateTime } from '@/lib/agent-format'
+
 import { adminUnbindCustomDomain, getAdminCustomDomains } from './api'
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
@@ -78,7 +80,9 @@ export function AdminCustomDomains() {
           size='sm'
           variant='outline'
           onClick={() =>
-            queryClient.invalidateQueries({ queryKey: ['admin-custom-domains'] })
+            queryClient.invalidateQueries({
+              queryKey: ['admin-custom-domains'],
+            })
           }
         >
           <RefreshCw className='h-4 w-4' />
@@ -99,7 +103,7 @@ export function AdminCustomDomains() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? (
+              {isLoading && (
                 <TableRow>
                   <TableCell
                     colSpan={6}
@@ -108,7 +112,8 @@ export function AdminCustomDomains() {
                     {t('Loading...')}
                   </TableCell>
                 </TableRow>
-              ) : rows.length === 0 ? (
+              )}
+              {!isLoading && rows.length === 0 && (
                 <TableRow>
                   <TableCell
                     colSpan={6}
@@ -117,7 +122,9 @@ export function AdminCustomDomains() {
                     {t('No custom domains yet')}
                   </TableCell>
                 </TableRow>
-              ) : (
+              )}
+              {!isLoading &&
+                rows.length > 0 &&
                 rows.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell>
@@ -160,10 +167,17 @@ export function AdminCustomDomains() {
                               )
                               if (d > 30) return null
                               return d <= 0 ? (
-                                <Badge variant='destructive' className='mt-0.5 w-fit'>
-                                  {t('Cert expired, awaiting auto-renew check', {
-                                    defaultValue: '证书已过期(待自动续期核查)',
-                                  })}
+                                <Badge
+                                  variant='destructive'
+                                  className='mt-0.5 w-fit'
+                                >
+                                  {t(
+                                    'Cert expired, awaiting auto-renew check',
+                                    {
+                                      defaultValue:
+                                        '证书已过期(待自动续期核查)',
+                                    }
+                                  )}
                                 </Badge>
                               ) : (
                                 <Badge
@@ -196,8 +210,7 @@ export function AdminCustomDomains() {
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
+                ))}
             </TableBody>
           </Table>
         </div>

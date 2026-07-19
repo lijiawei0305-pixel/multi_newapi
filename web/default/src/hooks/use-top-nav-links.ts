@@ -18,9 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAuthStore } from '@/stores/auth-store'
-import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
+
 import { useStatus } from '@/hooks/use-status'
+import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
+import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
+import { useAuthStore } from '@/stores/auth-store'
 
 export type TopNavLink = {
   title: string
@@ -100,8 +102,13 @@ export function useTopNavLinks(): TopNavLink[] {
     // 平台已有第一方 /docs 文档页 → 内部页为默认；
     // 仅当管理员设置了非上游默认的自定义外链时才跳外部（保留 OEM 能力）。
     const UPSTREAM_DEFAULT_DOCS = 'https://docs.newapi.pro'
-    if (docsLink && docsLink !== UPSTREAM_DEFAULT_DOCS) {
-      links.push({ title: t('Docs'), href: docsLink, external: true })
+    const externalDocsLink = normalizeHttpNavigationUrl(docsLink)
+    if (externalDocsLink && externalDocsLink !== UPSTREAM_DEFAULT_DOCS) {
+      links.push({
+        title: t('Docs'),
+        href: externalDocsLink,
+        external: true,
+      })
     } else {
       links.push({ title: t('Docs'), href: '/docs' })
     }

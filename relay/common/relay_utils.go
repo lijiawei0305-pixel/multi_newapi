@@ -1,6 +1,7 @@
 package common
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -78,6 +79,67 @@ func validatePrompt(prompt string) *dto.TaskError {
 	return nil
 }
 
+func validateTaskDuration(req TaskSubmitReq) error {
+	if req.Duration != nil && *req.Duration <= 0 {
+		return errors.New("duration must be greater than zero")
+	}
+	if req.Seconds != "" {
+		seconds, err := strconv.Atoi(req.Seconds)
+		if err != nil {
+			return fmt.Errorf("seconds must be an integer: %w", err)
+		}
+		if seconds <= 0 {
+			return errors.New("seconds must be greater than zero")
+		}
+	}
+	return validateTaskMetadataPositiveScalars(req.Metadata, "metadata")
+}
+
+func validateTaskMetadataPositiveScalars(metadata map[string]any, path string) error {
+	for key, value := range metadata {
+		fieldPath := path + "." + key
+		normalizedKey := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(key))
+		switch normalizedKey {
+		case "duration", "durationseconds", "frames", "samplecount", "n":
+			var numericValue float64
+			var isNumeric bool
+			switch typed := value.(type) {
+			case int:
+				numericValue, isNumeric = float64(typed), true
+			case int32:
+				numericValue, isNumeric = float64(typed), true
+			case int64:
+				numericValue, isNumeric = float64(typed), true
+			case uint:
+				numericValue, isNumeric = float64(typed), true
+			case uint32:
+				numericValue, isNumeric = float64(typed), true
+			case uint64:
+				numericValue, isNumeric = float64(typed), true
+			case float32:
+				numericValue, isNumeric = float64(typed), true
+			case float64:
+				numericValue, isNumeric = typed, true
+			case string:
+				parsed, err := strconv.ParseFloat(typed, 64)
+				if err == nil {
+					numericValue, isNumeric = parsed, true
+				}
+			}
+			if isNumeric && numericValue <= 0 {
+				return fmt.Errorf("%s must be greater than zero", fieldPath)
+			}
+		}
+
+		if nested, ok := value.(map[string]any); ok {
+			if err := validateTaskMetadataPositiveScalars(nested, fieldPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func validateMultipartTaskRequest(c *gin.Context, info *RelayInfo, action string) (TaskSubmitReq, error) {
 	var req TaskSubmitReq
 	if _, err := c.MultipartForm(); err != nil {
@@ -96,7 +158,7 @@ func validateMultipartTaskRequest(c *gin.Context, info *RelayInfo, action string
 
 	if durationStr := formData.Get("seconds"); durationStr != "" {
 		if duration, err := strconv.Atoi(durationStr); err == nil {
-			req.Duration = duration
+			req.Duration = common.GetPointer(duration)
 		}
 	}
 
@@ -110,6 +172,8 @@ func validateMultipartTaskRequest(c *gin.Context, info *RelayInfo, action string
 				req.Metadata[key] = intVal
 			} else if floatVal, err := strconv.ParseFloat(values[0], 64); err == nil {
 				req.Metadata[key] = floatVal
+			} else if boolVal, err := strconv.ParseBool(values[0]); err == nil {
+				req.Metadata[key] = boolVal
 			} else {
 				req.Metadata[key] = values[0]
 			}
@@ -134,11 +198,14 @@ func ValidateMultipartDirect(c *gin.Context, info *RelayInfo) *dto.TaskError {
 	model = req.Model
 	size = req.Size
 	seconds, _ = strconv.Atoi(req.Seconds)
-	if seconds == 0 {
-		seconds = req.Duration
+	if req.Seconds == "" && req.Duration != nil {
+		seconds = *req.Duration
 	}
 	if req.InputReference != "" {
 		req.Images = []string{req.InputReference}
+	}
+	if err := validateTaskDuration(req); err != nil {
+		return createTaskError(err, "invalid_duration", http.StatusBadRequest, true)
 	}
 
 	if strings.TrimSpace(req.Model) == "" {
@@ -190,6 +257,7 @@ func isKnownTaskField(field string) bool {
 		"images":          true,
 		"size":            true,
 		"duration":        true,
+		"seconds":         true,
 		"input_reference": true, // Sora 特有字段
 	}
 	return knownFields[field]
@@ -212,6 +280,9 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 
 	if taskErr := validatePrompt(req.Prompt); taskErr != nil {
 		return taskErr
+	}
+	if err := validateTaskDuration(req); err != nil {
+		return createTaskError(err, "invalid_duration", http.StatusBadRequest, true)
 	}
 
 	if len(req.Images) == 0 && strings.TrimSpace(req.Image) != "" {

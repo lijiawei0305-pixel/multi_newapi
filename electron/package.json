@@ -4,12 +4,14 @@
   "description": "New API - AI Model Gateway Desktop Application",
   "main": "main.js",
   "scripts": {
+    "test": "node --test navigation-policy.test.js",
     "start-app": "electron .",
     "dev-app": "cross-env NODE_ENV=development electron .",
-    "build": "electron-builder",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build:linux": "electron-builder --linux"
+    "prepare:runtime": "node prepare-runtime.js",
+    "build": "npm run prepare:runtime && electron-builder",
+    "build:mac": "npm run prepare:runtime && electron-builder --mac",
+    "build:win": "npm run prepare:runtime && electron-builder --win",
+    "build:linux": "npm run prepare:runtime && electron-builder --linux"
   },
   "keywords": [
     "ai",
@@ -26,7 +28,8 @@
   "devDependencies": {
     "cross-env": "^7.0.3",
     "electron": "39.8.5",
-    "electron-builder": "^26.7.0"
+    "electron-builder": "^26.15.3",
+    "7zip-bin": "5.2.0"
   },
   "build": {
     "appId": "com.newapi.desktop",
@@ -37,7 +40,9 @@
     },
     "files": [
       "main.js",
+      "navigation-policy.js",
       "preload.js",
+      "prepare-runtime.js",
       "icon.png",
       "tray-iconTemplate.png",
       "tray-iconTemplate@2x.png",
@@ -59,10 +64,6 @@
         {
           "from": "../new-api",
           "to": "bin/new-api"
-        },
-        {
-          "from": "../web/dist",
-          "to": "web/dist"
         },
         {
           "from": "../LICENSE",
@@ -157,5 +158,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
+  },
+  "allowScripts": {
+    "electron@39.8.5": true,
+    "electron-winstaller@5.4.0": true
   }
 }

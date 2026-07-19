@@ -56,27 +56,27 @@ func ratioMarkupQuotaUnits(chargedQuota int64, chargedGroupRatio, bottomRatio fl
 // （已含层级优惠）直接对 bottomRatio 求差，sellRatio 的返回值不再需要——但**查询本身仍必须保留**，
 // 因为它是"这个模型分组是否有卖价覆盖"这个入账资格判据的唯一来源（无覆盖=用户按平台价付费=不产生
 // 差价，即便 chargedGroupRatio 本身合法非零）。
-func (a *App) creditRatioMarkup(ctx context.Context, tenantID, userID, quotaUnits int64, usingGroup, requestID, billingSource string, chargedGroupRatio, discountRatio, bottomPriceRatio float64) {
+func (a *App) creditRatioMarkup(ctx context.Context, tenantID, userID, quotaUnits int64, usingGroup, requestID, billingSource string, chargedGroupRatio, discountRatio, bottomPriceRatio float64) error {
 	if tenantID <= 0 || quotaUnits <= 0 || requestID == "" || usingGroup == "" || chargedGroupRatio <= 0 {
-		return
+		return nil
 	}
 	if a.ModelGroupRepo == nil || !a.ModelGroupRepo.IsModelGroup(usingGroup) {
-		return // 非模型分组（层级名等）：无「卖价」概念，不产生差价
+		return nil // 非模型分组（层级名等）：无「卖价」概念，不产生差价
 	}
 	if _, hit := a.resolveTenantGroupRatio(ctx, userID, usingGroup); !hit {
-		return // 未设卖价覆盖：用户按平台直客价付费，不视为隐式底价加价
+		return nil // 未设卖价覆盖：用户按平台直客价付费，不视为隐式底价加价
 	}
 	bottom := consumeFloorRatio(discountRatio, bottomPriceRatio, usingGroup) // 与 HandleAgentSetGroupRatio 同口径（Task 12）
 	markupQuota := ratioMarkupQuotaUnits(quotaUnits, chargedGroupRatio, bottom)
 	if markupQuota <= 0 {
-		return
+		return nil
 	}
 	// markup 已是「计费额」口径（quota 单位），直接按 ratio=1 换算 CNY（不再乘任何分润比例）。
 	cny := consumeCommissionCNY(markupQuota, 1, operation_setting.USDExchangeRate)
 	if cny <= 0 {
-		return
+		return nil
 	}
-	a.creditEarning(ctx, agent.EarningEntry{
+	return a.creditEarning(ctx, agent.EarningEntry{
 		TenantID:   tenantID,
 		UserID:     userID,
 		SourceType: agent.SourceRatioMarkup,

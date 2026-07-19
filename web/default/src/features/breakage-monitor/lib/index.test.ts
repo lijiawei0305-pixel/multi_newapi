@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { describe, it, expect } from 'vitest'
 import type { TFunction } from 'i18next'
+import { describe, it, expect } from 'vitest'
+
 import {
   alertLevelMeta,
   clampPct,
@@ -46,7 +47,7 @@ describe('usd', () => {
     expect(usd(undefined)).toBe('$0.00')
     expect(usd(null)).toBe('$0.00')
     expect(usd('abc')).toBe('$0.00')
-    expect(usd(NaN)).toBe('$0.00')
+    expect(usd(Number.NaN)).toBe('$0.00')
   })
 })
 
@@ -70,7 +71,7 @@ describe('clampPct', () => {
     expect(clampPct(-5)).toBe(0)
   })
   it('NaN/缺省 → 0', () => {
-    expect(clampPct(NaN)).toBe(0)
+    expect(clampPct(Number.NaN)).toBe(0)
     expect(clampPct(undefined)).toBe(0)
   })
 })

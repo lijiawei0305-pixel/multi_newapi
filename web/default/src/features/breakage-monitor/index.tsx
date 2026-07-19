@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { VChart } from '@visactor/react-vchart'
 import {
@@ -26,8 +25,10 @@ import {
   TrendingUp,
   Wallet,
 } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { SectionPageLayout } from '@/components/layout'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
@@ -42,9 +43,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { cn } from '@/lib/utils'
 import { useChartTheme } from '@/lib/use-chart-theme'
+import { cn } from '@/lib/utils'
 import { VCHART_OPTION } from '@/lib/vchart'
+
 import {
   exportBreakageDetailCsv,
   getBreakageDetail,
@@ -61,7 +63,11 @@ import {
   unusedBarColor,
   usd,
 } from './lib'
-import type { AlertLevel, BreakageDetailParams } from './types'
+import type {
+  AlertLevel,
+  BreakageDetailParams,
+  BreakageSnapshotPoint,
+} from './types'
 
 // ============================================================================
 // Breakage 监控页（P2-BRK-01）：4 指标卡（活跃剩余 / 到期未用 / 钱包未消耗 / 系统异常）
@@ -72,6 +78,7 @@ import type { AlertLevel, BreakageDetailParams } from './types'
 
 const PAGE_SIZE = 20
 const DAY = 86400
+const EMPTY_SNAPSHOT_SERIES: BreakageSnapshotPoint[] = []
 
 /** 预设区间（epoch 秒）：滚动 N 天，end = 现在。 */
 function presetRange(days: number): { start: number; end: number } {
@@ -150,7 +157,7 @@ export function BreakageMonitor() {
     select: (res) => res.data,
     placeholderData: (prev) => prev,
   })
-  const series = snapshotsQuery.data?.series ?? []
+  const series = snapshotsQuery.data?.series ?? EMPTY_SNAPSHOT_SERIES
 
   const pickDetailPreset = (key: string) => {
     setDetailPreset(key)
@@ -277,7 +284,10 @@ export function BreakageMonitor() {
         {
           orient: 'bottom',
           type: 'band',
-          label: { style: { fill: chartTextColor, fontSize: 10 }, autoHide: true },
+          label: {
+            style: { fill: chartTextColor, fontSize: 10 },
+            autoHide: true,
+          },
           tick: { visible: false },
         },
         {
@@ -323,7 +333,10 @@ export function BreakageMonitor() {
         {t('Breakage Monitor', { defaultValue: '额度沉淀监控' })}
       </SectionPageLayout.Title>
       <SectionPageLayout.Content>
-        <div className='flex flex-col gap-6' data-testid='breakage-monitor-page'>
+        <div
+          className='flex flex-col gap-6'
+          data-testid='breakage-monitor-page'
+        >
           {/* ---- 4 指标卡 ---- */}
           <div
             className='grid grid-cols-2 gap-3 lg:grid-cols-4'
@@ -445,7 +458,7 @@ export function BreakageMonitor() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {detailQuery.isLoading && rows.length === 0 ? (
+                  {detailQuery.isLoading && rows.length === 0 && (
                     <TableRow>
                       <TableCell
                         colSpan={detailColSpan}
@@ -454,7 +467,8 @@ export function BreakageMonitor() {
                         加载中…
                       </TableCell>
                     </TableRow>
-                  ) : rows.length === 0 ? (
+                  )}
+                  {!detailQuery.isLoading && rows.length === 0 && (
                     <TableRow>
                       <TableCell
                         colSpan={detailColSpan}
@@ -463,14 +477,15 @@ export function BreakageMonitor() {
                         无数据
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    rows.map((row, idx) => {
+                  )}
+                  {rows.length > 0 &&
+                    rows.map((row) => {
                       const pct = clampPct(row.usage_pct)
                       const meta = alertLevelMeta(row.alert_level, t)
                       const unusedPctVal = clampPct(100 - pct)
                       return (
                         <TableRow
-                          key={`${row.user_id}-${row.plan_code}-${row.period_end}-${idx}`}
+                          key={`${row.user_id}-${row.plan_code}-${row.period_end}`}
                           data-testid={`breakage-row-${row.user_id}`}
                         >
                           {crossTenant && (
@@ -527,8 +542,7 @@ export function BreakageMonitor() {
                           </TableCell>
                         </TableRow>
                       )
-                    })
-                  )}
+                    })}
                 </TableBody>
               </Table>
             </div>
@@ -580,23 +594,29 @@ export function BreakageMonitor() {
               </div>
             </header>
             <div className='h-64 p-2 sm:h-72'>
-              {snapshotsQuery.isLoading || !themeReady ? (
+              {(snapshotsQuery.isLoading || !themeReady) && (
                 <Skeleton className='h-full w-full' />
-              ) : chartValues.length === 0 ? (
-                <div className='text-muted-foreground/80 flex h-full items-center justify-center text-xs'>
-                  暂无快照数据
-                </div>
-              ) : (
-                <VChart
-                  key={chartKey}
-                  spec={{
-                    ...chartSpec,
-                    theme: resolvedTheme === 'dark' ? 'dark' : 'light',
-                    background: 'transparent',
-                  }}
-                  option={VCHART_OPTION}
-                />
               )}
+              {!snapshotsQuery.isLoading &&
+                themeReady &&
+                chartValues.length === 0 && (
+                  <div className='text-muted-foreground/80 flex h-full items-center justify-center text-xs'>
+                    暂无快照数据
+                  </div>
+                )}
+              {!snapshotsQuery.isLoading &&
+                themeReady &&
+                chartValues.length > 0 && (
+                  <VChart
+                    key={chartKey}
+                    spec={{
+                      ...chartSpec,
+                      theme: resolvedTheme === 'dark' ? 'dark' : 'light',
+                      background: 'transparent',
+                    }}
+                    option={VCHART_OPTION}
+                  />
+                )}
             </div>
           </section>
         </div>

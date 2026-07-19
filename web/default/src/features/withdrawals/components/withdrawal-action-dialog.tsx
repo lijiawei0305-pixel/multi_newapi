@@ -19,16 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getApiErrorCode } from '@/lib/api'
+
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  approveWithdrawal,
-  markPaidWithdrawal,
-  rejectWithdrawal,
-} from '../api'
+import { getApiErrorCode } from '@/lib/api'
+
+import { approveWithdrawal, markPaidWithdrawal, rejectWithdrawal } from '../api'
 import { cny } from '../lib'
 import { useWithdrawals } from './withdrawals-provider'
 
@@ -51,29 +49,32 @@ export function WithdrawalActionDialog() {
   const isReject = action === 'reject'
   const isMarkPaid = action === 'mark-paid'
 
-  const title = isMarkPaid
-    ? t('Mark as paid', { defaultValue: '标记已打款' })
-    : isReject
-      ? t('Reject withdrawal')
-      : t('Approve withdrawal')
-  const desc = isMarkPaid
-    ? t(
-        'Confirm {{amount}} has been paid offline to {{agent}}, and record the payout reference number.',
-        {
-          amount: cny(currentRow.amount_cny),
-          agent: currentRow.agent_name,
-          defaultValue: '确认已向 {{agent}} 线下打款 {{amount}}，并登记打款单号/凭证。',
-        }
-      )
-    : isReject
-      ? t('Reject the withdrawal of {{amount}} from {{agent}}?', {
-          amount: cny(currentRow.amount_cny),
-          agent: currentRow.agent_name,
-        })
-      : t('Approve the withdrawal of {{amount}} from {{agent}}?', {
-          amount: cny(currentRow.amount_cny),
-          agent: currentRow.agent_name,
-        })
+  let title = t('Approve withdrawal')
+  let desc = t('Approve the withdrawal of {{amount}} from {{agent}}?', {
+    amount: cny(currentRow.amount_cny),
+    agent: currentRow.agent_name,
+  })
+  let confirmText = t('Approve')
+  if (isMarkPaid) {
+    title = t('Mark as paid', { defaultValue: '标记已打款' })
+    desc = t(
+      'Confirm {{amount}} has been paid offline to {{agent}}, and record the payout reference number.',
+      {
+        amount: cny(currentRow.amount_cny),
+        agent: currentRow.agent_name,
+        defaultValue:
+          '确认已向 {{agent}} 线下打款 {{amount}}，并登记打款单号/凭证。',
+      }
+    )
+    confirmText = t('Confirm payment', { defaultValue: '确认已打款' })
+  } else if (isReject) {
+    title = t('Reject withdrawal')
+    desc = t('Reject the withdrawal of {{amount}} from {{agent}}?', {
+      amount: cny(currentRow.amount_cny),
+      agent: currentRow.agent_name,
+    })
+    confirmText = t('Reject')
+  }
 
   const handleConfirm = async () => {
     setLoading(true)
@@ -100,7 +101,9 @@ export function WithdrawalActionDialog() {
         ? await rejectWithdrawal(currentRow.id, reason.trim())
         : await approveWithdrawal(currentRow.id)
       if (res.success) {
-        toast.success(isReject ? t('Has been rejected') : t('Has been approved'))
+        toast.success(
+          isReject ? t('Has been rejected') : t('Has been approved')
+        )
         triggerRefresh()
         closeAction()
       }
@@ -118,7 +121,8 @@ export function WithdrawalActionDialog() {
             t(
               'This withdrawal is no longer in approved status and cannot be marked as paid',
               {
-                defaultValue: '该提现单状态已发生变化（非「已通过」），无法标记已打款',
+                defaultValue:
+                  '该提现单状态已发生变化（非「已通过」），无法标记已打款',
               }
             )
           )
@@ -143,13 +147,7 @@ export function WithdrawalActionDialog() {
       desc={desc}
       handleConfirm={handleConfirm}
       isLoading={loading}
-      confirmText={
-        isMarkPaid
-          ? t('Confirm payment', { defaultValue: '确认已打款' })
-          : isReject
-            ? t('Reject')
-            : t('Approve')
-      }
+      confirmText={confirmText}
       destructive={isReject}
       disabled={isMarkPaid && !payoutRef.trim()}
     >

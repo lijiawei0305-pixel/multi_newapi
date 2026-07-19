@@ -2,15 +2,12 @@ package common
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"unsafe"
-
-	"github.com/samber/lo"
 )
 
 var (
@@ -42,11 +39,15 @@ func GetRandomString(length int) string {
 	if length <= 0 {
 		return ""
 	}
-	return lo.RandomString(length, lo.AlphanumericCharset)
+	value, err := GenerateRandomCharsKey(length)
+	if err != nil {
+		panic("secure random source unavailable")
+	}
+	return value
 }
 
 func MapToJsonStr(m map[string]interface{}) string {
-	bytes, err := json.Marshal(m)
+	bytes, err := Marshal(m)
 	if err != nil {
 		return ""
 	}
@@ -64,7 +65,7 @@ func StrToMap(str string) (map[string]interface{}, error) {
 
 func StrToJsonArray(str string) ([]interface{}, error) {
 	var js []interface{}
-	err := json.Unmarshal([]byte(str), &js)
+	err := Unmarshal([]byte(str), &js)
 	if err != nil {
 		return nil, err
 	}
@@ -73,12 +74,12 @@ func StrToJsonArray(str string) ([]interface{}, error) {
 
 func IsJsonArray(str string) bool {
 	var js []interface{}
-	return json.Unmarshal([]byte(str), &js) == nil
+	return Unmarshal([]byte(str), &js) == nil
 }
 
 func IsJsonObject(str string) bool {
 	var js map[string]interface{}
-	return json.Unmarshal([]byte(str), &js) == nil
+	return Unmarshal([]byte(str), &js) == nil
 }
 
 func String2Int(str string) int {
@@ -113,7 +114,7 @@ func GetJsonString(data any) string {
 	if data == nil {
 		return ""
 	}
-	b, _ := json.Marshal(data)
+	b, _ := Marshal(data)
 	return string(b)
 }
 

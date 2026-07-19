@@ -17,7 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+
 import { StatusBadge } from '@/components/status-badge'
+
 import { priorityMeta } from '../lib'
 import type { TicketPriority } from '../types'
 
@@ -28,10 +30,6 @@ export function TicketPriorityBadge(props: {
   const { t } = useTranslation()
   const meta = priorityMeta(props.priority, t)
   return (
-    <StatusBadge
-      label={meta.label}
-      variant={meta.variant}
-      copyable={false}
-    />
+    <StatusBadge label={meta.label} variant={meta.variant} copyable={false} />
   )
 }

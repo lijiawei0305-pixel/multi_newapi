@@ -16,16 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { getCookie } from '@/lib/cookies'
-import { cn } from '@/lib/utils'
-import { LayoutProvider } from '@/context/layout-provider'
-import { SearchProvider } from '@/context/search-provider'
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { AnimatedOutlet } from '@/components/page-transition'
 import { SkipToMain } from '@/components/skip-to-main'
+import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import { LayoutProvider } from '@/context/layout-provider'
+import { SearchProvider } from '@/context/search-provider'
+import { SubscriptionUsageBanner } from '@/features/subscriptions/components/subscription-usage-banner'
+import { getCookie } from '@/lib/cookies'
+import { cn } from '@/lib/utils'
+
 import { AppHeader } from './app-header'
 import { AppSidebar } from './app-sidebar'
-import { SubscriptionUsageBanner } from '@/features/subscriptions/components/subscription-usage-banner'
 
 type AuthenticatedLayoutProps = {
   children?: React.ReactNode

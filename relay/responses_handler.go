@@ -102,7 +102,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			}
 		}
 
-		logger.LogDebug(c, "requestBody: %s", jsonData)
+		logger.LogPayload(c, "Responses request body", jsonData)
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
@@ -121,10 +121,13 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 
-	if resp != nil {
-		httpResp = resp.(*http.Response)
+	httpResp, newAPIError = resolveSynchronousHTTPResponse(resp, info)
+	if newAPIError != nil {
+		return newAPIError
+	}
+	if httpResp != nil {
 
-		if httpResp.StatusCode != http.StatusOK {
+		if httpResp.StatusCode < http.StatusOK || httpResp.StatusCode >= http.StatusMultipleChoices {
 			newAPIError = service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 			// reset status code 重置状态码
 			service.ResetStatusCode(newAPIError, statusCodeMappingStr)
@@ -133,13 +136,17 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
+	recordSynchronousUpstreamResult(c, httpResp, newAPIError)
 	if newAPIError != nil {
 		// reset status code 重置状态码
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
 	}
 
-	usageDto := usage.(*dto.Usage)
+	usageDto, usageErr := acceptedResponseUsage(c, usage)
+	if usageErr != nil {
+		return usageErr
+	}
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		originModelName := info.OriginModelName
 		originPriceData := info.PriceData
@@ -150,17 +157,23 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			info.PriceData = originPriceData
 			return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		}
-		service.PostTextConsumeQuota(c, info, usageDto, nil)
-
+		billingErr := service.PostTextConsumeQuota(c, info, usageDto, nil)
 		info.OriginModelName = originModelName
 		info.PriceData = originPriceData
+		if billingErr != nil {
+			return billingErr
+		}
 		return nil
 	}
 
 	if strings.HasPrefix(info.OriginModelName, "gpt-4o-audio") {
-		service.PostAudioConsumeQuota(c, info, usageDto, "")
+		if billingErr := service.PostAudioConsumeQuota(c, info, usageDto, ""); billingErr != nil {
+			return billingErr
+		}
 	} else {
-		service.PostTextConsumeQuota(c, info, usageDto, nil)
+		if billingErr := service.PostTextConsumeQuota(c, info, usageDto, nil); billingErr != nil {
+			return billingErr
+		}
 	}
 	return nil
 }

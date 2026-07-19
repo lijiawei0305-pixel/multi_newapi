@@ -1,13 +1,14 @@
 package palm
 
 import (
-	"encoding/json"
-	"io"
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
@@ -51,74 +52,75 @@ func streamResponsePaLM2OpenAI(palmResponse *PaLMChatResponse) *dto.ChatCompleti
 }
 
 func palmStreamHandler(c *gin.Context, resp *http.Response) (*types.NewAPIError, string) {
-	responseText := ""
+	defer service.CloseResponseBodyGracefully(resp)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
+	if err != nil {
+		service.MarkUpstreamAccepted(c)
+		return relaychannel.AcceptedResponseDeliveryError(), ""
+	}
+	var palmResponse PaLMChatResponse
+	if err := common.Unmarshal(responseBody, &palmResponse); err != nil {
+		service.MarkUpstreamAccepted(c)
+		return relaychannel.AcceptedResponseDeliveryError(), ""
+	}
+	if palmResponse.Error.Code != 0 {
+		return service.MarkExplicitUpstreamRejection(types.WithOpenAIError(types.OpenAIError{
+			Message: palmResponse.Error.Message,
+			Type:    palmResponse.Error.Status,
+			Code:    palmResponse.Error.Code,
+		}, http.StatusBadGateway)), ""
+	}
+	if len(palmResponse.Candidates) == 0 {
+		if len(palmResponse.Filters) > 0 {
+			filter := palmResponse.Filters[0]
+			return service.MarkExplicitUpstreamRejection(types.NewOpenAIError(
+				fmt.Errorf("PaLM rejected the request: %s %s", filter.Reason, filter.Message),
+				types.ErrorCodeBadResponse,
+				http.StatusBadGateway,
+			)), ""
+		}
+		service.MarkUpstreamAccepted(c)
+		return relaychannel.AcceptedResponseDeliveryError(), ""
+	}
+
+	responseText := palmResponse.Candidates[0].Content
 	responseId := helper.GetResponseID(c)
 	createdTime := common.GetTimestamp()
-	dataChan := make(chan string)
-	stopChan := make(chan bool)
-	go func() {
-		responseBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			common.SysLog("error reading stream response: " + err.Error())
-			stopChan <- true
-			return
-		}
-		service.CloseResponseBodyGracefully(resp)
-		var palmResponse PaLMChatResponse
-		err = json.Unmarshal(responseBody, &palmResponse)
-		if err != nil {
-			common.SysLog("error unmarshalling stream response: " + err.Error())
-			stopChan <- true
-			return
-		}
-		fullTextResponse := streamResponsePaLM2OpenAI(&palmResponse)
-		fullTextResponse.Id = responseId
-		fullTextResponse.Created = createdTime
-		if len(palmResponse.Candidates) > 0 {
-			responseText = palmResponse.Candidates[0].Content
-		}
-		jsonResponse, err := json.Marshal(fullTextResponse)
-		if err != nil {
-			common.SysLog("error marshalling stream response: " + err.Error())
-			stopChan <- true
-			return
-		}
-		dataChan <- string(jsonResponse)
-		stopChan <- true
-	}()
+	fullTextResponse := streamResponsePaLM2OpenAI(&palmResponse)
+	fullTextResponse.Id = responseId
+	fullTextResponse.Created = createdTime
 	helper.SetEventStreamHeaders(c)
-	c.Stream(func(w io.Writer) bool {
-		select {
-		case data := <-dataChan:
-			c.Render(-1, common.CustomEvent{Data: "data: " + data})
-			return true
-		case <-stopChan:
-			c.Render(-1, common.CustomEvent{Data: "data: [DONE]"})
-			return false
-		}
-	})
-	service.CloseResponseBodyGracefully(resp)
+	service.MarkUpstreamAccepted(c)
+	if err := helper.ObjectData(c, fullTextResponse); err != nil {
+		return relaychannel.AcceptedResponseDeliveryError(), responseText
+	}
+	if err := helper.StringData(c, "[DONE]"); err != nil {
+		return relaychannel.AcceptedResponseDeliveryError(), responseText
+	}
 	return nil, responseText
 }
 
 func palmHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
-	responseBody, err := io.ReadAll(resp.Body)
+	defer service.CloseResponseBodyGracefully(resp)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
-	service.CloseResponseBodyGracefully(resp)
 	var palmResponse PaLMChatResponse
-	err = json.Unmarshal(responseBody, &palmResponse)
+	err = common.Unmarshal(responseBody, &palmResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	if palmResponse.Error.Code != 0 || len(palmResponse.Candidates) == 0 {
-		return nil, types.WithOpenAIError(types.OpenAIError{
+	if palmResponse.Error.Code != 0 {
+		return nil, service.MarkExplicitUpstreamRejection(types.WithOpenAIError(types.OpenAIError{
 			Message: palmResponse.Error.Message,
 			Type:    palmResponse.Error.Status,
 			Param:   "",
 			Code:    palmResponse.Error.Code,
-		}, resp.StatusCode)
+		}, http.StatusBadGateway))
+	}
+	if len(palmResponse.Candidates) == 0 {
+		return nil, types.NewOpenAIError(errors.New("empty response from PaLM API"), types.ErrorCodeEmptyResponse, http.StatusBadGateway)
 	}
 	fullTextResponse := responsePaLM2OpenAI(&palmResponse)
 	usage := service.ResponseText2Usage(c, palmResponse.Candidates[0].Content, info.UpstreamModelName, info.GetEstimatePromptTokens())

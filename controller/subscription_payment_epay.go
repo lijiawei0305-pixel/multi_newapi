@@ -1,19 +1,27 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/internal/epay"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
+	"github.com/shopspring/decimal"
 )
 
 type SubscriptionEpayPayRequest struct {
@@ -89,31 +97,34 @@ func SubscriptionRequestEpay(c *gin.Context) {
 		return
 	}
 
-	order := &model.SubscriptionOrder{
-		UserId:          userId,
-		PlanId:          plan.Id,
-		Money:           plan.PriceAmount,
-		TradeNo:         tradeNo,
-		PaymentMethod:   req.PaymentMethod,
-		PaymentProvider: model.PaymentProviderEpay,
-		CreateTime:      time.Now().Unix(),
-		Status:          common.TopUpStatusPending,
+	conversionRate := operation_setting.Price
+	if math.IsNaN(conversionRate) || math.IsInf(conversionRate, 0) || conversionRate <= 0 {
+		common.ApiErrorMsg(c, "支付汇率配置错误")
+		return
 	}
-	if err := order.Insert(); err != nil {
+	order, err := model.CreatePendingSubscriptionOrder(userId, plan.Id, tradeNo, req.PaymentMethod, model.PaymentProviderEpay, model.SubscriptionCheckoutPolicy{
+		Currency:         "CNY",
+		CurrencySource:   model.SubscriptionCurrencySourceMerchantContract,
+		AmountMultiplier: strconv.FormatFloat(conversionRate, 'f', -1, 64),
+		CheckoutMode:     model.SubscriptionCheckoutModeOneTime,
+	})
+	if err != nil {
 		common.ApiErrorMsg(c, "创建订单失败")
 		return
 	}
 	uri, params, err := client.Purchase(&epay.PurchaseArgs{
 		Type:           req.PaymentMethod,
 		ServiceTradeNo: tradeNo,
-		Name:           fmt.Sprintf("SUB:%s", plan.Title),
-		Money:          strconv.FormatFloat(plan.PriceAmount, 'f', 2, 64),
+		Name:           fmt.Sprintf("SUBPLAN:%d:%s", plan.Id, order.SnapshotHash),
+		Money:          order.ExpectedAmount,
 		Device:         epay.PC,
-		NotifyUrl:      notifyUrl,
-		ReturnUrl:      returnUrl,
+		NotifyURL:      notifyUrl,
+		ReturnURL:      returnUrl,
 	})
 	if err != nil {
-		_ = model.ExpireSubscriptionOrder(tradeNo, model.PaymentProviderEpay)
+		if expireErr := model.ExpireSubscriptionOrder(tradeNo, model.PaymentProviderEpay); expireErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("Epay 订阅订单过期标记失败 trade_no=%s error_type=%T", tradeNo, expireErr))
+		}
 		common.ApiErrorMsg(c, "拉起支付失败")
 		return
 	}
@@ -121,6 +132,10 @@ func SubscriptionRequestEpay(c *gin.Context) {
 }
 
 func SubscriptionEpayNotify(c *gin.Context) {
+	if !isEpayWebhookEnabled() {
+		_, _ = c.Writer.Write([]byte("fail"))
+		return
+	}
 	var params map[string]string
 
 	if c.Request.Method == "POST" {
@@ -165,7 +180,18 @@ func SubscriptionEpayNotify(c *gin.Context) {
 	LockOrder(verifyInfo.ServiceTradeNo)
 	defer UnlockOrder(verifyInfo.ServiceTradeNo)
 
-	if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type); err != nil {
+	fact, err := subscriptionEpayPaymentFact(verifyInfo, params)
+	if err != nil {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("Epay 订阅回调支付事实无效 trade_no=%s error_type=%T", verifyInfo.ServiceTradeNo, err))
+		_, _ = c.Writer.Write([]byte("fail"))
+		return
+	}
+	if err := model.CompleteSubscriptionOrder(fact); err != nil {
+		if errors.Is(err, model.ErrSubscriptionOrderReconciliationRequired) {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("Epay 订阅订单进入人工核账 trade_no=%s provider_trade_no=%s", verifyInfo.ServiceTradeNo, verifyInfo.TradeNo))
+			_, _ = c.Writer.Write([]byte("success"))
+			return
+		}
 		_, _ = c.Writer.Write([]byte("fail"))
 		return
 	}
@@ -176,6 +202,10 @@ func SubscriptionEpayNotify(c *gin.Context) {
 // SubscriptionEpayReturn handles browser return after payment.
 // It verifies the payload and completes the order, then redirects to console.
 func SubscriptionEpayReturn(c *gin.Context) {
+	if !isEpayWebhookEnabled() {
+		c.Redirect(http.StatusFound, paymentReturnPath("/console/topup?pay=fail"))
+		return
+	}
 	var params map[string]string
 
 	if c.Request.Method == "POST" {
@@ -214,7 +244,17 @@ func SubscriptionEpayReturn(c *gin.Context) {
 	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-		if err := model.CompleteSubscriptionOrder(verifyInfo.ServiceTradeNo, common.GetJsonString(verifyInfo), model.PaymentProviderEpay, verifyInfo.Type); err != nil {
+		fact, err := subscriptionEpayPaymentFact(verifyInfo, params)
+		if err != nil {
+			c.Redirect(http.StatusFound, paymentReturnPath("/console/topup?pay=fail"))
+			return
+		}
+		if err := model.CompleteSubscriptionOrder(fact); err != nil {
+			if errors.Is(err, model.ErrSubscriptionOrderReconciliationRequired) {
+				logger.LogWarn(c.Request.Context(), fmt.Sprintf("Epay 订阅返回进入人工核账 trade_no=%s provider_trade_no=%s", verifyInfo.ServiceTradeNo, verifyInfo.TradeNo))
+				c.Redirect(http.StatusFound, paymentReturnPath("/console/topup?pay=pending"))
+				return
+			}
 			c.Redirect(http.StatusFound, paymentReturnPath("/console/topup?pay=fail"))
 			return
 		}
@@ -222,4 +262,64 @@ func SubscriptionEpayReturn(c *gin.Context) {
 		return
 	}
 	c.Redirect(http.StatusFound, paymentReturnPath("/console/topup?pay=pending"))
+}
+
+func subscriptionEpayPaymentFact(verifyInfo *epay.VerifyResult, params map[string]string) (model.VerifiedSubscriptionPaymentFact, error) {
+	if verifyInfo == nil {
+		return model.VerifiedSubscriptionPaymentFact{}, errors.New("Epay verification result is missing")
+	}
+	serviceTradeNo := strings.TrimSpace(verifyInfo.ServiceTradeNo)
+	providerTradeNo := strings.TrimSpace(verifyInfo.TradeNo)
+	if serviceTradeNo == "" || providerTradeNo == "" {
+		return model.VerifiedSubscriptionPaymentFact{}, errors.New("Epay subscription transaction identity is incomplete")
+	}
+
+	productId := ""
+	snapshotHash := ""
+	parts := strings.Split(verifyInfo.Name, ":")
+	if len(parts) == 3 && parts[0] == "SUBPLAN" {
+		planId, err := strconv.Atoi(parts[1])
+		if err == nil && planId > 0 {
+			productId = fmt.Sprintf("plan:%d", planId)
+		}
+		snapshotHash = strings.ToLower(strings.TrimSpace(parts[2]))
+	}
+
+	canonicalAmount := strings.TrimSpace(verifyInfo.Money)
+	amount, err := decimal.NewFromString(canonicalAmount)
+	if err == nil && amount.GreaterThan(decimal.Zero) && amount.Equal(amount.Round(2)) {
+		canonicalAmount = amount.StringFixed(2)
+	}
+
+	keys := make([]string, 0, len(params))
+	for key := range params {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	hasher := sha256.New()
+	for _, key := range keys {
+		_, _ = hasher.Write([]byte(key))
+		_, _ = hasher.Write([]byte{0})
+		_, _ = hasher.Write([]byte(params[key]))
+		_, _ = hasher.Write([]byte{0})
+	}
+
+	return model.VerifiedSubscriptionPaymentFact{
+		TradeNo:               serviceTradeNo,
+		Provider:              model.PaymentProviderEpay,
+		ProviderEventId:       providerTradeNo,
+		ProviderTransactionId: providerTradeNo,
+		Amount:                canonicalAmount,
+		PaidAmount:            canonicalAmount,
+		Currency:              "CNY",
+		CurrencySource:        model.SubscriptionCurrencySourceMerchantContract,
+		ProductId:             productId,
+		PaymentMethod:         strings.TrimSpace(verifyInfo.Type),
+		SnapshotHash:          snapshotHash,
+		PayloadHash:           hex.EncodeToString(hasher.Sum(nil)),
+		CheckoutMode:          model.SubscriptionCheckoutModeOneTime,
+		// Epay's verified callback does not expose a provider payment timestamp.
+		// Keep this unknown; the receipt's CreatedAt records local observation time.
+		PaidAt: 0,
+	}, nil
 }

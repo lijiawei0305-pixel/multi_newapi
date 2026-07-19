@@ -11,9 +11,9 @@ package gormrepo
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 
 	"github.com/QuantumNous/new-api/internal/moderation"
@@ -137,7 +137,7 @@ func (r *Repo) DeleteWord(ctx context.Context, tenantID, id int64) error {
 
 // Record 落库一条违规事件（回填 ID/CreatedAt）。
 func (r *Repo) Record(ctx context.Context, ev *moderation.ViolationEvent) error {
-	mw, _ := json.Marshal(ev.MatchedWords)
+	mw, _ := common.Marshal(ev.MatchedWords)
 	row := violationRow{
 		TenantID:     ev.TenantID,
 		UserID:       ev.UserID,
@@ -205,7 +205,7 @@ func toWord(row *bannedWordRow) moderation.BannedWord {
 func toViolation(row *violationRow) moderation.ViolationEvent {
 	var mw []string
 	if row.MatchedWords != "" {
-		_ = json.Unmarshal([]byte(row.MatchedWords), &mw)
+		_ = common.Unmarshal([]byte(row.MatchedWords), &mw)
 	}
 	return moderation.ViolationEvent{
 		ID:           row.ID,

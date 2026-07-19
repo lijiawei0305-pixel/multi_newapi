@@ -17,41 +17,47 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useTokenKeys } from '../../hooks/chat/useTokenKeys';
 import { Spin } from '@douyinfe/semi-ui';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { resolveChatTemplateUrl } from '../../helpers/safeNavigation';
 
 const ChatPage = () => {
   const { t } = useTranslation();
   const { id } = useParams();
   const { keys, serverAddress, isLoading } = useTokenKeys(id);
 
-  const comLink = (key) => {
-    // console.log('chatLink:', chatLink);
-    if (!serverAddress || !key) return '';
-    let link = '';
-    if (id) {
-      let chats = localStorage.getItem('chats');
-      if (chats) {
-        chats = JSON.parse(chats);
-        if (Array.isArray(chats) && chats.length > 0) {
-          for (let k in chats[id]) {
-            link = chats[id][k];
-            link = link.replaceAll(
-              '{address}',
-              encodeURIComponent(serverAddress),
-            );
-            link = link.replaceAll('{key}', 'sk-' + key);
-          }
-        }
-      }
+  const iframeSrc = useMemo(() => {
+    const chatIndex = Number(id);
+    if (!Number.isInteger(chatIndex) || chatIndex < 0 || !keys[0]) return '';
+    try {
+      const chats = JSON.parse(localStorage.getItem('chats') || '[]');
+      const chat = Array.isArray(chats) ? chats[chatIndex] : null;
+      if (!chat || typeof chat !== 'object' || Array.isArray(chat)) return '';
+      const template = Object.values(chat).find(
+        (value) => typeof value === 'string',
+      );
+      return (
+        resolveChatTemplateUrl(template, serverAddress, keys[0], {
+          webOnly: true,
+        }) || ''
+      );
+    } catch {
+      return '';
     }
-    return link;
-  };
+  }, [id, keys, serverAddress]);
 
-  const iframeSrc = keys.length > 0 ? comLink(keys[0]) : '';
+  if (!isLoading && !iframeSrc) {
+    return (
+      <div className='fixed inset-0 mt-[60px] flex h-screen w-screen items-center justify-center bg-white/80'>
+        <span style={{ color: 'var(--semi-color-warning)' }}>
+          {t('请联系管理员配置聊天链接')}
+        </span>
+      </div>
+    );
+  }
 
   return !isLoading && iframeSrc ? (
     <iframe
@@ -64,6 +70,8 @@ const ChatPage = () => {
       }}
       title='Token Frame'
       allow='camera;microphone'
+      sandbox='allow-downloads allow-forms allow-popups allow-scripts'
+      referrerPolicy='no-referrer'
     />
   ) : (
     <div className='fixed inset-0 w-screen h-screen flex items-center justify-center bg-white/80 z-[1000] mt-[60px]'>

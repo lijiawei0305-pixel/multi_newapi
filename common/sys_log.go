@@ -2,6 +2,7 @@ package common
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -13,6 +14,23 @@ import (
 // during log file rotation. Acquire RLock when reading/writing through the writers,
 // acquire Lock when swapping writers and closing old files.
 var LogWriterMu sync.RWMutex
+
+type synchronizedLogWriter struct {
+	errorOutput bool
+}
+
+func (w synchronizedLogWriter) Write(p []byte) (int, error) {
+	LogWriterMu.RLock()
+	defer LogWriterMu.RUnlock()
+	if w.errorOutput {
+		return gin.DefaultErrorWriter.Write(p)
+	}
+	return gin.DefaultWriter.Write(p)
+}
+
+func SynchronizedLogWriter(errorOutput bool) io.Writer {
+	return synchronizedLogWriter{errorOutput: errorOutput}
+}
 
 func SysLog(s string) {
 	t := time.Now()

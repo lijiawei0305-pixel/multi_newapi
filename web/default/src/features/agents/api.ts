@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+
 import type {
   Agent,
   AgentMetrics,
@@ -59,9 +60,7 @@ export async function setAgentDomain(
 }
 
 // 删除代理（归档软删：回收子域名 + 用户迁回主站 + 数据留存）。
-export async function deleteAgent(
-  id: number
-): Promise<ApiResponse<unknown>> {
+export async function deleteAgent(id: number): Promise<ApiResponse<unknown>> {
   const res = await api.delete(`/api/admin/agents/${id}`)
   return res.data
 }

@@ -1,10 +1,9 @@
 package baidu
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -13,12 +12,11 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
-	"github.com/samber/lo"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -28,17 +26,15 @@ var baiduTokenStore sync.Map
 
 func requestOpenAI2Baidu(request dto.GeneralOpenAIRequest) *BaiduChatRequest {
 	baiduRequest := BaiduChatRequest{
-		Temperature:    request.Temperature,
-		TopP:           lo.FromPtrOr(request.TopP, 0),
-		PenaltyScore:   lo.FromPtrOr(request.FrequencyPenalty, 0),
-		Stream:         lo.FromPtrOr(request.Stream, false),
-		DisableSearch:  false,
-		EnableCitation: false,
-		UserId:         request.User,
+		Temperature:  request.Temperature,
+		TopP:         request.TopP,
+		PenaltyScore: request.FrequencyPenalty,
+		Stream:       request.Stream,
+		UserId:       request.User,
 	}
-	if request.GetMaxTokens() != 0 {
-		maxTokens := int(request.GetMaxTokens())
-		if request.GetMaxTokens() == 1 {
+	if request.MaxCompletionTokens != nil || request.MaxTokens != nil {
+		maxTokens := common.SaturatingUintToInt(request.GetMaxTokens())
+		if maxTokens == 1 {
 			maxTokens = 2
 		}
 		baiduRequest.MaxOutputTokens = &maxTokens
@@ -116,13 +112,35 @@ func embeddingResponseBaidu2OpenAI(response *BaiduEmbeddingResponse) *dto.OpenAI
 
 func baiduStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*types.NewAPIError, *dto.Usage) {
 	usage := &dto.Usage{}
+	var streamErr *types.NewAPIError
+	seenValidResponse := false
+	completed := false
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		var baiduResponse BaiduChatStreamResponse
 		if err := common.Unmarshal([]byte(data), &baiduResponse); err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
-			sr.Error(err)
+			service.MarkUpstreamAccepted(c)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
 			return
 		}
+		if baiduResponse.ErrorCode != 0 || baiduResponse.ErrorMsg != "" {
+			apiErr := types.NewError(
+				fmt.Errorf("Baidu error %d: %s", baiduResponse.ErrorCode, baiduResponse.ErrorMsg),
+				types.ErrorCodeBadResponseBody,
+			)
+			if seenValidResponse {
+				service.MarkUpstreamAccepted(c)
+				streamErr = relaychannel.AcceptedResponseDeliveryError()
+			} else {
+				streamErr = service.MarkExplicitUpstreamRejection(apiErr)
+			}
+			sr.Stop(streamErr)
+			return
+		}
+		service.MarkUpstreamAccepted(c)
+		seenValidResponse = true
+		completed = completed || baiduResponse.IsEnd
 		if baiduResponse.Usage.TotalTokens != 0 {
 			usage.TotalTokens = baiduResponse.Usage.TotalTokens
 			usage.PromptTokens = baiduResponse.Usage.PromptTokens
@@ -131,29 +149,40 @@ func baiduStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.
 		response := streamResponseBaidu2OpenAI(&baiduResponse)
 		if err := helper.ObjectData(c, response); err != nil {
 			common.SysLog("error sending stream response: " + err.Error())
-			sr.Error(err)
+			streamErr = relaychannel.AcceptedResponseDeliveryError()
+			sr.Stop(streamErr)
 		}
 	})
-	service.CloseResponseBodyGracefully(resp)
+	if streamErr != nil {
+		return streamErr, usage
+	}
+	if info.StreamStatus == nil || !info.StreamStatus.IsNormalEnd() || info.StreamStatus.HasErrors() || !seenValidResponse || !completed {
+		service.MarkUpstreamAccepted(c)
+		return relaychannel.AcceptedResponseDeliveryError(), usage
+	}
+	if err := helper.StringData(c, "[DONE]"); err != nil {
+		service.MarkUpstreamAccepted(c)
+		return relaychannel.AcceptedResponseDeliveryError(), usage
+	}
 	return nil, usage
 }
 
 func baiduHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*types.NewAPIError, *dto.Usage) {
 	var baiduResponse BaiduChatResponse
-	responseBody, err := io.ReadAll(resp.Body)
+	defer service.CloseResponseBodyGracefully(resp)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeBadResponseBody), nil
 	}
-	service.CloseResponseBodyGracefully(resp)
-	err = json.Unmarshal(responseBody, &baiduResponse)
+	err = common.Unmarshal(responseBody, &baiduResponse)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeBadResponseBody), nil
 	}
-	if baiduResponse.ErrorMsg != "" {
-		return types.NewError(fmt.Errorf("%s", baiduResponse.ErrorMsg), types.ErrorCodeBadResponseBody), nil
+	if baiduResponse.ErrorCode != 0 || baiduResponse.ErrorMsg != "" {
+		return service.MarkExplicitUpstreamRejection(types.NewError(fmt.Errorf("Baidu error %d: %s", baiduResponse.ErrorCode, baiduResponse.ErrorMsg), types.ErrorCodeBadResponseBody)), nil
 	}
 	fullTextResponse := responseBaidu2OpenAI(&baiduResponse)
-	jsonResponse, err := json.Marshal(fullTextResponse)
+	jsonResponse, err := common.Marshal(fullTextResponse)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeBadResponseBody), nil
 	}
@@ -165,20 +194,20 @@ func baiduHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respon
 
 func baiduEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*types.NewAPIError, *dto.Usage) {
 	var baiduResponse BaiduEmbeddingResponse
-	responseBody, err := io.ReadAll(resp.Body)
+	defer service.CloseResponseBodyGracefully(resp)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeBadResponseBody), nil
 	}
-	service.CloseResponseBodyGracefully(resp)
-	err = json.Unmarshal(responseBody, &baiduResponse)
+	err = common.Unmarshal(responseBody, &baiduResponse)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeBadResponseBody), nil
 	}
-	if baiduResponse.ErrorMsg != "" {
-		return types.NewError(fmt.Errorf("%s", baiduResponse.ErrorMsg), types.ErrorCodeBadResponseBody), nil
+	if baiduResponse.ErrorCode != 0 || baiduResponse.ErrorMsg != "" {
+		return service.MarkExplicitUpstreamRejection(types.NewError(fmt.Errorf("Baidu error %d: %s", baiduResponse.ErrorCode, baiduResponse.ErrorMsg), types.ErrorCodeBadResponseBody)), nil
 	}
 	fullTextResponse := embeddingResponseBaidu2OpenAI(&baiduResponse)
-	jsonResponse, err := json.Marshal(fullTextResponse)
+	jsonResponse, err := common.Marshal(fullTextResponse)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeBadResponseBody), nil
 	}
@@ -216,26 +245,35 @@ func getBaiduAccessTokenHelper(apiKey string) (*BaiduAccessToken, error) {
 	if len(parts) != 2 {
 		return nil, errors.New("invalid baidu apikey")
 	}
-	req, err := http.NewRequest("POST", fmt.Sprintf("https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=%s&client_secret=%s",
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=%s&client_secret=%s",
 		parts[0], parts[1]), nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("failed to create baidu access token request")
 	}
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Accept", "application/json")
-	res, err := service.GetHttpClient().Do(req)
+	client := service.GetHttpClient()
+	if client == nil {
+		return nil, errors.New("baidu access token client is unavailable")
+	}
+	res, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("baidu access token request failed")
 	}
 	defer res.Body.Close()
+	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
+		return nil, errors.New("baidu access token request failed")
+	}
 
 	var accessToken BaiduAccessToken
-	err = json.NewDecoder(res.Body).Decode(&accessToken)
+	err = common.DecodeJsonWithLimit(res.Body, &accessToken, common.ControlPlaneJSONMaxBytes)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("baidu access token response is invalid")
 	}
 	if accessToken.Error != "" {
-		return nil, errors.New(accessToken.Error + ": " + accessToken.ErrorDescription)
+		return nil, errors.New("baidu access token request was rejected")
 	}
 	if accessToken.AccessToken == "" {
 		return nil, errors.New("getBaiduAccessTokenHelper get empty access token")

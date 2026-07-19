@@ -1,11 +1,8 @@
 package controller
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"net/http"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -46,26 +43,26 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 	logger.LogInfo(ctx, fmt.Sprintf("检测到未完成的任务数有: %v", len(tasks)))
 	taskChannelM := make(map[int][]string)
 	taskM := make(map[string]*model.Midjourney)
-	nullTaskIds := make([]int, 0)
+	nullTasks := make([]*model.Midjourney, 0)
 	for _, task := range tasks {
 		if task.MjId == "" {
 			// 统计失败的未完成任务
-			nullTaskIds = append(nullTaskIds, task.Id)
+			nullTasks = append(nullTasks, task)
 			continue
 		}
 		taskM[task.MjId] = task
 		taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], task.MjId)
 	}
-	if len(nullTaskIds) > 0 {
-		summary.NullTasksFailed = len(nullTaskIds)
-		err := model.MjBulkUpdateByTaskIds(nullTaskIds, map[string]any{
-			"status":   "FAILURE",
-			"progress": "100%",
-		})
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error: %v", err))
-		} else {
-			logger.LogInfo(ctx, fmt.Sprintf("Fix null mj_id task success: %v", nullTaskIds))
+	if len(nullTasks) > 0 {
+		summary.NullTasksFailed = len(nullTasks)
+		for _, task := range nullTasks {
+			fromStatus := task.Status
+			task.Status = "FAILURE"
+			task.Progress = "100%"
+			task.FailReason = "upstream task id is empty"
+			if _, err := service.TransitionMidjourneyWithBilling(ctx, task, fromStatus, task.FailReason); err != nil {
+				logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error for %d: %v", task.Id, err))
+			}
 		}
 	}
 	if len(taskChannelM) == 0 {
@@ -90,65 +87,26 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		midjourneyChannel, err := model.CacheGetChannel(channelId)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("CacheGetChannel: %v", err))
-			err := model.MjBulkUpdate(taskIds, map[string]any{
-				"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
-				"status":      "FAILURE",
-				"progress":    "100%",
-			})
-			if err != nil {
-				logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", err))
+			for _, taskID := range taskIds {
+				task := taskM[taskID]
+				if task == nil {
+					continue
+				}
+				fromStatus := task.Status
+				task.Status = "FAILURE"
+				task.Progress = "100%"
+				task.FailReason = fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId)
+				if _, transitionErr := service.TransitionMidjourneyWithBilling(ctx, task, fromStatus, task.FailReason); transitionErr != nil {
+					logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask terminal billing error: %v", transitionErr))
+				}
 			}
 			continue
 		}
-		requestUrl := fmt.Sprintf("%s/mj/task/list-by-condition", *midjourneyChannel.BaseURL)
-
-		body, err := common.Marshal(map[string]any{
-			"ids": taskIds,
-		})
+		responseItems, err := service.FetchMidjourneyTasks(ctx, midjourneyChannel.GetBaseURL(), midjourneyChannel.Key, taskIds)
 		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Get Task marshal body error: %v", err))
+			logger.LogError(ctx, fmt.Sprintf("Get Midjourney Task failed: error_type=%T", err))
 			continue
 		}
-		timeout := time.Second * 15
-		requestCtx, cancel := context.WithTimeout(ctx, timeout)
-		req, err := http.NewRequestWithContext(requestCtx, "POST", requestUrl, bytes.NewBuffer(body))
-		if err != nil {
-			cancel()
-			logger.LogError(ctx, fmt.Sprintf("Get Task error: %v", err))
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("mj-api-secret", midjourneyChannel.Key)
-		resp, err := service.GetHttpClient().Do(req)
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Get Task Do req error: %v", err))
-			cancel()
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			logger.LogError(ctx, fmt.Sprintf("Get Task status code: %d", resp.StatusCode))
-			resp.Body.Close()
-			cancel()
-			continue
-		}
-		responseBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error: %v", err))
-			resp.Body.Close()
-			cancel()
-			continue
-		}
-		var responseItems []dto.MidjourneyDto
-		err = common.Unmarshal(responseBody, &responseItems)
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error2: %v, body: %s", err, string(responseBody)))
-			resp.Body.Close()
-			cancel()
-			continue
-		}
-		resp.Body.Close()
-		req.Body.Close()
-		cancel()
 
 		for _, responseItem := range responseItems {
 			task := taskM[responseItem.MjId]
@@ -202,33 +160,23 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			}
 
 			shouldReturnQuota := false
-			if (task.Progress != "100%" && responseItem.FailReason != "") || (task.Progress == "100%" && task.Status == "FAILURE") {
-				logger.LogInfo(ctx, task.MjId+" 构建失败，"+task.FailReason)
-				task.Progress = "100%"
+			if normalizeMidjourneyTerminalState(task) {
+				logger.LogInfo(ctx, fmt.Sprintf("Midjourney task %s 构建失败 reason_%s", task.MjId, logger.PayloadMetadata([]byte(task.FailReason))))
 				if task.Quota != 0 {
 					shouldReturnQuota = true
 				}
 			}
-			won, err := task.UpdateWithStatus(preStatus)
+			var won bool
+			terminal := task.Progress == "100%" && (task.Status == "FAILURE" || task.Status == "SUCCESS")
+			if shouldReturnQuota || terminal {
+				won, err = service.TransitionMidjourneyWithBilling(ctx, task, preStatus, "构图失败")
+			} else {
+				won, err = task.UpdateWithStatus(preStatus)
+			}
 			if err != nil {
 				logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
-			} else if won && shouldReturnQuota {
-				err = model.IncreaseUserQuota(task.UserId, task.Quota, false)
-				if err != nil {
-					logger.LogError(ctx, "fail to increase user quota: "+err.Error())
-				}
-				model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-					UserId:    task.UserId,
-					LogType:   model.LogTypeRefund,
-					Content:   "",
-					ChannelId: task.ChannelId,
-					ModelName: service.CovertMjpActionToModelName(task.Action),
-					Quota:     task.Quota,
-					Other: map[string]interface{}{
-						"task_id": task.MjId,
-						"reason":  "构图失败",
-					},
-				})
+			} else if !won {
+				logger.LogInfo(ctx, fmt.Sprintf("Midjourney task %s already transitioned", task.MjId))
 			}
 		}
 	}
@@ -236,6 +184,26 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		report(totalChannels, totalChannels)
 	}
 	return summary
+}
+
+// normalizeMidjourneyTerminalState closes provider compatibility gaps: a
+// terminal status is authoritative even when progress lags, and a fail reason
+// is terminal unless the provider explicitly reported success.
+func normalizeMidjourneyTerminalState(task *model.Midjourney) bool {
+	if task == nil {
+		return false
+	}
+	if task.Status == "SUCCESS" {
+		task.Progress = "100%"
+		return false
+	}
+	failed := task.Status == "FAILURE" || (task.FailReason != "" && task.Status != "SUCCESS")
+	if !failed {
+		return false
+	}
+	task.Status = "FAILURE"
+	task.Progress = "100%"
+	return true
 }
 
 func checkMjTaskNeedUpdate(oldTask *model.Midjourney, newTask dto.MidjourneyDto) bool {

@@ -1,5 +1,8 @@
 name: Publish Docker image (alpha)
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
@@ -10,9 +13,71 @@ on:
         description: "reason"
         required: false
 
+concurrency:
+  group: publish-docker-alpha
+  cancel-in-progress: false
+
 jobs:
+  verify:
+    name: Verify alpha source before publishing
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Check out alpha source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 1
+
+      - name: Validate source and determine alpha version
+        id: version
+        env:
+          SOURCE_REF: ${{ github.ref }}
+        run: |
+          if [ "$SOURCE_REF" != 'refs/heads/alpha' ]; then
+            echo "::error::Alpha images may only be published from refs/heads/alpha"
+            exit 1
+          fi
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA" || {
+            echo "::error::Checked-out commit does not match the workflow commit"
+            exit 1
+          }
+          VERSION="alpha-$(git show -s --format=%cs | tr -d '-')-${GITHUB_SHA::12}"
+          if [[ ! "$VERSION" =~ ^alpha-[0-9]{8}-[0-9a-f]{12}$ ]]; then
+            echo "::error::Generated alpha version is invalid"
+            exit 1
+          fi
+          printf 'value=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.11
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            bulb-orbit/v2/package-lock.json
+            electron/package-lock.json
+
+      - name: Run shared preflight
+        env:
+          RUN_ORBIT_E2E: '1'
+        run: bash scripts/preflight.sh
+
   build_single_arch:
     name: Build & push (${{ matrix.arch }}) [native]
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +89,7 @@ jobs:
             platform: linux/arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    environment: container-publish
     permissions:
       packages: write
       contents: read
@@ -36,11 +102,17 @@ jobs:
 
       - name: Determine alpha version
         id: version
+        env:
+          RESOLVED_VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          VERSION="alpha-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
+          VERSION="$RESOLVED_VERSION"
+          if [[ ! "$VERSION" =~ ^alpha-[0-9]{8}-[0-9a-f]{12}$ ]]; then
+            echo "::error::Resolved alpha version is invalid"
+            exit 1
+          fi
           echo "$VERSION" > VERSION
-          echo "value=$VERSION" >> $GITHUB_OUTPUT
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          printf 'value=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+          printf 'VERSION=%s\n' "$VERSION" >> "$GITHUB_ENV"
           echo "Publishing version: $VERSION for ${{ matrix.arch }}"
 
       - name: Normalize GHCR repository
@@ -78,9 +150,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            calciumion/new-api:alpha-${{ matrix.arch }}
             calciumion/new-api:${{ steps.version.outputs.value }}-${{ matrix.arch }}
-            ghcr.io/${{ env.GHCR_REPOSITORY }}:alpha-${{ matrix.arch }}
             ghcr.io/${{ env.GHCR_REPOSITORY }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -100,33 +170,33 @@ jobs:
         run: |
           echo "### Docker Image Digest (${{ matrix.arch }})" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "calciumion/new-api:alpha-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
-          echo "ghcr.io/${{ env.GHCR_REPOSITORY }}:alpha-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "calciumion/new-api:${VERSION}-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/${GHCR_REPOSITORY}:${VERSION}-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   create_manifests:
     name: Create multi-arch manifests (Docker Hub + GHCR)
-    needs: [build_single_arch]
+    needs: [verify, build_single_arch]
     runs-on: ubuntu-latest
+    environment: container-publish
     permissions:
       packages: write
       contents: read
+      id-token: write
     steps:
-      - name: Check out (shallow)
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 1
-
       - name: Normalize GHCR repository
         run: echo "GHCR_REPOSITORY=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
-      - name: Determine alpha version
-        id: version
+      - name: Set alpha version
+        env:
+          RESOLVED_VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          VERSION="alpha-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
-          echo "value=$VERSION" >> $GITHUB_OUTPUT
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          if [[ ! "$RESOLVED_VERSION" =~ ^alpha-[0-9]{8}-[0-9a-f]{12}$ ]]; then
+            echo "::error::Resolved alpha version is invalid"
+            exit 1
+          fi
+          printf 'VERSION=%s\n' "$RESOLVED_VERSION" >> "$GITHUB_ENV"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -134,19 +204,19 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Create & push manifest (Docker Hub - alpha)
-        run: |
-          docker buildx imagetools create \
-            -t calciumion/new-api:alpha \
-            calciumion/new-api:alpha-amd64 \
-            calciumion/new-api:alpha-arm64
-
       - name: Create & push manifest (Docker Hub - versioned alpha)
         run: |
           docker buildx imagetools create \
+            --metadata-file manifest-dockerhub.json \
             -t calciumion/new-api:${VERSION} \
             calciumion/new-api:${VERSION}-amd64 \
             calciumion/new-api:${VERSION}-arm64
+          DIGEST=$(jq -r '.["containerimage.descriptor"].digest // empty' manifest-dockerhub.json)
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Docker Hub manifest did not return a valid digest"
+            exit 1
+          fi
+          printf 'DOCKERHUB_MANIFEST_DIGEST=%s\n' "$DIGEST" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -155,19 +225,36 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create & push manifest (GHCR - alpha)
-        run: |
-          docker buildx imagetools create \
-            -t ghcr.io/${GHCR_REPOSITORY}:alpha \
-            ghcr.io/${GHCR_REPOSITORY}:alpha-amd64 \
-            ghcr.io/${GHCR_REPOSITORY}:alpha-arm64
-
       - name: Create & push manifest (GHCR - versioned alpha)
         run: |
           docker buildx imagetools create \
+            --metadata-file manifest-ghcr.json \
             -t ghcr.io/${GHCR_REPOSITORY}:${VERSION} \
             ghcr.io/${GHCR_REPOSITORY}:${VERSION}-amd64 \
             ghcr.io/${GHCR_REPOSITORY}:${VERSION}-arm64
+          DIGEST=$(jq -r '.["containerimage.descriptor"].digest // empty' manifest-ghcr.json)
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::GHCR manifest did not return a valid digest"
+            exit 1
+          fi
+          printf 'GHCR_MANIFEST_DIGEST=%s\n' "$DIGEST" >> "$GITHUB_ENV"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Sign versioned multi-arch manifests
+        run: |
+          cosign sign --yes calciumion/new-api@${DOCKERHUB_MANIFEST_DIGEST}
+          cosign sign --yes ghcr.io/${GHCR_REPOSITORY}@${GHCR_MANIFEST_DIGEST}
+
+      - name: Update signed alpha aliases
+        run: |
+          docker buildx imagetools create \
+            -t calciumion/new-api:alpha \
+            calciumion/new-api@${DOCKERHUB_MANIFEST_DIGEST}
+          docker buildx imagetools create \
+            -t ghcr.io/${GHCR_REPOSITORY}:alpha \
+            ghcr.io/${GHCR_REPOSITORY}@${GHCR_MANIFEST_DIGEST}
 
       - name: Output manifest digest
         run: |

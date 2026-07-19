@@ -493,6 +493,16 @@ export const STATIC_I18N_KEYS = [
   'No models available in this category',
   'Copied: {{model}}',
 
+  // Playground option labels passed to t() through configuration objects
+  '1 image',
+  '2 images',
+  '3 images',
+  '4 images',
+  'Square',
+  'Landscape',
+  'Portrait',
+  'Quota exhausted',
+
   // Grok settings
   'Grok Settings',
   'Enable violation deduction',

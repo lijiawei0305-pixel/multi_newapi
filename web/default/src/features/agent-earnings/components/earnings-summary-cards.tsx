@@ -18,7 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Lock, TrendingUp, Wallet } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { Skeleton } from '@/components/ui/skeleton'
+
 import { cny } from '../lib'
 import type { EarningsSummary } from '../types'
 
@@ -34,8 +36,8 @@ export function EarningsSummaryCards({ summary, loading }: Props) {
     return (
       <div className='overflow-hidden rounded-lg border'>
         <div className='divide-border/60 grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0'>
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className='px-3 py-3 sm:px-5 sm:py-4'>
+          {['available', 'pending', 'withdrawn'].map((metric) => (
+            <div key={metric} className='px-3 py-3 sm:px-5 sm:py-4'>
               <Skeleton className='h-3.5 w-20' />
               <Skeleton className='mt-2 h-7 w-28' />
             </div>
@@ -80,10 +82,9 @@ export function EarningsSummaryCards({ summary, loading }: Props) {
             </div>
             <div
               data-testid={item.testid}
-              className={
-                'mt-1.5 font-mono text-base font-bold tracking-tight break-all tabular-nums sm:mt-2 sm:text-2xl ' +
-                (item.emphasis ? 'text-emerald-600' : 'text-foreground')
-              }
+              className={`mt-1.5 font-mono text-base font-bold tracking-tight break-all tabular-nums sm:mt-2 sm:text-2xl ${
+                item.emphasis ? 'text-emerald-600' : 'text-foreground'
+              }`}
             >
               {item.value}
             </div>

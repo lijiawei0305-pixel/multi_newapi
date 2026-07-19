@@ -80,12 +80,8 @@ export function computeUsageAlert(
     const timedOut = s.status === 'expired'
     if (s.amount_total > 0 && !timedOut) {
       ratio = s.amount_used / s.amount_total
-      usage =
-        ratio >= 1 || s.status === 'exhausted'
-          ? 'exhausted'
-          : ratio >= WARN_THRESHOLD
-            ? 'warn'
-            : 'none'
+      if (ratio >= 1 || s.status === 'exhausted') usage = 'exhausted'
+      else if (ratio >= WARN_THRESHOLD) usage = 'warn'
     }
 
     // 时间维。

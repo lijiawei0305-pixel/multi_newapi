@@ -16,9 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+
+import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -41,7 +43,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { StatusBadge } from '@/components/status-badge'
 
 const OP_ADD = 'add' as const
 const OP_REMOVE = 'remove' as const
@@ -67,8 +68,9 @@ function uid() {
 
 function parsePrefix(rawKey: string): { op: OpType; groupName: string } {
   if (rawKey.startsWith('+:')) return { op: OP_ADD, groupName: rawKey.slice(2) }
-  if (rawKey.startsWith('-:'))
+  if (rawKey.startsWith('-:')) {
     return { op: OP_REMOVE, groupName: rawKey.slice(2) }
+  }
   return { op: OP_APPEND, groupName: rawKey }
 }
 
@@ -93,13 +95,16 @@ function flattenRules(nested: Record<string, Record<string, string>>): Rule[] {
     if (typeof inner !== 'object' || inner === null) continue
     for (const [rawKey, desc] of Object.entries(inner)) {
       const { op, groupName } = parsePrefix(rawKey)
+      let description = ''
+      if (op === OP_REMOVE) description = 'remove'
+      else if (typeof desc === 'string') description = desc
+
       rules.push({
         _id: uid(),
         userGroup,
         op,
         targetGroup: groupName,
-        description:
-          op === OP_REMOVE ? 'remove' : typeof desc === 'string' ? desc : '',
+        description,
       })
     }
   }
@@ -330,9 +335,13 @@ export function GroupSpecialUsableRulesEditor(
         rules.map((r) => {
           if (r._id !== id) return r
           const updated = { ...r, [field]: val }
-          if (field === 'op' && val === OP_REMOVE)
+          if (field === 'op' && val === OP_REMOVE) {
             updated.description = 'remove'
-          else if (field === 'op' && r.op === OP_REMOVE && val !== OP_REMOVE) {
+          } else if (
+            field === 'op' &&
+            r.op === OP_REMOVE &&
+            val !== OP_REMOVE
+          ) {
             if (updated.description === 'remove') updated.description = ''
           }
           return updated

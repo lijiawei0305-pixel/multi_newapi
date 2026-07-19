@@ -7,7 +7,7 @@ import (
 )
 
 // MemRepo 是 PromotionRepo 的并发安全内存假实现，用于本轮纯逻辑开发与单测。
-// 真实 GORM 实现（迁移 + prefix 唯一约束 + 原子 registered_count++ + scopeByTenant）顺延（见报告 TODO）。
+// 生产 GORM 实现（迁移 + prefix 唯一约束 + 原子 registered_count++ + scopeByTenant）位于 gormrepo 子包。
 type MemRepo struct {
 	mu            sync.RWMutex
 	channels      map[int64]Channel

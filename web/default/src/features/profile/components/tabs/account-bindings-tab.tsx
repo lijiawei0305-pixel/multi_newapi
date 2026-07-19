@@ -16,25 +16,31 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState, useCallback } from 'react'
 import { Mail, Shield, Send, Link2, Unlink } from 'lucide-react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SiGithub, SiWechat, SiLinux } from 'react-icons/si'
 import { toast } from 'sonner'
-import { IconDiscord } from '@/assets/brand-icons'
+
+import {
+  IconDiscord,
+  IconGithub,
+  IconLinuxDo,
+  IconWeChat,
+} from '@/assets/brand-icons'
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import { StatusBadge } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
+import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+import { useDialogs } from '@/hooks/use-dialog'
+import { useStatus } from '@/hooks/use-status'
 import {
   handleGitHubOAuth,
   handleOIDCOAuth,
   handleDiscordOAuth,
   handleLinuxDOOAuth,
 } from '@/lib/oauth'
-import { useDialogs } from '@/hooks/use-dialog'
-import { useStatus } from '@/hooks/use-status'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import { ConfirmDialog } from '@/components/confirm-dialog'
-import { StatusBadge } from '@/components/status-badge'
-import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+
 import {
   getSelfOAuthBindings,
   unbindCustomOAuth,
@@ -163,7 +169,7 @@ export function AccountBindingsTab({
       {
         id: 'wechat',
         label: t('WeChat'),
-        icon: SiWechat as React.ComponentType<{ className?: string }>,
+        icon: IconWeChat,
         value: undefined,
         isBound: Boolean(
           (profile as unknown as Record<string, unknown>).wechat_id
@@ -174,7 +180,7 @@ export function AccountBindingsTab({
       {
         id: 'github',
         label: t('GitHub'),
-        icon: SiGithub,
+        icon: IconGithub,
         value: (profile as unknown as Record<string, unknown>).github_id as
           | string
           | undefined,
@@ -241,7 +247,7 @@ export function AccountBindingsTab({
       {
         id: 'linuxdo',
         label: t('LinuxDO'),
-        icon: SiLinux as React.ComponentType<{ className?: string }>,
+        icon: IconLinuxDo,
         value: (profile as unknown as Record<string, unknown>).linux_do_id as
           | string
           | undefined,
@@ -264,46 +270,50 @@ export function AccountBindingsTab({
   return (
     <>
       <div className='grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3'>
-        {bindings.map((binding) => (
-          <div
-            key={binding.id}
-            className='flex items-center justify-between gap-2.5 rounded-lg border p-2.5 sm:gap-3 sm:p-3'
-          >
-            <div className='flex min-w-0 items-center gap-2.5 sm:gap-3'>
-              <div className='bg-muted shrink-0 rounded-md p-1.5 sm:p-2'>
-                <binding.icon className='h-4 w-4' />
-              </div>
-              <div className='min-w-0'>
-                <div className='flex items-center gap-1.5'>
-                  <p className='text-sm font-medium'>{binding.label}</p>
-                  {binding.isBound && (
-                    <StatusBadge
-                      label={t('Bound')}
-                      variant='success'
-                      copyable={false}
-                    />
-                  )}
-                </div>
-                <p className='text-muted-foreground truncate text-xs'>
-                  {binding.value || t('Not bound')}
-                </p>
-              </div>
-            </div>
-            <Button
-              variant='outline'
-              size='sm'
-              className='h-7 shrink-0 px-2.5 text-xs'
-              onClick={binding.onBind}
-              disabled={binding.isBound && binding.id !== 'email'}
+        {bindings.map((binding) => {
+          let actionLabel = t('Bind')
+          if (binding.isBound && binding.id === 'email') {
+            actionLabel = t('Change')
+          } else if (binding.isBound) {
+            actionLabel = t('Bound')
+          }
+          return (
+            <div
+              key={binding.id}
+              className='flex items-center justify-between gap-2.5 rounded-lg border p-2.5 sm:gap-3 sm:p-3'
             >
-              {binding.isBound
-                ? binding.id === 'email'
-                  ? t('Change')
-                  : t('Bound')
-                : t('Bind')}
-            </Button>
-          </div>
-        ))}
+              <div className='flex min-w-0 items-center gap-2.5 sm:gap-3'>
+                <div className='bg-muted shrink-0 rounded-md p-1.5 sm:p-2'>
+                  <binding.icon className='h-4 w-4' />
+                </div>
+                <div className='min-w-0'>
+                  <div className='flex items-center gap-1.5'>
+                    <p className='text-sm font-medium'>{binding.label}</p>
+                    {binding.isBound && (
+                      <StatusBadge
+                        label={t('Bound')}
+                        variant='success'
+                        copyable={false}
+                      />
+                    )}
+                  </div>
+                  <p className='text-muted-foreground truncate text-xs'>
+                    {binding.value || t('Not bound')}
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant='outline'
+                size='sm'
+                className='h-7 shrink-0 px-2.5 text-xs'
+                onClick={binding.onBind}
+                disabled={binding.isBound && binding.id !== 'email'}
+              >
+                {actionLabel}
+              </Button>
+            </div>
+          )
+        })}
       </div>
 
       {/* Custom OAuth Bindings */}

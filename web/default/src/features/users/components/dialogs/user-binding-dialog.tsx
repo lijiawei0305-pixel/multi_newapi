@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Mail,
   Globe,
@@ -28,10 +27,14 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SiGithub, SiDiscord } from 'react-icons/si'
 import { toast } from 'sonner'
-import { api } from '@/lib/api'
+
+import { IconDiscord, IconGithub } from '@/assets/brand-icons'
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Dialog } from '@/components/dialog'
+import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
@@ -41,9 +44,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { ConfirmDialog } from '@/components/confirm-dialog'
-import { Dialog } from '@/components/dialog'
-import { StatusBadge } from '@/components/status-badge'
+import { api } from '@/lib/api'
+
 import {
   getUser,
   getUserOAuthBindings,
@@ -103,14 +105,14 @@ const BUILTIN_BINDINGS: ReadonlyArray<{
     key: 'github_id',
     field: 'github_id',
     label: 'GitHub',
-    icon: <SiGithub className='h-4 w-4' />,
+    icon: <IconGithub className='h-4 w-4' />,
     statusKey: 'github_oauth',
   },
   {
     key: 'discord_id',
     field: 'discord_id',
     label: 'Discord',
-    icon: <SiDiscord className='h-4 w-4' />,
+    icon: <IconDiscord className='h-4 w-4' />,
     statusKey: 'discord_oauth',
   },
   {

@@ -95,17 +95,17 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/aff", controller.GetAffCode)
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
-				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
-				selfRoute.POST("/pay", middleware.CriticalRateLimit(), controller.RequestEpay)
-				selfRoute.POST("/amount", controller.RequestAmount)
-				selfRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.RequestStripePay)
-				selfRoute.POST("/stripe/amount", controller.RequestStripeAmount)
-				selfRoute.POST("/creem/pay", middleware.CriticalRateLimit(), controller.RequestCreemPay)
-				selfRoute.POST("/waffo/amount", controller.RequestWaffoAmount)
-				selfRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPay)
-				selfRoute.POST("/waffo-pancake/amount", controller.RequestWaffoPancakeAmount)
-				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPancakePay)
-				selfRoute.POST("/aff_transfer", controller.TransferAffQuota)
+				selfRoute.POST("/topup", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.TopUp)
+				selfRoute.POST("/pay", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.RequestEpay)
+				selfRoute.POST("/amount", anonymousRequestBodyLimit, controller.RequestAmount)
+				selfRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.RequestStripePay)
+				selfRoute.POST("/stripe/amount", anonymousRequestBodyLimit, controller.RequestStripeAmount)
+				selfRoute.POST("/creem/pay", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.RequestCreemPay)
+				selfRoute.POST("/waffo/amount", anonymousRequestBodyLimit, controller.RequestWaffoAmount)
+				selfRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.RequestWaffoPay)
+				selfRoute.POST("/waffo-pancake/amount", anonymousRequestBodyLimit, controller.RequestWaffoPancakeAmount)
+				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.RequestWaffoPancakePay)
+				selfRoute.POST("/aff_transfer", anonymousRequestBodyLimit, controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 
 				// 2FA routes
@@ -153,12 +153,12 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			subscriptionRoute.GET("/plans", controller.GetSubscriptionPlans)
 			subscriptionRoute.GET("/self", controller.GetSubscriptionSelf)
-			subscriptionRoute.PUT("/self/preference", controller.UpdateSubscriptionPreference)
-			subscriptionRoute.POST("/balance/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestBalancePay)
-			subscriptionRoute.POST("/epay/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestEpay)
-			subscriptionRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestStripePay)
-			subscriptionRoute.POST("/creem/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestCreemPay)
-			subscriptionRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestWaffoPancakePay)
+			subscriptionRoute.PUT("/self/preference", anonymousRequestBodyLimit, controller.UpdateSubscriptionPreference)
+			subscriptionRoute.POST("/balance/pay", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.SubscriptionRequestBalancePay)
+			subscriptionRoute.POST("/epay/pay", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.SubscriptionRequestEpay)
+			subscriptionRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.SubscriptionRequestStripePay)
+			subscriptionRoute.POST("/creem/pay", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.SubscriptionRequestCreemPay)
+			subscriptionRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.SubscriptionRequestWaffoPancakePay)
 		}
 		subscriptionAdminRoute := apiRouter.Group("/subscription/admin")
 		subscriptionAdminRoute.Use(middleware.AdminAuth())
@@ -174,6 +174,20 @@ func SetApiRouter(router *gin.Engine) {
 			subscriptionAdminRoute.POST("/users/:id/subscriptions", controller.AdminCreateUserSubscription)
 			subscriptionAdminRoute.POST("/user_subscriptions/:id/invalidate", controller.AdminInvalidateUserSubscription)
 			subscriptionAdminRoute.DELETE("/user_subscriptions/:id", controller.AdminDeleteUserSubscription)
+		}
+		subscriptionReconciliationRoute := apiRouter.Group("/subscription/reconciliation")
+		subscriptionReconciliationRoute.Use(middleware.AdminAuth())
+		{
+			subscriptionReconciliationRoute.GET("", controller.AdminListSubscriptionOrderReviews)
+			subscriptionReconciliationRoute.POST("/:id/resolve", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.AdminResolveSubscriptionOrderReview)
+		}
+
+		taskSubmissionRecoveryRoute := apiRouter.Group("/task-submission-recovery")
+		taskSubmissionRecoveryRoute.Use(middleware.AdminAuth())
+		{
+			taskSubmissionRecoveryRoute.GET("", controller.AdminListTaskSubmissionRecoveries)
+			taskSubmissionRecoveryRoute.GET("/:request_id", controller.AdminGetTaskSubmissionRecovery)
+			taskSubmissionRecoveryRoute.POST("/:request_id/resolve", middleware.CriticalRateLimit(), controller.AdminResolveTaskSubmissionRecovery)
 		}
 
 		// Subscription payment callbacks (no auth)

@@ -13,6 +13,9 @@
 #
 # Reset data:
 #   docker compose -f docker-compose.dev.yml down -v
+#
+# This file is deliberately local-development-only. Internet-facing deployments
+# must use HTTPS, SESSION_COOKIE_SECURE=true, and two different external secrets.
 
 services:
   new-api:
@@ -27,24 +30,42 @@ services:
     volumes:
       - dev_data:/data
     environment:
-      - SQL_DSN=postgresql://root:123456@postgres:5432/new-api
-      - REDIS_CONN_STRING=redis://redis
+      - DEPLOYMENT_ENV=development
+      - SESSION_COOKIE_SECURE=false
+      - SQL_DSN=postgresql://root:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be generated in .env}@postgres:5432/new-api
+      - REDIS_CONN_STRING=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be generated in .env}@redis:6379
       - TZ=Asia/Shanghai
-      - BATCH_UPDATE_ENABLED=true
+      - BATCH_UPDATE_ENABLED=false
     depends_on:
       redis:
-        condition: service_started
+        condition: service_healthy
       postgres:
         condition: service_healthy
     networks:
       - dev-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--timeout=5", "--output-document=/dev/null", "http://127.0.0.1:3000/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.9-alpine
     container_name: new-api-dev-redis
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD must be generated in .env}"]
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD must be generated in .env}"
+    volumes:
+      - dev_redis_data:/data
     networks:
       - dev-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -qx PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   postgres:
     image: postgres:15-alpine
@@ -52,7 +73,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: root
-      POSTGRES_PASSWORD: 123456
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be generated in .env}"
       POSTGRES_DB: new-api
     volumes:
       - dev_pg_data:/var/lib/postgresql/data
@@ -67,6 +88,7 @@ services:
 volumes:
   dev_data:
   dev_pg_data:
+  dev_redis_data:
 
 networks:
   dev-network:

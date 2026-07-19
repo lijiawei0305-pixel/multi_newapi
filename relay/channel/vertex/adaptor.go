@@ -1,7 +1,6 @@
 package vertex
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -215,7 +214,7 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
 	channel.SetupApiRequestHeader(info, c, req)
 	if info.ChannelOtherSettings.VertexKeyType != dto.VertexKeyTypeAPIKey {
-		accessToken, err := getAccessToken(a, info)
+		accessToken, err := getAccessToken(c.Request.Context(), a, info)
 		if err != nil {
 			return err
 		}
@@ -259,7 +258,10 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 			N:      lo.ToPtr(uint(1)),
 			Size:   "1024x1024",
 		}
-		if request.N != nil && *request.N > 0 {
+		if request.N != nil {
+			if *request.N <= 0 {
+				return nil, errors.New("n must be greater than zero for image generation")
+			}
 			imgReq.N = lo.ToPtr(uint(*request.N))
 		}
 		if request.Size != "" {
@@ -267,8 +269,11 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		}
 		if len(request.ExtraBody) > 0 {
 			var extra map[string]any
-			if err := json.Unmarshal(request.ExtraBody, &extra); err == nil {
-				if n, ok := extra["n"].(float64); ok && n > 0 {
+			if err := common.Unmarshal(request.ExtraBody, &extra); err == nil {
+				if n, ok := extra["n"].(float64); ok {
+					if n <= 0 {
+						return nil, errors.New("extra_body.n must be greater than zero for image generation")
+					}
 					imgReq.N = lo.ToPtr(uint(n))
 				}
 				if size, ok := extra["size"].(string); ok {

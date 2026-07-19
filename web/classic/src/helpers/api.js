@@ -25,6 +25,11 @@ import {
 } from './utils';
 import axios from 'axios';
 import { MESSAGE_ROLES } from '../constants/playground.constants';
+import {
+  assignHttpNavigationUrl,
+  normalizeHttpNavigationUrl,
+  openHttpUrlInNewTab,
+} from './safeNavigation';
 
 export let API = axios.create({
   baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
@@ -36,19 +41,21 @@ export let API = axios.create({
   },
 });
 
-
 function redirectToOAuthUrl(url, options = {}) {
   const { openInNewTab = false } = options;
   const targetUrl = typeof url === 'string' ? url : url.toString();
-
-  if (openInNewTab) {
-    window.open(targetUrl, '_blank');
-    return;
+  const safeUrl = normalizeHttpNavigationUrl(targetUrl);
+  if (!safeUrl) {
+    console.error('Refusing unsafe OAuth authorization URL');
+    return false;
   }
 
-  window.location.assign(targetUrl);
-}
+  if (openInNewTab) {
+    return openHttpUrlInNewTab(safeUrl);
+  }
 
+  return assignHttpNavigationUrl(safeUrl);
+}
 
 function patchAPIInstance(instance) {
   const originalGet = instance.get.bind(instance);

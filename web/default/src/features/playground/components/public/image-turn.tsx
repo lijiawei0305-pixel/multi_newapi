@@ -16,8 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
-import { useTranslation } from 'react-i18next'
 import {
   ChevronDownIcon,
   DownloadIcon,
@@ -27,13 +25,16 @@ import {
   SlidersHorizontalIcon,
   ZoomInIcon,
 } from 'lucide-react'
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { openHttpResourceUrlInNewTab } from '@/lib/safe-navigation'
 import { cn } from '@/lib/utils'
 
-import type { ImageResultItem } from '../../types'
 import type { ImageTurn } from '../../hooks/use-image-conversation'
-import { IMAGE_SIZE_OPTIONS } from './image-size-selector'
+import type { ImageResultItem } from '../../types'
+import { IMAGE_SIZE_OPTIONS } from './image-size-options'
 
 // 把 1024x1024 还原成「1024×1024（1:1 方形）」这类可读描述。
 function describeSize(size: string): string {
@@ -83,7 +84,7 @@ export function ImageTurnView({
     <div className='flex flex-col gap-3 py-3'>
       {/* 用户提示词（右对齐气泡） */}
       <div className='flex justify-end'>
-        <div className='max-w-[85%] rounded-2xl rounded-br-md bg-primary/10 px-3.5 py-2 text-sm text-foreground'>
+        <div className='bg-primary/10 text-foreground max-w-[85%] rounded-2xl rounded-br-md px-3.5 py-2 text-sm'>
           <p className='break-words whitespace-pre-wrap'>{turn.prompt}</p>
 
           {/* 请求参数：折叠展开，回看每次生成用了什么参数 */}
@@ -91,7 +92,7 @@ export function ImageTurnView({
             type='button'
             aria-expanded={showParams}
             onClick={() => setShowParams((v) => !v)}
-            className='mt-1.5 flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground'
+            className='text-muted-foreground hover:text-foreground mt-1.5 flex items-center gap-1 text-xs transition-colors'
           >
             <SlidersHorizontalIcon className='size-3' />
             <span>{t('Request parameters')}</span>
@@ -104,7 +105,7 @@ export function ImageTurnView({
           </button>
 
           {showParams && (
-            <div className='mt-1.5 space-y-1.5 border-t border-primary/15 pt-1.5 text-xs text-muted-foreground'>
+            <div className='border-primary/15 text-muted-foreground mt-1.5 space-y-1.5 border-t pt-1.5 text-xs'>
               <dl className='grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5'>
                 <dt className='text-muted-foreground/70'>{t('Endpoint')}</dt>
                 <dd className='font-mono break-all'>
@@ -117,7 +118,7 @@ export function ImageTurnView({
                 <dt className='text-muted-foreground/70'>{t('Quantity')}</dt>
                 <dd>{t('{{n}} images', { n: turn.n })}</dd>
               </dl>
-              <pre className='overflow-x-auto rounded-md bg-background/70 p-2 font-mono text-[11px] leading-relaxed text-foreground/80'>
+              <pre className='bg-background/70 text-foreground/80 overflow-x-auto rounded-md p-2 font-mono text-[11px] leading-relaxed'>
                 {JSON.stringify(requestBody, null, 2)}
               </pre>
             </div>
@@ -127,7 +128,7 @@ export function ImageTurnView({
 
       {/* 结果区 */}
       {turn.status === 'loading' && (
-        <div className='flex items-center gap-2 text-sm text-muted-foreground'>
+        <div className='text-muted-foreground flex items-center gap-2 text-sm'>
           <Loader2Icon className='size-4 animate-spin' />
           <span>{t('Generating…')}</span>
         </div>
@@ -135,7 +136,7 @@ export function ImageTurnView({
 
       {turn.status === 'error' && (
         <div className='flex flex-col items-start gap-2'>
-          <p className='text-sm text-destructive'>
+          <p className='text-destructive text-sm'>
             {turn.error ?? t('Image generation failed, please try again later')}
           </p>
           <Button
@@ -152,21 +153,22 @@ export function ImageTurnView({
 
       {turn.status === 'success' && turn.images.length > 0 && (
         <div
-          className={cn(
-            'max-w-md',
-            isGrid ? 'grid grid-cols-2 gap-2' : 'flex'
-          )}
+          className={cn('max-w-md', isGrid ? 'grid grid-cols-2 gap-2' : 'flex')}
         >
           {turn.images.map((item, index) => {
             const src = resolveSrc(item)
-            const alt = item.revised_prompt || turn.prompt || t('Generated image {{n}}', { n: index + 1 })
+            const imageKey = `${src}-${item.revised_prompt || turn.prompt}`
+            const alt =
+              item.revised_prompt ||
+              turn.prompt ||
+              t('Generated image {{n}}', { n: index + 1 })
             const filename = t('generated-image-{{n}}.png', { n: index + 1 })
 
             if (failedIndices.has(index)) {
               return (
                 <div
-                  key={index}
-                  className='flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-border bg-muted p-4 text-center text-muted-foreground'
+                  key={imageKey}
+                  className='border-border bg-muted text-muted-foreground flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border p-4 text-center'
                 >
                   <ImageIcon className='size-8 opacity-40' />
                   <p className='text-xs'>{t('Failed to load image')}</p>
@@ -174,7 +176,7 @@ export function ImageTurnView({
                     <Button
                       size='sm'
                       variant='outline'
-                      onClick={() => window.open(src, '_blank', 'noopener')}
+                      onClick={() => openHttpResourceUrlInNewTab(src)}
                     >
                       {t('Open in new tab')}
                     </Button>
@@ -185,8 +187,8 @@ export function ImageTurnView({
 
             return (
               <div
-                key={index}
-                className='group relative overflow-hidden rounded-lg border border-border bg-muted'
+                key={imageKey}
+                className='group border-border bg-muted relative overflow-hidden rounded-lg border'
               >
                 {/* 点击图片放大预览 */}
                 <button

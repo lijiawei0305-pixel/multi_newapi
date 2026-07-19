@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { expect, test } from 'vitest'
 
 import { nextSelection } from './scene3d-interaction'
 

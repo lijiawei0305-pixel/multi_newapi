@@ -43,7 +43,27 @@ func TestChatCompletionsRequestToResponsesRequestRejectsMultipleChoices(t *testi
 		N:     lo.ToPtr(2),
 	})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "n>1")
+	assert.Contains(t, err.Error(), "n must be 1")
+}
+
+func TestChatCompletionsRequestToResponsesRequestRejectsExplicitZeroChoices(t *testing.T) {
+	_, err := ChatCompletionsRequestToResponsesRequest(&dto.GeneralOpenAIRequest{
+		Model: "gpt-test",
+		N:     lo.ToPtr(0),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "n must be 1")
+}
+
+func TestChatCompletionsRequestToResponsesRequestPreservesZeroMaxCompletionTokens(t *testing.T) {
+	got, err := ChatCompletionsRequestToResponsesRequest(&dto.GeneralOpenAIRequest{
+		Model:               "gpt-test",
+		MaxTokens:           lo.ToPtr(uint(100)),
+		MaxCompletionTokens: lo.ToPtr(uint(0)),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got.MaxOutputTokens)
+	assert.Zero(t, *got.MaxOutputTokens)
 }
 
 func TestResponsesResponseToChatCompletionsPreservesTextAndToolCalls(t *testing.T) {

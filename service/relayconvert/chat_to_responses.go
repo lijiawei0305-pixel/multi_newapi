@@ -80,8 +80,8 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 	if req.Model == "" {
 		return nil, errors.New("model is required")
 	}
-	if lo.FromPtrOr(req.N, 1) > 1 {
-		return nil, fmt.Errorf("n>1 is not supported in responses compatibility mode")
+	if req.N != nil && *req.N != 1 {
+		return nil, fmt.Errorf("n must be 1 in responses compatibility mode")
 	}
 
 	var instructionsParts []string
@@ -357,11 +357,7 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 
 	textRaw := convertChatResponseFormatToResponsesText(req.ResponseFormat)
 
-	maxOutputTokens := lo.FromPtrOr(req.MaxTokens, uint(0))
-	maxCompletionTokens := lo.FromPtrOr(req.MaxCompletionTokens, uint(0))
-	if maxCompletionTokens > maxOutputTokens {
-		maxOutputTokens = maxCompletionTokens
-	}
+	maxOutputTokens := req.GetMaxTokens()
 	// OpenAI Responses API rejects max_output_tokens < 16 when explicitly provided.
 	//if maxOutputTokens > 0 && maxOutputTokens < 16 {
 	//	maxOutputTokens = 16

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QRCodeSVG } from 'qrcode.react'
 import { useTranslation } from 'react-i18next'
+
 import {
   Dialog,
   DialogContent,
@@ -25,6 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { normalizePaymentQrNavigationUrl } from '@/lib/safe-navigation'
 
 interface RechargeQrDialogProps {
   open: boolean
@@ -50,6 +52,7 @@ export function RechargeQrDialog({
   amountCny,
 }: RechargeQrDialogProps) {
   const { t } = useTranslation()
+  const safeQrLink = normalizePaymentQrNavigationUrl(qr)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className='sm:max-w-sm'>
@@ -70,14 +73,14 @@ export function RechargeQrDialog({
         </DialogHeader>
 
         <div className='flex flex-col items-center gap-4 py-2'>
-          {qr ? (
+          {safeQrLink ? (
             <div
               data-testid='pay-qr'
               data-order-no={orderNo}
-              data-qr-value={qr}
+              data-qr-value={safeQrLink}
               className='rounded-lg border bg-white p-4'
             >
-              <QRCodeSVG value={qr} size={196} marginSize={2} />
+              <QRCodeSVG value={safeQrLink} size={196} marginSize={2} />
             </div>
           ) : null}
 
@@ -87,10 +90,10 @@ export function RechargeQrDialog({
             </p>
           ) : null}
 
-          {qr ? (
+          {safeQrLink ? (
             // On mobile, the weixin:// code_url can open the WeChat app directly.
             <a
-              href={qr}
+              href={safeQrLink}
               target='_blank'
               rel='noopener noreferrer'
               data-testid='pay-qr-link'

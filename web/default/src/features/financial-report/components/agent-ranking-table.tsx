@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ReactNode } from 'react'
 import { ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import {
   Table,
   TableBody,
@@ -28,6 +29,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
+
 import { cny, count } from '../lib'
 import type { AgentRankRow, AgentSortBy, SortOrder } from '../types'
 import { ReportPagination } from './report-pagination'
@@ -147,6 +149,9 @@ export function AgentRankingTable({
             {columns.map((col) => {
               const numeric = col.key !== null
               const active = col.key === sortBy
+              let SortIcon = ChevronsUpDown
+              if (active && order === 'asc') SortIcon = ChevronUp
+              else if (active) SortIcon = ChevronDown
               return (
                 <TableHead
                   key={col.label}
@@ -160,15 +165,12 @@ export function AgentRankingTable({
                       className='hover:text-foreground ml-auto inline-flex items-center gap-1'
                     >
                       {col.label}
-                      {active ? (
-                        order === 'asc' ? (
-                          <ChevronUp className='size-3.5' />
-                        ) : (
-                          <ChevronDown className='size-3.5' />
-                        )
-                      ) : (
-                        <ChevronsUpDown className='text-muted-foreground/50 size-3.5' />
-                      )}
+                      <SortIcon
+                        className={cn(
+                          'size-3.5',
+                          !active && 'text-muted-foreground/50'
+                        )}
+                      />
                     </button>
                   ) : (
                     col.label
@@ -179,7 +181,7 @@ export function AgentRankingTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {loading ? (
+          {loading && (
             <TableRow>
               <TableCell
                 colSpan={columns.length}
@@ -188,7 +190,8 @@ export function AgentRankingTable({
                 {t('Loading...')}
               </TableCell>
             </TableRow>
-          ) : items.length === 0 ? (
+          )}
+          {!loading && items.length === 0 && (
             <TableRow>
               <TableCell
                 colSpan={columns.length}
@@ -197,7 +200,9 @@ export function AgentRankingTable({
                 {t('No data available')}
               </TableCell>
             </TableRow>
-          ) : (
+          )}
+          {!loading &&
+            items.length > 0 &&
             items.map((row) => (
               <TableRow
                 key={row.tenant_id}
@@ -219,8 +224,7 @@ export function AgentRankingTable({
                   )
                 })}
               </TableRow>
-            ))
-          )}
+            ))}
         </TableBody>
       </Table>
       <ReportPagination

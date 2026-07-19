@@ -17,6 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { PingStatus } from '@/features/dashboard/types'
+import {
+  normalizeHttpNavigationUrl,
+  openHttpUrlInNewTab,
+} from '@/lib/safe-navigation'
 
 /**
  * Get color class for latency status
@@ -35,9 +39,11 @@ export function getLatencyColorClass(latency: number): string {
  * Test URL latency
  */
 export async function testUrlLatency(url: string): Promise<PingStatus> {
+  const safeUrl = normalizeHttpNavigationUrl(url)
+  if (!safeUrl) return { latency: null, testing: false, error: true }
   try {
     const startTime = performance.now()
-    await fetch(url, {
+    await fetch(safeUrl, {
       method: 'HEAD',
       mode: 'no-cors',
       cache: 'no-cache',
@@ -46,7 +52,7 @@ export async function testUrlLatency(url: string): Promise<PingStatus> {
     const latency = Math.round(endTime - startTime)
 
     return { latency, testing: false, error: false }
-  } catch (_error) {
+  } catch {
     return { latency: null, testing: false, error: true }
   }
 }
@@ -55,9 +61,11 @@ export async function testUrlLatency(url: string): Promise<PingStatus> {
  * Open external speed test link
  */
 export function openExternalSpeedTest(url: string): void {
-  const encodedUrl = encodeURIComponent(url)
+  const safeUrl = normalizeHttpNavigationUrl(url)
+  if (!safeUrl) return
+  const encodedUrl = encodeURIComponent(safeUrl)
   const speedTestUrl = `https://www.tcptest.cn/http/${encodedUrl}`
-  window.open(speedTestUrl, '_blank', 'noopener,noreferrer')
+  openHttpUrlInNewTab(speedTestUrl)
 }
 
 /**

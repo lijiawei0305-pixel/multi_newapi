@@ -2,11 +2,11 @@ package mtwire
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 
 	"github.com/QuantumNous/new-api/internal/payment"
@@ -57,7 +57,7 @@ func (a *App) recordReconcileRun(ctx context.Context, trigger string, paid, crea
 		created.Scanned, len(created.Reconciled), len(created.Expired), len(created.Failed),
 		sub.Scanned, len(sub.Activated), len(sub.Unpaid), len(sub.Expired), len(sub.Failed),
 		agt.Scanned, len(agt.Activated), len(agt.Unpaid), len(agt.Expired), len(agt.Failed))
-	detail, _ := json.Marshal(map[string]any{"paid": paid, "created": created, "sub": sub, "agt": agt})
+	detail, _ := common.Marshal(map[string]any{"paid": paid, "created": created, "sub": sub, "agt": agt})
 	row := &reconcileRunRow{RanAt: time.Now(), Trigger: trigger, Summary: summary, Detail: string(detail)}
 	_ = a.DB.WithContext(ctx).Create(row).Error
 }

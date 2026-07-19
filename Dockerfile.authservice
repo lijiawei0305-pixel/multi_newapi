@@ -1,7 +1,9 @@
-# auth-service 独立支付网关镜像（Phase 2 · 目标③）。
+# Legacy/archive-only auth-service image. The production topology has retired
+# this service: it must not be added to production Compose or health/readiness
+# dependencies. Keep the image solely for historical recovery and isolated tests.
 # 与 new-api 同一 Go module，仅构建 ./auth-service/cmd/authservice 二进制。
-# 复用主 Dockerfile 的 Go 版本（golang:1.26.1-alpine）保持一致。
-FROM golang:1.26.1-alpine AS builder
+# 复用主 Dockerfile 已审核的 Go 版本与 immutable digest，避免归档镜像成为供应链例外。
+FROM golang:1.26.1-alpine@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039 AS builder
 ENV GO111MODULE=on CGO_ENABLED=0
 ENV GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64}
 WORKDIR /build
@@ -10,12 +12,18 @@ RUN go mod download
 COPY . .
 RUN go build -ldflags "-s -w" -o /authservice ./auth-service/cmd/authservice
 
-FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata
+FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates tzdata \
+    && rm -rf /var/lib/apt/lists/* \
+    && update-ca-certificates
 WORKDIR /app
 COPY --from=builder /authservice /app/authservice
 # 默认配置随镜像；生产用挂载/环境变量覆盖敏感项（见 config.go applyEnvOverrides）。
-COPY auth-service/config.yaml /app/config.yaml
+# config.yaml is intentionally gitignored because it can contain secrets. The
+# legacy image remains reproducible from a clean archive by starting from the
+# tracked, non-secret example; operators may still override it at runtime.
+COPY auth-service/config.example.yaml /app/config.yaml
 ENV AUTH_CONFIG=/app/config.yaml
 EXPOSE 8080
 ENTRYPOINT ["/app/authservice"]

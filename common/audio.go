@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/abema/go-mp4"
 	"github.com/go-audio/aiff"
@@ -13,39 +14,87 @@ import (
 	"github.com/mewkiz/flac"
 	"github.com/pkg/errors"
 	"github.com/tcolgate/mp3"
-	"github.com/yapingcat/gomedia/go-codec"
 )
+
+const (
+	defaultAudioDurationMaxSeconds = 24 * 60 * 60
+	maximumAudioDurationMaxSeconds = 365 * 24 * 60 * 60
+)
+
+type contextReadSeeker struct {
+	ctx context.Context
+	io.ReadSeeker
+}
+
+func (r *contextReadSeeker) Read(data []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.ReadSeeker.Read(data)
+}
+
+func (r *contextReadSeeker) Seek(offset int64, whence int) (int64, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.ReadSeeker.Seek(offset, whence)
+}
 
 // GetAudioDuration 使用纯 Go 库获取音频文件的时长（秒）。
 // 它不再依赖外部的 ffmpeg 或 ffprobe 程序。
 func GetAudioDuration(ctx context.Context, f io.ReadSeeker, ext string) (duration float64, err error) {
+	if f == nil {
+		return 0, errors.New("audio reader is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	reader := &contextReadSeeker{ctx: ctx, ReadSeeker: f}
 	SysLog(fmt.Sprintf("GetAudioDuration: ext=%s", ext))
 	// 根据文件扩展名选择解析器
 	switch ext {
 	case ".mp3":
-		duration, err = getMP3Duration(f)
+		duration, err = getMP3Duration(reader)
 	case ".wav":
-		duration, err = getWAVDuration(f)
+		duration, err = getWAVDuration(reader)
 	case ".flac":
-		duration, err = getFLACDuration(f)
+		duration, err = getFLACDuration(reader)
 	case ".m4a", ".mp4":
-		duration, err = getM4ADuration(f)
+		duration, err = getM4ADuration(reader)
 	case ".ogg", ".oga", ".opus":
-		duration, err = getOGGDuration(f)
+		duration, err = getOGGDuration(reader)
 		if err != nil {
-			duration, err = getOpusDuration(f)
+			duration, err = getOpusDuration(reader)
 		}
 	case ".aiff", ".aif", ".aifc":
-		duration, err = getAIFFDuration(f)
+		duration, err = getAIFFDuration(reader)
 	case ".webm":
-		duration, err = getWebMDuration(f)
+		duration, err = getWebMDuration(reader)
 	case ".aac":
-		duration, err = getAACDuration(f)
+		duration, err = getAACDuration(reader)
 	default:
 		return 0, fmt.Errorf("unsupported audio format: %s", ext)
 	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return 0, ctxErr
+	}
+	if err != nil {
+		return 0, err
+	}
+	maxSeconds := GetEnvOrDefault("RELAY_AUDIO_DURATION_MAX_SECONDS", defaultAudioDurationMaxSeconds)
+	if maxSeconds <= 0 {
+		maxSeconds = defaultAudioDurationMaxSeconds
+	} else if maxSeconds > maximumAudioDurationMaxSeconds {
+		maxSeconds = maximumAudioDurationMaxSeconds
+	}
+	if math.IsNaN(duration) || math.IsInf(duration, 0) || duration <= 0 || duration > float64(maxSeconds) {
+		return 0, fmt.Errorf("invalid audio duration: value=%g max_seconds=%d", duration, maxSeconds)
+	}
 	SysLog(fmt.Sprintf("GetAudioDuration: duration=%f", duration))
-	return duration, err
+	return duration, nil
 }
 
 // getMP3Duration 解析 MP3 文件以获取时长。
@@ -141,6 +190,9 @@ func getFLACDuration(r io.Reader) (float64, error) {
 	}
 	defer stream.Close()
 
+	if stream.Info.SampleRate == 0 {
+		return 0, errors.New("invalid flac sample rate")
+	}
 	// 时长 = 总采样数 / 采样率
 	duration := float64(stream.Info.NSamples) / float64(stream.Info.SampleRate)
 	return duration, nil
@@ -152,6 +204,9 @@ func getM4ADuration(r io.ReadSeeker) (float64, error) {
 	info, err := mp4.Probe(r)
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to probe m4a/mp4 file")
+	}
+	if info.Timescale == 0 {
+		return 0, errors.New("invalid m4a/mp4 timescale")
 	}
 	// 时长 = Duration / Timescale
 	return float64(info.Duration) / float64(info.Timescale), nil
@@ -173,6 +228,9 @@ func getOGGDuration(r io.ReadSeeker) (float64, error) {
 	// 需要读取整个文件来获取总采样数
 	channels := reader.Channels()
 	sampleRate := reader.SampleRate()
+	if channels <= 0 || sampleRate <= 0 {
+		return 0, errors.New("invalid ogg channel count or sample rate")
+	}
 
 	// 估算方法：读取到文件结尾
 	var totalSamples int64
@@ -226,7 +284,11 @@ func getOpusDuration(r io.ReadSeeker) (float64, error) {
 		}
 
 		// 读取 granule position (字节 6-13, 小端序)
-		granulePos := int64(binary.LittleEndian.Uint64(buf[6:14]))
+		rawGranulePos := binary.LittleEndian.Uint64(buf[6:14])
+		if rawGranulePos > math.MaxInt64 {
+			return 0, errors.New("invalid opus/ogg granule position")
+		}
+		granulePos := int64(rawGranulePos) // #nosec G115 -- bounded by math.MaxInt64 above.
 		if granulePos > totalGranulePos {
 			totalGranulePos = granulePos
 		}
@@ -307,41 +369,63 @@ func getWebMDuration(r io.ReadSeeker) (float64, error) {
 	return 0, errors.New("failed to parse webm file")
 }
 
-// getAACDuration 解析 AAC (ADTS格式) 文件以获取时长。
-// 使用 gomedia 库来解析 AAC ADTS 帧
+// getAACDuration parses ADTS headers one frame at a time. It keeps constant
+// memory even when the accepted audio body has spilled to a large spool file.
 func getAACDuration(r io.ReadSeeker) (float64, error) {
+	fileSize, err := r.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to inspect aac file size")
+	}
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return 0, errors.Wrap(err, "failed to seek aac file")
 	}
 
-	// 读取整个文件内容
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return 0, errors.Wrap(err, "failed to read aac file")
+	sampleRates := [...]int{96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350}
+	var totalSamples int64
+	sampleRate := 0
+	var header [7]byte
+	for {
+		frameStart, err := r.Seek(0, io.SeekCurrent)
+		if err != nil {
+			return 0, errors.Wrap(err, "failed to locate aac frame")
+		}
+		if frameStart == fileSize {
+			break
+		}
+		if fileSize-frameStart < int64(len(header)) {
+			return 0, errors.New("truncated aac frame header")
+		}
+		if _, err := io.ReadFull(r, header[:]); err != nil {
+			return 0, errors.Wrap(err, "truncated aac frame header")
+		}
+		if header[0] != 0xff || header[1]&0xf6 != 0xf0 {
+			return 0, errors.New("invalid aac frame sync word")
+		}
+		sampleIndex := int(header[2]>>2) & 0x0f
+		if sampleIndex >= len(sampleRates) {
+			return 0, errors.New("invalid aac sample rate index")
+		}
+		frameLength := int64(header[3]&0x03)<<11 | int64(header[4])<<3 | int64(header[5]>>5)
+		if frameLength < int64(len(header)) {
+			return 0, errors.New("invalid aac frame length")
+		}
+		if frameLength > fileSize-frameStart {
+			return 0, errors.New("truncated aac frame payload")
+		}
+		if sampleRate == 0 {
+			sampleRate = sampleRates[sampleIndex]
+		} else if sampleRate != sampleRates[sampleIndex] {
+			return 0, errors.New("aac sample rate changed between frames")
+		}
+		rawDataBlocks := int64(header[6]&0x03) + 1
+		totalSamples += rawDataBlocks * 1024
+		if _, err := r.Seek(frameStart+frameLength, io.SeekStart); err != nil {
+			return 0, errors.Wrap(err, "failed to skip aac frame payload")
+		}
 	}
 
-	var totalFrames int64
-	var sampleRate int
-
-	// 使用 gomedia 的 SplitAACFrame 函数来分割 AAC 帧
-	codec.SplitAACFrame(data, func(aac []byte) {
-		// 解析 ADTS 头部以获取采样率信息
-		if len(aac) >= 7 {
-			// 使用 ConvertADTSToASC 来获取音频配置信息
-			asc, err := codec.ConvertADTSToASC(aac)
-			if err == nil && sampleRate == 0 {
-				sampleRate = codec.AACSampleIdxToSample(int(asc.Sample_freq_index))
-			}
-			totalFrames++
-		}
-	})
-
-	if sampleRate == 0 || totalFrames == 0 {
+	if sampleRate == 0 || totalSamples == 0 {
 		return 0, errors.New("no valid aac frames found")
 	}
-
-	// 每个 AAC ADTS 帧包含 1024 个采样
-	totalSamples := totalFrames * 1024
-	duration := float64(totalSamples) / float64(sampleRate)
-	return duration, nil
+	return float64(totalSamples) / float64(sampleRate), nil
 }

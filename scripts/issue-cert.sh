@@ -6,7 +6,8 @@
 #   → 回写主站内网端点 /api/internal/domain/cert-issued（转 active + 失效缓存）。
 #
 # 幂等：可重复执行（acme.sh 已有有效证书会跳过签发，仍刷新 vhost + 回写）。
-# 红线：只反代到测试栈 127.0.0.1:3100；不碰现网 3000；不声明 default_server（与宝塔零冲突）。
+# 红线：只反代到唯一现网多租户栈 127.0.0.1:3100；拒绝 /api/internal/；
+# 不声明 default_server（与宝塔已有站点共存）。
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

@@ -5,18 +5,22 @@
   "type": "module",
   "scripts": {
     "dev": "rsbuild dev",
-    "build": "rsbuild build",
-    "build:check": "tsgo -b && rsbuild build",
-    "typecheck": "tsgo -b",
-    "lint": "oxlint -c .oxlintrc.json .",
+    "build": "bun run source-size:check && rsbuild build",
+    "bundle:check": "node scripts/check-initial-bundle.mjs",
+    "build:check": "bun run typecheck && bun run build",
+    "source-size:check": "node scripts/check-source-file-size.mjs",
+    "typecheck": "node scripts/check-typecheck-coverage.mjs && tsgo -b",
+    "lint": "oxlint -c .oxlintrc.json --deny-warnings .",
     "lint:fix": "oxlint -c .oxlintrc.json . --fix",
     "preview": "rsbuild preview",
+    "test": "vitest run",
     "format:check": "node scripts/format-with-protected-headers.mjs --check",
     "format": "node scripts/format-with-protected-headers.mjs --write",
     "copyright:check": "node scripts/add-copyright.mjs --check",
     "copyright": "node scripts/add-copyright.mjs",
     "i18n:sync": "node scripts/sync-i18n.mjs",
-    "knip": "knip"
+    "knip": "knip --dependencies",
+    "knip:full": "knip"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -35,7 +39,6 @@
     "@tanstack/react-query": "^5.100.14",
     "@tanstack/react-router": "^1.170.8",
     "@tanstack/react-table": "^8.21.3",
-    "@tanstack/react-virtual": "^3.13.25",
     "@visactor/react-vchart": "^2.0.22",
     "@visactor/vchart": "^2.0.22",
     "ai": "^6.0.191",
@@ -55,7 +58,6 @@
     "marked": "^18.0.5",
     "motion": "^12.40.0",
     "nanoid": "^5.1.11",
-    "next-themes": "^0.4.6",
     "qrcode.react": "catalog:",
     "react": "^19.2.6",
     "react-day-picker": "^10.0.1",
@@ -89,12 +91,14 @@
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "0.185.1",
     "@typescript/native-preview": "^7.0.0-dev.20260621.1",
     "@xyflow/react": "^12.10.2",
     "embla-carousel-react": "^8.6.0",
     "knip": "^6.14.2",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "shadcn": "^4.8.0"
+    "shadcn": "^4.8.0",
+    "vitest": "^4.0.18"
   }
 }

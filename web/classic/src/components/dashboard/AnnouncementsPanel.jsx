@@ -20,7 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Card, Tag, Timeline, Empty } from '@douyinfe/semi-ui';
 import { Bell } from 'lucide-react';
-import { marked } from 'marked';
+import { renderSafeMarkdown } from '../../helpers/sanitize';
 import {
   IllustrationConstruction,
   IllustrationConstructionDark,
@@ -80,7 +80,9 @@ const AnnouncementsPanel = ({
         {announcementData.length > 0 ? (
           <Timeline mode='left'>
             {announcementData.map((item, idx) => {
-              const htmlExtra = item.extra ? marked.parse(item.extra) : '';
+              const htmlExtra = item.extra
+                ? renderSafeMarkdown(item.extra)
+                : '';
               return (
                 <Timeline.Item
                   key={idx}
@@ -98,7 +100,7 @@ const AnnouncementsPanel = ({
                   <div>
                     <div
                       dangerouslySetInnerHTML={{
-                        __html: marked.parse(item.content || ''),
+                        __html: renderSafeMarkdown(item.content || ''),
                       }}
                     />
                   </div>

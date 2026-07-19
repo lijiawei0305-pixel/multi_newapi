@@ -1,5 +1,12 @@
 # 🤖 自动化开发起始 Prompt — Master-Worker（New API 多租户代理分销平台）
 
+> [!WARNING]
+> **历史一期启动 Prompt，不是当前执行手册。** 本文保留用于追溯早期 Wave/Worker 设计；其中
+> `pnpm`、React + Semi 单前端、旧测试栈/现网边界和“第一阶段未完成”等描述已过期，禁止直接照抄执行。
+> 当前工具链与约束以 [`../AGENTS.md`](../AGENTS.md)、[`../CLAUDE.md`](../CLAUDE.md)、
+> [`tasks/STATUS.md`](tasks/STATUS.md) 和 [`../scripts/preflight.sh`](../scripts/preflight.sh) 为准；
+> 发布/恢复只按 [`../deploy/ops/README.md`](../deploy/ops/README.md) 操作。
+
 > **用途**：把本文件作为**起始 Prompt** 交给自动化编码 Agent（Claude Code / Vibe Coding），即可进入**全自动、无人工干预**的 Master-Worker 开发，直至第一阶段里程碑达成。
 > **你的角色**：**Master Agent（主控）**。你不亲自写业务代码，而是**调度 Worker 子 Agent** 实现模块、跑测试、更新进度。
 

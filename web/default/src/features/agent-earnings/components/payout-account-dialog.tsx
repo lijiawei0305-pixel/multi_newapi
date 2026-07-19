@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getApiErrorCode } from '@/lib/api'
+
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -33,6 +33,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { getApiErrorCode } from '@/lib/api'
+
 import { updatePayoutAccount } from '../api'
 import type { PayoutAccount } from '../types'
 

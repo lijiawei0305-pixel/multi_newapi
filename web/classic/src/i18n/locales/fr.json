@@ -3680,6 +3680,9 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "计费输入 Token": "Jetons d’entrée facturables",
+    "计费输出 Token": "Jetons de sortie facturables",
+    "完整输入长度": "Longueur complète de l’entrée"
   }
 }

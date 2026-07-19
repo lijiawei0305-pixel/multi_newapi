@@ -131,14 +131,18 @@ docker pull calciumion/new-api:latest
 # 使用 SQLite（默认）
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 
-# 使用 MySQL
+# 使用 MySQL（先在当前 shell 设置 SQL_DSN，禁止把密码写入 tracked 文件）
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
+  -e SQL_DSN="${SQL_DSN:?请先 export SQL_DSN}" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -312,8 +316,10 @@ docker run --name new-api -d --restart always \
 
 | 变量名 | 说明                                                           | 默认值 |
 |--------|--------------------------------------------------------------|--------|
-| `SESSION_SECRET` | 会话密钥（多机部署必须）                                                 | - |
-| `CRYPTO_SECRET` | 加密密钥（Redis 必须）                                               | - |
+| `DEPLOYMENT_ENV` | 安全模式。未设置或拼错均按 `production` 处理；本地源码/HTTP 开发必须显式设为 `development` | `production`（fail-closed） |
+| `SESSION_COOKIE_SECURE` | 会话 Cookie 仅经 HTTPS 发送；生产必须为 `true`，仅显式本地 `DEPLOYMENT_ENV=development` 可用 `false` | `false` |
+| `SESSION_SECRET` | 显式会话签名密钥；生产环境必填 | - |
+| `CRYPTO_SECRET` | 显式加密/HMAC 密钥；生产环境必填，且必须与 `SESSION_SECRET` 不同 | - |
 | `SQL_DSN` | 数据库连接字符串                                                     | - |
 | `REDIS_CONN_STRING` | Redis 连接字符串                                                  | - |
 | `STREAMING_TIMEOUT` | 流式超时时间（秒）                                                    | `300` |
@@ -328,6 +334,9 @@ docker run --name new-api -d --restart always \
 | `PYROSCOPE_MUTEX_RATE` | Pyroscope mutex 采样率                               | `5` |
 | `PYROSCOPE_BLOCK_RATE` | Pyroscope block 采样率                               | `5` |
 | `HOSTNAME` | Pyroscope 标签里的主机名                                          | `new-api` |
+
+> [!IMPORTANT]
+> 未设置 `DEPLOYMENT_ENV` **不会**回退到不安全开发模式。本地源码安装若通过 HTTP 访问，必须显式设置 `DEPLOYMENT_ENV=development`。公网部署必须保持生产模式、启用 HTTPS、设置 `SESSION_COOKIE_SECURE=true`，并提供两把不同的随机 `SESSION_SECRET` / `CRYPTO_SECRET`；禁止把真实密钥提交到仓库。
 
 📖 **完整配置：** [环境变量文档](https://docs.newapi.pro/zh/docs/installation/config-maintenance/environment-variables)
 
@@ -359,16 +368,20 @@ docker-compose up -d
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
 ```
 
-**使用 MySQL：**
+**使用 MySQL：**先在当前 shell 设置 `SQL_DSN`，禁止把数据库密码写进 tracked 命令或文件。
 ```bash
 docker run --name new-api -d --restart always \
   -p 3000:3000 \
-  -e SQL_DSN="root:123456@tcp(localhost:3306)/oneapi" \
+  -e DEPLOYMENT_ENV=development \
+  -e SESSION_COOKIE_SECURE=false \
+  -e SQL_DSN="${SQL_DSN:?请先 export SQL_DSN}" \
   -e TZ=Asia/Shanghai \
   -v ./data:/data \
   calciumion/new-api:latest
@@ -394,8 +407,9 @@ docker run --name new-api -d --restart always \
 ### ⚠️ 多机部署注意事项
 
 > [!WARNING]
-> - **必须设置** `SESSION_SECRET` - 否则登录状态不一致
-> - **公用 Redis 必须设置** `CRYPTO_SECRET` - 否则数据无法解密
+> - **生产必须设置** `SESSION_COOKIE_SECURE=true` 并通过 HTTPS 提供服务。
+> - **生产所有实例必须设置**相同的 `SESSION_SECRET` / `CRYPTO_SECRET`，且两把密钥必须不同。
+> - **本地 HTTP/源码开发必须显式设置** `DEPLOYMENT_ENV=development`；公网环境禁止使用该模式。
 
 ### 🔄 渠道重试与缓存
 

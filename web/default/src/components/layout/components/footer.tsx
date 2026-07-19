@@ -16,13 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Fragment, useMemo } from 'react'
-import DOMPurify from 'dompurify'
 import { Link } from '@tanstack/react-router'
+import { Fragment, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { cn } from '@/lib/utils'
+
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { sanitizeUntrustedRichHtml } from '@/lib/safe-html'
+import {
+  normalizeHttpNavigationUrl,
+  normalizeImageResourceUrl,
+  normalizeSameOriginNavigationPath,
+} from '@/lib/safe-navigation'
+import { cn } from '@/lib/utils'
 
 interface FooterLink {
   text: string
@@ -44,13 +50,13 @@ interface FooterProps {
 
 function FooterLinkItem(props: { link: FooterLink }) {
   const { t } = useTranslation()
-  const isExternal = props.link.href.startsWith('http')
   const label = t(props.link.text)
+  const externalHref = normalizeHttpNavigationUrl(props.link.href)
 
-  if (isExternal) {
+  if (externalHref) {
     return (
       <a
-        href={props.link.href}
+        href={externalHref}
         target='_blank'
         rel='noopener noreferrer'
         className='text-muted-foreground hover:text-foreground text-sm transition-colors duration-200'
@@ -60,9 +66,14 @@ function FooterLinkItem(props: { link: FooterLink }) {
     )
   }
 
+  const internalHref = normalizeSameOriginNavigationPath(props.link.href)
+  if (!internalHref) {
+    return <span className='text-muted-foreground text-sm'>{label}</span>
+  }
+
   return (
     <Link
-      to={props.link.href}
+      to={internalHref}
       className='text-muted-foreground hover:text-foreground text-sm transition-colors duration-200'
     >
       {label}
@@ -125,7 +136,8 @@ export function Footer(props: FooterProps) {
   } = useSystemConfig()
 
   const { status } = useStatus()
-  const displayLogo = systemLogo || props.logo || '/logo.png'
+  const displayLogo =
+    normalizeImageResourceUrl(systemLogo || props.logo) || '/logo.png'
   const displayName = systemName || props.name || 'New API'
   const isDemoSiteMode = Boolean(demoSiteEnabled)
   const currentYear = new Date().getFullYear()
@@ -140,7 +152,7 @@ export function Footer(props: FooterProps) {
   // 也在下次渲染时中和已持久化进 localStorage（system-config-store persist）的旧 payload，
   // 无需依赖服务端删库即可应急止血。服务端 ValidatePatch 另有一道纵深校验（见 policy.go）。
   const safeFooterHtml = useMemo(
-    () => (footerHtml ? DOMPurify.sanitize(footerHtml) : ''),
+    () => (footerHtml ? sanitizeUntrustedRichHtml(footerHtml) : ''),
     [footerHtml]
   )
 
@@ -255,14 +267,14 @@ export function Footer(props: FooterProps) {
           {/* Links columns */}
           {isDemoSiteMode && (
             <div className='grid grid-cols-3 gap-8 md:gap-16'>
-              {displayColumns.map((column, index) => (
-                <div key={index}>
+              {displayColumns.map((column) => (
+                <div key={column.title}>
                   <p className='text-muted-foreground/50 mb-3 text-xs font-medium tracking-wider uppercase'>
                     {t(column.title)}
                   </p>
                   <ul className='space-y-2.5'>
-                    {column.links.map((link, linkIndex) => (
-                      <li key={linkIndex}>
+                    {column.links.map((link) => (
+                      <li key={`${link.href}-${link.text}`}>
                         <FooterLinkItem link={link} />
                       </li>
                     ))}

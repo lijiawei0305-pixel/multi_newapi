@@ -39,11 +39,11 @@ func NewOrderNo(prefix string) string {
 
 // CreditPaidOrder 是「可信内网入账」路径（detailed-design §2.8 / §3.3 的入账段）。
 //
-// 与 handle（公网回调）的区别：调用方（auth-service）**已**在支付侧完成平台验签，并经
-// 共享密钥认证后才调用本方法，故此处**不再验签**；金额一律以库内订单为准，不信外部报文
+// 与 handle（公网回调）的区别：调用方已在进程内支付适配器完成平台验签，故此处**不再验签**；
+// 金额一律以库内订单为准，不信外部报文
 // （只透传 txnID 作审计/收益引用）。强幂等仍由订单状态机保证：
 //
-//	定位订单 → CAS(created→paid) 原子占位（并发/重复只有一个胜者）
+//	定位订单 → CAS(created|failed→paid) 原子占位（并发/重复只有一个胜者）
 //	  → 已 paid/credited → 幂等短路成功（不重复入账）
 //	  → 首个推进者：按 type 分发 OnPaid → 成功置 credited / 失败回滚 created 供上游重试
 //
@@ -63,13 +63,14 @@ func (g *Gateway) CreditPaidOrder(ctx context.Context, orderNo, txnID string, pa
 		return ErrAmountMismatch
 	}
 
-	// 幂等占位：created→paid 原子 CAS。并发/重复回调只有一个胜者继续入账。
-	first, err := g.repo.CompareAndSetStatus(ctx, orderNo, OrderCreated, OrderPaid)
+	// 幂等占位：created/failed→paid 原子 CAS。failed 可能是本地过期对账刚写入；可信已付事实
+	// 必须覆盖该本地判断，不能把 CAS 失败静默 ACK 成成功而永久丢款。
+	first, err := g.claimPaidOrder(ctx, orderNo, ord.Status)
 	if err != nil {
 		return err // ORDER_NOT_FOUND（极端竞态：订单被删）
 	}
 	if !first {
-		// 已 paid/credited（或 failed）→ 幂等短路返回成功，绝不重复入账。
+		// 已 paid/credited → 幂等短路返回成功，绝不重复入账。
 		return nil
 	}
 
@@ -95,4 +96,32 @@ func (g *Gateway) CreditPaidOrder(ctx context.Context, orderNo, txnID string, pa
 		g.logf("payment: credit %s: advance paid→credited failed (ok=%v err=%v); left paid for reconcile", orderNo, ok, csErr)
 	}
 	return nil
+}
+
+// claimPaidOrder 用可信已付事实原子认领订单。created 是正常支付路径；failed 是本地超时/未付判断，
+// 若它恰在回调读取订单后由对账写入，必须重读并允许 failed→paid。并发认领的败者看到 paid/credited
+// 即幂等短路，只有一个调用方会执行实际入账。
+func (g *Gateway) claimPaidOrder(ctx context.Context, orderNo string, status OrderStatus) (bool, error) {
+	for {
+		switch status {
+		case OrderPaid, OrderCredited:
+			return false, nil
+		case OrderCreated, OrderFailed:
+			claimed, err := g.repo.CompareAndSetStatus(ctx, orderNo, status, OrderPaid)
+			if err != nil {
+				return false, err
+			}
+			if claimed {
+				return true, nil
+			}
+		default:
+			return false, ErrOrderInvalid
+		}
+
+		current, err := g.repo.GetByOrderNo(ctx, orderNo)
+		if err != nil {
+			return false, err
+		}
+		status = current.Status
+	}
 }

@@ -12,6 +12,8 @@ import (
 
 	"github.com/QuantumNous/new-api/internal/platform/appctx"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---- 测试辅助 ----
@@ -57,7 +59,7 @@ var errBoom = errors.New("boom")
 // kvErrOn 包装一个真实 KVCache，对选定方法注入错误，用于测试错误透传。
 type kvErrOn struct {
 	KVCache
-	incr, get, setnx bool
+	incr, decr, get, setnx bool
 }
 
 func (k kvErrOn) Incr(ctx context.Context, key string) (int64, error) {
@@ -65,6 +67,13 @@ func (k kvErrOn) Incr(ctx context.Context, key string) (int64, error) {
 		return 0, errBoom
 	}
 	return k.KVCache.Incr(ctx, key)
+}
+
+func (k kvErrOn) Decr(ctx context.Context, key string) (int64, error) {
+	if k.decr {
+		return 0, errBoom
+	}
+	return k.KVCache.Decr(ctx, key)
 }
 
 func (k kvErrOn) Get(ctx context.Context, key string) (string, bool, error) {
@@ -745,6 +754,72 @@ func TestCheckPurchaseLimit_NonTrialPerUserLimit(t *testing.T) {
 	assertCode(t, e.CheckPurchaseLimit(context.Background(), 7, plan), "")
 	assertCode(t, e.CheckPurchaseLimit(context.Background(), 7, plan), "")
 	assertCode(t, e.CheckPurchaseLimit(context.Background(), 7, plan), CodePurchaseLimitExceeded)
+}
+
+func TestCheckPurchaseLimit_NonTrialRejectedAttemptsDoNotConsumeLimit(t *testing.T) {
+	kv := NewMemKVCache(nil)
+	e := NewEngine(kv)
+	plan := Plan{ID: 2, Code: "mini", PerUserLimit: 2}
+	ctx := context.Background()
+
+	assertCode(t, e.CheckPurchaseLimit(ctx, 7, plan), "")
+	assertCode(t, e.CheckPurchaseLimit(ctx, 7, plan), "")
+	for i := 0; i < 20; i++ {
+		assertCode(t, e.CheckPurchaseLimit(ctx, 7, plan), CodePurchaseLimitExceeded)
+	}
+
+	require.NoError(t, e.RollbackPurchaseLimit(ctx, plan.ID, 7))
+	assertCode(t, e.CheckPurchaseLimit(ctx, 7, plan), "")
+	assertCode(t, e.CheckPurchaseLimit(ctx, 7, plan), CodePurchaseLimitExceeded)
+}
+
+func TestCheckPurchaseLimit_NonTrialConcurrentRejectedAttemptsRollback(t *testing.T) {
+	e := NewEngine(NewMemKVCache(nil))
+	plan := Plan{ID: 2, Code: "mini", PerUserLimit: 3}
+	ctx := context.Background()
+	var successes atomic.Int64
+	var wg sync.WaitGroup
+
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if e.CheckPurchaseLimit(ctx, 7, plan) == nil {
+				successes.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	assert.Equal(t, int64(plan.PerUserLimit), successes.Load())
+
+	for i := 0; i < plan.PerUserLimit; i++ {
+		require.NoError(t, e.RollbackPurchaseLimit(ctx, plan.ID, 7))
+	}
+	successes.Store(0)
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if e.CheckPurchaseLimit(ctx, 7, plan) == nil {
+				successes.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	assert.Equal(t, int64(plan.PerUserLimit), successes.Load(),
+		"rejected races must not leave hidden increments behind")
+}
+
+func TestCheckPurchaseLimit_NonTrialRollbackFailurePreservesBusinessError(t *testing.T) {
+	kv := kvErrOn{KVCache: NewMemKVCache(nil), decr: true}
+	e := NewEngine(kv)
+	plan := Plan{ID: 2, PerUserLimit: 1}
+	ctx := context.Background()
+	require.NoError(t, e.CheckPurchaseLimit(ctx, 7, plan))
+
+	err := e.CheckPurchaseLimit(ctx, 7, plan)
+	assert.ErrorIs(t, err, ErrPurchaseLimitExceeded)
+	assert.Contains(t, err.Error(), "rollback rejected purchase counter")
 }
 
 func TestCheckPurchaseLimit_NonTrialIncrErrorPropagates(t *testing.T) {

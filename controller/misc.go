@@ -1,10 +1,11 @@
 package controller
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -19,6 +20,52 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const readinessCheckTimeout = 3 * time.Second
+
+// HealthLive only reports whether the HTTP process can serve requests. It does
+// not consult downstream services, so a database or Redis outage cannot cause
+// an orchestrator to restart an otherwise healthy process.
+func HealthLive(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// HealthReady checks every dependency required by the configured process. It
+// deliberately bypasses the cached admin DB check so stale successes cannot
+// produce a false-green deployment signal.
+func HealthReady(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), readinessCheckTimeout)
+	defer cancel()
+
+	checks := gin.H{}
+	ready := true
+	if err := model.PingDBContext(ctx); err != nil {
+		checks["database"] = "unavailable"
+		ready = false
+	} else {
+		checks["database"] = "ok"
+	}
+	if err := common.PingRedis(ctx); err != nil {
+		checks["redis"] = "unavailable"
+		ready = false
+	} else if common.RedisEnabled {
+		checks["redis"] = "ok"
+	} else {
+		checks["redis"] = "disabled"
+	}
+
+	if !ready {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"status": "unavailable",
+			"checks": checks,
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status": "ok",
+		"checks": checks,
+	})
+}
 
 func TestStatus(c *gin.Context) {
 	err := model.PingDB()
@@ -322,7 +369,7 @@ func SendPasswordResetEmail(c *gin.Context) {
 			"<p>重置链接 %d 分钟内有效，如果不是本人操作，请忽略。</p>", common.SystemName, link, link, common.VerificationValidMinutes)
 		err := common.SendEmail(subject, email, content)
 		if err != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("failed to send password reset email to %s: %s", email, err.Error()))
+			logger.LogError(c.Request.Context(), fmt.Sprintf("failed to send password reset email recipient_%s error_type=%T", logger.PayloadMetadata([]byte(email)), err))
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -338,7 +385,7 @@ type PasswordResetRequest struct {
 
 func ResetPassword(c *gin.Context) {
 	var req PasswordResetRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&req)
+	err := common.DecodeJson(c.Request.Body, &req)
 	if req.Email == "" || req.Token == "" {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,

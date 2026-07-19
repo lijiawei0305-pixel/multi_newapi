@@ -16,11 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useRef } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Lock } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { useEffect, useRef, type ComponentProps } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { cn } from '@/lib/utils'
+
 import type { CustomDomainStatus } from './types'
 
 // ============================================================================
@@ -90,6 +92,7 @@ const SHIELD =
 
 // 8 sparkle directions for the one-shot success burst (monochrome, no gravity).
 const SPARKS = [0, 1, 2, 3, 4, 5, 6, 7]
+type ShieldMotionProps = ComponentProps<typeof motion.path>
 
 export function CertificateSeal({
   status,
@@ -115,10 +118,30 @@ export function CertificateSeal({
   // Issuing orbits faster + pulses deeper than verifying = visible escalation.
   const spin = status === 'dns_verified' ? 1.2 : 2
   const pulse = status === 'dns_verified' ? 1.05 : 1.03
+  let shieldAnimation: ShieldMotionProps['animate'] = { scale: 1 }
+  let shieldTransition: ShieldMotionProps['transition'] = { duration: 0 }
+  if (reduce) {
+    shieldAnimation = { scale: 1, x: 0 }
+  } else if (active) {
+    shieldAnimation = { scale: [1, 1.06, 1] }
+    shieldTransition = { duration: 0.52, ease: EASE, times: [0, 0.6, 1] }
+  } else if (failed) {
+    shieldAnimation = { x: [0, -4, 4, -3, 3, 0] }
+    shieldTransition = { duration: 0.38, ease: 'easeOut' }
+  } else if (busy) {
+    shieldAnimation = { scale: [1, pulse, 1] }
+    shieldTransition = {
+      duration: spin,
+      ease: 'easeInOut',
+      repeat: Infinity,
+    }
+  }
 
   return (
     <div className='flex flex-col items-center gap-4 text-center'>
-      <div className={cn('relative grid size-32 place-items-center', TONE[status])}>
+      <div
+        className={cn('relative grid size-32 place-items-center', TONE[status])}
+      >
         {/* plate */}
         <div
           className={cn(
@@ -183,28 +206,8 @@ export function CertificateSeal({
           strokeLinecap='round'
           strokeLinejoin='round'
           initial={false}
-          animate={
-            reduce
-              ? { scale: 1, x: 0 }
-              : active
-                ? { scale: [1, 1.06, 1] }
-                : failed
-                  ? { x: [0, -4, 4, -3, 3, 0] }
-                  : busy
-                    ? { scale: [1, pulse, 1] }
-                    : { scale: 1 }
-          }
-          transition={
-            reduce
-              ? { duration: 0 }
-              : active
-                ? { duration: 0.52, ease: EASE, times: [0, 0.6, 1] }
-                : failed
-                  ? { duration: 0.38, ease: 'easeOut' }
-                  : busy
-                    ? { duration: spin, ease: 'easeInOut', repeat: Infinity }
-                    : { duration: 0 }
-          }
+          animate={shieldAnimation}
+          transition={shieldTransition}
         >
           <path d={SHIELD} />
           {active && (
@@ -225,7 +228,7 @@ export function CertificateSeal({
         {active && !reduce && (
           <>
             <motion.span
-              className='pointer-events-none absolute inset-2 rounded-full ring-2 ring-success'
+              className='ring-success pointer-events-none absolute inset-2 rounded-full ring-2'
               initial={{ scale: 0.8, opacity: 0.5 }}
               animate={{ scale: 1.8, opacity: 0 }}
               transition={{ duration: 0.7, ease: 'easeOut' }}
@@ -233,7 +236,7 @@ export function CertificateSeal({
             {SPARKS.map((i) => (
               <motion.span
                 key={i}
-                className='pointer-events-none absolute size-1 rounded-full bg-success'
+                className='bg-success pointer-events-none absolute size-1 rounded-full'
                 initial={{ x: 0, y: 0, scale: 0.5, opacity: 0 }}
                 animate={{
                   x: Math.cos((i * Math.PI) / 4) * 46,

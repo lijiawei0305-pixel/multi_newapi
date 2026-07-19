@@ -1,6 +1,9 @@
 package setting
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 var CheckSensitiveEnabled = true
 var CheckSensitiveOnPromptEnabled = true
@@ -18,20 +21,32 @@ var StreamCacheQueueLength = 0
 var SensitiveWords = []string{
 	"test_sensitive",
 }
+var sensitiveWordsMutex sync.RWMutex
 
 func SensitiveWordsToString() string {
+	sensitiveWordsMutex.RLock()
+	defer sensitiveWordsMutex.RUnlock()
 	return strings.Join(SensitiveWords, "\n")
 }
 
 func SensitiveWordsFromString(s string) {
-	SensitiveWords = []string{}
+	updated := make([]string, 0)
 	sw := strings.Split(s, "\n")
 	for _, w := range sw {
 		w = strings.TrimSpace(w)
 		if w != "" {
-			SensitiveWords = append(SensitiveWords, w)
+			updated = append(updated, w)
 		}
 	}
+	sensitiveWordsMutex.Lock()
+	SensitiveWords = updated
+	sensitiveWordsMutex.Unlock()
+}
+
+func GetSensitiveWords() []string {
+	sensitiveWordsMutex.RLock()
+	defer sensitiveWordsMutex.RUnlock()
+	return append([]string(nil), SensitiveWords...)
 }
 
 func ShouldCheckPromptSensitive() bool {

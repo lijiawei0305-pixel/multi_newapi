@@ -22,6 +22,7 @@ import { Button, Tooltip, Toast } from '@douyinfe/semi-ui';
 import { Copy, ChevronDown, ChevronUp } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { copy } from '../../helpers';
+import { sanitizeHtmlContent } from '../../helpers/sanitize';
 
 const PERFORMANCE_CONFIG = {
   MAX_DISPLAY_LENGTH: 50000, // 最大显示字符数
@@ -138,7 +139,8 @@ const linkifyHtml = (html) => {
       if (part.startsWith('<')) return part;
       return part.replace(
         linkRegex,
-        (url) => `<a href="${url}" target="_blank" rel="noreferrer">${url}</a>`,
+        (url) =>
+          `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`,
       );
     })
     .join('');
@@ -347,7 +349,11 @@ const CodeViewer = ({ content, title, language = 'json' }) => {
             {t('正在处理大内容...')}
           </div>
         ) : (
-          <div dangerouslySetInnerHTML={{ __html: renderedContent }} />
+          <div
+            dangerouslySetInnerHTML={{
+              __html: sanitizeHtmlContent(renderedContent),
+            }}
+          />
         )}
       </div>
 

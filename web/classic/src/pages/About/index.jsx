@@ -19,28 +19,34 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React, { useEffect, useState } from 'react';
 import { API, showError } from '../../helpers';
-import { marked } from 'marked';
+import {
+  renderSafeMarkdown,
+  sanitizeHtmlContent,
+} from '../../helpers/sanitize';
 import { Empty } from '@douyinfe/semi-ui';
 import {
   IllustrationConstruction,
   IllustrationConstructionDark,
 } from '@douyinfe/semi-illustrations';
 import { useTranslation } from 'react-i18next';
+import { normalizeHttpNavigationUrl } from '../../helpers/safeNavigation';
 
 const About = () => {
   const { t } = useTranslation();
   const [about, setAbout] = useState('');
   const [aboutLoaded, setAboutLoaded] = useState(false);
   const currentYear = new Date().getFullYear();
+  const aboutUrl = normalizeHttpNavigationUrl(about);
 
   const displayAbout = async () => {
     setAbout(localStorage.getItem('about') || '');
     const res = await API.get('/api/about');
     const { success, message, data } = res.data;
     if (success) {
-      let aboutContent = data;
-      if (!data.startsWith('https://')) {
-        aboutContent = marked.parse(data);
+      const iframeUrl = normalizeHttpNavigationUrl(data);
+      let aboutContent = iframeUrl || data;
+      if (!iframeUrl) {
+        aboutContent = renderSafeMarkdown(data);
       }
       setAbout(aboutContent);
       localStorage.setItem('about', aboutContent);
@@ -153,9 +159,12 @@ const About = () => {
         </div>
       ) : (
         <>
-          {about.startsWith('https://') ? (
+          {aboutUrl ? (
             <iframe
-              src={about}
+              src={aboutUrl}
+              sandbox='allow-forms allow-popups allow-scripts'
+              referrerPolicy='no-referrer'
+              title={t('关于')}
               style={{
                 width: '100%',
                 flex: '1 1 auto',
@@ -166,7 +175,7 @@ const About = () => {
           ) : (
             <div
               style={{ fontSize: 'larger' }}
-              dangerouslySetInnerHTML={{ __html: about }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtmlContent(about) }}
             ></div>
           )}
         </>

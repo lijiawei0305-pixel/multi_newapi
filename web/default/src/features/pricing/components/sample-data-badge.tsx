@@ -1,6 +1,6 @@
 import { Info } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { cn } from '@/lib/utils'
+
 import { Badge } from '@/components/ui/badge'
 import {
   Tooltip,
@@ -8,6 +8,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 
 /**
  * SampleDataBadge —— 「示例数据」角标。
@@ -21,17 +22,20 @@ export function SampleDataBadge({ className }: { className?: string }) {
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge
-            variant='outline'
-            className={cn(
-              'cursor-help gap-1 border-amber-400/60 font-normal text-amber-600 dark:text-amber-400',
-              className,
-            )}
-          >
-            <Info className='size-3' />
-            {t('Sample data', { defaultValue: '示例数据' })}
-          </Badge>
+        <TooltipTrigger
+          render={
+            <Badge
+              render={<button type='button' />}
+              variant='outline'
+              className={cn(
+                'cursor-help gap-1 border-amber-400/60 font-normal text-amber-600 dark:text-amber-400',
+                className
+              )}
+            />
+          }
+        >
+          <Info className='size-3' />
+          {t('Sample data', { defaultValue: '示例数据' })}
         </TooltipTrigger>
         <TooltipContent className='max-w-60 text-xs'>
           {t('sample-data-disclaimer', {

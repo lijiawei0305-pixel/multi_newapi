@@ -16,12 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useRef } from 'react'
-import * as z from 'zod'
-import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useEffect, useMemo, useRef } from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import * as z from 'zod'
+
 import {
   Form,
   FormControl,
@@ -34,6 +35,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+
 import {
   SettingsForm,
   SettingsSwitchContent,
@@ -77,13 +79,11 @@ const thresholdString = z.string().refine((value) => {
 const alertSchema = z.object({
   breakage_alert_enabled: z.boolean(),
   breakage_alert_email: z.string(),
-  breakage_alert_webhook_url: z
-    .string()
-    .refine((value) => {
-      const trimmed = value.trim()
-      if (!trimmed) return true
-      return /^https?:\/\//.test(trimmed)
-    }, '请填写以 http:// 或 https:// 开头的有效地址'),
+  breakage_alert_webhook_url: z.string().refine((value) => {
+    const trimmed = value.trim()
+    if (!trimmed) return true
+    return /^https?:\/\//.test(trimmed)
+  }, '请填写以 http:// 或 https:// 开头的有效地址'),
   breakage_alert_threshold_pct: thresholdString,
 })
 
@@ -105,7 +105,9 @@ const normalizeDefaults = (
 ): AlertSettingsDefaults => ({
   breakage_alert_enabled: defaults.breakage_alert_enabled,
   breakage_alert_email: (defaults.breakage_alert_email ?? '').trim(),
-  breakage_alert_webhook_url: (defaults.breakage_alert_webhook_url ?? '').trim(),
+  breakage_alert_webhook_url: (
+    defaults.breakage_alert_webhook_url ?? ''
+  ).trim(),
   breakage_alert_threshold_pct: (
     defaults.breakage_alert_threshold_pct ?? ''
   ).trim(),
@@ -130,7 +132,8 @@ export function AlertSettingsSection({
     () => ({
       breakage_alert_enabled: defaultValues.breakage_alert_enabled,
       breakage_alert_email: defaultValues.breakage_alert_email ?? '',
-      breakage_alert_webhook_url: defaultValues.breakage_alert_webhook_url ?? '',
+      breakage_alert_webhook_url:
+        defaultValues.breakage_alert_webhook_url ?? '',
       breakage_alert_threshold_pct:
         defaultValues.breakage_alert_threshold_pct ?? '',
     }),
@@ -169,7 +172,9 @@ export function AlertSettingsSection({
     ).filter((key) => normalized[key] !== baselineRef.current[key])
 
     if (updates.length === 0) {
-      toast.info(t('No changes to save', { defaultValue: '没有需要保存的更改' }))
+      toast.info(
+        t('No changes to save', { defaultValue: '没有需要保存的更改' })
+      )
       return
     }
 
@@ -185,9 +190,7 @@ export function AlertSettingsSection({
   }
 
   return (
-    <SettingsSection
-      title={t('Breakage Alerts', { defaultValue: '系统告警' })}
-    >
+    <SettingsSection title={t('Breakage Alerts', { defaultValue: '系统告警' })}>
       <Form {...form}>
         <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
           <SettingsPageFormActions

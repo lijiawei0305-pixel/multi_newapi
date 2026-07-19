@@ -23,22 +23,53 @@ func CloseResponseBodyGracefully(httpResponse *http.Response) {
 	}
 }
 
-// ShouldCopyUpstreamHeader checks whether a given upstream response header
-// should be copied to the client response. It returns false for Content-Length
-// (managed separately) and X-Oneapi-Request-Id (to preserve the local instance
-// ID). When the upstream header is X-Oneapi-Request-Id, the value is captured
-// into the Gin context for later logging.
+// ShouldCopyUpstreamHeader permits only response metadata that is safe and
+// useful to API clients. Provider cookies, hop-by-hop headers, authentication
+// challenges, CORS policy, and gateway security headers must never control the
+// gateway origin.
 func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
-	if strings.EqualFold(k, "Content-Length") {
+	if len(v) == 0 {
 		return false
 	}
 	if strings.EqualFold(k, common.RequestIdKey) {
-		if c != nil && len(v) > 0 {
+		if c != nil {
 			c.Set(common.UpstreamRequestIdKey, v[0])
 		}
 		return false
 	}
-	return true
+	key := strings.ToLower(strings.TrimSpace(k))
+	switch key {
+	case "content-type", "content-encoding", "content-disposition", "content-language",
+		"accept-ranges", "content-range", "retry-after", "x-accel-buffering",
+		"x-request-id", "openai-organization", "openai-processing-ms", "openai-version":
+		return true
+	default:
+		return strings.HasPrefix(key, "x-ratelimit-") || strings.HasPrefix(key, "ratelimit-")
+	}
+}
+
+// CopyUpstreamResponseHeaders evaluates the whole header map first so tokens
+// named by Connection are suppressed independent of Go map iteration order.
+func CopyUpstreamResponseHeaders(c *gin.Context, destination http.Header, source http.Header) {
+	if destination == nil || source == nil {
+		return
+	}
+	connectionHeaders := make(map[string]struct{})
+	for _, value := range source.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if key := http.CanonicalHeaderKey(strings.TrimSpace(token)); key != "" {
+				connectionHeaders[key] = struct{}{}
+			}
+		}
+	}
+	for key, values := range source {
+		canonical := http.CanonicalHeaderKey(key)
+		if _, forbidden := connectionHeaders[canonical]; forbidden || !ShouldCopyUpstreamHeader(c, canonical, values) {
+			continue
+		}
+		destination[canonical] = append([]string(nil), values...)
+	}
+	destination.Set("Cache-Control", "no-store, private")
 }
 
 func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
@@ -53,12 +84,7 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	// So the httpClient will be confused by the response.
 	// For example, Postman will report error, and we cannot check the response at all.
 	if src != nil {
-		for k, v := range src.Header {
-			if !ShouldCopyUpstreamHeader(c, k, v) {
-				continue
-			}
-			c.Writer.Header().Set(k, v[0])
-		}
+		CopyUpstreamResponseHeaders(c, c.Writer.Header(), src.Header)
 	}
 
 	// set Content-Length header manually BEFORE calling WriteHeader

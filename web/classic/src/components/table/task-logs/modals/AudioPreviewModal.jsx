@@ -21,6 +21,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Modal, Typography, Tag, Button } from '@douyinfe/semi-ui';
 import { IconExternalOpen, IconCopy } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
+import {
+  normalizeHttpNavigationUrl,
+  openHttpUrlInNewTab,
+} from '../../../../helpers/safeNavigation';
 
 const { Text, Title } = Typography;
 
@@ -45,6 +49,8 @@ const AudioClipCard = ({ clip }) => {
   const duration = clip.duration || clip.metadata?.duration;
   const imageUrl = clip.image_url || clip.image_large_url;
   const audioUrl = clip.audio_url;
+  const safeImageUrl = normalizeHttpNavigationUrl(imageUrl);
+  const safeAudioUrl = normalizeHttpNavigationUrl(audioUrl);
 
   return (
     <div
@@ -57,9 +63,9 @@ const AudioClipCard = ({ clip }) => {
         background: 'var(--semi-color-bg-1)',
       }}
     >
-      {imageUrl && (
+      {safeImageUrl && (
         <img
-          src={imageUrl}
+          src={safeImageUrl}
           alt={title}
           style={{
             width: 80,
@@ -82,7 +88,11 @@ const AudioClipCard = ({ clip }) => {
             marginBottom: '4px',
           }}
         >
-          <Text strong ellipsis={{ showTooltip: true }} style={{ fontSize: 15 }}>
+          <Text
+            strong
+            ellipsis={{ showTooltip: true }}
+            style={{ fontSize: 15 }}
+          >
             {title}
           </Text>
           {duration > 0 && (
@@ -104,7 +114,7 @@ const AudioClipCard = ({ clip }) => {
           </div>
         )}
 
-        {hasError ? (
+        {hasError || !safeAudioUrl ? (
           <div
             style={{
               display: 'flex',
@@ -119,14 +129,16 @@ const AudioClipCard = ({ clip }) => {
             <Button
               size='small'
               icon={<IconExternalOpen />}
-              onClick={() => window.open(audioUrl, '_blank')}
+              onClick={() => openHttpUrlInNewTab(safeAudioUrl)}
+              disabled={!safeAudioUrl}
             >
               {t('在新标签页中打开')}
             </Button>
             <Button
               size='small'
               icon={<IconCopy />}
-              onClick={() => navigator.clipboard.writeText(audioUrl)}
+              onClick={() => navigator.clipboard.writeText(safeAudioUrl)}
+              disabled={!safeAudioUrl}
             >
               {t('复制链接')}
             </Button>
@@ -134,7 +146,7 @@ const AudioClipCard = ({ clip }) => {
         ) : (
           <audio
             ref={audioRef}
-            src={audioUrl}
+            src={safeAudioUrl}
             controls
             preload='none'
             onError={() => setHasError(true)}

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
+
 import type { StatusVariant } from '@/components/status-badge'
 
 export {
@@ -51,14 +52,26 @@ export function agentStatusMeta(
     case 'disabled':
     case 'suspended':
     case 'banned':
-      return { variant: 'danger', label: t('Disabled', { defaultValue: '已禁用' }) }
+      return {
+        variant: 'danger',
+        label: t('Disabled', { defaultValue: '已禁用' }),
+      }
     case 'pending':
-      return { variant: 'warning', label: t('Pending', { defaultValue: '待审核' }) }
+      return {
+        variant: 'warning',
+        label: t('Pending', { defaultValue: '待审核' }),
+      }
     case '':
     case undefined:
     case null as unknown as string:
-      return { variant: 'success', label: t('Enabled', { defaultValue: '已启用' }) }
+      return {
+        variant: 'success',
+        label: t('Enabled', { defaultValue: '已启用' }),
+      }
     default:
-      return { variant: 'success', label: t('Enabled', { defaultValue: '已启用' }) }
+      return {
+        variant: 'success',
+        label: t('Enabled', { defaultValue: '已启用' }),
+      }
   }
 }

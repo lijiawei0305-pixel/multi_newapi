@@ -23,7 +23,11 @@ import i18n from '@/i18n/config'
 import { api } from '@/lib/api'
 
 import { API_ENDPOINTS } from '../constants'
-import type { ImageGenParams, ImageGenResponse, ImageResultItem } from '../types'
+import type {
+  ImageGenParams,
+  ImageGenResponse,
+  ImageResultItem,
+} from '../types'
 
 export type ImageTurnStatus = 'loading' | 'success' | 'error'
 
@@ -61,7 +65,8 @@ function extractImageError(err: unknown): string {
       message?: string
     }
     const backendMsg =
-      axiosErr.response?.data?.error?.message ?? axiosErr.response?.data?.message
+      axiosErr.response?.data?.error?.message ??
+      axiosErr.response?.data?.message
     if (backendMsg && typeof backendMsg === 'string') {
       msg = backendMsg
     } else if (axiosErr.response?.status === 401) {
@@ -127,7 +132,9 @@ export function useImageConversation(): UseImageConversationReturn {
           : []
 
         if (validItems.length === 0) {
-          const msg = i18n.t('Image generation returned no valid result, please try again')
+          const msg = i18n.t(
+            'Image generation returned no valid result, please try again'
+          )
           setTurns((prev) =>
             prev.map((t) =>
               t.id === id ? { ...t, status: 'error', error: msg } : t

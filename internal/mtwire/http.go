@@ -1,10 +1,12 @@
 package mtwire
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -220,6 +222,27 @@ type purchaseRequest struct {
 	Provider string `json:"provider"` // wxpay | alipay（默认 wxpay）
 }
 
+const purchaseRequestBodyLimit int64 = 4 << 10
+
+// decodeOptionalJSONObject accepts an absent body, but requires any supplied
+// body to be exactly one bounded JSON object. Callers map parse failures to
+// their own domain error before any state transition occurs.
+func decodeOptionalJSONObject(c *gin.Context, destination any, maxBytes int64) error {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return err
+	}
+	trimmedBody := bytes.TrimSpace(bodyBytes)
+	if len(trimmedBody) == 0 {
+		return nil
+	}
+	if common.GetJsonType(trimmedBody) != "object" {
+		return errors.New("request body must be one JSON object")
+	}
+	return common.Unmarshal(trimmedBody, destination)
+}
+
 // deviceFingerprint 从**不可由被监管方自选**的请求信号（ClientIP）服务端派生 Trial 终身限购的
 // 设备维度指纹。唯一性键**只能由攻击者难以廉价轮换的信号构成**：ClientIP 由网络路径决定、被监管方
 // 无法逐请求随意更换；而 User-Agent 是客户端完全自选的 HTTP 头，放进唯一性键等于让被监管方自选
@@ -265,7 +288,10 @@ func (a *App) HandlePurchase(c *gin.Context) {
 		return
 	}
 	var body purchaseRequest
-	_ = c.ShouldBindJSON(&body) // body 可选
+	if err := decodeOptionalJSONObject(c, &body, purchaseRequestBodyLimit); err != nil {
+		respondErr(c, payment.ErrOrderInvalid)
+		return
+	}
 
 	provider := payment.ProviderWxpay // 默认微信
 	if body.Provider != "" {
@@ -285,7 +311,13 @@ func (a *App) HandlePurchase(c *gin.Context) {
 	}
 	// 解析该购买租户对应代理的全线折扣系数（主站平台租户/未设代理 → found=false → 0 → 套餐回退原成本）。
 	var discountRatio float64
-	if p, found, err := a.AgentRepo.GetAgentType(ctx, t.ID); err == nil && found {
+	p, found, err := a.AgentRepo.GetAgentType(ctx, t.ID)
+	if err != nil {
+		// 财务快照必须 fail closed：瞬时 DB 错误不能被当成「无代理折扣」并永久固化错误成本/分润。
+		respondErr(c, err)
+		return
+	}
+	if found {
 		discountRatio = p.DiscountRatio
 	}
 	// 设备指纹只算一次：既作 Purchase 的限购去重维度、又作下方 CreatePay 失败时归还占键的入参
@@ -308,19 +340,21 @@ func (a *App) HandlePurchase(c *gin.Context) {
 
 	payURL, err := a.subscriptionPayURL(ctx, ticket, provider)
 	if err != nil {
-		// 支付凭据创建失败（网关运行时抖动等）→ Purchase 已占的 Trial 终身键须归还，
-		// 否则永久泄漏、用户没付款却再也买不了 Trial（audit F2 旗舰场景）。这一步在 Purchase
-		// 返回之后，函数内 defer 触不到，故在此显式补偿。best-effort：释放失败仅 SysLog 留痕，
-		// 不改变返回给用户的原始错误（仍可经后台 ReleaseTrialLimit 兜底）。
-		if rerr := a.Subscriptions.ReleasePurchaseClaim(ctx, tokenplan.PurchaseLimitCheck{
+		// 支付凭据创建失败（网关运行时抖动等）→ 归还 Purchase 本次取得的限购占用。Trial 按
+		// 带归属的维度键释放；非 Trial 只原子递减一次，不能清掉该用户其它成功购买。此步在
+		// Purchase 返回之后，函数内 defer 触不到，故在此显式补偿。
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		rerr := a.Subscriptions.ReleasePurchaseClaim(releaseCtx, tokenplan.PurchaseLimitCheck{
 			TenantID:   t.ID,
 			UserID:     int64(c.GetInt("id")),
 			PlanID:     ticket.PlanID,
 			PlanCode:   ticket.PlanCode,
 			DeviceID:   deviceID,
 			RealNameID: "",
-		}); rerr != nil {
-			common.SysLog("release trial claim after CreatePay failure failed: " + rerr.Error())
+		})
+		cancel()
+		if rerr != nil {
+			common.SysLog("release purchase claim after CreatePay failure failed: " + rerr.Error())
 		}
 		respondErr(c, err)
 		return
@@ -346,19 +380,49 @@ func (a *App) HandlePurchase(c *gin.Context) {
 // （微信 code_url / 支付宝跳转 URL），复用 RCG 充值同一 providerManager。
 // 金额仅人民币（amount_cny=零售价）：套餐额度在激活时按 month_limit_usd 注入原生订阅桶，非充值额度，
 // 故下单只传人民币应付额。notify_url 用契约回调路径（base + notifyPathFor(provider)）。
-// providerMgr 未装配（如单测直构 App）时回退占位 PayURL，保证可跑不 panic。
+// 支付创建口必须由生产装配或测试桩显式提供；缺失时 fail closed，绝不返回不可支付的占位链接。
+type subscriptionPayCreator interface {
+	CreatePay(ctx context.Context, provider payment.Provider, orderNo, subject string, amountCNY float64, notifyURL string) (string, error)
+}
+
 func (a *App) subscriptionPayURL(ctx context.Context, ticket *tokenplan.PurchaseTicket, provider payment.Provider) (string, error) {
-	// 回填订单支付渠道（供真实回调路由 + 卡单对账主动查单识别渠道）；best-effort，失败不阻断下单。
-	if err := newSubOrderStore(a.DB).setProvider(ctx, ticket.OrderID, string(provider)); err != nil {
-		common.SysLog("set sub order provider failed: " + err.Error())
+	orders := newSubOrderStore(a.DB)
+	// 平台建单前先持久化渠道；失败则不发外部请求，并把订单从 pay_creating 收束到显式 pay_failed。
+	if err := orders.setProvider(ctx, ticket.OrderID, string(provider)); err != nil {
+		markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		if markErr := orders.finishPaymentCreation(markCtx, ticket.OrderID, subOrderPayFailed); markErr != nil {
+			common.SysLog("mark sub payment creation failed after provider write error: " + markErr.Error())
+		}
+		return "", err
 	}
-	if a.providerMgr == nil {
-		return ticket.PayURL, nil
+	creator := a.subscriptionPayCreator
+	if creator == nil && a.providerMgr != nil {
+		creator = a.providerMgr
+	}
+	if creator == nil {
+		markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		if markErr := orders.finishPaymentCreation(markCtx, ticket.OrderID, subOrderPayFailed); markErr != nil {
+			return "", errors.Join(errProviderMgrUnset, markErr)
+		}
+		return "", errProviderMgrUnset
 	}
 	notifyURL := resolveNotifyBase() + notifyPathFor(provider)
-	payURL, err := a.providerMgr.CreatePay(ctx, provider, ticket.OrderID,
+	payURL, err := creator.CreatePay(ctx, provider, ticket.OrderID,
 		"套餐购买 #"+strconv.FormatInt(ticket.PlanID, 10), ticket.AmountCNY, notifyURL)
 	if err != nil {
+		// CreatePay 可能因请求超时返回；用短时脱离取消的上下文记录失败，仍保留原始平台错误给调用方。
+		// 若进程恰在此外部调用边界崩溃，订单会留在同样明确的 pay_creating，而不是普通 pending。
+		markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		if markErr := orders.finishPaymentCreation(markCtx, ticket.OrderID, subOrderPayFailed); markErr != nil {
+			common.SysLog("mark sub payment creation failed: " + markErr.Error())
+		}
+		return "", err
+	}
+	if err := orders.finishPaymentCreation(ctx, ticket.OrderID, subOrderPending); err != nil {
+		// 平台订单可能已经存在，不能谎报为普通失败态；保留 pay_creating 供可信回调/主动查单恢复。
 		return "", err
 	}
 	return payURL, nil

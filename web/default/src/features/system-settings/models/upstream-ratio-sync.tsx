@@ -16,12 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckSquare, RefreshCcw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { Button } from '@/components/ui/button'
+
 import {
   fetchUpstreamRatios,
   getUpstreamChannels,
@@ -90,8 +92,9 @@ function getDefaultEndpointForChannel(channel: UpstreamChannel): string {
 
 function getBillingCategory(ratioType: string): 'price' | 'ratio' | 'tiered' {
   if (ratioType === 'model_price') return 'price'
-  if (ratioType === 'billing_mode' || ratioType === 'billing_expr')
+  if (ratioType === 'billing_mode' || ratioType === 'billing_expr') {
     return 'tiered'
+  }
   return 'ratio'
 }
 
@@ -290,7 +293,7 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       const category = getBillingCategory(finalType)
 
       setResolutions((prev) => {
-        const newModelRes = { ...(prev[model] || {}) }
+        const newModelRes = { ...prev[model] }
 
         // Clear conflicting categories
         Object.keys(newModelRes).forEach((rt) => {
@@ -368,8 +371,9 @@ export function UpstreamRatioSync({ modelRatios }: UpstreamRatioSyncProps) {
       currentRatios.ImageRatio[model] !== undefined ||
       currentRatios.AudioRatio[model] !== undefined ||
       currentRatios.AudioCompletionRatio[model] !== undefined
-    )
+    ) {
       return 'ratio'
+    }
     return null
   }
 

@@ -7,10 +7,10 @@ package gormrepo
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -214,7 +214,7 @@ func encodeModules(mods []string) string {
 	if len(mods) == 0 {
 		return ""
 	}
-	b, err := json.Marshal(mods)
+	b, err := common.Marshal(mods)
 	if err != nil {
 		return ""
 	}
@@ -226,7 +226,7 @@ func decodeModules(s string) []string {
 		return nil
 	}
 	var mods []string
-	if err := json.Unmarshal([]byte(s), &mods); err != nil {
+	if err := common.Unmarshal([]byte(s), &mods); err != nil {
 		return nil
 	}
 	return mods

@@ -1,0 +1,1605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>newapi628 增量审计报告 · 8f68feb..52204cb</title>
+<style>
+  :root {
+    --sidebar-bg: #1a1f2e;
+    --sidebar-hover: #242a3d;
+    --sidebar-active: #2d3555;
+    --bg: #f0f3f7;
+    --card-bg: #ffffff;
+    --border: #e6eaef;
+    --text: #1e2233;
+    --text-secondary: #6b7394;
+    --accent: #3370ff;
+    --accent-light: #e8f0ff;
+    --success: #34c759;
+    --warning: #ff9500;
+    --danger: #ff3b30;
+    --info: #5ac8fa;
+    --badge-critical: #ff3b30;
+    --badge-high: #ff9500;
+    --badge-medium: #3370ff;
+    --badge-low: #8e8e93;
+    --badge-info: #5ac8fa;
+    --bar-bg: #e8eaed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    display: flex;
+    min-height: 100vh;
+    font-size: 15px;
+  }
+  .sidebar { width: 240px; background: var(--sidebar-bg); color: #fff; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  .sidebar-header .sub { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 4px; }
+  .sidebar-nav { padding: 8px 0; flex: 1; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 14px 20px; color: rgba(255,255,255,.6); text-decoration: none; font-size: 14px; transition: all .15s; border-left: 3px solid transparent; }
+  .sidebar-nav a:hover { background: var(--sidebar-hover); color: #fff; }
+  .sidebar-nav a.active { background: var(--sidebar-active); color: #fff; border-left-color: var(--accent); }
+  .sidebar-nav a .icon { width: 18px; text-align: center; font-size: 14px; }
+  .sidebar-footer { padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.3); }
+  .main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+  .page-header { margin-bottom: 32px; }
+  .page-header h2 { font-size: 26px; font-weight: 700; }
+  .page-header .meta { font-size: 14px; color: var(--text-secondary); margin-top: 6px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .page-header .meta span { display: flex; align-items: center; gap: 4px; }
+  .card { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .card-body { padding: 24px; }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .score-item { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); }
+  .score-item .label { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .4px; }
+  .score-item .bar-row { display: flex; align-items: center; gap: 12px; }
+  .score-item .bar-track { flex: 1; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .score-item .bar-fill { height: 100%; border-radius: 5px; transition: width .6s ease; }
+  .score-item .value { font-size: 22px; font-weight: 700; min-width: 52px; text-align: right; }
+  .score-item .grade { font-size: 15px; font-weight: 700; min-width: 22px; text-align: center; }
+  .bar-fill.s { background: linear-gradient(90deg, #34c759, #30d158); }
+  .bar-fill.a { background: linear-gradient(90deg, #3370ff, #5e8cff); }
+  .bar-fill.b { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .bar-fill.c { background: linear-gradient(90deg, #ff3b30, #ff6b61); }
+  .bar-fill.d { background: linear-gradient(90deg, #ff6b61, #ff9f91); }
+  .bar-fill.f { background: linear-gradient(90deg, #9b1d1a, #d63031); }
+  .grade-s { color: #34c759; } .grade-a { color: #3370ff; }
+  .grade-b { color: #ff9500; } .grade-c { color: #ff3b30; }
+  .grade-d { color: #ff6b61; } .grade-f { color: #9b1d1a; }
+  .overall-row { grid-column: 1 / -1; background: linear-gradient(135deg, #1a1f2e, #2d3555); border-color: transparent; }
+  .overall-row .label { color: rgba(255,255,255,.6); }
+  .overall-row .value { color: #fff; }
+  .overall-row .grade { color: #34c759; }
+  .overall-row .bar-fill { background: linear-gradient(90deg, #34c759, #30d158); }
+  .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat-card { flex: 1; min-width: 140px; padding: 20px 24px; background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); text-align: center; }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1.3; }
+  .stat-card .desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .finding { border-left: 4px solid var(--border); margin-bottom: 20px; padding: 20px 24px; border-radius: 0 10px 10px 0; background: #fafbfc; border: 1px solid var(--border); border-left-width: 4px; }
+  .finding.severity-critical { border-left-color: var(--badge-critical); }
+  .finding.severity-high { border-left-color: var(--badge-high); }
+  .finding.severity-medium { border-left-color: var(--badge-medium); }
+  .finding.severity-low { border-left-color: var(--badge-low); }
+  .finding.severity-info { border-left-color: var(--badge-info); }
+  .finding-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .finding-header h4 { font-size: 16px; font-weight: 600; flex: 1; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; line-height: 1.6; }
+  .badge-critical { background: #ffeae9; color: var(--badge-critical); }
+  .badge-high { background: #fff3e0; color: var(--badge-high); }
+  .badge-medium { background: var(--accent-light); color: var(--badge-medium); }
+  .badge-low { background: #f2f2f5; color: var(--badge-low); }
+  .badge-info { background: #e4f5ff; color: #007aff; }
+  .badge-confirmed { background: #e8ffe8; color: #248a3d; }
+  .badge-suspected { background: #fff8e1; color: #b8860b; }
+  .badge-s { background: #e8ffe8; color: #248a3d; }
+  .badge-a { background: var(--accent-light); color: var(--accent); }
+  .badge-b { background: #fff3e0; color: var(--warning); }
+  .badge-c { background: #ffeae9; color: var(--danger); }
+  .finding-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+  .finding-meta span { display: flex; align-items: center; gap: 4px; }
+  .finding .evidence { margin: 12px 0; padding: 14px 18px; background: #f0f2f5; border-radius: 8px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .finding .problem { font-size: 14px; margin: 12px 0; color: var(--text); line-height: 1.8; }
+  .finding .fix-box { margin-top: 12px; padding: 14px 18px; background: #f0f7ff; border-radius: 8px; border: 1px solid #d6e4ff; font-size: 13px; }
+  .finding .fix-box code { display: block; margin-top: 6px; padding: 12px 16px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .fix-label { font-weight: 600; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
+  .section-title { font-size: 20px; font-weight: 700; margin: 36px 0 20px; padding-bottom: 10px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 12px 16px; font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); background: #f8fafc; }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; }
+  .check-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.6; }
+  .check-item .check { color: var(--success); font-weight: 700; }
+  .check-item .cross { color: var(--danger); font-weight: 700; }
+  .win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .win-card { padding: 16px; background: linear-gradient(135deg, #f0f7ff, #e8f0ff); border-radius: 8px; border: 1px solid #d6e4ff; }
+  .win-card .win-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .win-card .win-meta { font-size: 11px; color: var(--text-secondary); }
+  .small { font-size: 13px; color: var(--text-secondary); }
+  .code-block { margin: 8px 0; padding: 14px 18px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; overflow-x: auto; white-space: pre; line-height: 1.7; }
+  .hl { color: #f7768e; font-weight: 600; } .cm { color: #565f89; }
+  .kw { color: #bb9af7; } .fn { color: #7aa2f7; }
+  .ty { color: #ff9e64; } .op { color: #89ddff; }
+  .str { color: #9ece6a; } .nu { color: #ff9e64; }
+  @media (max-width: 768px) { .sidebar { display: none; } .main { padding: 16px; } .score-grid { grid-template-columns: 1fr; } .stats-row { flex-direction: column; } .check-list { grid-template-columns: 1fr; } .win-grid { grid-template-columns: 1fr; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c1c7d0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a8adb8; }
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>newapi628</h1>
+    <div class="sub">增量深审 · 2026-07-18</div>
+  </div>
+  <div class="sidebar-nav">
+    <a href="#summary"><span class="icon">📊</span> 评分面板</a>
+    <a href="#executive-summary"><span class="icon">📝</span> 总体评估</a>
+    <a href="#change-summary"><span class="icon">🔀</span> 变更概览</a>
+    <a href="#coverage"><span class="icon">🧭</span> 覆盖矩阵</a>
+    <a href="#top-risks"><span class="icon">⚠️</span> 首要风险</a>
+    <a href="#findings"><span class="icon">🔍</span> 详细发现</a>
+    <a href="#security"><span class="icon">🔒</span> 安全</a>
+    <a href="#stability"><span class="icon">⚡</span> 稳定性</a>
+    <a href="#data-integrity"><span class="icon">🧱</span> 数据完整性</a>
+    <a href="#concurrency"><span class="icon">🔀</span> 并发</a>
+    <a href="#testing-authenticity"><span class="icon">🧪</span> 测试真实性</a>
+    <a href="#release"><span class="icon">🚢</span> 发布与运维</a>
+    <a href="#principles"><span class="icon">📋</span> 工程原则</a>
+    <a href="#fix-order"><span class="icon">🎯</span> 修复顺序</a>
+  </div>
+  <div class="sidebar-footer">Fuck My Shit Mountain v1.0</div>
+</nav>
+
+<div class="main">
+
+  <div class="page-header" id="summary">
+    <h2>newapi628 增量深审报告</h2>
+    <div class="meta">
+      <span>📅 2026-07-18</span>
+      <span>🔍 incremental + security + data-integrity + concurrency + testing-authenticity</span>
+      <span>🛠 Claude Opus 4.8</span>
+      <span>🎯 8f68feb..52204cb（7 提交 / 13 文件）</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">📊 评分面板</div>
+    <div class="card-body">
+      <div class="score-grid">
+
+        <div class="score-item">
+          <div class="label">Security</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:55%"></div></div>
+            <span class="value grade-b">5.5</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">方向正确但主目标未达成：设备指纹含攻击者自选的 UA，换头即绕过，与改前自报 device_id 等价；force 一键绕过归属校验；DB root 口令未轮换。覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Stability</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:60%"></div></div>
+            <span class="value grade-b">6.0</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">并发决胜逻辑本身正确（单赢家性质保持、-race 干净），但占键与下单跨三层非原子、失败即永久烧号；运维 fail-closed 作用域过宽卡住回滚与巡检。覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Testing</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill a" style="width:75%"></div></div>
+            <span class="value grade-a">7.5</span>
+            <span class="grade grade-a">A</span>
+          </div>
+          <div class="small">45 用例 / -race 干净 / RETRO 有变异验证记录，跨账号回归守卫是真的；扣分在 Del 零替身、端点层零测试、且 TestDeviceFingerprint 把缺陷写成了契约。覆盖 High。</div>
+        </div>
+
+        <div class="score-item">
+          <div class="label">Release</div>
+          <div class="bar-row">
+            <div class="bar-track"><div class="bar-fill b" style="width:55%"></div></div>
+            <span class="value grade-b">5.5</span>
+            <span class="grade grade-b">B</span>
+          </div>
+          <div class="small">C1 去内联方向对、restore 剪枝免疫是好修法，但 rollback/healthcheck 被无关的 DB 口令闸门卡死（撞 C6），真值未轮换仍在 6 个历史提交里。覆盖 High。</div>
+        </div>
+
+        <div class="score-item overall-row">
+          <div class="label">Overall</div>
+          <div class="bar-row">
+            <div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:61%;background:linear-gradient(90deg,#ff9500,#ffb340)"></div></div>
+            <span class="value" style="color:#fff">6.1</span>
+            <span class="grade" style="color:#ff9500">B</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="executive-summary">📝 总体评估</h3>
+
+  <div class="card">
+    <div class="card-header">📋 总体评估</div>
+    <div class="card-body">
+      <p><strong>项目概况：</strong> newapi628 是基于 New API 二次开发的 Go 多租户代理分销平台（Go 1.26 / gin v1.9.1 / MySQL / Redis，单栈 Docker Compose 部署）。本次审计范围是从 origin/main 拉取的增量 <code>8f68feb..52204cb</code>：7 个提交、13 个文件、+464/−52 行，全部出自同一作者、集中在 2026-07-17 晚间。改动分四组：① Trial 终身限购键的占用回滚与释放归属校验（<code>internal/risk</code>）；② 设备指纹改服务端派生（<code>internal/mtwire</code>）；③ DB root 口令按 C1 去内联（<code>deploy/</code>）；④ restore 预备份剪枝免疫。<strong>关键前提：经 <code>/api/status</code> 核实，生产栈当前运行的正是 <code>52204cb-20260717-232116</code>——这批代码已经上线，本报告不是合入前评审，而是对在跑代码的复核。</strong></p>
+
+      <p style="margin-top:12px"><strong>主要风险：</strong> 三条 High。最要害的是 <strong>设备指纹把攻击者完全可控的 User-Agent 揉进了唯一性键</strong>——这批改动的头号安全目标是「反滥用信号只认服务端派生、绝不读客户端自报」，但 UA 本身就是客户端自报的，攻击者每次请求换一个 UA 即得到全新指纹键，绕过成本与改动前发随机 <code>device_id</code> 完全相同；被真正堵住的只是「填受害者标识反向武器化」这一半。其次是 <strong>占键与下单跨 Redis/MySQL/支付网关三层非原子</strong>：本次新增的补偿删除只作用在 <code>checkTrialLimit</code> 函数内部，一旦通过限购检查，后续建单、存 pending、调微信/支付宝任一步失败，那把永不过期的终身键就永久留在 Redis，零自动回收——而这正是该批改动引用的原始事故场景。第三是 <strong>运维 fail-closed 作用域过宽</strong>：DB 口令缺失时 <code>lib.sh</code> 在 source 阶段直接 <code>exit 1</code>，把根本不用 DB 口令的 <code>rollback.sh</code>（deploy 自动回滚兜底）和 <code>healthcheck.sh</code>（5 分钟 cron）一并卡死，与 C6「回滚兜底路径必须真实可达」正面冲突。</p>
+
+      <p style="margin-top:12px"><strong>亮点：</strong> 这批改动的工程质量明显高于一般水平，几处值得点名：<strong>并发正确性是真的</strong>——SetNX 逐维决胜的单赢家性质在补偿回滚引入后依然成立（回滚只删本次 SetNX 刚写入、值为本人 userID 的键，不触碰赢家），<code>go test -race</code> 实跑干净；<strong>测试不是摆设</strong>——45 个用例里 <code>TrialConcurrentCrossAccountSingleWinner</code> 精准守卫「跨账号共享维度」这个旧实现能骗过的性质，RETRO 还记录了 2/2 变异杀死验证；<strong>路由装配合规</strong>——新端点挂在 <code>apiBase.Group("/admin/risk")</code> 下，完整继承四个中间件，<code>git grep 'Group("/api'</code> 全仓生产代码只剩两处，C2 无违例；<strong>审计留痕双层</strong>——AdminAuth 自动审计 + handler 内 SysLog 记录 operator/force/released/skipped；<strong>RETRO 记录诚实到罕见</strong>——主动点名自己上一版的「承重假注释」，标注前提出处与「勿再引用」。restore.sh 用点号前缀 + 硬链接把恢复目标移出剪枝 glob，也是干净利落的正确修法。</p>
+
+      <p style="margin-top:12px"><strong>优先修复：</strong> ① 把 UA 从设备指纹的唯一性键里拿掉（唯一性键只能由攻击者难以轮换的信号构成，UA 可留作风险评分信号），同时删掉 <code>TestDeviceFingerprint</code> 里那条把缺陷固化成契约的「不同 UA 必须不同指纹」断言，并撤回 RETRO 里同款措辞的候选规则——否则它会被棘轮升级成硬约束；② 给 <code>Purchase</code> 的错误路径加 defer 补偿释放，或把占键移到建单成功之后；③ 把 <code>lib.sh</code> 的 DB 口令校验从 source 期改成惰性 <code>require_db_pass()</code>，只由 backup/restore/reconcile 调用。这三条都是小改动（合计约 30 行），但前两条直接决定这批改动是否达成了它自己宣称的目标。</p>
+
+      <p style="margin-top:12px"><strong>总评：</strong> <strong>6.1 / B</strong>——改动方向全部正确，工程纪律（测试、审计、RETRO、路由合规）明显在线，问题不在「做得糙」而在「差最后一步」：三条 High 里有两条是<em>同一个模式</em>——正确的机制只应用到了最内层的作用域（指纹只防住了武器化没防住绕过；回滚只做在函数内没做到事务边界；fail-closed 只考虑了「缺了就该拒」没考虑「谁不该被拒」）。这批代码已在生产运行，建议按「立即修复」三项处理后再收口，而不是当作已完成。</p>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="change-summary">🔀 变更概览</h3>
+
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>项目</th><th>数值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>提交数</td><td>7</td><td>8f68feb（不含）→ 52204cb（含）</td></tr>
+            <tr><td>文件数</td><td>13</td><td>+464 / −52 行</td></tr>
+            <tr><td>作者</td><td>WEI &lt;weidu500l@gmail.com&gt;</td><td>单作者，2026-07-17 21:56–22:16 集中提交</td></tr>
+            <tr><td>生产 Go 代码</td><td>4 文件 · +148 / −43</td><td>risk/engine.go、risk/port.go、mtwire/http.go、mtwire/risk_admin_http.go</td></tr>
+            <tr><td>测试 Go 代码</td><td>2 文件 · +236 / −0</td><td>risk/engine_test.go（+202）、mtwire/http_test.go（+34）</td></tr>
+            <tr><td>部署配置</td><td>4 文件 · +35 / −7</td><td>docker-compose.test.yml、ops/lib.sh、ops/restore.sh、ops/README.md</td></tr>
+            <tr><td>文档 / 元数据</td><td>3 文件 · +45 / −2</td><td>RETRO.md（+43）、STATUS.md、.ccg/tasks/*.turns.json</td></tr>
+            <tr><td>生产部署状态</td><td><span class="badge badge-high">已上线</span></td><td><code>/api/status</code> 实测 = <code>52204cb-20260717-232116</code>（干净树，无 -dirty）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">变更分类 / 风险增量 / 测试增量</div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>维度</th><th>明细</th></tr></thead>
+          <tbody>
+            <tr><td>缺陷修复</td><td>4 文件（限购回滚、释放归属校验、指纹服务端派生、restore 剪枝免疫）</td></tr>
+            <tr><td>安全加固</td><td>2 文件（compose 两处 + lib.sh 的 DB 口令去内联）</td></tr>
+            <tr><td>测试</td><td>2 文件 · 新增 7 个测试函数 + 1 个测试替身（barrierGetKV）</td></tr>
+            <tr><td>文档</td><td>3 文件（RETRO 4 条新复盘、STATUS 订正、任务日志去重）</td></tr>
+            <tr><td>新引入风险</td><td><strong>3</strong>（F3 运维闸门过宽、F8 释放结果虚报、F11 恢复目标事后丢失）</td></tr>
+            <tr><td>已修复的既有风险</td><td><strong>4</strong>（败者 userK 永久留痕、释放无归属校验、device_id 可武器化、restore 剪枝删目标）</td></tr>
+            <tr><td>未被修复到位的既有风险</td><td><strong>2</strong>（F1 指纹仍可绕过、F2 事务边界仍泄漏永久键）</td></tr>
+            <tr><td>新代码有测试</td><td>4 生产文件中 3 个有对应新测试（risk_admin_http.go 无端点层测试）</td></tr>
+            <tr><td>删除的测试</td><td>0</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="coverage">🧭 覆盖矩阵</h3>
+
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>维度</th><th style="width:120px">覆盖度</th><th>已检查证据</th><th>排除 / 限制</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Security</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>逐 hunk 读完 4 个生产 Go 文件全文；追出 <code>deviceFingerprint</code> 两个分量的可控性（查实 gin v1.9.1 <code>context.go:771-778</code> 源码，非凭记忆）；追出 <code>ClientIP()</code> 信任链（<code>router/trusted_ip.go:21</code> + 全仓零 <code>SetTrustedProxies</code>）；追出 admin 端点完整 14 层中间件链与 <code>AdminAuth</code> role≥10 判定（<code>middleware/auth.go:132-139</code>）；<code>git grep 'Group("/api'</code> 核 C2；<code>git log -S</code> 核历史口令留存；<code>gh repo view</code> 核仓库可见性</td>
+              <td>未做动态渗透（未对生产站发起真实绕过请求）；CF 面板侧配置（SSL 模式、WAF 规则）不可见，源站 nginx allow/deny 规则以 CLAUDE.md 记载与既往验证为准，本次未重新取证</td>
+            </tr>
+            <tr>
+              <td>Stability</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>读完 <code>checkTrialLimit</code> / <code>ReleaseTrialLimit</code> 全部分支；追出 <code>Purchase</code> 完整调用序列 7 步与 3 个 error return 点；<code>grep defer|Release|rollback</code> 确认零补偿；本机实跑 <code>go test -race ./internal/risk/</code> 通过；沙盒实跑复现 lib.sh 的 source 期 exit；SSH 实跑服务器 <code>healthcheck.sh</code> 确认当前态</td>
+              <td>未在 MySQL 栈上做并发压测（本机无 MySQL；按 C8 记载 SQLite/内存件不具行锁语义，真实并发回归须上服务器）；Redis 故障注入未做</td>
+            </tr>
+            <tr>
+              <td>Data Integrity</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>追出占键（<code>subscription.go:61</code>→<code>engine.go:196</code> SetNX）与两处 DB 写（<code>:72</code>/<code>:90</code>）及网关调用（<code>http.go:338</code>）的先后与事务边界；核实 <code>PurchaseDedupTTL=0</code> 经 <code>wire.go:198</code> 落到生产（写成 Redis 无 TTL 键）；读 <code>restore.sh</code> 全部改动与 <code>prune_keep</code> glob（<code>lib.sh:112-118</code>）与 <code>backup.sh:67-69</code></td>
+              <td>未在服务器实跑 restore（破坏性，需人在环强确认）；未核对生产 Redis 中现存 <code>risk:trial:*</code> 键的实际数量与分布</td>
+            </tr>
+            <tr>
+              <td>Concurrency</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>逐交错分析 <code>checkTrialLimit</code> 的补偿回滚对单赢家性质的影响（同用户并发 / 跨账号共享 realname / 跨账号共享 device 三种编排）；核实 <code>claimed</code> 出作用域时机；读全部 5 个 KVCache 实现的 <code>SetNX</code>/<code>Get</code>/<code>Del</code> 源码确认原子性；<code>go test -race</code> 实跑</td>
+              <td><code>barrierGetKV</code> 屏障对当前实现不触发（实现不调 Get），故并发用例的实际强度等价于 n=4 朴素压测，未做高并发长时压测</td>
+            </tr>
+            <tr>
+              <td>Testing Authenticity</td>
+              <td><span class="badge badge-confirmed">High</span></td>
+              <td>读完新增 236 行测试全文 + <code>engine_test.go</code> 45 个用例函数名清单 + 3 个既有测试替身定义（<code>:58</code>/<code>:85</code>/<code>:98</code>）；核实哪些断言真能杀死回归、哪些是空转；本机实跑两个包的测试；<code>grep --include='*_test.go'</code> 确认端点层零测试；比对 MemKVCache 与 RedisKVCache 的行为差异</td>
+              <td>未做覆盖率统计（<code>go test -cover</code> 未跑）；未对全部 45 个既有用例逐个做变异验证，仅复核了新增 7 个用例的杀伤力</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>已检查范围：</strong> <code>git diff --name-only 8f68feb..52204cb</code> 给出的全部 13 个文件，逐 hunk 阅读；对 4 个生产 Go 文件读取改动后全文而非仅 diff；按增量模式的「上下文感知」要求，额外追查了未改动但受影响的调用方（<code>router/mt-router.go</code> 路由装配、<code>internal/mtwire/wire.go</code> 依赖注入、<code>internal/tokenplan/subscription.go</code> 事务边界、<code>internal/risk/memkv.go</code> 与 <code>rediskv.go</code> 两个 KVCache 实现、<code>middleware/auth.go</code> 与 <code>middleware/rate-limit.go</code> 中间件、gin v1.9.1 依赖源码）。</p>
+      <p style="margin-top:10px"><strong>执行的命令（关键）：</strong> <code>go test -race -count=1 ./internal/risk/</code>（通过，1.285s）、<code>go test -race -count=1 -run TestDeviceFingerprint ./internal/mtwire/</code>（通过，1.456s）、指纹派生逻辑等价复刻实跑（同 IP 5 个 UA → 5 个不同键）、lib.sh 沙盒 source 实验（无 DB 口令的脚本 exit 1、主体不可达）、<code>ssh newapi628</code> 上 <code>/api/status</code> 版本核对与 <code>healthcheck.sh</code> 实跑。</p>
+      <p style="margin-top:10px"><strong>排除的路径类别：</strong> 前端 <code>web/</code>（本次 diff 未触及）、<code>bulb-orbit/</code>（落地页资产，已 React 化且不在 diff 内）、<code>node_modules</code>/<code>dist</code>/构建产物、其余 900+ 个未改动的 Go 文件。按增量模式规则，既有问题除非被本次改动放大否则不报告——唯一例外是 F10、F12 两条标记为 Info 的既有背景事实，因其直接决定本批改动的实际价值边界，不列出会造成误导。</p>
+      <p style="margin-top:10px"><strong>限制：</strong> 未做动态渗透测试；未在 MySQL 生产栈做并发回归；未实跑破坏性的 restore 流程；CF 面板侧配置不可见。</p>
+    </div>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">12</div><div class="desc">总发现</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-high)">3</div><div class="desc">High</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">3</div><div class="desc">Medium</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-low)">3</div><div class="desc">Low</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-info)">3</div><div class="desc">Info</div></div>
+  </div>
+
+  <h3 class="section-title" id="top-risks">⚠️ 首要风险</h3>
+
+  <div class="card">
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:60px">#</th><th>发现</th><th style="width:100px">严重程度</th><th style="width:110px">类别</th><th style="width:90px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>设备指纹含攻击者完全可控的 User-Agent，换头即得全新终身键——绕过成本与改前自报 device_id 等同</td><td><span class="badge badge-high">High</span></td><td>Security</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>2</td><td>占键与下单跨 Redis/MySQL/支付网关非原子，补偿只做在函数内——建单或调网关失败即永久烧毁终身 Trial 资格</td><td><span class="badge badge-high">High</span></td><td>Data Integrity</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>3</td><td>DB 口令 fail-closed 作用域过宽：rollback.sh 与 healthcheck.sh 不用该口令却被 source 期 exit 1 卡死（撞 C6）</td><td><span class="badge badge-high">High</span></td><td>Release</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>4</td><td>force 是请求体裸 bool，无二次授权/无理由字段/不限遗留键——归属校验被同一操作者一键绕过</td><td><span class="badge badge-medium">Medium</span></td><td>Security</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>5</td><td>DB root 口令已移出工作树但未轮换，低熵真值仍在 6 个历史提交中且为生产在用凭据</td><td><span class="badge badge-medium">Medium</span></td><td>Security</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>6</td><td>Del 在全部 3 个测试替身中零覆写——本批头号修复（补偿回滚）的失败路径无任何测试</td><td><span class="badge badge-medium">Medium</span></td><td>Testing</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>7</td><td>RedisKVCache.Expire(ttl&lt;=0) 不清除 TTL 而 MemKVCache 清除——接口契约与生产实现不符，测试全跑在假件上</td><td><span class="badge badge-low">Low</span></td><td>Testing</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>8</td><td>ReleaseTrialLimit 对 user 维恒报 Released（键不存在也报），审计日志无法区分「真释放」与「本来就没有」</td><td><span class="badge badge-low">Low</span></td><td>Observability</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>9</td><td>restore.sh 的 EXIT trap 在原文件已被剪枝时删掉安全副本，恢复完成后目标快照两个名字都不存在</td><td><span class="badge badge-low">Low</span></td><td>Data Integrity</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>10</td><td>新的失实注释两处：rediskv.go 称 go-redis 空 keys 会 panic（实为服务端报错）、http.go 称「规整 UA」（实为仅 TrimSpace）</td><td><span class="badge badge-info">Info</span></td><td>Documentation</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>11</td><td>【既有背景】Redis 未配置时 riskEngine 为 nil，全部限购直接放行——本批全部加固的价值上限受此约束</td><td><span class="badge badge-info">Info</span></td><td>Security</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>12</td><td>【既有背景】生产巡检恒报 2 项异常（auth-service 已退役仍被检查）+ 磁盘 89% 逼近 90% 阈值</td><td><span class="badge badge-info">Info</span></td><td>Observability</td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="findings">🔍 详细发现</h3>
+
+  <!-- F1 -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>1. 设备指纹把攻击者完全可控的 User-Agent 揉进唯一性键 —— 换头即绕过，与改动前的自报 device_id 等价</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Security</span>
+      <span>📍 internal/mtwire/http.go:234-242</span>
+      <span>🎯 deviceFingerprint()</span>
+      <span>🔧 Modified</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>本批改动的头号安全目标写在 <code>risk/port.go:316-318</code> 的「铁律」注释里：<em>「这两个字段必须由服务端派生，绝不承载客户端自报值——反滥用维度若由被监管方自报，即可被随机化绕过」</em>。改动删掉了请求体里的 <code>device_id</code>/<code>real_name_id</code>，改由 <code>deviceFingerprint(c)</code> 派生——但派生公式是 <code>sha256(ClientIP + "\x00" + UserAgent)</code>，而 <strong>User-Agent 恰恰是 100% 由客户端自报的请求头</strong>。攻击者每次请求换一个 UA 字符串即得到一把全新的、互不碰撞的终身键。这与改动前发随机 <code>device_id</code> 的绕过成本完全相同（都是改一个 HTTP 字段），且无需直连源站、经 Cloudflare 正常访问即可。改动真正堵住的只是「填入受害者标识反向武器化」这一半；宣称的「不可被随机化绕过」这一半没有达成。<br><br>
+      放大这条的两个因素：① <strong>项目自己的测试把缺陷固化成了契约</strong>——<code>http_test.go:341-345</code> 断言「不同 UA 必须产生不同指纹」，任何人按正确方向修复（把 UA 移出唯一性键）都会撞红这条测试；② <strong>RETRO 的候选棘轮规则同样写死了这个公式</strong>（「设备→服务端 ClientIP+UA 归一」），按 W3 纪律它将被升级为 CLAUDE.md 硬约束，届时缺陷会获得红线级别的保护。
+    </div>
+    <div class="evidence">File: internal/mtwire/http.go:234-242（deviceFingerprint）
+  ip := strings.TrimSpace(c.ClientIP())
+  ua := strings.TrimSpace(c.GetHeader("User-Agent"))   ← 客户端完全自选，仅去首尾空白
+  if ip == "" &amp;&amp; ua == "" { return "" }
+  sum := sha256.Sum256([]byte(ip + "\x00" + ua))
+  return hex.EncodeToString(sum[:16])
+
+注释与代码不符：http.go:227 声称「ClientIP + \x00 + 规整 UA」，
+但代码对 UA 的全部处理只有 TrimSpace——无大小写归一、无版本号归一、无长度截断。
+
+运行时证据（等价复刻实跑，固定 IP=203.0.113.7 仅轮换 UA）：
+  UA="…Chrome/120.0.0.0" → risk:trial:device:b7eb79b479c33223be1a1ccf54dd4a05
+  UA="…Chrome/120.0.0.1" → risk:trial:device:c17fb1cb7b6b7c12a9056ab306d40cef   ← 只改补丁号
+  UA="…Chrome/120.0.0.2" → risk:trial:device:ad1590e833cab24f9bc868e9de356441
+  UA="a"                 → risk:trial:device:17bde09e0e245d165c789c3b46dd67a0
+  UA="b"                 → risk:trial:device:2b09859747d7a9f131f686985ab97d1b
+  同一 IP、5 次请求 → 5 个互不相同的设备维度键（期望应为 1 个）
+
+项目自身测试即为佐证：internal/mtwire/http_test.go:341-345
+  if b := fp("203.0.113.7:5555", "cursor/2.0"); b == a {
+      t.Fatalf("different UA must yield different fingerprint, both = %q", a)
+  }
+  ← 该断言正是绕过条件本身，且它当前是绿的（本机实跑通过）
+
+UA 取值空间：本仓未设 MaxHeaderBytes（main.go:222 → gin gin.go:386 零值 http.Server），
+回落 net/http DefaultMaxHeaderBytes = 1 MB；全仓对 UA 无白名单/长度/格式校验。
+
+键生命周期：wire.go:198 只设 DefaultRPM → Config.PurchaseDedupTTL 取零值 0
+  → port.go:67 「&lt;=0 表示永不过期」→ rediskv.go:41-44 写成 Redis 无 TTL 键。</div>
+    <div class="problem">
+      <strong>攻击前提：</strong>拥有 N 个已注册账号（注册成本是唯一真实门槛），普通 HTTP 客户端，经 Cloudflare 正常访问，无需直连源站、无需伪造任何受信头。<br>
+      <strong>攻击路径：</strong>对每个账号发一次 <code>POST /api/tenant/token-plans/:id/purchase</code>，每次带一个不同的 <code>User-Agent</code>（改一个字符即可）→ 每次 <code>devK</code> 都不碰撞 → 每个账号各得一份 Trial。设备维度对多账号农场提供零阻力，三维去重对该攻击退化为「只按 user_id」。<br>
+      <strong>失败场景：</strong>Trial 是引流体验款（proposal §2.4 要求最强限购）。一个脚本注册 200 个账号、每次换 UA，即领走 200 份 Trial 额度；<code>CriticalUserRateLimit</code>（20 次/20 分钟，按 user_id 计桶）不构成约束——它限的是单账号频率，而攻击靠的是横向铺账号。<br>
+      <strong>用户可见影响：</strong>平台侧引流成本按账号数线性流失；与此同时，<em>诚实用户</em>反而承担该维度的全部误伤——共享出口 IP + 相同主流浏览器 UA 的真实用户会撞进同一指纹被连带拒绝（这正是代码注释里承认的「粗粒度」代价）。即：拦不住要绕的人，只拦得住不绕的人。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// internal/mtwire/http.go —— 唯一性键只能由攻击者难以轮换的信号构成。
+// UA 是客户端自选字段，把它放进键 = 让被监管方自选分桶，属自毁。
+func deviceFingerprint(c *gin.Context) string {
+    ip := strings.TrimSpace(c.ClientIP())
+    if ip == "" {
+        return "" // 无信号 → 跳过设备维度（口径不变）
+    }
+    // 只用 IP。如需降低 NAT 误伤，可退到 /24（IPv4）或 /64（IPv6）网段粒度，
+    // 用「更粗但不可自选」换「更细但可自选」——后者是没有防护价值的细。
+    sum := sha256.Sum256([]byte(ip))
+    return hex.EncodeToString(sum[:16])
+}
+
+// 同批必须一起做，否则修复会被自家测试和自家规则挡回去：
+// 1. 删除 http_test.go:341-345「不同 UA 必须不同指纹」断言，
+//    改为断言「同 IP 不同 UA 必须产生相同指纹」（锁死修复方向）。
+// 2. 撤回 RETRO.md 里「设备→服务端 ClientIP+UA 归一」的候选棘轮规则，
+//    改为「唯一性键只取不可由被监管方自选的信号」。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px">
+      <div class="fix-label">更好的长期修复</div>
+      <code>UA 不是没有价值，只是不能进「唯一性键」。分层用法：
+  · 唯一性键（去重/限购）：只用服务端观测且难轮换的信号——IP 网段、
+    已验证手机号、支付账户标识（首次支付后回填）。
+  · 风险评分信号（不进键）：UA 异常、UA 与 TLS 指纹不一致、注册时间聚集度
+    → 高分触发人工审核或二次验证，而不是直接拒绝。
+根治方向：把 Trial 资格与「已完成一次真实支付的账户标识」绑定，
+而非与「设备」绑定——设备指纹在浏览器端天然不可信。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 修复 0.5 小时（含改测试与 RETRO）；若一并做网段粒度与误伤评估，2 小时 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 新增 <code>TestDeviceFingerprint_UARotationDoesNotEscape</code>：固定 RemoteAddr，用 5 个不同 UA 调 <code>deviceFingerprint</code>，断言 5 次结果<strong>全等</strong>；再加引擎级 <code>TestCheckPurchaseLimit_TrialUARotationStillSingleWinner</code>：5 个不同 userID 各带不同 UA 派生的指纹调 <code>CheckPurchaseLimit</code>，断言恰好 1 个成功（当前实现下会得到 5 个成功，测试即刻变红，可作为修复前的失败用例）。
+    </div>
+  </div>
+
+  <!-- F2 -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>2. 占键与下单跨 Redis / MySQL / 支付网关三层非原子，补偿只做在函数内 —— 后续任一步失败即永久烧毁用户终身 Trial 资格</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Data Integrity</span>
+      <span>📍 internal/tokenplan/subscription.go:61-101</span>
+      <span>🎯 SubscriptionService.Purchase()</span>
+      <span>🔧 Modified（补偿新增但作用域不足）</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>受威胁的不变量：</strong>「用户的终身 Trial 资格，当且仅当他真正获得了一份 Trial 时才被消耗」。<br><br>
+      <strong>问题：</strong>本批的核心改进是给 <code>checkTrialLimit</code> 加了 <code>claimed</code> 补偿删除——但补偿的作用域<strong>严格限于该函数内部的多维 SetNX 循环</strong>：一旦三个维度全部 SetNX 成功、函数在 <code>engine.go:207</code> 返回 nil，<code>claimed</code> 即出作用域，对后续任何失败一无所知。而占键之后还有三个可失败步骤：建支付订单（DB 写）、存 pending 订阅（DB 写）、调微信/支付宝下单（外部网络）。这三步的 error return 全是裸返回，<code>grep "defer|Release|rollback"</code> 在 <code>subscription.go</code> 零命中。生产 <code>PurchaseDedupTTL=0</code>，键写成 Redis 无 TTL——<strong>任一步失败，那把永久键就留在 Redis，零自动回收，用户终身买不了 Trial</strong>。<br><br>
+      这正是本批改动自己引用的原始事故（RETRO 2026-07-16「用户点开收银台犹豫关单即永久消耗」）。该事故的善后手段（后台释放端点）在上一批已建成，但<strong>泄漏源本身从未被处理</strong>；本批新增的 <code>Del</code> 原语明明已经具备补偿能力，却只用在了最内层。
+    </div>
+    <div class="evidence">File: internal/tokenplan/subscription.go —— Purchase 调用序列
+  :46      s.plans.GetPlan                    只读
+  :53-59   s.plans.GetListing + 上架校验       只读
+  :61  →   s.risk.CheckPurchaseLimit(...)     ★ SetNX 占永久键（engine.go:196）
+  :72  →   s.payment.CreateOrder(...)         DB 写 → 失败 :81 裸 return，键已泄漏
+  :90  →   s.subs.SavePendingPurchase(...)    DB 写 → 失败 :100 裸 return，键已泄漏
+  :103     返回 PurchaseTicket
+
+File: internal/mtwire/http.go —— 同一请求内，Purchase 返回之后
+  :338 →   a.providerMgr.CreatePay(...)       外部网络调用（微信/支付宝真实下单）
+           失败 → :340 return err → :303 respondErr + return，键已泄漏
+
+补偿的实际作用域（internal/risk/engine.go:191-206）：
+  var claimed []string
+  for _, k := range []string{userK, realK, devK} {
+      ok, err := e.kv.SetNX(ctx, k, owner, ttl)
+      if err != nil { _ = e.kv.Del(ctx, claimed...); return err }   ← 只管循环内
+      if !ok       { _ = e.kv.Del(ctx, claimed...); return ErrPurchaseLimitExceeded }
+      claimed = append(claimed, k)
+  }
+  return nil    ← claimed 在此出作用域；后续 3 个失败点全部无补偿
+
+grep 佐证：
+  grep -rn "ReleaseTrialLimit|ReleasePurchaseLimit" --include="*.go"（排除测试）
+  → 仅 internal/mtwire/risk_admin_http.go:70 / :74（人工后台端点）
+  → 整条下单链路零调用
+  grep "defer|Release|rollback|Rollback" internal/tokenplan/subscription.go
+  → 零命中
+
+键永久性：wire.go:198 未设 PurchaseDedupTTL → 零值 0 → rediskv.go:41-44 无 TTL 键</div>
+    <div class="problem">
+      <strong>现实失败场景：</strong>用户点「购买 Trial」→ 限购检查通过、Redis 写下永久键 → 调微信统一下单接口时网络抖动/微信侧 5xx/证书轮换期验签失败 → 接口返回 500，用户看到「下单失败，请重试」→ 用户重试 → 这次在限购检查就被拒（<code>PURCHASE_LIMIT_EXCEEDED</code>）→ <strong>用户一分钱没付、一个订单没建，终身 Trial 资格已被吃掉</strong>，且没有任何自助恢复途径，只能联系客服走后台释放。同一场景对<em>撞到同一设备指纹的其他无辜用户</em>同样生效（devK 也被占住）。<br>
+      <strong>发生频率：</strong>不需要罕见条件——任何一次 DB 瞬时错误、连接池耗尽、支付网关抖动都触发。项目自身在 RETRO 中记录过「api_v3_key 轮换配错致 24h 回调全部验签失败」这类真实事故，同类故障期间每一次 Trial 购买尝试都会烧掉一个用户。<br>
+      <strong>用户可见影响：</strong>付费转化漏斗顶端的用户被静默永久拒绝；客服工单量与「点了没反应还再也买不了」的差评。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复 —— 在事务边界补偿，而非只在函数内</div>
+      <code>// internal/tokenplan/subscription.go —— Purchase 内，占键成功后立刻登记补偿
+// 需要 risk 侧暴露一个「释放本次占用」的内部原语（可复用 PurchaseLimitAdmin，
+// 或新增 ReleaseOwnClaim(ctx, userID, pi) 只删值==userID 的键，避免误删赢家）。
+
+if err := s.risk.CheckPurchaseLimit(ctx, in.UserID, plan); err != nil {
+    return nil, err
+}
+claimOK := false
+defer func() {
+    if !claimOK {
+        // 下单未走到成功终点 → 归还本次占用（尽力而为，失败仅留痕，
+        // 仍可经 ReleaseTrialLimit 后台解，方向与既有 fail-closed 一致）
+        _ = s.risk.ReleaseOwnClaim(context.WithoutCancel(ctx), in.UserID, pi)
+    }
+}()
+
+// ... CreateOrder / SavePendingPurchase ...
+
+claimOK = true   // 仅当 ticket 成功构造并返回时置真
+return ticket, nil</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px">
+      <div class="fix-label">更好的长期修复</div>
+      <code>把「消耗资格」从下单前移到支付成功后（RETRO 2026-07-16 已提出但未做的
+「更强根治」）：下单阶段只做「是否已有 Trial」的只读检查，真正的 SetNX 占键
+放在支付回调 / 对账确认到账的那一刻。这样：
+  · 未付款 = 零消耗（彻底消灭本条与原始事故的整个类别）
+  · 并发防护由「订单唯一约束 + 支付幂等键」承担，而非 Redis 键
+  · 与 C5 的对账保护层天然对齐（占键成为激活流程的一部分）
+代价：下单阶段的防刷变弱，需靠限流 + 订单数上限兜住——但那本就是
+下单阶段该有的控件，用终身键去防「下单」是把成本错配到了错误的阶段。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 最小修复 2–3 小时（含新原语与测试）；长期修复 1–2 天（涉及回调链与对账） &nbsp;·&nbsp; <strong>回归测试建议：</strong> 在 <code>internal/tokenplan</code> 加 <code>TestPurchase_OrderCreateFailureReleasesTrialClaim</code>：注入一个 <code>CreateOrder</code> 恒返回错误的 payment 假件，调 <code>Purchase</code> 断言返回错误，然后<strong>用同一 userID 与同一 identity 再调一次 <code>CheckPurchaseLimit</code>，断言放行</strong>（当前实现下第二次会被拒，测试即刻变红）；同理再加一条覆盖 <code>SavePendingPurchase</code> 失败路径，以及 <code>mtwire</code> 层覆盖 <code>CreatePay</code> 失败路径。
+    </div>
+  </div>
+
+  <!-- F3 -->
+  <div class="finding severity-high">
+    <div class="finding-header">
+      <h4>3. DB 口令 fail-closed 作用域过宽 —— 不使用该口令的 rollback.sh 与 healthcheck.sh 被 source 期 exit 1 卡死（正面撞 C6）</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Release / Stability</span>
+      <span>📍 deploy/ops/lib.sh:41-45</span>
+      <span>🎯 顶层 DB_PASS 解析块</span>
+      <span>🔧 Added</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>C1 修复把 <code>DB_PASS</code> 的内联默认值改成「缺失即中止」，方向完全正确——但校验写在 <code>lib.sh</code> 的<strong>顶层</strong>，而 <code>lib.sh</code> 是被 <code>source</code> 的公共库。于是这个 <code>exit 1</code> 会击穿<strong>每一个</strong> source 它的脚本，包括两个根本不碰数据库的：<code>rollback.sh</code>（<code>grep DB_PASS</code> = 0 处）与 <code>healthcheck.sh</code>（0 处）。<br><br>
+      这两个恰恰是最不能被无关依赖卡住的脚本：<code>rollback.sh</code> 是 <code>deploy.sh</code> 步骤 ⑧「健康检查失败自动回滚」的兜底执行体，也是文档里唯一的紧急回退手段；<code>healthcheck.sh</code> 挂在 <code>*/5 * * * *</code> cron 上，是全站唯一的自动巡检与告警触发点。缺一个<strong>它们不使用的</strong>凭据，就同时失去回滚能力和监控能力。<br><br>
+      更关键的是触发条件并不罕见：<code>MYSQL_ROOT_PASSWORD</code> 是<strong>本批刚引入</strong>的新键——任何早于 2026-07-17 的 <code>.env</code> 都没有它。而 <code>backup.sh</code> 每天备份 <code>config-*.tar.gz</code>，从旧备份恢复配置、或在新机器重建环境，都会得到一个缺该键的 <code>.env</code>。此时「站点异常 → 想回滚」的路径直接断掉，操作者必须先排查一个与故障毫不相干的 <code>DB_PASS 未设置</code> 报错。<br><br>
+      这与 CLAUDE.md <strong>C6</strong>「回滚兜底路径必须真实可达」直接冲突——C6 正是为「推荐了一条跑不通的回滚路径」而设立的硬约束。
+    </div>
+    <div class="evidence">File: deploy/ops/lib.sh:41-45（顶层，非函数内）
+  if [ -z "${DB_PASS:-}" ]; then
+    printf '\033[1;31m[err]\033[0m %s\n' "DB_PASS 未设置且 $ENV_FILE 缺 MYSQL_ROOT_PASSWORD…" &gt;&amp;2
+    exit 1        ← source 到本脚本的调用方在此整体退出
+  fi
+
+各脚本对 DB_PASS 的实际使用（grep -c）：
+  backup.sh    : 1 次   ← 真的需要
+  reconcile.sh : 2 次   ← 真的需要
+  restore.sh   : 1 次   ← 真的需要
+  rollback.sh  : 0 次   ← 不需要，却被卡死
+  healthcheck.sh: 0 次  ← 不需要，却被卡死
+
+运行时证据（沙盒实验，.env 中不含 MYSQL_ROOT_PASSWORD）：
+  $ ./probe.sh                 # 模拟 rollback.sh：source lib.sh 但从不用 DB_PASS
+  [err] DB_PASS 未设置且 ./fake.env 缺 MYSQL_ROOT_PASSWORD——…
+  [退出码 1]
+  → 脚本主体那行 echo 从未打印，回滚/巡检逻辑完全不可达
+
+依赖这两个脚本的关键路径：
+  deploy/ops/README.md:34   deploy.sh 步骤 ⑧「失败自动 rollback.sh」
+  deploy/ops/go-live.md:126 「新栈程序异常 → ssh … rollback.sh（回 :prev 镜像，秒级）」
+  deploy/ops/go-live.md:143 */5 * * * * … healthcheck.sh &gt;&gt; /var/log/newapi-health.log
+
+当前生产状态：服务器 /root/newapi-test/.env 已含该键（已核实），
+故本条目前为【潜伏】未发作——healthcheck.sh 实跑可正常执行。</div>
+    <div class="problem">
+      <strong>现实失败场景：</strong>某次部署把 <code>.env</code> 写坏 / 从 7 月 17 日之前的 <code>config-*.tar.gz</code> 恢复配置 / 在新机器按文档重建环境 → 站点异常 → 操作者按 go-live.md 执行 <code>rollback.sh</code> → 得到 <code>DB_PASS 未设置</code> → 回滚被拒。与此同时 cron 上的 <code>healthcheck.sh</code> 每 5 分钟同样 exit 1，<strong>告警逻辑位于 source 之后，永远不会被执行</strong>——即故障期间监控静默，日志里只有重复的 DB_PASS 报错。<br>
+      <strong>用户可见影响：</strong>故障恢复时间被一个无关的凭据检查拉长；最坏情况是「监控不报 + 回滚不动」叠加，把一次本可秒级回退的事故变成长时间中断。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复 —— 把校验从 source 期改为惰性调用</div>
+      <code># deploy/ops/lib.sh —— 顶层只做解析，不做中止
+DB_NAME="${DB_NAME:-new-api-test}"
+DB_USER="${DB_USER:-root}"
+if [ -z "${DB_PASS:-}" ] &amp;&amp; [ -f "$ENV_FILE" ]; then
+  DB_PASS="$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' "$ENV_FILE" | tail -n 1 | sed "s/^['\"]//;s/['\"]\$//")"
+fi
+
+# 需要 DB 口令的脚本显式调用；不需要的（rollback/healthcheck）不受影响。
+require_db_pass() {
+  [ -n "${DB_PASS:-}" ] || die "DB_PASS 未设置且 $ENV_FILE 缺 MYSQL_ROOT_PASSWORD——\
+DB 密码已按 C1 移出 git，禁止内联默认；请先在服务器 .env(600) 写入。"
+}
+
+# 然后在 backup.sh / restore.sh / reconcile.sh 各自开头加一行：
+require_db_pass</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 20 分钟（5 行改动 + 3 处调用） &nbsp;·&nbsp; <strong>回归测试建议：</strong> 在既有的 <code>scripts/lint-deploy-helpers.sh</code> 旁加一个 shell 冒烟用例：构造一个不含 <code>MYSQL_ROOT_PASSWORD</code> 的临时 <code>.env</code>，分别以该 <code>ENV_FILE</code> 运行 <code>rollback.sh --list</code> 与 <code>healthcheck.sh</code>，断言两者<strong>退出码不为 1 且产生正常输出</strong>；再运行 <code>backup.sh</code>，断言它<strong>明确以 DB_PASS 缺失原因中止</strong>。这条测试同时锁死「该拒的拒、不该拒的别拒」两个方向。
+    </div>
+  </div>
+
+  <!-- F4 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>4. force 是请求体里的裸 bool —— 归属校验被同一个操作者一键绕过，无二次授权、无理由字段、不限于遗留键</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Security</span>
+      <span>📍 internal/mtwire/risk_admin_http.go:47,77 · internal/risk/engine.go:250</span>
+      <span>🎯 HandleAdminReleaseTrialLimit / ReleaseTrialLimit</span>
+      <span>🔧 Added</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>归属校验是提交 <code>b038b62</code> 的核心，它要防的威胁在注释里写得很明确：<em>「客服按 B 自报的 device_id 释放会误删 A 合法占用的键」</em>——即一个<strong>被用户话术欺骗的客服</strong>。但 <code>force</code> 就是同一个请求体里的一个布尔字段，由同一个客服填写，绕过后不做任何额外校验。当客服执行释放、拿到 <code>skipped: ["device"]</code>、而用户坚持说「还是买不了」时，最自然的下一步就是重试并带上 <code>force: true</code>——<strong>防线与绕过开关握在同一只手里</strong>。<br><br>
+      代码也没有兑现注释的承诺。注释说 force 的「唯一合法用途」是释放旧版无归属的遗留值 <code>"1"</code>，但 <code>engine.go:250</code> 的判断是 <code>if val != owner &amp;&amp; !force</code>——force 无差别绕过<strong>所有</strong>归属不符的情况，包括「这把键明确属于另一个真实用户」。测试也只覆盖了 force 删遗留键（<code>TestReleaseTrialLimit_LegacyValueRequiresForce</code>），<strong>force 删他人有效键这个最危险的行为没有任何测试描述它</strong>。<br><br>
+      配套的两个弱化因素：该端点<strong>未挂 <code>CriticalRateLimit</code></strong>（<code>mt-router.go:220-224</code>，同文件 5 个 money 端点都挂了）；鉴权是 <code>AdminAuth</code> 即 <code>role &gt;= 10</code>（<code>RoleAdminUser</code>）而非 root，审计日志也没有「为什么 force」的理由字段，事后无法复核判断是否正当。
+    </div>
+    <div class="evidence">File: internal/mtwire/risk_admin_http.go
+  :47   Force bool `json:"force"`        ← 请求体裸字段，无任何附加约束
+  :77   }, body.Force)                   ← 直通引擎
+
+File: internal/risk/engine.go:250
+  if val != owner &amp;&amp; !force {
+      res.Skipped = append(res.Skipped, s.dim)
+      continue
+  }
+  ← force=true 时无差别放行：遗留 "1" 键与「另一真实用户的有效键」同等对待，
+    与 :221 注释「唯一合法用途：释放遗留 "1" 键」不符
+
+路由与鉴权（router/mt-router.go:220-223）：
+  adminRiskGroup := apiBase.Group("/admin/risk")
+  adminRiskGroup.Use(middleware.AdminAuth())
+  adminRiskGroup.POST("/trial-limit/release", app.HandleAdminReleaseTrialLimit)
+  ← 未挂 CriticalRateLimit / CriticalUserRateLimit
+  ← 同文件 5 个 money 端点（:87 :89 :100 :108 :117）均挂了 CriticalUserRateLimit
+
+AdminAuth 阈值（middleware/auth.go:187-191 → :132-139）：
+  role &gt;= common.RoleAdminUser(=10)，非 RoleRootUser(=100)
+
+测试缺口（internal/risk/engine_test.go:726）：
+  TestReleaseTrialLimit_LegacyValueRequiresForce 只覆盖 force 删 "1" 值键；
+  无任何用例描述 force 删「另一有效 userID 持有的键」的行为</div>
+    <div class="problem">
+      <strong>攻击前提：</strong>(a) 一个被话术欺骗的客服/运营（role≥10），或 (b) 一个被盗用的管理员会话。<br>
+      <strong>攻击路径：</strong>攻击者以「我点开收银台没付款，Trial 被吃了」为由联系客服（这正是该端点被文档化的合法用途），报出<strong>受害者所在设备的指纹对应值</strong>或反复施压直至客服使用 force；客服 force 释放 → 受害者（或该设备的合法占用者）的反刷键被删 → 攻击者的新账号可从该设备再领 Trial。由于无限流，脚本化的社工或被盗会话可批量清洗设备维度键。<br>
+      <strong>影响：</strong>反刷维度可被「客服通道」系统性洗掉——这恰恰是归属校验试图阻止的结果，只是多了一次交互回合。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复 —— 让 force 只能做它声称要做的事</div>
+      <code>// internal/risk/engine.go —— force 只豁免「归属不可考」的遗留键，
+// 绝不豁免「明确属于另一个真实用户」的有效键。
+if val != owner {
+    if !force || isValidOwner(val) {
+        // isValidOwner: 值能解析为 &gt;0 的 int64 → 是另一真实用户的有效占用
+        // 这种键任何情况下都不能按他人请求删除（要删须走该 owner 自己的释放）
+        res.Skipped = append(res.Skipped, s.dim)
+        continue
+    }
+    // 至此：force=true 且 val 非合法 userID（遗留 "1" / 脏值）→ 允许释放
+}
+
+// internal/mtwire/risk_admin_http.go —— 补齐问责链
+//   1. force=true 时要求非空 Reason 字段，否则返回入参非法
+//   2. 路由挂 CriticalRateLimit()（对齐同文件 5 个 money 端点）
+//   3. SysLog 审计行加入 reason=%q</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 1 小时 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 新增 <code>TestReleaseTrialLimit_ForceCannotStealValidOwnerKey</code>：A(7) 占用 devK，以 userID=8 + <code>force=true</code> 调释放，断言 device 维度<strong>仍进 Skipped</strong>、键仍存在、且 C(9) 从该设备购买<strong>仍被拒</strong>；保留既有 <code>LegacyValueRequiresForce</code> 验证遗留键仍可 force 释放。两条一起把 force 的边界钉死。
+    </div>
+  </div>
+
+  <!-- F5 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>5. DB root 口令已移出工作树但未轮换 —— 低熵真值仍在 6 个历史提交中，且是生产在用凭据</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Security</span>
+      <span>📍 deploy/docker-compose.test.yml:21,86 · deploy/ops/lib.sh:38</span>
+      <span>🎯 MYSQL_ROOT_PASSWORD</span>
+      <span>🔧 Modified</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>C1 修复做对了「今后不再写进 git」——四处内联全部改为 <code>${MYSQL_ROOT_PASSWORD:?}</code> fail-closed 引用。但<strong>真值本身没有轮换</strong>：服务器 <code>.env</code> 里沿用的就是那个此前以明文提交、长度 11 位的低熵人工口令，它至今仍是唯一生产数据库的 root 凭据，并永久留在 6 个历史提交中。提交信息本身诚实地标注了「沿用现值，<strong>未轮换</strong>」，因此这是一个<em>已知已披露</em>的残留，而非隐藏缺陷。<br><br>
+      定级考量（据实收窄）：仓库经 <code>gh repo view</code> 核实为 <strong>PRIVATE</strong>；MySQL 服务未发布 <code>ports:</code>，仅 compose 网络内可达。因此不存在直接的远程利用路径，不构成 Critical。但 C1 的立论前提正是「仓库读者不可信」——在该前提下，任何拥有（或曾经拥有）仓库读权限的人、任何一份泄漏的克隆、任何把仓库拉进过 CI 日志的流程，都掌握着当前生产库的 root 口令；配合任一容器沦陷或宿主立足点即可直升 root。「已移出工作树」并不改变这一点，只有轮换才改变。
+    </div>
+    <div class="evidence">git log -S &lt;口令字面量&gt; --all → 6 个提交仍含真值（值已按审计规范隐去）
+  f6d79ee  🔒 fix(deploy): DB root 密码去内联改 fail-closed（C1 第二例，四处全清）
+  67ea0b0  （同上，重复提交）
+  839c7c2  删除xml
+  493b830  📝 docs(core): 记录真实支付接入问题解决与错误码前缀规范
+  c29b65a  feat(ops/P1-OPS-03): ops toolkit — backup/restore/rollback/healthcheck…
+  （另 1 个）
+
+git grep &lt;口令字面量&gt; HEAD → 工作树已清除 ✓（本次修复确实生效）
+
+服务器现状（只读核验，未打印值）：
+  MYSQL_ROOT_PASSWORD: 已设置（长度 11）   ← 与历史明文长度一致，未轮换
+  SESSION_SECRET     : 已设置（长度 64）   ← 已按 openssl rand -hex 32 轮换
+  CRYPTO_SECRET      : 已设置（长度 64）   ← 已轮换且与 SESSION_SECRET 分权
+  /root/newapi-test/.env 权限 600 root:root ✓
+
+仓库可见性：gh repo view → {"isPrivate":true,"visibility":"PRIVATE"}
+MySQL 网络暴露：compose 中 mysql 服务无 ports:，仅 compose 网络内可达
+
+对照：同批的 SESSION_SECRET/CRYPTO_SECRET 已完成轮换（长度 64 = hex 32 字节），
+说明「去内联 + 轮换」的完整动作项目已经会做，DB 口令只差轮换这一步。</div>
+    <div class="problem">
+      <strong>攻击前提：</strong>拥有仓库读权限（含历史克隆），且获得任一容器内立足点或宿主访问。<br>
+      <strong>攻击路径：</strong><code>git log -S</code> 或 <code>git show &lt;旧提交&gt;:deploy/docker-compose.test.yml</code> 取出明文 → 从 app 容器（或任何同 compose 网络的容器）连 <code>mysql:3306</code> 以 root 登录 → 全库读写：用户余额、订单、代理分润、消耗日志、Token 明文。<br>
+      <strong>影响：</strong>唯一生产数据库的完全控制权。虽然需要前置立足点，但一旦发生，凭据环节不构成任何额外阻力。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复 —— 三步同做，否则 app 连不上库</div>
+      <code># 注意：MYSQL_ROOT_PASSWORD 仅在数据卷【首次初始化】时生效（compose 注释已说明），
+# 对存量卷必须先在库内改密，再同步 .env，最后重启 app。低峰执行。
+
+# 1) 库内改密（两个 host 都要改）
+docker compose -p newapi_test --env-file /root/newapi-test/.env \
+  -f /root/newapi-test/deploy/docker-compose.test.yml exec -T mysql \
+  mysql -uroot -p"$OLD" -e "
+    ALTER USER 'root'@'%'         IDENTIFIED BY '$NEW';
+    ALTER USER 'root'@'localhost' IDENTIFIED BY '$NEW';
+    FLUSH PRIVILEGES;"
+
+# 2) 同步 .env（600），$NEW 用 openssl rand -base64 24 生成
+sed -i "s|^MYSQL_ROOT_PASSWORD=.*|MYSQL_ROOT_PASSWORD=$NEW|" /root/newapi-test/.env
+
+# 3) 重启 app 让连接串生效，并跑一次巡检确认
+docker compose -p newapi_test --env-file /root/newapi-test/.env \
+  -f /root/newapi-test/deploy/docker-compose.test.yml up -d app
+/root/newapi-test/deploy/ops/healthcheck.sh</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 30 分钟（低峰窗口执行 + 验证） &nbsp;·&nbsp; <strong>回归测试建议：</strong> 轮换后立即执行 <code>healthcheck.sh</code>（app <code>/api/status</code> 应 200）与 <code>backup.sh</code>（验证 mysqldump 仍能以新口令连上，避免备份链在下一次 cron 才暴露断裂）；另在 preflight 中加一条断言：<code>git grep</code> 工作树无任何 <code>MYSQL_ROOT_PASSWORD=</code> 真值行。历史提交中的旧值在轮换后即成死字符串，如需彻底洁净可后续 BFG 洗历史（非阻塞）。
+    </div>
+  </div>
+
+  <!-- F6 -->
+  <div class="finding severity-medium">
+    <div class="finding-header">
+      <h4>6. Del 在全部三个测试替身中零覆写 —— 本批头号修复（补偿回滚）的失败路径无任何测试</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Testing（Subtype: HappyPathOnly）</span>
+      <span>📍 internal/risk/engine_test.go:58,85,98 · engine.go:198,202</span>
+      <span>🎯 kvErrOn / kvSetNXErrOnKey / kvSetNXErrOnce</span>
+      <span>🔧 Added（测试新增但未覆盖该面）</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>本批的核心生产改动是 <code>checkTrialLimit</code> 里那两行 <code>_ = e.kv.Del(ctx, claimed...)</code>——注意错误被<strong>显式丢弃</strong>，注释把它定性为「尽力而为，Del 失败仅多留痕」。这是一个明确的设计决策，理应有测试固定它。但仓库里三个 KVCache 测试替身（<code>kvErrOn:58</code>、<code>kvSetNXErrOnKey:85</code>、<code>kvSetNXErrOnce:98</code>）<strong>没有任何一个覆写 <code>Del</code></strong>，全部透传给底层 MemKVCache。后果有两层：<br>
+      ① <strong>无法注入 Del 失败</strong>——「Del 失败时仍返回原始业务错误、不 panic、不改变返回语义」这个行为从未被验证；<br>
+      ② <strong>无法断言 Del 的入参</strong>——「只删本次 claimed、绝不多删」这个安全性质，目前只能通过「后续 Get 查不到键」间接推断，无法直接证明没有误删其他键。<br><br>
+      当前所有回滚测试都走 happy path（Del 必然成功）。顺带一个死字段佐证测试件年久失修：<code>kvErrOn</code> 声明了 <code>expire bool</code>（<code>engine_test.go:60</code>）却没有对应的 <code>Expire</code> 覆写方法。
+    </div>
+    <div class="evidence">File: internal/risk/engine_test.go —— 三个替身的覆写方法清单
+  kvErrOn         (:58)  覆写 Incr(:63) / Get(:70) / SetNX(:77)   → 无 Del
+  kvSetNXErrOnKey (:85)  覆写 SetNX(:90)                          → 无 Del
+  kvSetNXErrOnce  (:98)  覆写 SetNX(:104)                         → 无 Del
+  （另 getErrKV 仅覆写 Get，为本批新增）
+  → 全仓无任何测试替身能注入 Del 失败或记录 Del 入参
+
+被测但未被覆盖的生产代码（internal/risk/engine.go）：
+  :198   _ = e.kv.Del(ctx, claimed...)   ← 错误显式丢弃，无测试
+  :202   _ = e.kv.Del(ctx, claimed...)   ← 错误显式丢弃，无测试
+  :257   if err := e.kv.Del(ctx, keys...); err != nil { ... }  ← 此处错误有返回，
+         但同样无替身能触发该分支
+
+死字段（测试件失修佐证）：
+  engine_test.go:60  expire bool   ← 声明了但无对应 Expire 覆写方法
+
+对照：本批为 Get 新增了 getErrKV 替身并写了 TestReleaseTrialLimit_GetErrorPropagates，
+说明「给新调用的原语配错误替身」这个动作作者是会做的，Del 只是被漏掉了。</div>
+    <div class="problem">
+      <strong>为什么产生虚假信心：</strong>回滚相关测试有 5 条且全绿（<code>TrialLoserLeavesNoResidue</code>、<code>TrialLoserDoesNotPoisonRealName</code>、<code>TrialErrorMidLoopRollsBack</code>、<code>TrialMidLoopErrorHealthyRetrySucceeds</code>、<code>CrossUserOwnershipGuard</code> 末段），看起来补偿逻辑覆盖充分。但它们共享同一个隐含前提：Del 永远成功。生产用的是 Redis——网络抖动、连接池耗尽、Redis OOM/只读都会让 Del 失败，而这恰恰是注释专门讨论过的场景。真实故障期间的行为（是否仍返回正确的业务错误码、是否留下部分回滚的中间态）目前无测试描述。<br>
+      <strong>建议动作：</strong>保留现有测试并补充（Keep but augment）。
+    </div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复 —— 补一个可注错、可取证的 Del 替身</div>
+      <code>// internal/risk/engine_test.go
+type kvDelSpy struct {
+    KVCache
+    mu      sync.Mutex
+    calls   [][]string   // 记录每次 Del 的入参，用于断言「只删该删的」
+    failNow bool         // 置真则 Del 返回 errBoom
+}
+
+func (k *kvDelSpy) Del(ctx context.Context, keys ...string) error {
+    k.mu.Lock()
+    k.calls = append(k.calls, append([]string(nil), keys...))
+    k.mu.Unlock()
+    if k.failNow {
+        return errBoom
+    }
+    return k.KVCache.Del(ctx, keys...)
+}</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 1 小时 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 用该替身加三条：(a) <code>TestTrialRollback_DelFailureStillReturnsBusinessError</code>——Del 注错，断言 <code>checkTrialLimit</code> 仍返回 <code>ErrPurchaseLimitExceeded</code>（而非 Del 的错误）且不 panic；(b) <code>TestTrialRollback_DeletesOnlyClaimedKeys</code>——断言 <code>calls</code> 恰为本次 claimed 的键集合，一个不多；(c) <code>TestReleaseTrialLimit_DelErrorPropagates</code>——覆盖 <code>engine.go:257</code> 那条有返回值的错误分支。
+    </div>
+  </div>
+
+  <!-- F7 -->
+  <div class="finding severity-low">
+    <div class="finding-header">
+      <h4>7. RedisKVCache.Expire(ttl&lt;=0) 不清除 TTL，MemKVCache 清除 —— 接口契约与生产实现不符，而全部测试跑在假件上</h4>
+      <span class="badge badge-low">Low</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Testing / Stability</span>
+      <span>📍 internal/risk/rediskv.go:49-51 · memkv.go:98-100 · port.go:105</span>
+      <span>🎯 KVCache.Expire</span>
+      <span>🔧 既有（本批未改，但被新增的 Get 依赖暴露）</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong><code>port.go:105</code> 的接口契约写明「<code>ttl&lt;=0</code> 表示清除过期」。<code>MemKVCache.Expire</code> 照做（把 <code>expireAt</code> 置零）；<code>RedisKVCache.Expire</code> 在 <code>ttl&lt;=0</code> 时<strong>直接 <code>return nil</code> 什么也不做</strong>，已有 TTL 保持不变。两个实现在同一契约下行为相反，而<strong>全部单元测试都跑在 MemKVCache 上</strong>——假件比真件更符合契约，测试永远不会发现这个分歧。<br><br>
+      当前不可达（所有调用点传的都是正数 ttl：<code>checkRPM</code> 传 <code>RateWindow</code>、非 Trial 限购传 <code>PurchaseDedupTTL&gt;0</code>），所以定为 Low。但它是一个成型的陷阱：这正是 CLAUDE.md <strong>C8</strong> 记录过的模式——「SQLite 上的全绿计量测试为空锁路径盖绿章」，假件与真件语义不一致时，绿色测试是无效证明。本批新增的 <code>Get</code> 调用让 KVCache 的契约面变得更重要，值得顺手对齐。
+    </div>
+    <div class="evidence">契约（internal/risk/port.go:105）：
+  // Expire 为已存在的 key 设置/刷新过期时长；ttl&lt;=0 表示清除过期。
+
+MemKVCache.Expire（memkv.go:98-100）—— 符合契约：
+  if ttl &lt;= 0 { e.expireAt = time.Time{} }   ← 清除
+  ...
+
+RedisKVCache.Expire（rediskv.go:49-51）—— 不符合契约：
+  if ttl &lt;= 0 { return nil }                 ← 静默不作为，已有 TTL 保留
+
+当前调用点均传正数，故不可达：
+  engine.go:120  e.kv.Expire(ctx, key, e.cfg.RateWindow)      RateWindow&gt;0（normalize 保证）
+  engine.go:142  e.kv.Expire(ctx, key, e.cfg.PurchaseDedupTTL) 仅在 &gt;0 时调用
+
+生产注入的是 Redis（internal/mtwire/wire.go:196-197）：
+  riskEngine = risk.NewEngine(risk.NewRedisKVCache(common.RDB), ...)
+全部单测注入的是 Mem（engine_test.go 各处 NewMemKVCache(nil)）</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// internal/risk/rediskv.go —— 兑现契约
+func (r *RedisKVCache) Expire(ctx context.Context, key string, ttl time.Duration) error {
+    if ttl &lt;= 0 {
+        return r.rdb.Persist(ctx, key).Err()   // PERSIST：移除已有 TTL
+    }
+    return r.rdb.Expire(ctx, key, ttl).Err()
+}</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 20 分钟 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 写一组<strong>契约测试</strong>（table-driven），对「任意 KVCache 实现」断言同一批语义（Get 区分空值与不存在、SetNX ttl&lt;=0 永不过期、Expire ttl&lt;=0 清除、Del 空列表 no-op），MemKVCache 在单测中跑，RedisKVCache 用 build tag 或 <code>testing.Short()</code> 跳过、在服务器 CI 上连真实 Redis 跑。这样假件与真件的分歧会被结构性地挡住，而不是靠人工比对。
+    </div>
+  </div>
+
+  <!-- F8 -->
+  <div class="finding severity-low">
+    <div class="finding-header">
+      <h4>8. ReleaseTrialLimit 对 user 维恒报 Released —— 审计日志与 API 响应无法区分「真的释放了」与「本来就没有」</h4>
+      <span class="badge badge-low">Low</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Observability</span>
+      <span>📍 internal/risk/engine.go:231-232 · internal/mtwire/risk_admin_http.go:71</span>
+      <span>🎯 ReleaseTrialLimit / HandleAdminReleaseTrialLimit</span>
+      <span>🔧 Added</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong><code>TrialReleaseResult</code> 的设计初衷写在 <code>port.go:129-130</code>：「让后台端点能<strong>如实</strong>回报哪些维度真的释放了，而非笼统的 <code>released=true</code>」。但 user 维度是<strong>无条件</strong>加入 <code>Released</code> 的（<code>engine.go:231-232</code>，先 append 再 Del），键本来就不存在时同样上报「已释放」；<code>plan_id&gt;0</code> 分支更是硬编码 <code>res.Released = []string{"purchase"}</code>（<code>risk_admin_http.go:71</code>），完全不看实际结果。于是新结构体在这两条路径上并没有比旧的 <code>released=true</code> 更如实。<br><br>
+      共享维度（realname/device）的回报是准确的（先 Get 判存在与归属），所以问题局限在 user 与 purchase 两维。对一个反刷控件的审计轨迹而言，「我释放了 X」与「X 本来就没被占用」在事后复核时是完全不同的结论——尤其在排查「这个用户的资格到底被谁、在什么时候释放过」时。
+    </div>
+    <div class="evidence">File: internal/risk/engine.go:229-232
+  owner := strconv.FormatInt(userID, 10)
+  res := TrialReleaseResult{}
+  keys := []string{trialKey("user", owner)}
+  res.Released = append(res.Released, "user")   ← 无条件，未先 Get 判存在
+
+对照同函数内共享维度的处理（:243-255）—— 这部分是准确的：
+  val, found, err := e.kv.Get(ctx, k)
+  if !found { continue }              ← 不存在则不计入任何列表
+  if val != owner &amp;&amp; !force { Skipped } else { Released }
+
+File: internal/mtwire/risk_admin_http.go:70-71
+  err = admin.ReleasePurchaseLimit(ctx, body.PlanID, body.UserID)
+  res.Released = []string{"purchase"}   ← 硬编码，不反映实际删除结果
+
+项目自身测试确认这是当前契约（engine_test.go:757 AbsentSharedKeysIdempotent）：
+  // 共享维度键全不存在的场景下仍断言：
+  if !containsDim(res.Released, "user") { t.Fatalf("user dim must always release…") }
+
+审计日志因此同样失真（risk_admin_http.go:87-89）：
+  "… released=%v skipped=%v" → 恒含 user，无论是否真有键被删</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// internal/risk/engine.go —— user 维同样先判存在再上报
+userK := trialKey("user", owner)
+var keys []string
+if _, found, err := e.kv.Get(ctx, userK); err != nil {
+    return TrialReleaseResult{}, err
+} else if found {
+    keys = append(keys, userK)
+    res.Released = append(res.Released, "user")
+}
+// （user 维无跨用户共享问题，故只判存在、不判归属，语义不变）
+
+// internal/mtwire/risk_admin_http.go —— purchase 分支同理，
+// 让 ReleasePurchaseLimit 返回「是否真的删了键」而非仅 error。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 30 分钟（含改 <code>AbsentSharedKeysIdempotent</code> 的断言） &nbsp;·&nbsp; <strong>回归测试建议：</strong> 修改 <code>TestReleaseTrialLimit_AbsentSharedKeysIdempotent</code>：对一个从未购买过的 userID 调释放，断言 <code>Released</code> 为<strong>空</strong>（而非含 "user"）、<code>Skipped</code> 为空、且不返回错误（幂等语义不变）；再加一条对已占用用户的释放，断言 <code>Released</code> 含 "user"。
+    </div>
+  </div>
+
+  <!-- F9 -->
+  <div class="finding severity-low">
+    <div class="finding-header">
+      <h4>9. restore.sh 的 EXIT trap 在原文件已被剪枝时删掉安全副本 —— 恢复完成后目标快照两个名字都不存在</h4>
+      <span class="badge badge-low">Low</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Data Integrity（Subtype: BackupRestore）</span>
+      <span>📍 deploy/ops/restore.sh:38-42</span>
+      <span>🎯 SAFE_SRC 硬链接 + trap EXIT</span>
+      <span>🔧 Added</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>受威胁的不变量：</strong>「用于恢复的历史快照，在恢复流程结束后仍然可用（可重复恢复 / 可再次校验）」。<br><br>
+      <strong>问题：</strong>本次修复本身是正确的：用点号前缀 + 硬链接把恢复目标移出 <code>db-*.sql.gz</code> 剪枝 glob，让强制预备份的 <code>prune_keep</code> 删不掉它。但 <code>trap 'rm -f -- "$SAFE_SRC"' EXIT</code> 会在脚本结束时删除这个安全副本——<strong>而当剪枝确实删掉了原文件时，这一删就意味着该快照的两个名字都没有了，文件被彻底回收</strong>。修复保护了「恢复过程中」，没有保护「恢复之后」。<br><br>
+      触发场景恰是修复注释自己描述的那一个：恢复「手上最旧的一份快照」（每日 cron + <code>KEEP=7</code> 下，目标正好第 7 新）。数据已经进了数据库，所以不是数据丢失；但如果恢复本身选错了快照、或需要再次比对原始文件，那份「损坏前状态的唯一拷贝」已经不在了。<br><br>
+      次要一点：<code>trap ... EXIT</code> 会覆盖任何既有 EXIT trap。当前 <code>lib.sh</code> 与 <code>restore.sh</code> 均无其他 EXIT trap（已核实），故暂无冲突，但后续给 lib.sh 加清理 trap 时会被静默吃掉。
+    </div>
+    <div class="evidence">File: deploy/ops/restore.sh:38-42
+  ensure_backup_dir
+  SAFE_SRC="$BACKUP_DIR/.restore-src-$$.sql.gz"
+  ln -f -- "$BACKUP" "$SAFE_SRC" 2&gt;/dev/null || cp -a -- "$BACKUP" "$SAFE_SRC" \
+    || die "无法为恢复目标建立安全副本：$BACKUP → $SAFE_SRC"
+  trap 'rm -f -- "$SAFE_SRC"' EXIT      ← 无论原文件是否还在，退出即删副本
+
+剪枝会删掉原文件的条件（lib.sh:112-118 + backup.sh:67）：
+  prune_keep "$BACKUP_DIR/db-*.sql.gz"
+  ls -1t $pattern | tail -n +"$((KEEP + 1))" | xargs rm    KEEP=7
+  → 预备份新增第 8 份 → 原第 7 新（即恢复目标）被挤出保留窗口并 rm
+
+序列：
+  1. ln 建硬链接 .restore-src-$$.sql.gz   （inode 引用计数 2）
+  2. backup.sh 预备份 → prune 删 db-&lt;ts&gt;.sql.gz（引用计数 1，文件仍活）
+  3. gunzip 从 SAFE_SRC 导入                        ← 修复生效，恢复成功
+  4. trap EXIT: rm SAFE_SRC                （引用计数 0，文件被回收）← 快照消失
+
+已核实无 trap 冲突：grep "trap" lib.sh → 无；restore.sh 仅此一处</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复 —— 原文件没了就把副本改名顶上，而不是删掉</div>
+      <code># deploy/ops/restore.sh —— 退出清理时保住唯一拷贝
+cleanup_safe_src() {
+  [ -e "$SAFE_SRC" ] || return 0
+  if [ -e "$BACKUP" ]; then
+    rm -f -- "$SAFE_SRC"            # 原文件仍在 → 副本是纯冗余，可删
+  else
+    # 原文件已被预备份剪枝回收 → 副本是该快照的唯一拷贝，改回正规名保留
+    mv -f -- "$SAFE_SRC" "$BACKUP" \
+      && log "恢复目标已被预备份剪枝删除，已由安全副本还原：$BACKUP"
+  fi
+}
+trap cleanup_safe_src EXIT</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 30 分钟 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 扩展作者已做的沙盒用例：造 7 份 <code>db-*.sql.gz</code>，以最旧一份为恢复目标跑完整流程（用桩替换 mysql 导入），断言<strong>脚本结束后该目标文件仍存在且内容完整</strong>（当前实现下会不存在，用例即刻变红）；再补一条「原文件未被剪枝」的场景，断言副本已清理、无 <code>.restore-src-*</code> 残留。
+    </div>
+  </div>
+
+  <!-- F10 -->
+  <div class="finding severity-info">
+    <div class="finding-header">
+      <h4>10. 新的失实注释两处 —— 恰在本批 RETRO 把「承重假注释」列为反模式的同时产生</h4>
+      <span class="badge badge-info">Info</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Documentation</span>
+      <span>📍 internal/risk/rediskv.go:55 · internal/mtwire/http.go:227</span>
+      <span>🎯 注释与实现不符</span>
+      <span>🔧 Added / 既有</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>问题：</strong>本批 RETRO 新增了一条复盘，把「以『X 不可能』为由合法化缺陷的承重假注释」明确列为反模式，并要求「前提变动后必须重新审计」。与此同时，同一子系统里存在两处新的事实性错误注释：<br>
+      ① <code>rediskv.go:55</code> 称「go-redis 空 keys 会 panic」——查实 go-redis v8 <code>commands.go:494-503</code>，客户端只是构造 <code>args=["del"]</code> 发出，不 panic；报错的是 Redis <strong>服务端</strong>（<code>ERR wrong number of arguments</code>）。短路判断本身正确且必要（<code>engine.go:198/202</code> 确实会传空 <code>claimed</code>），只是理由写错了。<br>
+      ② <code>http.go:227</code> 称派生公式用「<strong>规整</strong> UA」——实际代码（<code>:236</code>）对 UA 只做了 <code>TrimSpace</code>，无大小写归一、无版本号归一、无长度截断。这处措辞会让读者以为指纹对 UA 微小变化是稳定的，而事实相反（见 F1）。<br><br>
+      两处都不造成运行期故障，但按项目自己刚立的规矩，它们正是「未来读者会据此做出错误判断」的那类注释——尤其第 ② 条直接掩盖了 F1。
+    </div>
+    <div class="evidence">① internal/risk/rediskv.go:55
+  // 注释称：go-redis 空 keys 会 panic
+  实测依据：go-redis v8.11.5 commands.go:494-503
+    args := make([]interface{}, 1+len(keys)); args[0] = "del"; …
+    → 无 panic 路径；空 keys 时由 Redis 服务端回 ERR wrong number of arguments
+  结论：短路 return nil 正确且必要，理由陈述失实
+
+② internal/mtwire/http.go:227 vs :236
+  注释：「归一：ClientIP + "\x00" + 规整 UA」
+  代码：ua := strings.TrimSpace(c.GetHeader("User-Agent"))
+  → 「规整」的全部内容 = 去首尾空白
+
+对照本批 RETRO 新增条目（RETRO.md，「承重假注释」复盘）：
+  「代码注释里任何『X 不可能/无原语/无法做到』式的辩护，
+    在依赖的前提变动后必须重新审计……不是让旧注释继续把缺陷合法化」</div>
+    <div class="fix-box">
+      <div class="fix-label">最小修复</div>
+      <code>// internal/risk/rediskv.go:55 —— 改为准确理由
+// 空 keys 短路：Redis 服务端对零参数 DEL 返回 ERR wrong number of arguments，
+// 而 checkTrialLimit 的补偿回滚确实会传空 claimed（首维即判负时），故必须短路。
+
+// internal/mtwire/http.go:227 —— 删除「规整」措辞，如实描述
+// 归一：ClientIP + "\x00" + User-Agent 原串（仅去首尾空白，不做任何归一化——
+// 故 UA 一字之差即不同指纹，见 F1；修复 F1 后本行随之调整）。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 10 分钟 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 注释类问题无法用单测锁定，建议在 code review 清单里加一条与本批 RETRO 呼应的检查项：「凡注释中出现『不可能 / 无法 / 会 panic / 已归一』等事实性断言，须能指出验证它的代码位置或依赖源码行号」。
+    </div>
+  </div>
+
+  <!-- F11 -->
+  <div class="finding severity-info">
+    <div class="finding-header">
+      <h4>11.【既有背景，非本批引入】Redis 未配置时风控引擎为 nil，全部限购直接放行 —— 本批全部加固的价值上限</h4>
+      <span class="badge badge-info">Info</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Security</span>
+      <span>📍 internal/mtwire/wire.go:194-200 · internal/mtwire/risk_purchase.go:22-24</span>
+      <span>🎯 riskEngine 装配</span>
+      <span>🔧 既有（本批未触及）</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>说明：</strong>按增量审计规则，既有问题除非被本次改动放大否则不报告。此条列为 Info 而非计分发现，因为不列出会让本批改动的实际价值被高估。<br><br>
+      <code>wire.go:194</code> 仅在 <code>common.RedisEnabled &amp;&amp; common.RDB != nil</code> 时构造风控引擎，否则 <code>riskEngine</code> 为 nil；而 <code>risk_purchase.go:22-24</code> 对 nil 引擎的处理是 <code>return nil</code>——<strong>直接放行</strong>。即：Redis 未配置或初始化失败时，Trial 三维去重、非 Trial 每用户限购<strong>全部静默失效</strong>，这是一个 fail-open 的安全控件。本批投入的全部加固（归属校验、补偿回滚、服务端指纹）都建立在「Redis 在线」这个前提上。<br><br>
+      当前生产 Redis 已配置且在跑（<code>healthcheck.sh</code> 实测容器 running），故不是活跃缺陷。但值得登记：这是整条限购链路里唯一的「一个依赖挂掉 = 控件完全消失」的环节，与本批体现的 fail-closed 取向（Del 失败宁可多留痕、归属不符默认拒删）方向相反。
+    </div>
+    <div class="evidence">File: internal/mtwire/wire.go:194-200
+  var riskEngine risk.RiskEngine
+  if common.RedisEnabled &amp;&amp; common.RDB != nil {
+      riskEngine = risk.NewEngine(risk.NewRedisKVCache(common.RDB), ...)
+  }
+  // else → riskEngine 保持 nil
+
+File: internal/mtwire/risk_purchase.go:22-24
+  if a.eng == nil {
+      return nil          ← 放行：无任何限购检查
+  }
+
+RedisEnabled 的取值路径（common/redis.go:17,25-28）：
+  默认 true；InitRedisClient 在 REDIS_CONN_STRING 未设时置为 false
+
+对比同批的 fail-closed 取向：
+  engine.go:165-166  「补偿是尽力而为：Del 失败仅多留痕（fail-closed 方向）」
+  engine.go:250      「归属不符默认拒删」
+  lib.sh:41-45       「DB 口令缺失即中止」
+  → 唯独「风控依赖缺失」是 fail-open</div>
+    <div class="fix-box">
+      <div class="fix-label">建议（非本批范围，供排期参考）</div>
+      <code>两个方向，按业务容忍度二选一：
+  A. fail-closed：riskEngine 为 nil 时，对 Trial 这类「最强限购」档直接拒绝购买
+     （返回明确错误码，如 RISK_ENGINE_UNAVAILABLE），普通档放行。
+     代价：Redis 抖动期间 Trial 不可售；收益：反刷控件永不静默消失。
+  B. 启动期硬校验：若配置声明启用了限购功能，则 Redis 未就绪时拒绝启动
+     （fail-fast），避免「以为有防护实际没有」的静默状态。
+无论哪种，都应至少加一条启动日志与告警：
+  「风控引擎未装配 —— 全部购买限制当前无效」，而不是静默放行。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> 2 小时（含决策与告警接入） &nbsp;·&nbsp; <strong>回归测试建议：</strong> <code>TestPurchase_RiskEngineUnavailableIsNotSilent</code>：以 nil 引擎构造 App，调购买，断言（按选定方向）返回明确错误码，或至少断言产生了一条 WARN 级日志——核心是「不得静默放行」。
+    </div>
+  </div>
+
+  <!-- F12 -->
+  <div class="finding severity-info">
+    <div class="finding-header">
+      <h4>12.【既有背景，审计期实测发现】生产巡检恒报 2 项异常 + 磁盘 89% 逼近阈值 —— 告警信噪比与 restore 链路的隐患</h4>
+      <span class="badge badge-info">Info</span>
+      <span class="badge badge-confirmed">Confirmed</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Observability</span>
+      <span>📍 deploy/ops/healthcheck.sh（生产实跑）</span>
+      <span>🎯 巡检项与磁盘水位</span>
+      <span>🔧 既有</span>
+      <span>🎓 置信度 High</span>
+    </div>
+    <div class="problem">
+      <strong>说明：</strong>这两条不在本次 diff 范围内，是核实 F3 是否已发作时实跑 <code>healthcheck.sh</code> 顺带观测到的生产事实。列为 Info 供参考。<br><br>
+      ① <strong>巡检恒红</strong>：<code>auth-service</code>（:8180 mock 支付页）按 CLAUDE.md 记载已进入退役状态、容器未启动，但 <code>healthcheck.sh</code> 仍在检查它，导致每 5 分钟固定报「2 项异常」、退出码恒为 2。若 <code>ALERT_WEBHOOK</code> 已接机器人，则告警恒响；即便未接，日志里也永远是红的——真实故障发生时无法与常态噪声区分。这直接削弱 C5 所依赖的告警能力。<br>
+      ② <strong>磁盘 89%</strong>：阈值是 90%，已在触发边缘。与本批改动的关联在于 <code>restore.sh</code>：它的第一步是<strong>强制</strong>预备份，失败即中止（这是刻意设计，「连给现态拍照都做不到就不该覆盖它」）。磁盘一旦满，<code>backup.sh</code> 失败 → 预备份失败 → <strong>restore 整条路径不可用</strong>。即磁盘水位是恢复能力的前置依赖。
+    </div>
+    <div class="evidence">生产实跑（ssh newapi628，ALERT_WEBHOOK 置空以避免外发告警）：
+  ────────── healthcheck @ 2026-07-18 13:10:48 栈=newapi_test ──────────
+  ✓ app /api/status 正常（:3100, Host=tokendream.wedreamhub.com）
+  ✗ auth /auth/healthz 异常（:8180）
+  ✓ 容器 app running（health=n/a）
+  ✗ 服务 auth-service 无容器（未启动）
+  ✓ 容器 mysql running（health=n/a）
+  ✓ 容器 redis running（health=n/a）
+  ✓ 磁盘使用率 89% &lt; 90%
+  ✓ 内存使用率 19% &lt; 90%
+  [wrn] 巡检发现 2 项异常。
+  [退出码 2]
+
+cron 配置（deploy/ops/go-live.md:143）：
+  */5 * * * *  ALERT_WEBHOOK= /root/newapi-test/deploy/ops/healthcheck.sh …
+
+CLAUDE.md 记载 auth-service 状态：「/auth/ → 8180（mock 支付页，退役中）」
+restore.sh 对磁盘的隐含依赖（restore.sh:47-48）：
+  "$(dirname "$0")/backup.sh" || die "恢复前备份失败——已中止，绝不在无保险快照时覆盖生产库"</div>
+    <div class="fix-box">
+      <div class="fix-label">建议</div>
+      <code># ① 让巡检反映真实期望拓扑：把 auth-service 从必检项移出
+#    （用开关而非删除，便于日后恢复）
+CHECK_AUTH="${CHECK_AUTH:-0}"     # auth-service 已退役，默认不检
+[ "$CHECK_AUTH" = "1" ] && { …原有两项检查… }
+
+# ② 磁盘：先看大头再决定
+ssh newapi628 'du -sh /root/backups /root/deploy-archives /var/lib/docker 2>/dev/null | sort -h'
+#    备份保留 KEEP=7、源码归档保留 7 份，若占比高可下调或外挂存储；
+#    另建议把磁盘告警阈值从 90% 降到 85%，给 restore 的强制预备份留出余量。</code>
+    </div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>⏱ 预估工作量：</strong> ① 20 分钟；② 视清理结果而定，先 30 分钟排查 &nbsp;·&nbsp; <strong>回归测试建议：</strong> 修改后实跑 <code>healthcheck.sh</code>，断言退出码为 <strong>0</strong>——让「绿色」重新成为有信息量的信号，这是所有后续告警可信度的前提。
+    </div>
+  </div>
+
+  <!-- ════════ 维度分节 ════════ -->
+
+  <h3 class="section-title" id="security">🔒 Security</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 4 个生产 Go 文件改动后全文；<code>deviceFingerprint</code> 两个分量的可控性（查实 gin v1.9.1 <code>context.go:771-778</code> 源码而非凭记忆，确认 <code>TrustedPlatform</code> 分支直接回显头且不校验 TCP 源）；<code>router/trusted_ip.go:21</code> + 全仓零 <code>SetTrustedProxies</code>；admin 端点完整 14 层中间件链与 <code>AdminAuth</code>（<code>middleware/auth.go:132-139,187-191</code>，role≥10）；<code>git grep 'Group("/api'</code> 核 C2 合规；<code>git log -S</code> 核历史凭据留存；<code>gh repo view</code> 核仓库可见性；<code>ssh</code> 只读核验服务器 <code>.env</code> 键存在性与权限（未打印任何值）。</p>
+      <p><strong>排除 / 限制：</strong> 未做动态渗透（未对生产站发起真实绕过请求）；CF 面板侧配置（SSL 模式、WAF）不可见；源站 nginx 的 CF-only allow/deny 规则以 CLAUDE.md 记载与既往验证为准，本次未重新取证。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>设备指纹含攻击者完全可控的 User-Agent，换头即得全新终身键（F1）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>force 是请求体裸 bool，归属校验被同一操作者一键绕过，且不限于遗留键（F4）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>DB root 口令未轮换，低熵真值仍在 6 个历史提交中且为生产在用凭据（F5）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>【既有】Redis 未配置时风控引擎为 nil，全部限购 fail-open 静默放行（F11）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证安全</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 客户端自报的 <code>device_id</code>/<code>real_name_id</code> 已从请求体彻底移除——「填受害者标识定向剥夺其 Trial」的武器化路径确已关闭</div>
+        <div class="check-item"><span class="check">✓</span> C2 合规：新端点挂 <code>apiBase.Group("/admin/risk")</code>，完整继承 RouteTag/gzip/BodyStorageCleanup/GlobalAPIRateLimit；全仓生产代码仅两处 <code>Group("/api")</code></div>
+        <div class="check-item"><span class="check">✓</span> 后台释放端点有 <code>AdminAuth</code> 鉴权（role≥10）+ 双层审计（<code>beginAdminAudit</code>/<code>finishAdminAudit</code> + handler 内 <code>SysLog</code> 记 operator/force/released/skipped）</div>
+        <div class="check-item"><span class="check">✓</span> 购买端点挂 <code>CriticalUserRateLimit</code>（20 次/20 分钟，按 <code>user_id</code> 计桶、桶键不含 IP，免疫伪造头绕过）</div>
+        <div class="check-item"><span class="check">✓</span> 归属校验的默认方向正确：值不符即拒删（fail-closed），遗留无归属键同样默认拒</div>
+        <div class="check-item"><span class="check">✓</span> 键值改记占用者 <code>userID</code>（而非无意义的 "1"），为归属判定提供了必要的信息基础</div>
+        <div class="check-item"><span class="check">✓</span> C1 方向已落实：compose 两处 + lib.sh + README 四处内联全清，工作树 <code>git grep</code> 无残留真值</div>
+        <div class="check-item"><span class="check">✓</span> <code>SESSION_SECRET</code> / <code>CRYPTO_SECRET</code> 已完成轮换（各 64 字符 = hex 32 字节）且分权，服务器 <code>.env</code> 权限 600</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="stability">⚡ Stability</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> <code>checkTrialLimit</code> 与 <code>ReleaseTrialLimit</code> 全部分支逐行阅读；<code>Purchase</code> 7 步调用序列与 3 个 error return 点；<code>grep "defer|Release|rollback"</code> 确认零补偿；本机实跑 <code>go test -race -count=1 ./internal/risk/</code> 通过（1.285s）；沙盒实跑复现 <code>lib.sh</code> source 期 exit 对无关脚本的击穿；SSH 实跑服务器 <code>healthcheck.sh</code> 确认当前运行态与 <code>/api/status</code> 版本。</p>
+      <p><strong>排除 / 限制：</strong> 未在 MySQL 栈做并发压测（本机无 MySQL；按 C8 记载 SQLite/内存件不具行锁语义，真实并发回归须上服务器）；未做 Redis 故障注入；未实跑破坏性的 restore 流程。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>DB 口令 fail-closed 作用域过宽，rollback.sh / healthcheck.sh 被 source 期 exit 1 卡死（F3）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>RedisKVCache.Expire 与接口契约及内存实现行为相反，测试全跑在假件上（F7）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>【既有】生产巡检恒报 2 项异常 + 磁盘 89% 逼近阈值，后者是 restore 的前置依赖（F12）</td><td><span class="badge badge-info">Info</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证稳健</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> <code>go test -race</code> 实跑干净，无数据竞争告警</div>
+        <div class="check-item"><span class="check">✓</span> 错误路径与判负路径都做了补偿回滚，且两条路径各有专门测试（<code>TrialErrorMidLoopRollsBack</code> / <code>TrialLoserLeavesNoResidue</code>）</div>
+        <div class="check-item"><span class="check">✓</span> 瞬时错误如实传播而非吞掉（<code>TrialMidLoopErrorHealthyRetrySucceeds</code> 锁死「抖动后重试仍可购买」）</div>
+        <div class="check-item"><span class="check">✓</span> <code>ReleaseTrialLimit</code> 的 Get 错误路径提前返回，不会在信息不全时执行删除（fail-safe 顺序正确）</div>
+        <div class="check-item"><span class="check">✓</span> <code>errRiskEngineOff</code> 对 nil 引擎做类型断言保护，不 panic，返回明确错误码</div>
+        <div class="check-item"><span class="check">✓</span> restore.sh 保留「强制预备份、失败即中止、不提供逃生口」的正确取向</div>
+        <div class="check-item"><span class="check">✓</span> <code>ensure_backup_dir</code> 确实定义于 <code>lib.sh:110</code>——未重蹈 audit#8「调用未定义 helper」的覆辙</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="data-integrity">🧱 Data Integrity</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 占键点（<code>subscription.go:61</code> → <code>engine.go:196</code> SetNX）与两处 DB 写（<code>:72</code> <code>CreateOrder</code>、<code>:90</code> <code>SavePendingPurchase</code>）及外部网关调用（<code>http.go:338</code> <code>CreatePay</code>）的先后顺序与事务边界；核实 <code>PurchaseDedupTTL=0</code> 经 <code>wire.go:198</code> 落到生产、由 <code>rediskv.go:41-44</code> 写成 Redis 无 TTL 键；<code>restore.sh</code> 全部改动与 <code>prune_keep</code> glob（<code>lib.sh:112-118</code>）、<code>backup.sh:67-69</code> 的剪枝范围与命名模式比对；核实 trap 无冲突。</p>
+      <p><strong>排除 / 限制：</strong> 未在服务器实跑 restore（破坏性操作，需人在环强确认）；未核对生产 Redis 中现存 <code>risk:trial:*</code> 键的实际数量与分布（可作为 F2 影响面的量化后续）。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>占键与下单跨 Redis/MySQL/支付网关非原子，补偿只做在函数内，失败即永久烧号（F2）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>restore.sh 的 EXIT trap 在原文件已被剪枝时删掉安全副本，快照事后彻底消失（F9）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证可靠</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 剪枝免疫的修法本身正确：点号前缀 + 非 <code>db-*</code> 命名确实落在 <code>prune_keep</code> glob 之外</div>
+        <div class="check-item"><span class="check">✓</span> 硬链接优先、跨文件系统回落 <code>cp -a</code>、两者皆败即 <code>die</code>——降级链完整，无静默失败</div>
+        <div class="check-item"><span class="check">✓</span> 导入一律从安全副本读取，原文件被剪与否都不影响恢复本身</div>
+        <div class="check-item"><span class="check">✓</span> <code>Del</code> 幂等语义在两个实现中一致（键不存在不报错、空列表 no-op）</div>
+        <div class="check-item"><span class="check">✓</span> <code>Get</code> 在两个实现中都能正确区分「键不存在」与「键存在但值为空串」；Redis 侧 <code>redis.Nil</code> 正确转 <code>found=false</code> 而非当错误抛出</div>
+        <div class="check-item"><span class="check">✓</span> 补偿删除只针对本次 <code>SetNX</code> 成功写入、值为本人 <code>userID</code> 的键，不触碰赢家占用</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="concurrency">🔀 Concurrency</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 对补偿回滚做了三种编排的逐交错分析（同用户并发重复、跨账号共享 realname、跨账号共享 device），核实 <code>claimed</code> 的生命周期与出作用域时机；读取全部 5 个 KVCache 实现的 <code>SetNX</code>/<code>Get</code>/<code>Del</code> 源码确认原子性语义（<code>memkv.go:74-86,63-71,106-113</code>；<code>rediskv.go:28-45,56-61</code>）；本机实跑 <code>go test -race</code>；分析 <code>barrierGetKV</code> 屏障对当前实现的实际作用。</p>
+      <p><strong>排除 / 限制：</strong> 未做高并发长时压测；未在真实 Redis 上验证（内存假件的 SetNX 由互斥锁保证原子，Redis 由单线程命令模型保证，两者语义一致但未实测）；<code>barrierGetKV</code> 对当前实现不触发，故跨账号并发用例的实际强度等价于 n=4 朴素压测。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 无发现（并发正确性经分析与 -race 实跑均未见问题）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 单赢家性质在引入补偿回滚后依然成立：回滚只删本次 <code>SetNX</code> 刚写入的键，且 <code>devK</code> 位于循环末位、永不进入回滚集合</div>
+        <div class="check-item"><span class="check">✓</span> 键顺序 <code>[user, realname, device]</code> 的设计正确：同用户并发重复在首维即判负，零键占用、无需补偿</div>
+        <div class="check-item"><span class="check">✓</span> <code>userK</code> 按 <code>userID</code> 建键、不跨用户共享，其回滚不存在误删他人占用的可能</div>
+        <div class="check-item"><span class="check">✓</span> 共享维度回滚后的「瞬时误拒」是自愈的：败者重试即可，且反刷不变量（每实名/每设备 1 份）在任何交错下都不被突破</div>
+        <div class="check-item"><span class="check">✓</span> 决胜完全建立在 <code>SetNX</code> 的原子返回值上，未退回「先 Get 预检」的非原子模式</div>
+        <div class="check-item"><span class="check">✓</span> <code>MemKVCache</code> 全方法互斥锁保护，惰性过期在锁内完成；<code>RedisKVCache</code> 依赖 Redis 单线程命令语义</div>
+        <div class="check-item"><span class="check">✓</span> <code>Get→Del</code> 非原子窗口已被作者显式识别并书面接受（人工低频客服操作），非疏漏</div>
+        <div class="check-item"><span class="check">✓</span> <code>-race</code> 在 CI 与本机均实际执行，非仅声明</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="testing-authenticity">🧪 Testing Authenticity</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 新增 236 行测试全文逐行阅读；<code>engine_test.go</code> 全部 45 个测试函数名清单；3 个既有测试替身定义（<code>:58</code>/<code>:85</code>/<code>:98</code>）与本批新增的 <code>getErrKV</code>、<code>barrierGetKV</code>；判定每条断言的实际杀伤力（能否杀死对应回归）；本机实跑两个包的测试（均通过）；<code>grep --include='*_test.go'</code> 确认端点层零测试；比对 <code>MemKVCache</code> 与 <code>RedisKVCache</code> 的行为差异面。</p>
+      <p><strong>排除 / 限制：</strong> 未跑 <code>go test -cover</code> 统计覆盖率（本维度关注真实信心而非覆盖率数字）；未对全部 45 个既有用例逐个做变异验证，仅复核了本批新增 7 个用例；RETRO 记录的「变异 2/2 杀死」为作者自述，本次未复现。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>Del 在全部三个测试替身中零覆写，补偿回滚的失败路径与「只删该删的」性质均无测试（F6）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>TestDeviceFingerprint 把「不同 UA 必须不同指纹」写成契约，等于把 F1 的缺陷固化进测试（F1 关联）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>RedisKVCache 与 MemKVCache 行为分歧而全部测试跑在假件上（F7）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">⚠️ 其它测试缺口（未单列为发现）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="cross">✗</span> <code>HandleAdminReleaseTrialLimit</code> 无任何端点层测试：未验证非管理员被拒、未验证 <code>force</code> 从请求体正确流转到引擎、未验证审计日志内容</div>
+        <div class="check-item"><span class="cross">✗</span> <code>force=true</code> 删除「另一有效用户持有的键」这一最危险行为无任何用例描述其预期</div>
+        <div class="check-item"><span class="cross">✗</span> <code>barrierGetKV</code> 对当前实现完全不触发（实现不调 <code>Get</code>），其 1 秒超时兜底意味着若日后引入不同键的 Get 预检，屏障会静默降级而非报错</div>
+        <div class="check-item"><span class="cross">✗</span> <code>kvErrOn.expire</code> 为死字段（<code>engine_test.go:60</code> 声明但无对应 <code>Expire</code> 覆写）</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证真实（这批测试的质量明显高于平均水平）</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> <code>TrialConcurrentCrossAccountSingleWinner</code> 是真守卫：作者主动标注了「同用户版本旧实现也能过」，并专门补了跨账号版本来堵住那个盲区</div>
+        <div class="check-item"><span class="check">✓</span> <code>CrossUserOwnershipGuard</code> 用行为断言而非内部状态：验「C 从同设备购买仍被拒」而不是「某个键还在」，测的是外部可观测后果</div>
+        <div class="check-item"><span class="check">✓</span> 错误注入替身定点精确（<code>kvSetNXErrOnKey</code> 按键注错、<code>kvSetNXErrOnce</code> 按调用序号注错），非笼统 mock</div>
+        <div class="check-item"><span class="check">✓</span> 无过度 mock：全部测试跑真实 <code>Engine</code> + 并发安全的内存 KV，替身只包一层错误注入</div>
+        <div class="check-item"><span class="check">✓</span> 生产代码零测试专用分支（无 <code>if isTest</code> 之类），测试走的是生产路径</div>
+        <div class="check-item"><span class="check">✓</span> 并发用例用 <code>-race</code> 实跑而非仅声明；RETRO 另记录了变异测试 2/2 杀死</div>
+        <div class="check-item"><span class="check">✓</span> 幂等、边界、错误传播三类路径都有专门用例，非只测 happy path</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="release">🚢 Release &amp; 运维</h3>
+
+  <div class="card">
+    <div class="card-header">🧭 覆盖说明</div>
+    <div class="card-body">
+      <p><strong>Coverage：</strong> High</p>
+      <p><strong>已检查证据：</strong> 4 个部署文件全部改动逐行阅读；<code>grep -c DB_PASS</code> 逐脚本统计实际使用；沙盒实跑复现 source 期 exit 击穿；<code>rollback.sh</code> 实际支持的参数（<code>--to</code>/<code>--list</code>，<code>--git</code> 已按 C6 废弃并给出明确指引）；<code>go-live.md:143</code> cron 配置与 <code>README.md:34</code> 部署步骤 ⑧ 自动回滚；SSH 实跑服务器 <code>/api/status</code> 版本核对（确认本批已上线）与 <code>healthcheck.sh</code>；只读核验 <code>.env</code> 三个 fail-closed 键的存在性与文件权限。</p>
+      <p><strong>排除 / 限制：</strong> 未实跑 <code>deploy.sh</code> 或 <code>rollback.sh</code>（会改动生产）；未实跑 restore；未验证 <code>docker compose config</code> 在缺 <code>.env</code> 时的插值失败行为（作者 RETRO 记录已在服务器 <code>/tmp</code> 副本验证 exit=15）。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">已确认 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个发现</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:100px">状态</th></tr></thead>
+          <tbody>
+            <tr><td>DB 口令 fail-closed 作用域过宽，回滚与巡检被无关凭据卡死（F3，撞 C6）</td><td><span class="badge badge-high">High</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>DB root 口令未轮换，真值仍在历史提交中（F5）</td><td><span class="badge badge-medium">Medium</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+            <tr><td>restore.sh 恢复目标事后被删（F9）；巡检恒红 + 磁盘 89%（F12）</td><td><span class="badge badge-low">Low</span></td><td><span class="badge badge-confirmed">Confirmed</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 已验证就绪</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> 版本身份可溯源：<code>/api/status</code> 实测 <code>52204cb-20260717-232116</code>，含 git 短 SHA + 时间戳、无 <code>-dirty</code>，C6 的版本自报要求已落实</div>
+        <div class="check-item"><span class="check">✓</span> <code>rollback.sh</code> 已按 C6 删除必败的 <code>--git</code>，并在用户误用时给出明确的替代指引（<code>--to</code>/<code>--list</code>）</div>
+        <div class="check-item"><span class="check">✓</span> compose 的 <code>:?</code> fail-closed 带有中文说明性错误消息，缺失时拒绝部署而非静默回落</div>
+        <div class="check-item"><span class="check">✓</span> compose 注释明确记录了「<code>MYSQL_ROOT_PASSWORD</code> 仅新卷首次初始化生效、存量卷改密须 ALTER USER」这一关键操作陷阱</div>
+        <div class="check-item"><span class="check">✓</span> <code>lib.sh</code> 的 DB_PASS 三级解析顺序合理（显式环境变量 &gt; <code>.env</code> &gt; 中止），<code>sed</code> 容忍两侧引号并取末条生效行</div>
+        <div class="check-item"><span class="check">✓</span> 服务器 <code>.env</code> 权限 600 root:root，三个 fail-closed 键均已就位，本次部署不会被拦</div>
+        <div class="check-item"><span class="check">✓</span> <code>ops/README.md</code> 的 MySQL 口令明文已删除并替换为「只存服务器 <code>.env</code>」的指引</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="principles">📋 工程原则符合性</h3>
+
+  <div class="card">
+    <div class="card-header">违反项</div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>原则</th><th style="width:70px">次数</th><th style="width:100px">严重程度</th><th>区域</th></tr></thead>
+          <tbody>
+            <tr><td>不信任外部输入（反滥用信号不得由被监管方自选）</td><td>1</td><td><span class="badge badge-high">High</span></td><td><code>deviceFingerprint</code> 把客户端自报的 UA 放进唯一性键（F1）</td></tr>
+            <tr><td>原子性 / 事务边界完整</td><td>1</td><td><span class="badge badge-high">High</span></td><td><code>Purchase</code> 跨三层无补偿，占键泄漏（F2）</td></tr>
+            <tr><td>最小权限 / 最小作用域</td><td>1</td><td><span class="badge badge-high">High</span></td><td><code>lib.sh</code> 顶层 <code>exit 1</code> 击穿不相关脚本（F3）</td></tr>
+            <tr><td>控件不得由其防范对象自行绕过</td><td>1</td><td><span class="badge badge-medium">Medium</span></td><td><code>force</code> 与归属校验握在同一操作者手里（F4）</td></tr>
+            <tr><td>接口契约与实现一致</td><td>1</td><td><span class="badge badge-low">Low</span></td><td><code>Expire(ttl&lt;=0)</code> 两实现行为相反（F7）</td></tr>
+            <tr><td>如实报告（不谎报未发生的操作）</td><td>2</td><td><span class="badge badge-low">Low</span></td><td><code>Released</code> 恒含 user、purchase 分支硬编码（F8）</td></tr>
+            <tr><td>注释须与实现相符</td><td>2</td><td><span class="badge badge-info">Info</span></td><td><code>rediskv.go:55</code> panic 说法、<code>http.go:227</code>「规整 UA」（F10）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ 遵守的原则</div>
+    <div class="card-body">
+      <div class="check-list">
+        <div class="check-item"><span class="check">✓</span> Fail-closed 默认 — 归属不符默认拒删、遗留键默认拒、Del 失败宁可多留痕</div>
+        <div class="check-item"><span class="check">✓</span> 单一职责 — <code>deviceFingerprint</code>、<code>ReleaseTrialLimit</code>、<code>checkTrialLimit</code> 各自边界清晰</div>
+        <div class="check-item"><span class="check">✓</span> 消费者定义接口 — <code>risk</code> 包只声明自己依赖的 <code>KVCache</code>/<code>Clock</code> 等，不 import 兄弟业务模块</div>
+        <div class="check-item"><span class="check">✓</span> 可测试性 — 时钟与 KV 均可注入，错误注入替身定点精确</div>
+        <div class="check-item"><span class="check">✓</span> 显式优于隐式 — <code>TrialReleaseResult</code> 用逐维度结果替代笼统布尔（方向正确，落地差一点，见 F8）</div>
+        <div class="check-item"><span class="check">✓</span> 可追溯 — 注释与 RETRO 主动点名前提出处（提交 SHA）与「勿再引用」标注，反模式被显式记录</div>
+        <div class="check-item"><span class="check">✓</span> 棘轮纪律 — 每条修复都在 RETRO 留下复盘并提出候选规则（唯一问题是 F1 那条规则内容本身需要修正）</div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="fix-order">🎯 建议修复顺序</h3>
+
+  <div class="card">
+    <div class="card-header">
+      <span>⚡ 立即修复（这批代码已在生产运行）</span>
+      <span class="badge badge-high">High</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:50px">#</th><th>修复</th><th style="width:110px">工作量</th><th>不修的风险</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td><strong>F1</strong> 把 User-Agent 移出设备指纹的唯一性键；同步改掉 <code>http_test.go</code> 的反向断言，并撤回 RETRO 里同款措辞的候选棘轮规则</td>
+              <td>0.5 小时</td>
+              <td>设备维度对多账号农场零阻力，本批头号安全目标未达成；且规则一旦按 W3 升级为 CLAUDE.md 硬约束，缺陷将获得红线保护、更难纠正</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td><strong>F2</strong> 给 <code>Purchase</code> 错误路径加 defer 补偿释放（或把占键移到建单成功之后）</td>
+              <td>2–3 小时</td>
+              <td>任一次 DB 抖动或支付网关失败即永久烧毁一个用户（及同指纹用户）的终身 Trial 资格，零自动恢复，只能走客服</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td><strong>F3</strong> <code>lib.sh</code> 的 DB 口令校验改惰性 <code>require_db_pass()</code>，只由 backup/restore/reconcile 调用</td>
+              <td>20 分钟</td>
+              <td>一旦 <code>.env</code> 缺该键（旧配置恢复 / 新机重建），回滚与巡检同时失效——正是最需要它们的时刻，撞 C6</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span>📅 排期修复</span>
+      <span class="badge badge-medium">Medium</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:50px">#</th><th>修复</th><th style="width:110px">工作量</th></tr></thead>
+          <tbody>
+            <tr><td>4</td><td><strong>F5</strong> 轮换 DB root 口令（库内 ALTER USER + 同步 <code>.env</code> + 重启 app 三步同做，低峰执行）</td><td>30 分钟</td></tr>
+            <tr><td>5</td><td><strong>F4</strong> 收窄 <code>force</code>：只豁免归属不可考的遗留键，不豁免他人有效键；补 <code>reason</code> 必填字段；路由挂 <code>CriticalRateLimit</code></td><td>1 小时</td></tr>
+            <tr><td>6</td><td><strong>F6</strong> 补 <code>kvDelSpy</code> 测试替身，覆盖 Del 失败路径与「只删 claimed」入参断言</td><td>1 小时</td></tr>
+            <tr><td>7</td><td>补 <code>HandleAdminReleaseTrialLimit</code> 端点层测试（非管理员被拒 / force 流转 / 审计内容）</td><td>1 小时</td></tr>
+            <tr><td>8</td><td><strong>F9</strong> restore.sh 的 EXIT 清理改为「原文件已被剪枝则把副本改名顶上」</td><td>30 分钟</td></tr>
+            <tr><td>9</td><td><strong>F8</strong> <code>Released</code> 如实回报（user 维先判存在、purchase 分支反映实际结果）</td><td>30 分钟</td></tr>
+            <tr><td>10</td><td><strong>F7</strong> <code>RedisKVCache.Expire</code> 用 <code>Persist</code> 兑现契约；建立跨实现的契约测试</td><td>20 分钟 + 2 小时（契约测试）</td></tr>
+            <tr><td>11</td><td><strong>F10</strong> 修正两处失实注释</td><td>10 分钟</td></tr>
+            <tr><td>12</td><td><strong>F12</strong> 巡检移除已退役的 auth-service 检查（让绿色重新有信息量）；排查磁盘 89% 占用大头</td><td>50 分钟</td></tr>
+            <tr><td>13</td><td><strong>F11</strong> 决策并落地风控引擎缺失时的行为（fail-closed 或启动期 fail-fast），至少加告警，不得静默放行</td><td>2 小时</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <span>✅ 增量审计结论</span>
+      <span class="badge badge-high">Request changes</span>
+    </div>
+    <div class="card-body">
+      <p><strong>结论：Request changes（需修改）</strong>——但需注意语境：这批代码<strong>已经合入 main 并部署到生产</strong>（<code>/api/status</code> = <code>52204cb-20260717-232116</code>），所以这不是一个阻止合入的判定，而是「已上线代码需要一次补丁收口」。</p>
+      <p style="margin-top:12px">理由：三条 High 中有两条（F1、F2）意味着这批改动<strong>没有达成它自己宣称的目标</strong>——F1 使「反滥用信号只认服务端派生」只兑现了一半（武器化关闭、绕过未变），F2 使「Del 原语让补偿成为可能」只应用到了最内层作用域，而原始事故场景所在的事务边界仍在泄漏永久键。第三条 F3 是本批新引入的运维风险，且正面撞上项目自己的 C6 硬约束。三条修复合计约 3–4 小时，都是局部改动，不需要重构。</p>
+      <p style="margin-top:12px">同时应当明确记录：这批改动的<strong>方向全部正确</strong>，工程纪律（跨账号并发回归守卫、变异验证、双层审计、C2 路由合规、RETRO 自我纠错）明显高于常见水平。问题集中在一个可复述的模式上——<em>正确的机制只应用到了最内层的作用域</em>。建议把这一条本身作为候选棘轮规则记入 RETRO：「修复一个缺陷时，先确认该缺陷的完整作用域边界在哪里——补偿要补到事务边界而非函数边界，信号可信性要覆盖全部分量而非部分分量，fail-closed 要限定到真正依赖它的路径而非所有路径。」</p>
+    </div>
+  </div>
+
+  <h3 class="section-title">⚡ 速赢清单</h3>
+
+  <div class="win-grid">
+    <div class="win-card">
+      <div class="win-title">F3 · lib.sh 惰性校验</div>
+      <div class="win-meta">5 行改动 + 3 处调用 · 20 分钟 · 直接解除回滚与巡检的无关阻塞</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">F1 · 指纹去掉 UA 分量</div>
+      <div class="win-meta">4 行改动（含改测试）· 0.5 小时 · 让本批头号安全目标真正成立</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">F10 · 两处失实注释</div>
+      <div class="win-meta">2 行注释 · 10 分钟 · 呼应本批 RETRO 刚立的反模式</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">F7 · Expire 用 Persist</div>
+      <div class="win-meta">3 行改动 · 20 分钟 · 消除假件与真件的行为分歧</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">F8 · Released 如实回报</div>
+      <div class="win-meta">6 行改动 · 30 分钟 · 让反刷审计轨迹可复核</div>
+    </div>
+    <div class="win-card">
+      <div class="win-title">F12 · 巡检移除退役项</div>
+      <div class="win-meta">2 行改动 · 20 分钟 · 让 healthcheck 的绿色重新有信息量</div>
+    </div>
+  </div>
+
+  <div style="text-align:center;padding:40px 0 20px;color:var(--text-secondary);font-size:12px">
+    newapi628 增量深审 · 范围 8f68feb..52204cb（7 提交 / 13 文件 / +464 −52）· 模式 incremental + security + data-integrity + concurrency + testing-authenticity · 2026-07-18 · Claude Opus 4.8<br>
+    敏感凭据值已按审计规范隐去，仅记录路径、键名与风险。
+  </div>
+
+</div>
+
+<script>
+  const sections = document.querySelectorAll('[id]');
+  const navLinks = document.querySelectorAll('.sidebar-nav a');
+
+  const observer = new IntersectionObserver((entries) => {
+    let activeId = null;
+    entries.forEach(entry => {
+      if (entry.isIntersecting) activeId = entry.target.id;
+    });
+    if (activeId) {
+      navLinks.forEach(a => {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + activeId);
+      });
+    }
+  }, { rootMargin: '-10% 0px -60% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+
+  navLinks.forEach(a => {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+
+</body>
+</html>

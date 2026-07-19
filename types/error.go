@@ -399,7 +399,7 @@ func ErrOptionWithStatusCode(statusCode int) NewAPIErrorOptions {
 func ErrOptionWithHideErrMsg(replaceStr string) NewAPIErrorOptions {
 	return func(e *NewAPIError) {
 		if common.DebugEnabled {
-			fmt.Printf("ErrOptionWithHideErrMsg: %s, origin error: %s", replaceStr, e.Err)
+			fmt.Printf("ErrOptionWithHideErrMsg: replacement=%q origin_error_type=%T\n", replaceStr, e.Err)
 		}
 		e.Err = errors.New(replaceStr)
 	}

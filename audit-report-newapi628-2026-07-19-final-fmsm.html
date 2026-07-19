@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>newapi628 全仓代码审计报告</title>
+<style>
+  :root {
+    --sidebar-bg: #1a1f2e;
+    --sidebar-hover: #242a3d;
+    --sidebar-active: #2d3555;
+    --bg: #f0f3f7;
+    --card-bg: #ffffff;
+    --border: #e6eaef;
+    --text: #1e2233;
+    --text-secondary: #6b7394;
+    --accent: #3370ff;
+    --accent-light: #e8f0ff;
+    --success: #34c759;
+    --warning: #ff9500;
+    --danger: #ff3b30;
+    --info: #5ac8fa;
+    --badge-critical: #ff3b30;
+    --badge-high: #ff9500;
+    --badge-medium: #3370ff;
+    --badge-low: #8e8e93;
+    --badge-info: #5ac8fa;
+    --bar-bg: #e8eaed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    display: flex;
+    min-height: 100vh;
+    font-size: 15px;
+  }
+  .sidebar { width: 240px; background: var(--sidebar-bg); color: #fff; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  .sidebar-header .sub { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 4px; }
+  .sidebar-nav { padding: 8px 0; flex: 1; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 14px 20px; color: rgba(255,255,255,.6); text-decoration: none; font-size: 14px; transition: all .15s; border-left: 3px solid transparent; }
+  .sidebar-nav a:hover { background: var(--sidebar-hover); color: #fff; }
+  .sidebar-nav a.active { background: var(--sidebar-active); color: #fff; border-left-color: var(--accent); }
+  .sidebar-nav a .icon { width: 18px; text-align: center; font-size: 14px; }
+  .sidebar-footer { padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.3); }
+  .main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+  .page-header { margin-bottom: 32px; }
+  .page-header h2 { font-size: 26px; font-weight: 700; }
+  .page-header .meta { font-size: 14px; color: var(--text-secondary); margin-top: 6px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .page-header .meta span { display: flex; align-items: center; gap: 4px; }
+  .card { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .card-body { padding: 24px; }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .score-item { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); }
+  .score-item .label { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .4px; }
+  .score-item .bar-row { display: flex; align-items: center; gap: 12px; }
+  .score-item .bar-track { flex: 1; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .score-item .bar-fill { height: 100%; border-radius: 5px; transition: width .6s ease; }
+  .score-item .value { font-size: 22px; font-weight: 700; min-width: 52px; text-align: right; }
+  .score-item .grade { font-size: 15px; font-weight: 700; min-width: 22px; text-align: center; }
+  .bar-fill.s { background: linear-gradient(90deg, #34c759, #30d158); }
+  .bar-fill.a { background: linear-gradient(90deg, #3370ff, #5e8cff); }
+  .bar-fill.b { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .bar-fill.c { background: linear-gradient(90deg, #ff3b30, #ff6b61); }
+  .bar-fill.d { background: linear-gradient(90deg, #ff6b61, #ff9f91); }
+  .bar-fill.f { background: linear-gradient(90deg, #9b1d1a, #d63031); }
+  .grade-s { color: #34c759; } .grade-a { color: #3370ff; }
+  .grade-b { color: #ff9500; } .grade-c { color: #ff3b30; }
+  .grade-d { color: #ff6b61; } .grade-f { color: #9b1d1a; }
+  .overall-row { grid-column: 1 / -1; background: linear-gradient(135deg, #1a1f2e, #2d3555); border-color: transparent; }
+  .overall-row .label { color: rgba(255,255,255,.6); }
+  .overall-row .value { color: #fff; }
+  .overall-row .grade { color: #34c759; }
+  .overall-row .bar-fill { background: linear-gradient(90deg, #34c759, #30d158); }
+  .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat-card { flex: 1; min-width: 140px; padding: 20px 24px; background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); text-align: center; }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1.3; }
+  .stat-card .desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .finding { border-left: 4px solid var(--border); margin-bottom: 20px; padding: 20px 24px; border-radius: 0 10px 10px 0; background: #fafbfc; border: 1px solid var(--border); border-left-width: 4px; }
+  .finding.severity-critical { border-left-color: var(--badge-critical); }
+  .finding.severity-high { border-left-color: var(--badge-high); }
+  .finding.severity-medium { border-left-color: var(--badge-medium); }
+  .finding.severity-low { border-left-color: var(--badge-low); }
+  .finding.severity-info { border-left-color: var(--badge-info); }
+  .finding-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .finding-header h4 { font-size: 16px; font-weight: 600; flex: 1; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; line-height: 1.6; }
+  .badge-critical { background: #ffeae9; color: var(--badge-critical); }
+  .badge-high { background: #fff3e0; color: var(--badge-high); }
+  .badge-medium { background: var(--accent-light); color: var(--badge-medium); }
+  .badge-low { background: #f2f2f5; color: var(--badge-low); }
+  .badge-info { background: #e4f5ff; color: #007aff; }
+  .badge-confirmed { background: #e8ffe8; color: #248a3d; }
+  .badge-suspected { background: #fff8e1; color: #b8860b; }
+  .badge-s { background: #e8ffe8; color: #248a3d; }
+  .badge-a { background: var(--accent-light); color: var(--accent); }
+  .badge-b { background: #fff3e0; color: var(--warning); }
+  .badge-c { background: #ffeae9; color: var(--danger); }
+  .finding-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+  .finding-meta span { display: flex; align-items: center; gap: 4px; }
+  .finding .evidence { margin: 12px 0; padding: 14px 18px; background: #f0f2f5; border-radius: 8px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .finding .problem { font-size: 14px; margin: 12px 0; color: var(--text); line-height: 1.8; }
+  .finding .fix-box { margin-top: 12px; padding: 14px 18px; background: #f0f7ff; border-radius: 8px; border: 1px solid #d6e4ff; font-size: 13px; }
+  .finding .fix-box code { display: block; margin-top: 6px; padding: 12px 16px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .fix-label { font-weight: 600; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
+  .section-title { font-size: 20px; font-weight: 700; margin: 36px 0 20px; padding-bottom: 10px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 12px 16px; font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); background: #f8fafc; }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; }
+  .check-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.6; }
+  .check-item .check { color: var(--success); font-weight: 700; }
+  .check-item .cross { color: var(--danger); font-weight: 700; }
+  .win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .win-card { padding: 16px; background: linear-gradient(135deg, #f0f7ff, #e8f0ff); border-radius: 8px; border: 1px solid #d6e4ff; }
+  .win-card .win-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .win-card .win-meta { font-size: 11px; color: var(--text-secondary); }
+  .small { font-size: 13px; color: var(--text-secondary); }
+  .code-block { margin: 8px 0; padding: 14px 18px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; overflow-x: auto; white-space: pre; line-height: 1.7; }
+  .hl { color: #f7768e; font-weight: 600; } .cm { color: #565f89; }
+  .kw { color: #bb9af7; } .fn { color: #7aa2f7; }
+  .ty { color: #ff9e64; } .op { color: #89ddff; }
+  .str { color: #9ece6a; } .nu { color: #ff9e64; }
+  @media (max-width: 768px) { .sidebar { display: none; } .main { padding: 16px; } .score-grid { grid-template-columns: 1fr; } .stats-row { flex-direction: column; } .check-list { grid-template-columns: 1fr; } .win-grid { grid-template-columns: 1fr; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c1c7d0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a8adb8; }
+</style>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>newapi628</h1>
+    <div class="sub">Full · 2026-07-19 · R01 remediation · Codex self-audit</div>
+  </div>
+  <div class="sidebar-nav">
+    <a href="#summary"><span class="icon">📊</span> 摘要</a>
+    <a href="#executive-summary"><span class="icon">📝</span> 总体评估</a>
+    <a href="#coverage"><span class="icon">🧭</span> 覆盖矩阵</a>
+    <a href="#findings"><span class="icon">🔍</span> 详细发现</a>
+    <a href="#architecture"><span class="icon">🏗</span> 架构</a>
+    <a href="#security"><span class="icon">🔒</span> 安全</a>
+    <a href="#stability"><span class="icon">⚡</span> 稳定性</a>
+    <a href="#performance"><span class="icon">🚀</span> 性能</a>
+    <a href="#testing"><span class="icon">🧪</span> 测试</a>
+    <a href="#maintainability"><span class="icon">📐</span> 可维护性</a>
+    <a href="#design"><span class="icon">📋</span> 设计</a>
+    <a href="#release"><span class="icon">🚢</span> 发布</a>
+    <a href="#documentation"><span class="icon">📚</span> 文档</a>
+    <a href="#configuration"><span class="icon">⚙️</span> 配置</a>
+    <a href="#observability"><span class="icon">🩺</span> 可观测性</a>
+    <a href="#data-integrity"><span class="icon">🧱</span> 数据完整性</a>
+    <a href="#privacy"><span class="icon">🛡</span> 隐私</a>
+    <a href="#accessibility"><span class="icon">⌨️</span> 可访问性</a>
+    <a href="#supply-chain"><span class="icon">🔗</span> 供应链</a>
+    <a href="#cost"><span class="icon">💸</span> 成本</a>
+    <a href="#ai-safety"><span class="icon">🤖</span> AI 安全</a>
+    <a href="#fallback"><span class="icon">🪂</span> 降级与防御</a>
+    <a href="#testing-authenticity"><span class="icon">🧫</span> 测试真实性</a>
+    <a href="#type-safety"><span class="icon">🔤</span> 类型安全</a>
+    <a href="#frontend-state"><span class="icon">🖥</span> 前端状态</a>
+    <a href="#backend-api"><span class="icon">🔌</span> 后端 API</a>
+    <a href="#dependency-weight"><span class="icon">📦</span> 依赖重量</a>
+    <a href="#code-consistency"><span class="icon">🧹</span> 代码一致性</a>
+    <a href="#comment-coverage"><span class="icon">💬</span> 注释覆盖</a>
+    <a href="#principles"><span class="icon">📋</span> 设计原则</a>
+    <a href="#fix-order"><span class="icon">🎯</span> 修复顺序</a>
+  </div>
+  <div class="sidebar-footer">Fuck My Shit Mountain v1.0 format · Codex</div>
+</nav>
+
+<div class="main">
+  <div class="page-header" id="summary">
+    <h2>newapi628 全仓代码审计报告</h2>
+    <div class="meta">
+      <span>📅 2026-07-19</span>
+      <span>⏱ Evidence cutoff: 2026-07-19 19:55:23 +08:00</span>
+      <span>🔍 Full · 25 dimensions</span>
+      <span>🛠 Reviewer: Codex（自审；未调用 Claude）</span>
+      <span>🧾 Baseline: 93155552f101bfd963742e1e6c8b14c8dd17b199</span>
+      <span>🚫 No local Docker · No server deployment</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">📊 Score Dashboard / 评分面板</div>
+    <div class="card-body">
+      <div class="score-grid">
+        <div class="score-item">
+    <div class="label">Security</div>
+    <div class="bar-row">
+      <div class="bar-track"><div class="bar-fill a" style="width:78%"></div></div>
+      <span class="value grade-a">7.8</span>
+      <span class="grade grade-a">A</span>
+    </div>
+    <div class="small">已移除演示/弱默认凭据并补 fail-closed；仍有认证失效窗口与 Origin 纵深缺口</div>
+  </div>
+<div class="score-item">
+    <div class="label">Stability</div>
+    <div class="bar-row">
+      <div class="bar-track"><div class="bar-fill a" style="width:72%"></div></div>
+      <span class="value grade-a">7.2</span>
+      <span class="grade grade-a">A</span>
+    </div>
+    <div class="small">全量 race 通过、流式生命周期已收口；真实灾备与配置原子发布仍欠闭环</div>
+  </div>
+<div class="score-item">
+    <div class="label">Performance</div>
+    <div class="bar-row">
+      <div class="bar-track"><div class="bar-fill a" style="width:77%"></div></div>
+      <span class="value grade-a">7.7</span>
+      <span class="grade grade-a">A</span>
+    </div>
+    <div class="small">有界缓冲、COW 缓存与 bundle 预算已验证；未做生产负载压测</div>
+  </div>
+<div class="score-item">
+    <div class="label">Testing</div>
+    <div class="bar-row">
+      <div class="bar-track"><div class="bar-fill a" style="width:85%"></div></div>
+      <span class="value grade-a">8.5</span>
+      <span class="grade grade-a">A</span>
+    </div>
+    <div class="small">后端全量 race、四套前端与运维静态测试均通过；缺真实恢复/支付沙箱演练</div>
+  </div>
+<div class="score-item">
+    <div class="label">Maintainability</div>
+    <div class="bar-row">
+      <div class="bar-track"><div class="bar-fill b" style="width:68%"></div></div>
+      <span class="value grade-b">6.8</span>
+      <span class="grade grade-b">B</span>
+    </div>
+    <div class="small">文件体积门禁与拆分有效；1781 项脏工作区和裸全局配置拉低可审查性</div>
+  </div>
+<div class="score-item">
+    <div class="label">Design</div>
+    <div class="bar-row">
+      <div class="bar-track"><div class="bar-fill a" style="width:76%"></div></div>
+      <span class="value grade-a">7.6</span>
+      <span class="grade grade-a">A</span>
+    </div>
+    <div class="small">原生订阅已建立不可变订单/权益快照、结构化支付事实与唯一回执；运行时配置快照仍待统一</div>
+  </div>
+<div class="score-item">
+    <div class="label">Release</div>
+    <div class="bar-row">
+      <div class="bar-track"><div class="bar-fill b" style="width:67%"></div></div>
+      <span class="value grade-b">6.7</span>
+      <span class="grade grade-b">B</span>
+    </div>
+    <div class="small">R01 已完成代码级闭环；R02 仍是唯一 High，脏工作树仍降低发布可复现性</div>
+  </div>
+        <div class="score-item overall-row">
+          <div class="label">Overall</div>
+          <div class="bar-row">
+            <div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:75%;background:linear-gradient(90deg,#34c759,#30d158)"></div></div>
+            <span class="value" style="color:#fff">7.5</span>
+            <span class="grade" style="color:#34c759">A</span>
+          </div>
+          <div class="small" style="color:rgba(255,255,255,.68)">仍有 1 个 High（R02）发布阻断项；R07 的干净发布边界也未闭环。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="section-title" id="executive-summary">📝 Executive Summary / 总体评估</h3>
+  <div class="card">
+    <div class="card-header">📋 审计结论</div>
+    <div class="card-body">
+      <p><strong>项目概况：</strong>这是一个 Go 1.25+、Gin、GORM 的多供应商 AI API 网关，支持 SQLite/MySQL/PostgreSQL、Redis、多租户计费与 React 管理端，同时包含 Classic、Default、Orbit 与 Electron 多个交付面。本次检查覆盖生成报告前的完整脏工作树，而非仅 HEAD diff。</p>
+      <p style="margin-top:12px"><strong>结论：</strong>整体代码健康度为 <strong>7.5 / A</strong>。当前开放发现为 <strong>1 个 High、5 个 Medium、1 个 Low</strong>。R01 已完成代码级整改；但 R02 异地灾备/真实恢复演练和 R07 干净发布边界仍未闭环，因此<strong>不建议直接发布</strong>。</p>
+      <p style="margin-top:12px"><strong>本轮亮点：</strong>原生订阅现已在远端结账前固化不可变权益/支付快照，四类 provider 回调统一收敛为已验签支付事实，并以唯一回执、逐事件证据和管理员人工核账闭环保护权益授予；同时保留此前对演示凭据、stream 生命周期、缓存 stale-fill/race、Coze 轮询、Electron 导航、前端 preflight 与 CI 制品证明的整改。</p>
+      <p style="margin-top:12px"><strong>审计边界：</strong>遵守用户要求，没有调用 Claude、没有启动本地 Docker、没有 SSH 或服务器变更。没有执行真实 MySQL/PostgreSQL 迁移、支付/provider 沙箱、异地 restore、生产压测、Linux Electron 打包或 GitHub Environment 设置核验；报告不会把静态绿色门禁描述成这些运行面已被证明。</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">🗺 Project Map / 项目地图</div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>区域</th><th>入口 / 数据流</th><th>状态与边界</th><th>规模 / 风险热点</th></tr></thead>
+      <tbody>
+        <tr><td>Go Backend</td><td>main → router → controller → service → model</td><td>GORM 主库、Redis cache/risk、session/token auth</td><td>1124 个 Go 文件、约 212,709 行；计费、配置、缓存是热点</td></tr>
+        <tr><td>Relay</td><td>/v1、Gemini、Realtime → relay helpers → channel adapters</td><td>40+ provider、上游凭据、streaming/usage/billing</td><td>accepted-response、SSRF、reader lifecycle、零值 DTO</td></tr>
+        <tr><td>Multi-tenant</td><td>internal/mtwire + tenant/agent/tokenplan</td><td>共享 DB、master migration/seed、支付与分润</td><td>订单幂等、owner 鉴权、demo seed 安全</td></tr>
+        <tr><td>Default UI</td><td>React 19 / TypeScript / Rsbuild / Base UI</td><td>i18next 六语言、admin/user state</td><td>443 TS + 813 TSX，约 218,216 行；bundle/i18n/type gates</td></tr>
+        <tr><td>Classic / Orbit / Electron</td><td>React 18/Vite、Orbit、桌面 shell</td><td>独立依赖树、loopback 与导航安全</td><td>多构建面的一致性与依赖重量</td></tr>
+        <tr><td>Delivery / Ops</td><td>9 个 GitHub workflows、Compose、deploy/ops</td><td>registry/release environments、SBOM、签名、备份恢复</td><td>外部环境保护、least privilege、异地灾备</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">🛠 Remediated During Audit / 本次已修复</div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>范围</th><th>落地结果</th><th>验证</th></tr></thead>
+      <tbody>
+        <tr><td>Critical · 演示/启动凭据</td><td>删除历史文档口令与 dormant 弱 root bootstrap；保留 demo 用户名默认禁用，生产禁止自动 seed，状态无法确认时启动 fail-closed</td><td>internal/mtwire 安全回归 + race；凭据模式复扫无残留</td></tr>
+        <tr><td>High · Streaming</td><td>OpenAI realtime reader 可中断并 join；accepted 后不错误 retry；计费错误不再吞掉；Claude/Gemini 生命周期同步收口</td><td>真实本地 WebSocket 对测试 + race</td></tr>
+        <tr><td>High · Cache concurrency</td><td>channel COW、pricing/rate 锁、auth generation+Lua CAS、subscription-plan version key 与 FOR UPDATE</td><td>model/middleware/controller/relay race</td></tr>
+        <tr><td>High · R01 原生订阅支付一致性</td><td>远端结账前固化 v1 权益、金额、币种、产品、支付方式与模式快照；四条原生支付路径转换为结构化已验签事实，模型精确比对、唯一回执幂等完成，异常进入人工核账而不授予权益</td><td>快照漂移、事实不符、重放、重复付款、跨订单交易复用、历史订单、迁移、人工处置与四渠道事实测试 + 最终全仓 race/vet</td></tr>
+        <tr><td>Security / Stability</td><td>SSRF dial-time 保护、XSS 净化、OAuth 校验、pprof 回环、CSPRNG、Coze timeout、Electron 导航与随机端口</td><td>针对性测试、vet、前端/桌面测试</td></tr>
+        <tr><td>Release / Supply chain</td><td>Actions SHA pin、SBOM/provenance/cosign、release/commit 绑定、draft release、ops 防误操作测试</td><td>actionlint、YAML、40-char pin、ops 14/14</td></tr>
+        <tr><td>F01–F31 与 R01 复核</td><td>计费/退款/事务/恢复脚本/前端/i18n/stream/strict JSON 与原生订阅支付一致性的代码层问题已关闭；R02 单独保留为真实灾备证明缺口</td><td>当前工作树源码与门禁重新取证，不以旧整改说明代替证据</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">✅ Verification Gates / 验证门禁</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span>Backend preflight：deploy lint、context secret exclusion、gofmt/size、go build、go vet、go test ./... -race</div>
+      <div class="check-item"><span class="check">✓</span>R01 专项：model/controller/service race + vet；四渠道事实、核账 API、迁移、重放与异常状态回归通过</div>
+      <div class="check-item"><span class="check">✓</span>Default：136 tests、typecheck/lint/format/i18n/knip/build/bundle budget</div>
+      <div class="check-item"><span class="check">✓</span>Classic：13 tests + lint/format/build</div>
+      <div class="check-item"><span class="check">✓</span>Orbit：31 tests + audit/typecheck/lint/build</div>
+      <div class="check-item"><span class="check">✓</span>Electron：4 navigation tests + audit</div>
+      <div class="check-item"><span class="check">✓</span>JS dependency audits：Default/Electron/Orbit 均 0 已知漏洞；go mod verify 通过</div>
+      <div class="check-item"><span class="check">✓</span>Ops 14/14；actionlint/YAML 通过；外部 Actions 全部固定 40 位 SHA</div>
+      <div class="check-item"><span class="cross">✗</span>未运行 Docker、服务器部署、真实 restore、支付/provider sandbox、生产压测</div>
+    </div></div>
+  </div>
+
+  <h3 class="section-title" id="coverage">🧭 Coverage Matrix / 覆盖矩阵</h3>
+  <div class="card">
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>Dimension</th><th style="width:110px">Coverage</th><th>Evidence inspected</th><th>Exclusions / limits</th></tr></thead>
+      <tbody><tr><td>Architecture</td><td><span class="badge badge-confirmed">High</span></td><td>Go 分层、relay/internal 边界、前端与交付目录；go list/build；1124 个 Go 文件</td><td>未对 40+ 上游做逐个运行时 trace</td></tr>
+<tr><td>Security</td><td><span class="badge badge-confirmed">High</span></td><td>认证中间件、OAuth/SSRF/XSS、缓存、seed、凭据与工作流；支付回调验签后才构造 canonical fact</td><td>无真实渗透、OAuth/provider 沙箱</td></tr>
+<tr><td>Stability</td><td><span class="badge badge-confirmed">High</span></td><td>全量 go test -race；stream/轮询/补偿/缓存并发；支付核账 ACK 与瞬时 DB 错误重试</td><td>无生产故障注入与真实灾备</td></tr>
+<tr><td>Performance</td><td><span class="badge badge-suspected">Medium</span></td><td>缓冲预算、COW 缓存、bundle 预算、knip/build</td><td>无生产压测、CPU/heap profile</td></tr>
+<tr><td>Testing</td><td><span class="badge badge-confirmed">High</span></td><td>Go 全量 race；四 provider 支付事实、快照/回执/迁移/核账回归；default/classic/orbit/electron；ops 14/14</td><td>无真实支付/上游/恢复 E2E</td></tr>
+<tr><td>Maintainability</td><td><span class="badge badge-confirmed">High</span></td><td>文件体积门禁、gofmt/vet、拆分与 wrapper 规则</td><td>巨大脏工作树降低可审查性</td></tr>
+<tr><td>Design</td><td><span class="badge badge-confirmed">High</span></td><td>事务、幂等、缓存 generation、不可变 checkout snapshot、typed fact 与 unique receipt</td><td>原生订阅支付事实已统一；运行时配置快照仍未统一</td></tr>
+<tr><td>Release</td><td><span class="badge badge-confirmed">High</span></td><td>9 个 workflow、actionlint、YAML、SHA pin、SBOM/签名路径</td><td>GitHub 环境设置与真实部署未核验</td></tr>
+<tr><td>Documentation</td><td><span class="badge badge-confirmed">High</span></td><td>高风险 runbook、env 示例、demo 文档与历史凭据清理</td><td>未逐句校验全部历史任务文档</td></tr>
+<tr><td>Configuration</td><td><span class="badge badge-confirmed">High</span></td><td>Option 校验、发布路径、Compose、secrets fail-closed</td><td>外部 GitHub 设置不可见；运行态仍逐项发布</td></tr>
+<tr><td>Observability</td><td><span class="badge badge-suspected">Medium</span></td><td>health、request ID、pprof、日志与对账任务</td><td>无生产日志/指标/告警投递样本</td></tr>
+<tr><td>Data Integrity</td><td><span class="badge badge-confirmed">High</span></td><td>计费事务、FOR UPDATE、不可变订阅快照、唯一支付回执、逐事件证据与人工核账状态</td><td>无真实网关回调、MySQL/PostgreSQL migration 或 PITR 演练</td></tr>
+<tr><td>Privacy</td><td><span class="badge badge-suspected">Medium</span></td><td>日志/响应敏感面、文档凭据、缓存键 HMAC；支付只存 canonical fact 与 payload hash</td><td>无生产数据保留审计或 DPIA</td></tr>
+<tr><td>Accessibility</td><td><span class="badge badge-suspected">Medium</span></td><td>前端 lint/test/build、i18n、组件语义检查</td><td>无人工键盘/屏幕阅读器测试</td></tr>
+<tr><td>Supply Chain</td><td><span class="badge badge-confirmed">High</span></td><td>go mod verify、三套 JS audit、Actions SHA pin、SBOM/provenance/cosign</td><td>未构建/拉取生产镜像，base digest 未锁</td></tr>
+<tr><td>Cost</td><td><span class="badge badge-suspected">Medium</span></td><td>计费不变量、订阅 canonical decimal 金额与固定两位舍入策略、缓冲/并发预算、bundle budget</td><td>无真实流量成本或 provider 账单核对</td></tr>
+<tr><td>AI Safety</td><td><span class="badge badge-suspected">Medium</span></td><td>敏感词、请求边界、SSRF、body limit、provider adapter</td><td>无对抗 prompt/输出安全评测</td></tr>
+<tr><td>Fallback</td><td><span class="badge badge-confirmed">High</span></td><td>Redis 回源、退款/补偿、skip-retry、轮询超时、恢复脚本</td><td>未做真实 Redis/DB/主机故障演练</td></tr>
+<tr><td>Testing Authenticity</td><td><span class="badge badge-confirmed">High</span></td><td>真实 websocket 对、miniredis barrier、race、静态 ops 回归</td><td>缺 provider sandbox 与实际 restore</td></tr>
+<tr><td>Type Safety</td><td><span class="badge badge-confirmed">High</span></td><td>Go/TS typecheck、optional pointer、strict JSON；支付 adapter 收敛为 VerifiedSubscriptionPaymentFact</td><td>其他遗留动态 map/裸全局与 float64 金额仍存在</td></tr>
+<tr><td>Frontend State</td><td><span class="badge badge-confirmed">High</span></td><td>default 136、classic 13、orbit 31、electron 4；build/i18n</td><td>无浏览器人工 E2E 与视觉回归全集</td></tr>
+<tr><td>Backend API</td><td><span class="badge badge-confirmed">High</span></td><td>路由中间件、鉴权、限流、严格 JSON、四类支付完成契约与管理员核账 API</td><td>无真实上游/支付回调联调</td></tr>
+<tr><td>Dependency Weight</td><td><span class="badge badge-confirmed">High</span></td><td>go mod verify、audit、knip、bundle 预算</td><td>未测容器镜像体积；基础 tag 可变</td></tr>
+<tr><td>Code Consistency</td><td><span class="badge badge-confirmed">High</span></td><td>gofmt、vet、diff-check、Go/脚本体积与 JSON wrapper</td><td>1781 项变更尚未拆成可审查提交</td></tr>
+<tr><td>Comment Coverage</td><td><span class="badge badge-suspected">Medium</span></td><td>并发、缓存、财务、运维危险路径注释抽查</td><td>无定量注释覆盖；历史说明可能漂移</td></tr></tbody>
+    </table></div></div>
+  </div>
+
+  <h3 class="section-title">📈 Finding Statistics / 发现统计</h3>
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">7</div><div class="desc">Open findings</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-critical)">0</div><div class="desc">Critical</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-high)">1</div><div class="desc">High</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">5</div><div class="desc">Medium</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-low)">1</div><div class="desc">Low</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-info)">0</div><div class="desc">Info</div></div>
+  </div>
+  <div class="card"><div class="card-body"><p><strong>状态：</strong>6 个代码/仓库事实已确认；R06 为 1 个外部设置核验项。R01 保留为已修复审计轨迹，不计入上述开放发现。</p></div></div>
+
+  <h3 class="section-title" id="top-risks">⚠️ Top Risks / 最高风险</h3>
+  <div class="card"><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+    <thead><tr><th style="width:55px">#</th><th>Finding</th><th style="width:95px">Severity</th><th>Category</th></tr></thead>
+    <tbody><tr><td>1</td><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Recovery / Release</td></tr>
+<tr><td>2</td><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Configuration / Least Privilege / Supply Chain</td></tr>
+<tr><td>3</td><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Configuration / Concurrency</td></tr>
+<tr><td>4</td><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Authentication / Distributed Cache</td></tr>
+<tr><td>5</td><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · 发布 job 引用了 GitHub Environment，但保护规则无法由仓库证明</a></td><td><span class="badge badge-medium">Medium</span></td><td>Release Governance</td></tr>
+<tr><td>6</td><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Maintainability / Release</td></tr>
+<tr><td>7</td><td><a href="#finding-r08" style="color:var(--accent);text-decoration:none">R08 · Realtime WebSocket 无条件接受任意 Origin</a></td><td><span class="badge badge-low">Low</span></td><td>WebSocket / Defense in Depth</td></tr></tbody>
+  </table></div></div></div>
+
+  <h3 class="section-title" id="findings">🔍 Detailed Findings / 详细发现</h3>
+  <div class="finding severity-info" id="finding-r01">
+    <div class="finding-header">
+      <h4>R01. 已修复：原生订阅订单已固化不可变结账/权益快照，并按已验证支付事实完成</h4>
+      <span class="badge badge-confirmed">Resolved</span>
+      <span class="badge badge-confirmed">Confidence: High</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Category: Data Integrity / Payment</span>
+      <span>📌 Status: Remediated · Code-level verified</span>
+      <span>⚠ Historical severity: High</span>
+      <span>📍 Affected area: model/subscription*.go；controller/subscription_payment_*.go；controller/topup_*.go；router/api-router.go</span>
+    </div>
+    <div class="problem"><strong>Problem（历史）：</strong>下单时的套餐权益曾不是订单的不可变事实，回调完成时会读取可能已被管理员修改后的当前套餐；模型完成接口也缺少统一的网关金额、币种、产品与模式事实。</div>
+    <div class="evidence"><strong>Evidence：</strong>
+model/subscription.go:108 起 — SubscriptionOrder 持久化版本化结账快照、哈希、预期金额/币种/产品/模式及 review/resolution 字段；UserSubscription 固化套餐标题和额度重置策略。
+model/subscription_checkout.go:389、907 起 — CreatePendingSubscriptionOrder 在远端请求前冻结套餐和支付契约；CompleteSubscriptionOrder(VerifiedSubscriptionPaymentFact) 精确校验 provider、交易/结账标识、金额、实付、币种来源、产品、方式、模式、快照与 payload hash，并只按快照授予权益。
+model/subscription_checkout.go — SubscriptionPaymentReceipt 形成 provider+transaction 唯一幂等边界；SubscriptionPaymentEvidence 逐次保存冲突回调的有界 canonical fact，不落原始 PII payload。
+model/subscription_reconciliation.go:26、127 起 — 管理员可分页查看待核账订单，并以 grant/close/externally_refunded 追加式决策幂等处置；跨订单交易冲突禁止补发。
+model/subscription_migration.go、model/main.go — 增加回执/证据/决策迁移，回填旧回执、核账元数据和权益策略；缺失套餐安全降级为不重置。
+Stripe、Creem、Epay、Waffo Pancake 均传递签名覆盖的产品/快照/金额事实；本地订单先于远端会话创建，回调可用性不再依赖“允许新订单”的商品目录配置。</div>
+    <div class="problem"><strong>Why it matters：</strong>原行为会破坏支付与权益之间的可追溯一致性，使价格或套餐变更影响已经进入结账的客户，并让跨网关重复付款或交易号冲突缺少统一处置边界。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>用户下单后、回调前管理员修改套餐有效期、额度或升级组；合法回调曾可能按新套餐创建订阅。另一现实场景是同一 provider transaction 被用于另一本地订单，若没有唯一回执会重复授予权益。</div>
+    <div class="problem"><strong>Outcome：</strong>套餐在下单后的修改或删除不再改变已付款权益；事实不一致、第二笔付款、交易号跨订单复用和历史无快照订单会进入可追踪人工核账并由 webhook ACK，但不会自动获得订阅。</div>
+    <div class="fix-box"><div class="fix-label">Minimal fix · Implemented</div><div>订单、权益、支付预期、provider 已验签事实、唯一回执、逐事件证据和人工决策形成版本化不可变边界；余额购买也使用同一金额/回执语义。</div></div>
+    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>在隔离环境补做四 provider sandbox 与真实 MySQL/PostgreSQL migration 演练，并为待核账队列增加告警/仪表盘和 provider 原生退款自动化。</div></div>
+    <div class="fix-box" style="margin-top:6px;background:#f0fff4;border-color:#b7ebc6">
+      <strong>Regression test suggestion：</strong>持续保留不可变快照、套餐修改/删除、金额/实付/币种/来源/产品/方式/模式/hash/checkout ID 不一致、超长金额/支付方式、重放、第二笔付款、跨订单交易复用、legacy pending、余额购买、reset 策略、迁移、四 provider 事实、核账 ACK/DB 重试与管理员幂等处置用例；最终 backend preflight 已通过。<br>
+      <strong>Estimated effort：</strong>代码整改已完成；生产 provider sandbox 与 MySQL/PostgreSQL 演练预计另需 1–2 天和隔离环境/凭据。
+    </div>
+  </div>
+<div class="finding severity-high" id="finding-r02">
+    <div class="finding-header">
+      <h4>R02. 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</h4>
+      <span class="badge badge-high">High</span>
+      <span class="badge badge-confirmed">Confidence: High</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Category: Recovery / Release</span>
+      <span>📌 Status: Confirmed in repository · External production state unknown</span>
+      <span>📍 Affected area: deploy/ops/lib.sh；deploy/ops/backup.sh；deploy/ops/README.md；deploy/ops/go-live.md</span>
+    </div>
+    <div class="problem"><strong>Problem：</strong>代码层已能生成一致的 MySQL/Redis/配置恢复集，但默认保存在同一主机；整机、磁盘、账号或勒索事件可能同时摧毁生产与备份。本轮遵守用户要求，没有启动 Docker、没有改服务器，因此也没有证明真实 RTO/RPO。</div>
+    <div class="evidence"><strong>Evidence：</strong>
+deploy/ops/lib.sh:49-52 — BACKUP_DIR 默认 /root/backups，KEEP 默认 7。
+deploy/ops/README.md:82 — runbook 明确把这些产物定义为同机恢复点而非完整灾备。
+deploy/ops/go-live.md:134-142 — 默认 cron 是每日全量，异地/对象存储外迁仍是人工建议。
+deploy/ops/backup.sh:141-166 — 配对 manifest、SHA-256、权限与一致性校验完整，但没有自动远端复制、不可变保留或 PITR 链路。</div>
+    <div class="problem"><strong>Why it matters：</strong>备份脚本正确不等于灾备可用。没有异地、不可变副本和定期真实恢复演练，最严重故障下仍可能无法恢复或恢复时间不可预测。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>宿主磁盘损坏或 root 账号被攻破，同机 /root/backups 与运行数据一起丢失；团队直到事故时才发现对象存储复制、密钥或恢复步骤不可用。</div>
+    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>把每个已校验 manifest 恢复集自动加密复制到独立账号/区域的对象存储，启用不可变保留与生命周期告警；在一次性隔离主机执行完整 restore + 应用验收并记录 RTO/RPO。</div></div>
+    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>为 MySQL 建立 binlog/PITR，Redis/配置保留配对版本；将恢复演练做成周期性、可审计的灾备作业，并验证密钥轮换、跨账号访问与删除保护。</div></div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>Regression test suggestion：</strong>每月至少一次从远端对象恢复到空环境，核验 manifest/hash、数据计数、关键财务不变量、应用 readiness 与回滚；演练失败必须告警。<br>
+      <strong>Estimated effort：</strong>1–2 天建立远端复制与首次演练；PITR 另计
+    </div>
+  </div>
+<div class="finding severity-medium" id="finding-r03">
+    <div class="finding-header">
+      <h4>R03. 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confidence: High</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Category: Configuration / Least Privilege / Supply Chain</span>
+      <span>📌 Status: Confirmed</span>
+      <span>📍 Affected area: deploy/docker-compose.test.yml</span>
+    </div>
+    <div class="problem"><strong>Problem：</strong>一旦应用容器被利用，攻击者直接获得数据库最高权限；同网络内任意受控容器可访问 Redis。基础镜像 tag 也可能在重建时指向不同制品。</div>
+    <div class="evidence"><strong>Evidence：</strong>
+deploy/docker-compose.test.yml:23-24 — 应用 SQL_DSN 使用 MySQL root，Redis URI 没有认证信息。
+deploy/docker-compose.test.yml:74-86 — MySQL 镜像为 mysql:8.2，root 密码被强制注入，但应用权限仍是 root。
+deploy/docker-compose.test.yml:93-105 — Redis 为 redis:7.4.9-alpine、无 ACL/口令；MySQL 与 Redis 都未用 digest 锁定。
+缓解因素：两项数据服务没有发布宿主端口，位于 Compose 内网。</div>
+    <div class="problem"><strong>Why it matters：</strong>这扩大单点入侵的影响面，也让灾难恢复和发布复现依赖远端 tag 当前状态。MySQL 版本迁移涉及认证与持久化参数，不能未经演练直接替换。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>上游解析器或管理端点被利用后，攻击者从 app 容器以 root 删除/改写全库，并篡改 Redis 风控键；之后用同一 tag 重建得到不同镜像，增加取证与恢复不确定性。</div>
+    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>创建专用应用 DB 用户并仅授予所需 schema 权限；为 Redis 配 ACL/口令并轮换；在隔离环境演练 MySQL 8.4 LTS 后固定补丁版本和镜像 digest。</div></div>
+    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>按服务拆分凭据与权限，使用密钥管理器/短期凭据，建立受控的基础镜像更新机器人、SBOM 差异审查与升级回滚演练。</div></div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>Regression test suggestion：</strong>Compose 配置测试断言 app 不再使用 root、Redis 必须认证、生产 image 必须含 digest；隔离环境跑迁移、备份与恢复验收。<br>
+      <strong>Estimated effort：</strong>1–2 天（含迁移演练）
+    </div>
+  </div>
+<div class="finding severity-medium" id="finding-r04">
+    <div class="finding-header">
+      <h4>R04. 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confidence: High</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Category: Configuration / Concurrency</span>
+      <span>📌 Status: Confirmed</span>
+      <span>📍 Affected area: model/option.go；common/constants.go；setting/payment_wxpay_alipay.go；internal/mtwire/payment_inprocess.go</span>
+    </div>
+    <div class="problem"><strong>Problem：</strong>配置集合在数据库中是原子事务，在内存中却按不确定 map 顺序逐字段可见。并发请求可能观察到新旧字段混合，部分读写也没有统一同步语义。</div>
+    <div class="evidence"><strong>Evidence：</strong>
+model/option.go:256-294 — UpdateOptionsBulk 在一个 DB 事务提交后，遍历 map 逐项调用 updateOptionMap。
+model/option.go:383-401、549-579 — 每次发布分别写 OptionMap 和单个包级全局。
+setting/payment_wxpay_alipay.go:3-24 — 支付开关与多项凭据是可变包级全局。
+internal/mtwire/payment_inprocess.go:125-167 — 请求侧连续读取多项字段来构造 SDK 配置与指纹，没有读取同一个不可变快照。
+已修复的热路径 map/slice 使用锁或 COW，但没有覆盖全部标量与耦合配置。</div>
+    <div class="problem"><strong>Why it matters：</strong>支付、限流、权限等耦合配置如果短暂不一致，可能造成错误渠道选择、签名失败、错误放行或 race；绿色 race 测试只证明已执行路径，不证明所有运行组合。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>管理员同时更新支付开关、商户号和证书。DB 已完整提交，但请求在线程间正好读取到新开关与旧凭据，生成不可用的支付请求或错误配置指纹。</div>
+    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>先把支付、认证、限流等耦合设置收进不可变结构，以 atomic.Value 或明确 RWMutex 一次替换；所有读路径只取一次快照。批量发布按稳定顺序并在完整快照验证后原子切换。</div></div>
+    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>建立版本化 RuntimeConfig 聚合根：DB 事务提交一个版本，后台构建并验证完整快照，然后单点原子发布；失败保留旧版本并暴露指标。</div></div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>Regression test suggestion：</strong>并发更新与高频读取测试在 -race 下运行，断言读者只能看到旧版本或新版本，永远看不到混合字段；覆盖失败发布与重启重载。<br>
+      <strong>Estimated effort：</strong>2–4 天
+    </div>
+  </div>
+<div class="finding severity-medium" id="finding-r05">
+    <div class="finding-header">
+      <h4>R05. 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confidence: High</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Category: Authentication / Distributed Cache</span>
+      <span>📌 Status: Confirmed bounded failure window</span>
+      <span>📍 Affected area: model/auth_cache_generation.go；model/user.go；model/user_cache.go；model/token.go；middleware/auth.go</span>
+    </div>
+    <div class="problem"><strong>Problem：</strong>短暂 Redis 故障如果发生在 DB 已禁用/删除用户或令牌之后，其他实例可能继续命中旧 hash，直到 TTL 到期；持续 Redis 故障会回源 DB，因此风险是短暂失效失败后恢复的有界窗口。</div>
+    <div class="evidence"><strong>Evidence：</strong>
+model/user.go:529-549 — 用户 DB 更新先完成，随后失效 Redis；失效失败返回错误，但没有持久重试/outbox。
+model/user_cache.go:84-100 — 认证读取优先返回 Redis 命中，Redis miss/error 才回源 DB。
+model/auth_cache_generation.go:39-104 — generation + Lua CAS 已阻止健康 Redis 下的并发旧填充，但生成与 DB 提交不是分布式事务。
+common/init.go:110-114 — 默认缓存 TTL 约 60 秒。
+middleware/auth.go:426-437 — TokenAuth 使用缓存中的用户状态做放行决定。</div>
+    <div class="problem"><strong>Why it matters：</strong>禁用与撤销是安全控制，调用方收到错误并不能撤回已提交 DB 变更，也不能保证其他实例停止使用旧授权。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>管理员禁用被盗令牌时 Redis 短暂超时，DB 更新成功但失效失败。Redis 随即恢复，另一实例在剩余 TTL 内继续接受旧缓存。</div>
+    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>为撤销敏感实体增加 DB auth_version/disabled_at 并在缓存值携带版本；失效失败写入持久 outbox 重试。高风险管理操作可在成功响应前验证全局失效或启用短期 DB 复核。</div></div>
+    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>构建可审计的授权版本/deny epoch 协议，实例按单调版本拒绝旧缓存；将缓存失效与事件发布纳入事务 outbox。</div></div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>Regression test suggestion：</strong>模拟 DB commit 成功、Redis invalidation 失败、Redis 恢复、另一个实例旧缓存命中的完整时序，断言旧版本立即被拒；覆盖用户、token、硬删除和额度更新。<br>
+      <strong>Estimated effort：</strong>2–3 天
+    </div>
+  </div>
+<div class="finding severity-medium" id="finding-r06">
+    <div class="finding-header">
+      <h4>R06. 发布 job 引用了 GitHub Environment，但保护规则无法由仓库证明</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-suspected">Confidence: Medium</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Category: Release Governance</span>
+      <span>📌 Status: External verification required</span>
+      <span>📍 Affected area: .github/workflows/docker-build.yml；release.yml；electron-build.yml；docker-image-*.yml</span>
+    </div>
+    <div class="problem"><strong>Problem：</strong>workflow 结构已经把高风险发布集中到命名 Environment，但真正的人工审批、分支限制与绕过策略存放在 GitHub 仓库设置中，本地审计无法确认其是否启用。</div>
+    <div class="evidence"><strong>Evidence：</strong>
+.github/workflows/docker-build.yml:115-120、188-196 — 发布任务绑定 container-publish。
+.github/workflows/release.yml:304-312、electron-build.yml:184-192 — 正式制品绑定 release-publish。
+同类引用共 8 个 job、5 个 workflow。
+仓库文件不能显示 GitHub 端 required reviewers、deployment branch rules、wait timer 或 admin bypass 设置。</div>
+    <div class="problem"><strong>Why it matters：</strong>如果 Environment 没有保护规则，environment 字段只提供命名/密钥范围，不能独立阻止被攻陷的工作流或误操作直接发布。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>攻击者通过可写工作流或高权限账号触发 release job；若 GitHub 环境没有 required reviewer/branch restriction，发布无需第二人确认。</div>
+    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>在 GitHub 设置中核对两个 Environment：required reviewers、受保护分支/tag、禁止管理员绕过、等待门与机密权限；截图或导出设置作为发布证据。</div></div>
+    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>用组织策略/IaC 管理环境保护，定期审计漂移，并把发布证明与审批记录归档到每次 release。</div></div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>Regression test suggestion：</strong>用无权限分支和测试 tag 触发 dry-run，确认 job 被环境门阻挡；审批后才可继续，管理员绕过路径按策略验证。<br>
+      <strong>Estimated effort：</strong>少于 1 小时核验；IaC 另计
+    </div>
+  </div>
+<div class="finding severity-medium" id="finding-r07">
+    <div class="finding-header">
+      <h4>R07. 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</h4>
+      <span class="badge badge-medium">Medium</span>
+      <span class="badge badge-confirmed">Confidence: High</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Category: Maintainability / Release</span>
+      <span>📌 Status: Confirmed · Release process</span>
+      <span>📍 Affected area: 整个工作树（生成报告前取证快照）</span>
+    </div>
+    <div class="problem"><strong>Problem：</strong>大量互不分组的变更虽然能一起通过测试，但无法清晰回答每项变更的意图、所有者、回滚单元和最小审查范围。</div>
+    <div class="evidence"><strong>Evidence：</strong>
+分支 main，HEAD 93155552f101bfd963742e1e6c8b14c8dd17b199。
+git status --short：1781 项，其中 1513 项 tracked 修改/删除、268 项 untracked、0 staged。
+git diff --stat：1513 files changed，46,893 insertions，36,794 deletions（未包含 untracked 内容）。
+本轮所有门禁针对这个完整工作树运行；报告自身生成后会额外增加一个审计制品，不计入上述代码快照。</div>
+    <div class="problem"><strong>Why it matters：</strong>发布事故时难以定位或撤回单一风险；后续 reviewer 也无法区分用户原有改动、审计修复与生成制品，绿色结果不可轻易映射到可合并提交。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>上线后出现回归，需要回滚某个缓存修复，却发现它与前端、迁移、文档和运维脚本混在同一巨大差异中，只能整体回退或在线挑拣。</div>
+    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>按安全、计费、缓存、前端、CI/运维拆成有意图的提交/PR；在干净 clone 或新 worktree 重新应用并跑同一门禁，确认没有依赖本地未跟踪文件。</div></div>
+    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>建立变更预算、ownership 与分层 PR 策略；审计报告绑定不可变 commit，CI 从干净 checkout 生成可复现证据。</div></div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>Regression test suggestion：</strong>在干净 checkout 对候选 commit 运行 backend preflight、四套前端门禁、actionlint、ops tests 与报告 lint；禁止未跟踪源码参与发布。<br>
+      <strong>Estimated effort：</strong>0.5–1 天
+    </div>
+  </div>
+<div class="finding severity-low" id="finding-r08">
+    <div class="finding-header">
+      <h4>R08. Realtime WebSocket 无条件接受任意 Origin</h4>
+      <span class="badge badge-low">Low</span>
+      <span class="badge badge-confirmed">Confidence: High</span>
+    </div>
+    <div class="finding-meta">
+      <span>📁 Category: WebSocket / Defense in Depth</span>
+      <span>📌 Status: Confirmed hardening gap</span>
+      <span>📍 Affected area: controller/relay.go；router/relay-router.go；middleware/auth.go</span>
+    </div>
+    <div class="problem"><strong>Problem：</strong>任何网页 Origin 都能完成协议升级并进入令牌校验路径，系统没有提供同源/允许列表策略来减少浏览器环境的跨站滥用面。</div>
+    <div class="evidence"><strong>Evidence：</strong>
+controller/relay.go:414-419 — 生产 websocket.Upgrader 的 CheckOrigin 固定返回 true。
+router/relay-router.go:69-80 — /v1/realtime 仍经过 TokenAuth。
+middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API key。
+因此端点不是未认证；风险是 Origin 纵深防线缺失，而不是任意网站可无凭据劫持。</div>
+    <div class="problem"><strong>Why it matters：</strong>令牌一旦因扩展、前端存储或 XSS 暴露，Origin 检查本可阻断部分跨站利用；当前所有防线都落在令牌保密性上。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>用户浏览器中的 API key 被恶意扩展或站点脚本读取，攻击者页面可直接从任意 Origin 建立 realtime 连接并消费额度。</div>
+    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>增加可配置 Origin allowlist/同源检查；非浏览器客户端通常没有 Origin，可明确允许空 Origin；保留专用开关支持受控跨域。</div></div>
+    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>集中管理 HTTP/CORS/WebSocket origin policy，按租户域名与部署域名生成规则，并记录拒绝指标。</div></div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
+      <strong>Regression test suggestion：</strong>握手测试覆盖同源、允许列表、未知 Origin、空 Origin、代理 Host 与 token subprotocol；未知浏览器 Origin 必须 403。<br>
+      <strong>Estimated effort：</strong>约 0.5 天
+    </div>
+  </div>
+
+  <h3 class="section-title" id="architecture">🏗 Architecture &amp; Module Boundaries / 架构与模块边界</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查 router→controller→service→model 主链、relay provider adapters、internal 多租户扩展、四套前端与 deploy/CI 边界。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>未逐个运行 40+ provider 的端到端请求。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed · Release process</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>主干保持 Router → Controller → Service → Model 分层</div><div class="check-item"><span class="check">✓</span>provider adapter 目录隔离上游协议差异</div><div class="check-item"><span class="check">✓</span>master-only migration/seed 边界明确并对安全 seed fail-closed</div></div></div>
+    </div>
+<h3 class="section-title" id="security">🔒 Security / 安全</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查认证/授权、OAuth、SSRF、XSS、WebSocket、缓存撤销、demo seed、密钥配置与 CI 发布权限。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有真实渗透、第三方 OAuth 或支付沙箱。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed bounded failure window</td></tr><tr><td><a href="#finding-r08" style="color:var(--accent);text-decoration:none">R08 · Realtime WebSocket 无条件接受任意 Origin</a></td><td><span class="badge badge-low">Low</span></td><td>Confirmed hardening gap</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>默认演示登录禁用，生产自动 seed 被拒，状态无法确认时主节点拒绝启动</div><div class="check-item"><span class="check">✓</span>旧文档凭据与未调用弱默认 root 创建函数已移除</div><div class="check-item"><span class="check">✓</span>SSRF 在解析与 dial 阶段约束，存储型 HTML 做净化</div><div class="check-item"><span class="check">✓</span>只有已验签、确认 paid 的回调才构造订阅 canonical fact；原始 provider payload 不落新表</div><div class="check-item"><span class="check">✓</span>pprof 仅回环、权限和超时已收紧</div></div></div>
+    </div>
+<h3 class="section-title" id="stability">⚡ Stability &amp; Error Handling / 稳定性与错误处理</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>全量 go test ./... -race；重点检查 streaming、轮询、退款/补偿、缓存刷新和配置发布。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有生产故障注入、断网或整机恢复演练。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed bounded failure window</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>OpenAI/Claude/Gemini streaming 生命周期、reader join 与 accepted-response retry 语义已收口</div><div class="check-item"><span class="check">✓</span>Coze 轮询有 context、timeout 与终态检查</div><div class="check-item"><span class="check">✓</span>已付款但事实不一致的 webhook 在持久化核账后 ACK；瞬时数据库错误保持可重试</div><div class="check-item"><span class="check">✓</span>响应缓冲采用有界自适应 admission</div><div class="check-item"><span class="check">✓</span>缓存并发测试覆盖 stale fill barrier</div></div></div>
+    </div>
+<h3 class="section-title" id="performance">🚀 Performance &amp; Scalability / 性能与可扩展性</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查响应缓冲、cache COW、rate/pricing cache、bundle budget 与依赖裁剪。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有生产数据集、压测或 CPU/heap profile。</p>
+      </div>
+    </div>
+    <div class="card"><div class="card-header">✅ 无新增未关闭发现</div><div class="card-body"><p class="small">在上述覆盖与限制下未发现需要单独登记的开放问题；这不表示未执行的运行时场景已被证明安全。</p></div></div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>非流式响应缓冲不再固定把全局并发卡死在极小值</div><div class="check-item"><span class="check">✓</span>channel/pricing/rate cache 使用锁或不可变快照</div><div class="check-item"><span class="check">✓</span>default 初始 JS 约 2.21 MB raw / 626 KB gzip，预算门禁通过</div></div></div>
+    </div>
+<h3 class="section-title" id="testing">🧪 Testing Quality / 测试质量</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>后端全量 race、四 provider fact、不可变快照、迁移、重放、重复付款、历史订单与人工核账回归，以及 frontend default/classic/orbit/electron、ops tests、actionlint。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>真实支付、provider、灾备与人工可访问性没有执行。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>R01 修复后 Go 全量 build/vet/race 重新通过</div><div class="check-item"><span class="check">✓</span>订阅测试覆盖 provider facts、快照漂移、全部关键事实不符、重放/重复付款、跨订单复用、迁移与人工处置</div><div class="check-item"><span class="check">✓</span>Default 19 文件/136 tests；Classic 13；Orbit 31；Electron navigation 4</div><div class="check-item"><span class="check">✓</span>运维脚本 14/14 静态场景通过</div><div class="check-item"><span class="check">✓</span>新增测试使用 testify 并保护真实安全/并发契约</div></div></div>
+    </div>
+<h3 class="section-title" id="maintainability">📐 Maintainability / 可维护性</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>抽查超大文件、重复 helper、全局状态、格式/体积门禁与工作树范围。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>未为每个历史模块建立 ownership。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed · Release process</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Gemini、subscription cache 等大文件已拆分</div><div class="check-item"><span class="check">✓</span>tracked + untracked Go 文件都纳入 gofmt/size preflight</div><div class="check-item"><span class="check">✓</span>JSON 统一走 common wrapper，跨库 helper 约束保留</div></div></div>
+    </div>
+<h3 class="section-title" id="design">📋 Design Principles Compliance / 设计原则</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查单一事实源、幂等、事务、失败语义、资源边界与快照一致性。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>部分结论依赖静态控制流而非生产 trace。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed bounded failure window</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>财务路径使用事务与 FOR UPDATE/CAS</div><div class="check-item"><span class="check">✓</span>原生订阅以 immutable checkout snapshot + typed fact + unique receipt 为单一事实源</div><div class="check-item"><span class="check">✓</span>stream accepted 后禁止错误 failover</div><div class="check-item"><span class="check">✓</span>channel/subscription plan/auth cache 引入 generation 或不可变快照</div></div></div>
+    </div>
+<h3 class="section-title" id="release">🚢 Release &amp; Deployment / 发布与部署</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>9 个 workflow、actionlint/YAML、SHA pin、release/image job、ops runbook、dirty tree。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有本地 Docker、没有服务器部署；GitHub Environment 设置不可见。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · 发布 job 引用了 GitHub Environment，但保护规则无法由仓库证明</a></td><td><span class="badge badge-medium">Medium</span></td><td>External verification required</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed · Release process</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>外部 Actions 固定 40 位 commit SHA</div><div class="check-item"><span class="check">✓</span>制品流程包含 SBOM、provenance、cosign 与 draft release</div><div class="check-item"><span class="check">✓</span>部署/备份/恢复脚本有静态防误操作回归</div></div></div>
+    </div>
+<h3 class="section-title" id="documentation">📚 Documentation Accuracy / 文档准确性</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查 env 示例、demo README/脚本、ops README/go-live 与高风险历史任务文档。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有逐句校验所有历史设计文档。</p>
+      </div>
+    </div>
+    <div class="card"><div class="card-header">✅ 无新增未关闭发现</div><div class="card-body"><p class="small">在上述覆盖与限制下未发现需要单独登记的开放问题；这不表示未执行的运行时场景已被证明安全。</p></div></div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>仓库不再记录演示测试口令或脚本默认口令</div><div class="check-item"><span class="check">✓</span>ops 文档诚实说明同机恢复点局限</div><div class="check-item"><span class="check">✓</span>部署注释明确生产栈与危险操作语义</div></div></div>
+    </div>
+<h3 class="section-title" id="configuration">⚙️ Configuration Safety / 配置安全</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查 Option 校验/批量更新、热 map/slice 锁、支付设置、Compose 与 workflow environment。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>GitHub/服务器外部设置不可读取。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · 发布 job 引用了 GitHub Environment，但保护规则无法由仓库证明</a></td><td><span class="badge badge-medium">Medium</span></td><td>External verification required</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>结构化 Option 在落库前验证</div><div class="check-item"><span class="check">✓</span>核心 secrets 缺失时部署 fail-closed</div><div class="check-item"><span class="check">✓</span>敏感词、auto-group、status ranges 已加同步与 copy getter</div></div></div>
+    </div>
+<h3 class="section-title" id="observability">🩺 Observability / 可观测性</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查 live/ready、request ID、stream/provider 错误、pprof、对账与 ops 告警入口。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有生产指标、日志样本和告警收件端验证。</p>
+      </div>
+    </div>
+    <div class="card"><div class="card-header">✅ 无新增未关闭发现</div><div class="card-body"><p class="small">在上述覆盖与限制下未发现需要单独登记的开放问题；这不表示未执行的运行时场景已被证明安全。</p></div></div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>liveness 与 readiness 职责分离</div><div class="check-item"><span class="check">✓</span>pprof 限回环并设置超时/权限</div><div class="check-item"><span class="check">✓</span>请求与上游 request ID 可追踪</div><div class="check-item"><span class="check">✓</span>订阅订单保存首次/最近 review 时间、原因、关联回执、逐事件证据与追加式人工决策</div><div class="check-item"><span class="check">✓</span>补偿/对账失败显式记录</div></div></div>
+    </div>
+<h3 class="section-title" id="data-integrity">🧱 Data Integrity / 数据完整性</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查计费/订阅/充值事务、跨 DB、不可变 checkout/benefit 快照、唯一 receipt、逐事件 evidence、人工 review decision、cache invalidation、备份 manifest 与恢复校验。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>无真实支付回调、MySQL/PostgreSQL migration 或远端恢复。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed bounded failure window</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>订阅余额购买与绑定使用 FOR UPDATE</div><div class="check-item"><span class="check">✓</span>已付款事实不一致、重复付款和 legacy pending 持久进入核账，但不自动授予权益</div><div class="check-item"><span class="check">✓</span>provider transaction 不能完成两个订单；冲突 callback 分别保存 evidence</div><div class="check-item"><span class="check">✓</span>退款/预扣/结算保护显式零值与幂等</div><div class="check-item"><span class="check">✓</span>备份集将 DB、Redis、配置用 manifest/hash 配对</div></div></div>
+    </div>
+<h3 class="section-title" id="privacy">🛡 Privacy &amp; Data Governance / 隐私与数据治理</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>抽查日志、凭据、provider payload、缓存键与报告输出。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有生产数据留存、DSAR/DPIA 或日志采样。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>报告不包含凭据值</div><div class="check-item"><span class="check">✓</span>新支付证据不保存原始 provider callback，只保存有界 canonical fact、身份哈希与 payload hash</div><div class="check-item"><span class="check">✓</span>演示/部署脚本改为安全注入</div><div class="check-item"><span class="check">✓</span>API token 缓存键使用 HMAC，敏感错误避免直接回显</div></div></div>
+    </div>
+<h3 class="section-title" id="accessibility">⌨️ Accessibility &amp; UX Correctness / 可访问性与 UX</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>前端 lint/typecheck/test/build、i18n 六语言与组件结构抽查。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有 VoiceOver、全键盘路径或对比度人工测试。</p>
+      </div>
+    </div>
+    <div class="card"><div class="card-header">✅ 无新增未关闭发现</div><div class="card-body"><p class="small">在上述覆盖与限制下未发现需要单独登记的开放问题；这不表示未执行的运行时场景已被证明安全。</p></div></div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Default UI 用户文案走 i18n，同步 6 个 locale</div><div class="check-item"><span class="check">✓</span>TypeScript/ESLint/Prettier 与组件测试通过</div><div class="check-item"><span class="check">✓</span>Electron 外链/导航策略有回归测试</div></div></div>
+    </div>
+<h3 class="section-title" id="supply-chain">🔗 Supply Chain &amp; Reproducibility / 供应链与可复现性</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>go mod verify、bun/npm audit、Actions pin、SBOM/provenance/cosign 与 license inventory。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有实际构建/拉取生产容器；base images 未 digest pin。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · 发布 job 引用了 GitHub Environment，但保护规则无法由仓库证明</a></td><td><span class="badge badge-medium">Medium</span></td><td>External verification required</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Go 模块校验通过</div><div class="check-item"><span class="check">✓</span>Default/Electron/Orbit audit 均为 0 已知漏洞</div><div class="check-item"><span class="check">✓</span>所有外部 Actions 固定 commit SHA</div><div class="check-item"><span class="check">✓</span>发布工作流生成证明并签名</div></div></div>
+    </div>
+<h3 class="section-title" id="cost">💸 Cost &amp; Resource Economics / 成本与资源经济性</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查预扣/结算、缓冲 admission、轮询 timeout、bundle 与 async writer 开关。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有真实 provider 账单、生产请求分布或容量模型。</p>
+      </div>
+    </div>
+    <div class="card"><div class="card-header">✅ 无新增未关闭发现</div><div class="card-body"><p class="small">原生订阅金额已使用 canonical decimal 字符串和固定两位舍入策略；仍未执行真实 provider 账单核对。</p></div></div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>生产禁用可能丢账的进程内批量计费缓冲</div><div class="check-item"><span class="check">✓</span>订阅订单冻结 decimal 金额与 multiplier，显式拒绝正数价格舍入为零</div><div class="check-item"><span class="check">✓</span>provider 轮询与 reader 生命周期有上限</div><div class="check-item"><span class="check">✓</span>前端 bundle 与依赖重量有预算门禁</div></div></div>
+    </div>
+<h3 class="section-title" id="ai-safety">🤖 AI / LLM Safety / AI 与 LLM 安全</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查敏感词设置、请求体限制、provider URL/SSRF、日志与 relay adapter 边界。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有红队 prompt、越狱、输出内容或模型行为评测。</p>
+      </div>
+    </div>
+    <div class="card"><div class="card-header">✅ 无新增未关闭发现</div><div class="card-body"><p class="small">在上述覆盖与限制下未发现需要单独登记的开放问题；这不表示未执行的运行时场景已被证明安全。</p></div></div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>prompt 敏感词检查支持提醒/停止策略</div><div class="check-item"><span class="check">✓</span>匿名/高风险接口有 body 与速率限制</div><div class="check-item"><span class="check">✓</span>上游 URL 受 SSRF 防护，provider 错误归一化</div></div></div>
+    </div>
+<h3 class="section-title" id="fallback">🪂 Fallback &amp; Defensive Code / 降级与防御代码</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查 Redis fallback、stream retry、退款补偿、provider polling、panic recovery 与 ops restore。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有真实断 Redis/DB/主机演练。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed bounded failure window</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Redis 持续故障时认证回源 DB</div><div class="check-item"><span class="check">✓</span>provider 已接受响应后不错误切换渠道</div><div class="check-item"><span class="check">✓</span>补偿使用 WithoutCancel + timeout</div><div class="check-item"><span class="check">✓</span>stream reader 会被关闭并 join</div></div></div>
+    </div>
+<h3 class="section-title" id="testing-authenticity">🧫 Testing Authenticity / 测试真实性</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>真实本地 WebSocket 对、miniredis 时序 barrier、race、构建和 shell 场景测试。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有 Docker/服务器/真实 provider，因此不把静态测试包装成上线证明。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed · Release process</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>OpenAI realtime 测试真实转发与 malformed accepted 流</div><div class="check-item"><span class="check">✓</span>cache 测试可控复现 stale fill</div><div class="check-item"><span class="check">✓</span>运维测试验证防误操作而非只提高覆盖率</div></div></div>
+    </div>
+<h3 class="section-title" id="type-safety">🔤 Type Safety / 类型安全</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>Go build/vet、TS typecheck、relay DTO optional scalars、strict JSON、配置解析与 VerifiedSubscriptionPaymentFact adapter 边界。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>原生订阅支付已使用 canonical decimal；其他遗留动态 map、float64 金额与包级全局仍存在。</p>
+      </div>
+    </div>
+    <div class="card"><div class="card-header">✅ 无新增未关闭发现</div><div class="card-body"><p class="small">四个订阅支付 adapter 已在边界收敛为强类型、规范化支付事实；其他遗留动态 map 仍按本节限制保留。</p></div></div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>可选标量使用 pointer + omitempty 保留显式零值</div><div class="check-item"><span class="check">✓</span>动态 provider 字段在 adapter 边界转换为 VerifiedSubscriptionPaymentFact</div><div class="check-item"><span class="check">✓</span>关键请求拒绝 malformed JSON</div><div class="check-item"><span class="check">✓</span>四套前端类型/构建门禁通过</div></div></div>
+    </div>
+<h3 class="section-title" id="frontend-state">🖥 Frontend State / 前端状态</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>Default React 19、Classic React 18、Orbit、Electron 的测试/构建/i18n/导航。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有人工浏览器全流程、视觉回归全集和生产 API 联调。</p>
+      </div>
+    </div>
+    <div class="card"><div class="card-header">✅ 无新增未关闭发现</div><div class="card-body"><p class="small">在上述覆盖与限制下未发现需要单独登记的开放问题；这不表示未执行的运行时场景已被证明安全。</p></div></div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Default 136 tests 与生产 build 通过</div><div class="check-item"><span class="check">✓</span>Classic/Orbit 各自隔离安装并通过测试</div><div class="check-item"><span class="check">✓</span>Electron 禁止任意导航并用随机 loopback port</div></div></div>
+    </div>
+<h3 class="section-title" id="backend-api">🔌 Backend API / 后端 API</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>Gin 路由链、中间件、鉴权/限流、strict JSON、relay、四类统一支付完成契约与管理员核账 API。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有真实 provider/支付回调或外部网络契约测试。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r08" style="color:var(--accent);text-decoration:none">R08 · Realtime WebSocket 无条件接受任意 Origin</a></td><td><span class="badge badge-low">Low</span></td><td>Confirmed hardening gap</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>自研 /api 路由补齐基础中间件</div><div class="check-item"><span class="check">✓</span>高风险操作按认证用户限流；核账查询/处置仅 Admin/Root 可访问</div><div class="check-item"><span class="check">✓</span>四类回调统一完成契约；持久核账后 ACK，瞬时数据库失败可重试</div><div class="check-item"><span class="check">✓</span>响应明确 no-store，错误语义区分 accepted/skip-retry</div></div></div>
+    </div>
+<h3 class="section-title" id="dependency-weight">📦 Dependency Weight / 依赖重量</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>go mod verify、JS audits、knip、bundle budget、第三方 license 清单。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有容器构建，无法量化最终 image 大小。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>未授权 Epay 库已由内部实现替代</div><div class="check-item"><span class="check">✓</span>knip 与 bundle 门禁通过</div><div class="check-item"><span class="check">✓</span>三套 JS 依赖审计为 0 已知漏洞</div></div></div>
+    </div>
+<h3 class="section-title" id="code-consistency">🧹 Code Consistency / 代码一致性</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>全仓 gofmt/vet/diff-check、JSON wrapper、DB helper、shell/YAML/style gates。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>巨大差异尚未按意图拆分。</p>
+      </div>
+    </div>
+    <div class="card">
+        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+          <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
+          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed · Release process</td></tr></tbody>
+        </table></div></div>
+      </div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>tracked + untracked Go 都进入格式门禁</div><div class="check-item"><span class="check">✓</span>新后端测试使用 testify</div><div class="check-item"><span class="check">✓</span>跨 DB reserved columns 与 bool 走项目 helper</div></div></div>
+    </div>
+<h3 class="section-title" id="comment-coverage">💬 Comment Coverage / 注释覆盖</h3>
+    <div class="card">
+      <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
+      <div class="card-body">
+        <p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span></p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>抽查并发 cache、财务事务、stream lifecycle、危险 ops 与 seed 安全注释。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>无定量覆盖；历史任务文档可能过时。</p>
+      </div>
+    </div>
+    <div class="card"><div class="card-header">✅ 无新增未关闭发现</div><div class="card-body"><p class="small">在上述覆盖与限制下未发现需要单独登记的开放问题；这不表示未执行的运行时场景已被证明安全。</p></div></div>
+    <div class="card">
+      <div class="card-header">✅ Verified / 已验证实践</div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>复杂 generation/CAS 与 stream accepted 语义有原因注释</div><div class="check-item"><span class="check">✓</span>恢复脚本写明一致性和危险边界</div><div class="check-item"><span class="check">✓</span>demo seed 注释明确默认禁用与 fail-closed</div></div></div>
+    </div>
+
+  <h3 class="section-title" id="principles">📋 Design Principles / 设计原则</h3>
+  <div class="card">
+    <div class="card-header">⚠️ Principle Gaps / 原则缺口</div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>Principle</th><th style="width:80px">Count</th><th style="width:100px">Severity</th><th>Affected areas</th></tr></thead>
+      <tbody>
+        <tr><td>Recoverability must be proven</td><td>1</td><td><span class="badge badge-high">High</span></td><td>R02 offsite/PITR/restore drill</td></tr>
+        <tr><td>Least privilege &amp; immutable artifacts</td><td>1</td><td><span class="badge badge-medium">Medium</span></td><td>R03 Compose DB/Redis/base images</td></tr>
+        <tr><td>Atomic publication</td><td>2</td><td><span class="badge badge-medium">Medium</span></td><td>R04 runtime config；R05 auth revocation</td></tr>
+        <tr><td>Reproducible release governance</td><td>2</td><td><span class="badge badge-medium">Medium</span></td><td>R06 external environment；R07 dirty scope</td></tr>
+        <tr><td>Defense in depth</td><td>1</td><td><span class="badge badge-low">Low</span></td><td>R08 WebSocket Origin</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">✅ Respected Practices / 已遵守原则</div>
+    <div class="card-body"><div class="check-list">
+      <div class="check-item"><span class="check">✓</span>Fail fast / fail closed — secrets、demo seed、strict JSON 与危险 restore</div>
+      <div class="check-item"><span class="check">✓</span>Idempotency — 支付完成、退款、分润、订单回调与缓存 generation</div>
+      <div class="check-item"><span class="check">✓</span>Bounded resources — response buffer、polling、stream reader、compensation timeout</div>
+      <div class="check-item"><span class="check">✓</span>Explicit error handling — billing/stream/cache invalidation 不再静默吞错</div>
+      <div class="check-item"><span class="check">✓</span>Cross-database discipline — GORM/helper + SQLite/MySQL/PostgreSQL 兼容分支</div>
+      <div class="check-item"><span class="check">✓</span>Immutable cache snapshots — channel/subscription/auth generation 防 stale fill</div>
+      <div class="check-item"><span class="check">✓</span>Immutable checkout facts — 订单、权益、支付预期、provider 事实、回执和人工决策形成版本化边界</div>
+    </div></div>
+  </div>
+
+  <h3 class="section-title" id="fix-order">🎯 Recommended Fix Order / 建议修复顺序</h3>
+  <div class="card">
+    <div class="card-header"><span>🛑 Immediate / 发布阻断</span><span class="badge badge-high">Before release</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>Fix</th><th>Effort</th><th>Why now</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>R02：自动加密异地复制 + 不可变保留，并在隔离主机做首次完整 restore</td><td>1–2 天</td><td>当前无法覆盖整机/磁盘级事故</td></tr>
+        <tr><td>2</td><td>R07：把 1781 项工作树拆成意图清晰的提交，在干净 checkout 重跑门禁</td><td>0.5–1 天</td><td>为灾备闭环和回滚建立可审查边界</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><span>📅 Stabilize / 稳定发布前</span><span class="badge badge-medium">Next</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>Fix</th><th>Effort</th><th>Dependency</th></tr></thead>
+      <tbody>
+        <tr><td>3</td><td>R03：应用 DB 专用用户、Redis ACL、MySQL 8.4 LTS 隔离迁移与 digest pin</td><td>1–2 天</td><td>需可回滚的服务器/隔离环境</td></tr>
+        <tr><td>4</td><td>R04：把支付/认证/限流配置收进不可变 RuntimeConfig 原子快照</td><td>2–4 天</td><td>先定义配置聚合边界</td></tr>
+        <tr><td>5</td><td>R05：DB auth_version/deny epoch + transaction outbox</td><td>2–3 天</td><td>需多实例时序测试</td></tr>
+        <tr><td>6</td><td>R06：核验并归档 GitHub Environment reviewer/branch/bypass 规则</td><td>&lt;1 小时</td><td>需要 GitHub 管理权限</td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><span>🧰 Scheduled / 可排期强化</span><span class="badge badge-low">Low</span></div>
+    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>Fix</th><th>Effort</th></tr></thead>
+      <tbody><tr><td>7</td><td>R08：WebSocket Origin allowlist/同源策略，明确允许无 Origin 的非浏览器客户端</td><td>约 0.5 天</td></tr></tbody>
+    </table></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">⏸ Not performed in this audit / 本轮明确未做</div>
+    <div class="card-body"><p>未擅自部署服务器、未启动本地 Docker、未更改 GitHub 设置、未用真实支付/provider 凭据、未做破坏性 restore。它们需要独立环境、授权和回滚窗口；已作为 R02/R03/R06 或 coverage limit 记录，而不是假装完成。</p></div>
+  </div>
+
+  <h3 class="section-title">⚡ Quick Wins / 快速收益</h3>
+  <div class="win-grid">
+    <div class="win-card"><div class="win-title">核验 GitHub Environment 保护</div><div class="win-meta">R06 · &lt;1h · 高发布治理收益</div></div>
+    <div class="win-card"><div class="win-title">为已校验备份集加对象存储复制任务</div><div class="win-meta">R02 · 0.5–1d · 立即降低同机灾难风险</div></div>
+    <div class="win-card"><div class="win-title">建立干净审计分支并拆分变更</div><div class="win-meta">R07 · 0.5–1d · 提升审查与回滚能力</div></div>
+    <div class="win-card"><div class="win-title">增加 WebSocket Origin 配置开关</div><div class="win-meta">R08 · 0.5d · 浏览器纵深防护</div></div>
+    <div class="win-card"><div class="win-title">把首次 restore 验收写入发布清单</div><div class="win-meta">R02 · &lt;1h 文档工作 · 防止静态门禁冒充灾备证明</div></div>
+  </div>
+
+  <div style="text-align:center;padding:40px 0 20px;color:var(--text-secondary);font-size:12px">
+    Fuck My Shit Mountain v1.0 HTML format · Codex self-audit · 2026-07-19 19:55:23 +08:00<br>
+    Scope: complete local working tree after R01 remediation and final backend gates · No Claude · No local Docker · No server mutation
+  </div>
+</div>
+
+<script>
+  const sections = document.querySelectorAll('[id]');
+  const navLinks = document.querySelectorAll('.sidebar-nav a');
+  const observer = new IntersectionObserver((entries) => {
+    let activeId = null;
+    entries.forEach(entry => {
+      if (entry.isIntersecting) activeId = entry.target.id;
+    });
+    if (activeId) {
+      navLinks.forEach(a => {
+        a.classList.toggle('active', a.getAttribute('href') === '#' + activeId);
+      });
+    }
+  }, { rootMargin: '-10% 0px -60% 0px' });
+  sections.forEach(s => observer.observe(s));
+  navLinks.forEach(a => {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      const target = document.querySelector(this.getAttribute('href'));
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+</body>
+</html>

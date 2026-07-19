@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React from 'react';
 import { Link } from 'react-router-dom';
 import SkeletonWrapper from '../components/SkeletonWrapper';
+import { normalizeHttpNavigationUrl } from '../../../helpers/safeNavigation';
 
 const Navigation = ({
   mainNavLinks,
@@ -40,10 +41,12 @@ const Navigation = ({
       const linkContent = <span>{link.text}</span>;
 
       if (link.isExternal) {
+        const safeExternalLink = normalizeHttpNavigationUrl(link.externalLink);
+        if (!safeExternalLink) return null;
         return (
           <a
             key={link.itemKey}
-            href={link.externalLink}
+            href={safeExternalLink}
             target='_blank'
             rel='noopener noreferrer'
             className={commonLinkClasses}

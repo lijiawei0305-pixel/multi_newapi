@@ -5,10 +5,29 @@ import (
 	"math"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agent"
 	"github.com/QuantumNous/new-api/internal/modelgroup"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestCommissionPolicyFreezesRateAndOwnerBeforeFinalQuota(t *testing.T) {
+	ctx := context.Background()
+	app := newRatioMarkupTestApp(t)
+	seedUser(t, app, 100, 5)
+	require.NoError(t, app.AgentRepo.SetAgentType(ctx, 5, agent.AgentParams{UserID: 999, Level: 0, CommissionRatio: 0.2}))
+	policy, err := app.prepareConsumeCommissionPolicy(100, "wallet", "default", 1)
+	require.NoError(t, err)
+	require.NoError(t, app.AgentRepo.SetAgentType(ctx, 5, agent.AgentParams{UserID: 111, Level: 0, CommissionRatio: 0.9}))
+
+	snapshot, err := materializeConsumeCommissionPolicy(policy, int64(common.QuotaPerUnit), "policy-frozen-source")
+	require.NoError(t, err)
+	assert.Equal(t, int64(999), snapshot.EarningUserID, "payable owner is the frozen agent owner, not the consumer or later profile")
+	assert.InDelta(t, 0.2*operation_setting.USDExchangeRate, snapshot.EarningAmount, 1e-8)
+	assert.Equal(t, int64(100), snapshot.WalletUserID)
+}
 
 // TestCreditConsumeCommission_TierSwitch_NeverBothSources 是核心不变量测试（spec §9.9，防双发）：
 // 同一次 creditConsumeCommission 调用，L0 租户只产生 consume_commission、L1 租户只产生 ratio_markup，

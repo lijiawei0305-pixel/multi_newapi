@@ -6,7 +6,9 @@ import (
 )
 
 // ParseVeoDurationSeconds extracts durationSeconds from metadata.
-// Returns 8 (Veo default) when not specified or invalid.
+// Returns 8 (Veo default) when not specified or invalid. An explicitly
+// supplied zero remains zero so billing and the provider request observe the
+// same client value.
 func ParseVeoDurationSeconds(metadata map[string]any) int {
 	if metadata == nil {
 		return 8
@@ -17,13 +19,9 @@ func ParseVeoDurationSeconds(metadata map[string]any) int {
 	}
 	switch n := v.(type) {
 	case float64:
-		if int(n) > 0 {
-			return int(n)
-		}
+		return int(n)
 	case int:
-		if n > 0 {
-			return n
-		}
+		return n
 	}
 	return 8
 }
@@ -46,19 +44,19 @@ func ParseVeoResolution(metadata map[string]any) string {
 
 // ResolveVeoDuration returns the effective duration in seconds.
 // Priority: metadata["durationSeconds"] > stdDuration > stdSeconds > default (8).
-func ResolveVeoDuration(metadata map[string]any, stdDuration int, stdSeconds string) int {
+func ResolveVeoDuration(metadata map[string]any, stdDuration *int, stdSeconds string) int {
 	if metadata != nil {
 		if _, exists := metadata["durationSeconds"]; exists {
-			if d := ParseVeoDurationSeconds(metadata); d > 0 {
-				return d
-			}
+			return ParseVeoDurationSeconds(metadata)
 		}
 	}
-	if stdDuration > 0 {
-		return stdDuration
+	if stdDuration != nil {
+		return *stdDuration
 	}
-	if s, err := strconv.Atoi(stdSeconds); err == nil && s > 0 {
-		return s
+	if stdSeconds != "" {
+		if s, err := strconv.Atoi(stdSeconds); err == nil {
+			return s
+		}
 	}
 	return 8
 }

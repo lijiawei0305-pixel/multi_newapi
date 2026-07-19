@@ -17,8 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
+
 import type { StatusVariant } from '@/components/status-badge'
 import dayjs from '@/lib/dayjs'
+
 import type { Earning, EarningsSummary } from '../types'
 
 export const cny = (v: number | undefined) => `¥${Number(v || 0).toFixed(2)}`
@@ -74,7 +76,10 @@ export function parseEarnings(data: unknown): {
 }
 
 /** i18n label for an earning source type (tolerant of unknown values). */
-export function sourceTypeLabel(source: string | undefined, t: TFunction): string {
+export function sourceTypeLabel(
+  source: string | undefined,
+  t: TFunction
+): string {
   switch (source) {
     case 'commission':
       return t('Commission')

@@ -486,7 +486,7 @@ func (r *Repo) ConsumptionTrend(ctx context.Context, tenantID *int64, start, end
 		}
 		q := r.logDB().WithContext(ctx).
 			Table("logs AS l").
-			Select(expr + " AS bucket, COALESCE(SUM(l.quota),0) AS used_quota, COUNT(*) AS calls, COALESCE(SUM(l.prompt_tokens + l.completion_tokens),0) AS tokens").
+			Select(expr+" AS bucket, COALESCE(SUM(l.quota),0) AS used_quota, COUNT(*) AS calls, COALESCE(SUM(l.prompt_tokens + l.completion_tokens),0) AS tokens").
 			Joins("JOIN users AS u ON u.id = l.user_id").
 			Where("l.type = ?", model.LogTypeConsume).
 			Where("u.deleted_at IS NULL").
@@ -1276,7 +1276,7 @@ func (r *Repo) bucketedSumDatetime(ctx context.Context, table, sumCol, timeCol s
 			Val    float64
 		}
 		q := r.db.WithContext(ctx).Table(table).
-			Select(expr + " AS bucket, COALESCE(SUM(" + sumCol + "),0) AS val").
+			Select(expr+" AS bucket, COALESCE(SUM("+sumCol+"),0) AS val").
 			Where(timeCol+" >= ? AND "+timeCol+" <= ?", unixT(start), unixT(end))
 		q = applyTenantScope(q, "tenant_id", tenantID)
 		if extra != nil {
@@ -1295,7 +1295,7 @@ func (r *Repo) bucketedSumDatetime(ctx context.Context, table, sumCol, timeCol s
 		Val       float64
 	}
 	q := r.db.WithContext(ctx).Table(table).
-		Select(timeCol + " AS created_at, " + sumCol + " AS val").
+		Select(timeCol+" AS created_at, "+sumCol+" AS val").
 		Where(timeCol+" >= ? AND "+timeCol+" <= ?", unixT(start), unixT(end))
 	q = applyTenantScope(q, "tenant_id", tenantID)
 	if extra != nil {
@@ -1328,7 +1328,7 @@ func (r *Repo) bucketedStatusSum(ctx context.Context, table, timeCol string, ten
 			Val    float64
 		}
 		q := r.db.WithContext(ctx).Table(table).
-			Select(expr + " AS bucket, status, COALESCE(SUM(amount),0) AS val").
+			Select(expr+" AS bucket, status, COALESCE(SUM(amount),0) AS val").
 			Where(timeCol+" >= ? AND "+timeCol+" <= ?", unixT(start), unixT(end))
 		q = applyTenantScope(q, "tenant_id", tenantID)
 		if err := q.Group(expr + ", status").Scan(&rows).Error; err != nil {
@@ -1345,7 +1345,7 @@ func (r *Repo) bucketedStatusSum(ctx context.Context, table, timeCol string, ten
 		Amount    float64
 	}
 	q := r.db.WithContext(ctx).Table(table).
-		Select(timeCol + " AS created_at, status, amount").
+		Select(timeCol+" AS created_at, status, amount").
 		Where(timeCol+" >= ? AND "+timeCol+" <= ?", unixT(start), unixT(end))
 	q = applyTenantScope(q, "tenant_id", tenantID)
 	if err := q.Scan(&rows).Error; err != nil {
@@ -1370,7 +1370,7 @@ func (r *Repo) bucketedSubPaidCost(ctx context.Context, tenantID *int64, start, 
 		}
 		q := r.db.WithContext(ctx).
 			Table("pending_subscription_orders AS p").
-			Select(expr + " AS bucket, COALESCE(SUM(p.retail_price),0) AS paid, COALESCE(SUM(p.agent_cost_price),0) AS cost").
+			Select(expr+" AS bucket, COALESCE(SUM(p.retail_price),0) AS paid, COALESCE(SUM(p.agent_cost_price),0) AS cost").
 			Joins("JOIN mt_subscription_orders AS o ON o.order_no = p.order_id").
 			Where("o.status = ?", "activated").
 			Where("o.created_at >= ? AND o.created_at <= ?", unixT(start), unixT(end))

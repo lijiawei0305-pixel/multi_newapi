@@ -32,20 +32,53 @@ func TestIsClickHouseDSN(t *testing.T) {
 }
 
 func TestNormalizeClickHouseDSN(t *testing.T) {
-	// https without secure gets secure=true appended
-	normalized := normalizeClickHouseDSN("https://default:pass@localhost:8443/logs")
+	// https without secure gets secure=true appended and all log inserts are
+	// forced synchronous for projection-key readback.
+	normalized, err := normalizeClickHouseDSN("https://default:pass@localhost:8443/logs")
+	require.NoError(t, err)
 	assert.Contains(t, normalized, "secure=true")
+	assert.Contains(t, normalized, "async_insert=0")
+	assert.Contains(t, normalized, "wait_for_async_insert=1")
+	assert.Contains(t, normalized, "insert_deduplicate=0")
 	assert.True(t, strings.HasPrefix(normalized, "https://"))
 
-	// https that already specifies secure is left untouched
-	assert.Equal(t,
-		"https://localhost:8443/logs?secure=false",
-		normalizeClickHouseDSN("https://localhost:8443/logs?secure=false"),
-	)
+	// Existing secure preference is preserved, while an explicit async mode is
+	// overridden because it cannot satisfy immediate idempotency readback.
+	normalized, err = normalizeClickHouseDSN("https://localhost:8443/logs?secure=false&async_insert=1")
+	require.NoError(t, err)
+	assert.Contains(t, normalized, "secure=false")
+	assert.Contains(t, normalized, "async_insert=0")
+	assert.Contains(t, normalized, "wait_for_async_insert=1")
+	assert.Contains(t, normalized, "insert_deduplicate=0")
 
-	// non-https schemes are returned verbatim
-	assert.Equal(t, "clickhouse://localhost:9000/logs", normalizeClickHouseDSN("clickhouse://localhost:9000/logs"))
-	assert.Equal(t, "tcp://localhost:9000/logs", normalizeClickHouseDSN("tcp://localhost:9000/logs"))
+	for _, dsn := range []string{"clickhouse://localhost:9000/logs", "tcp://localhost:9000/logs", "http://localhost:8123/logs"} {
+		normalized, err = normalizeClickHouseDSN(dsn)
+		require.NoError(t, err)
+		assert.Contains(t, normalized, "async_insert=0")
+		assert.Contains(t, normalized, "wait_for_async_insert=1")
+		assert.Contains(t, normalized, "insert_deduplicate=0")
+	}
+}
+
+func TestNormalizeClickHouseDSNRejectsMultiEndpointRouting(t *testing.T) {
+	tests := []string{
+		"clickhouse://host-a:9000,host-b:9000/logs",
+		"https://clickhouse.example/logs?alt_hosts=host-b%3A8443",
+		"tcp://clickhouse.example:9000/logs?ALT_HOSTS=host-b%3A9000",
+		"clickhouse://clickhouse.example:9000/logs?alt_hosts=",
+	}
+	for _, dsn := range tests {
+		_, err := normalizeClickHouseDSN(dsn)
+		require.ErrorContains(t, err, "one direct endpoint", "dsn=%q", dsn)
+	}
+}
+
+func TestChooseDBRejectsClickHouseMultiEndpointLogDSN(t *testing.T) {
+	t.Setenv("LOG_SQL_DSN", "clickhouse://host-a:9000,host-b:9000/logs")
+	db, dbType, err := chooseDB("LOG_SQL_DSN", true)
+	require.ErrorContains(t, err, "one direct endpoint")
+	assert.Nil(t, db)
+	assert.Empty(t, dbType)
 }
 
 func TestChooseDBRejectsClickHouseForMainDatabase(t *testing.T) {
@@ -78,16 +111,51 @@ func TestClickHouseLogTTLClause(t *testing.T) {
 }
 
 func TestClickHouseLogCreateTableSQL(t *testing.T) {
-	withoutTTL := clickHouseLogCreateTableSQL(0)
+	withoutTTL := clickHouseLogCreateTableSQL(0, 12345)
 	assert.Contains(t, withoutTTL, "CREATE TABLE IF NOT EXISTS logs")
 	assert.Contains(t, withoutTTL, "ENGINE = MergeTree()")
 	assert.Contains(t, withoutTTL, "PARTITION BY toYYYYMM(toDateTime(created_at))")
+	assert.Contains(t, withoutTTL, "non_replicated_deduplication_window = 12345")
 	assert.Contains(t, withoutTTL, "ORDER BY (created_at, request_id)")
+	assert.Contains(t, withoutTTL, "projection_key Nullable(String) DEFAULT NULL")
+	assert.Contains(t, withoutTTL, "INDEX idx_logs_projection_key projection_key TYPE bloom_filter(0.001) GRANULARITY 1")
+	assert.NotContains(t, strings.ToUpper(withoutTTL), "UNIQUE")
 	assert.NotContains(t, withoutTTL, "TTL ")
 
-	withTTL := clickHouseLogCreateTableSQL(30)
+	withTTL := clickHouseLogCreateTableSQL(30, 12345)
 	assert.Contains(t, withTTL, "ORDER BY (created_at, request_id)")
 	assert.Contains(t, withTTL, "TTL toDateTime(created_at) + INTERVAL 30 DAY DELETE")
+}
+
+func TestClickHouseLogDeduplicationWindowFailsClosed(t *testing.T) {
+	original, hadOriginal := os.LookupEnv("LOG_SQL_CLICKHOUSE_DEDUPLICATION_WINDOW")
+	t.Cleanup(func() {
+		if hadOriginal {
+			require.NoError(t, os.Setenv("LOG_SQL_CLICKHOUSE_DEDUPLICATION_WINDOW", original))
+		} else {
+			require.NoError(t, os.Unsetenv("LOG_SQL_CLICKHOUSE_DEDUPLICATION_WINDOW"))
+		}
+	})
+
+	require.NoError(t, os.Unsetenv("LOG_SQL_CLICKHOUSE_DEDUPLICATION_WINDOW"))
+	assert.Equal(t, defaultClickHouseLogDeduplicationWindow, clickHouseLogDeduplicationWindow())
+	require.NoError(t, os.Setenv("LOG_SQL_CLICKHOUSE_DEDUPLICATION_WINDOW", "0"))
+	assert.Equal(t, defaultClickHouseLogDeduplicationWindow, clickHouseLogDeduplicationWindow())
+	require.NoError(t, os.Setenv("LOG_SQL_CLICKHOUSE_DEDUPLICATION_WINDOW", "12345"))
+	assert.Equal(t, 12345, clickHouseLogDeduplicationWindow())
+}
+
+func TestClickHouseProjectionKeyMigrationContract(t *testing.T) {
+	assert.Equal(t,
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS projection_key Nullable(String) DEFAULT NULL",
+		clickHouseLogProjectionKeyMigrationSQL,
+	)
+	assert.NotContains(t, strings.ToUpper(clickHouseLogProjectionKeyMigrationSQL), "UNIQUE")
+	assert.Equal(t,
+		"ALTER TABLE logs ADD INDEX IF NOT EXISTS idx_logs_projection_key projection_key TYPE bloom_filter(0.001) GRANULARITY 1",
+		clickHouseLogProjectionKeyIndexMigrationSQL,
+	)
+	assert.NotContains(t, strings.ToUpper(clickHouseLogProjectionKeyIndexMigrationSQL), "MATERIALIZE")
 }
 
 func TestClickHouseCreateTableHasTTL(t *testing.T) {

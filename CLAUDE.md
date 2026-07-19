@@ -17,8 +17,8 @@
 - **主站**：统一管控上游渠道、模型、支付、计费、风控、系统配置与管理员能力。
 - **代理商**（普通 / OEM / API 三类）：在主站体系内获得分销、品牌定制、用户组倍率、兑换码、开放 API 等能力，管理自己的下级用户与收益。
 - **终端用户**：经主站、代理域名或推广链接注册，归属到对应代理商名下。
-- **栈**：Go 1.21+ ｜ Node.js 18+ ｜ MySQL 8.0+ ｜ Nginx 1.18+ ｜ Docker Compose 部署。
-- **路线**：第一期 3 天全栈可演示 MVP → 第二期前端品牌化 / OEM / 自定义域名。
+- **栈**：Go 1.25.1+（以 `go.mod` 为准）｜ Bun 1.3.x / Node.js 20（前端工具链）｜ MySQL 8.0+ ｜ Nginx 1.18+ ｜ Docker Compose 部署。
+- **路线**：已从一期 MVP 演进为多期产品；已建成与真实剩余范围只以 [`doc/tasks/STATUS.md`](doc/tasks/STATUS.md) 为准，早期工期/Wave 文档仅作历史记录。
 
 > 完整业务定义见 [`doc/proposal.md`](doc/proposal.md)（**权威需求文档 v2.0，完整替代版**，含 tokenplan 套餐、可行性分析、技术选型、二期预留）。
 > `newapi-multitenant-development-plan.md` 为初版设计稿，已被 proposal 取代，仅作历史参考；`TOKEN HUB 文档.md` 为对标基准。
@@ -63,9 +63,9 @@
 **服务器现状**（已核实 · 2026-07-03 收敛为**单栈**）：
 - `64.90.4.114` ｜ Debian 12 ｜ 宝塔面板（:8889）｜ Docker 29 + Compose v2
 - **唯一 newapi = fork 栈 `newapi_test`**（`newapi_test-app` 本机构建 + `redis` + `mysql:8.2`，DB=`new-api-test`），监听 `127.0.0.1:3100`；含微信/支付宝真实 SDK（进程内 `realpay`）+ 全部多租户功能。
-- **三域名全走 fork**：`api` / `www` / `tokendream`.wedreamhub.com 经宝塔 nginx 反代到 3100（`*.wedreamhub.com` 通配 → 3100；`api` 显式 config 已由 3000 改指 3100）。`/auth/` → 8180（mock 支付页，退役中）。
+- **三域名全走 fork**：`api` / `www` / `tokendream`.wedreamhub.com 经宝塔 nginx 反代到 3100（`*.wedreamhub.com` 通配 → 3100；`api` 显式 config 同样指 3100）。微信/支付宝 SDK 与验签回调均在主站进程内，`/api/pay/{wechat,alipay}/notify` 经普通 `location /` 到 app，不存在独立支付 upstream。
 - **原 stock 栈 `newapi_YFNf`（原版 `calciumion/new-api`，DB `new-api`，:3000）已于 2026-07-03 删除**（空壳：0 渠道 / 0 token / 无 /v1 流量）。回滚料：DB 备份 `/root/stock-newapi-backup.sql`、nginx 备份 `…/api-443-to-origin.wedreamhub.com.conf.bak-before-consolidate`。
-- fork 源码/构建：服务器 `/root/newapi-test/`（**非 git 副本**，rsync 自 Mac）+ `deploy/ops/deploy.sh`；compose `deploy/docker-compose.test.yml`（`docker compose -p newapi_test --env-file /root/newapi-test/.env -f …`）。
+- fork release：服务器 `/root/newapi-test/` 是**非 git 副本**；`deploy/ops/deploy.sh` 上传可重建归档、在空 staging 解包并整树切换，禁止定向覆盖形成混合树。compose 为 `deploy/docker-compose.test.yml`（`docker compose -p newapi_test --env-file /root/newapi-test/.env -f …`）。
 
 > 部署细节见 [`doc/tasks/00-infra.md`](doc/tasks/00-infra.md) 与 [`doc/deployment.md`](doc/deployment.md)。
 
@@ -112,7 +112,7 @@
 - ✅ **[已查清 · 无 bug] 微信/支付宝回调其实一直正常** —— 一度以为「付款成功但回调验签 `PAY_SIGN_INVALID`、套餐卡 `pending` 不激活」。**2026-07-03 用商户平台截图 + DB 交叉核实,坐实是误判**：商户中心仅 **3 笔真实付款**（全「买家已支付」）—— `SUB6169CC`（¥6.90 套餐→已激活 sub 18，已迁主站平台租户 4）、`RCGdjoko3sig…`（¥1 充值 user6）/`RCGdjokuo7yr…`（¥1 充值 user15）**均已 `credited` + 进 `top_ups`（账单历史可见）**，全链路走通。所谓「卡住」的 `SUBE6212E88`（创建于真实付款前 46 秒、**商户平台查无此付款**）及 DB 里 24 笔 pending（12 微信 +12 支付宝）**全是「下单没付」的废单**（`pending`＝未付款，非回调失败）。⇒ **微信/支付宝支付无需修,勿再追此「bug」**。`internal/payment/realpay/wxpay.go` 里那段临时诊断（只在测试栈服务器、未入库）**可撤** —— 它只在回调验签失败时触发,而回调从未失败过。
 - 🔴 **[需你提供] 微信/支付宝商户凭据** —— 接真实支付的**唯一外部阻塞**（真实 SDK 已落地：主站进程内 `internal/payment/realpay` + `internal/mtwire/payment_inprocess.go`，凭据存 DB；充值/购买闭环已 E2E 通过）。需：微信 `mch_id`/`app_id`/`api_v3_key`/商户私钥 `apiclient_key.pem`/微信支付公钥+`pub_key_id`；支付宝 `app_id`/应用私钥/应用公钥证书/支付宝公钥证书/根证书。拿到后→后台「系统设置 → 支付 → 微信/支付宝 选项卡」填表单并启用（**单门**：配好即在用户充值页与套餐购买页对买家显示，无需改配置文件/环境变量）→沙箱小额验收（入账侧零改）。
 - 🔴 **[需你后续 · 我以后改] gemini 换上游** —— gemini 渠道（测试栈 channel **id4**，type=24 Google Gemini，分组 `gemini`）上游不出请求 → new-api 跨组回退、报 `no available channel … under group default`。**已逐层验证：token 组=gemini、可用组校验含 gemini、渠道启用、路由 enabled、已配价——分组/调用都没错，纯上游渠道问题。** 换法：控制台「渠道管理」→ gemini 渠道 → 编辑 → 改 **base_url + key**（换成能分发 gemini 的上游）→ 保存（分组/路由/倍率/可选全不动）。换好后若仍回退 default，叫我加调试日志精确定位。
-- ✅ **①+② 买家页端到端闭环（完成）** —— 购买 snake_case + 走 auth-service mock：购买→mock 支付页→确认→激活原生订阅→代理分润(¥23.8)→**/v1 走订阅桶**，全链路 E2E 过。
+- ✅ **①+② 买家页端到端闭环（完成）** —— 购买 snake_case + 主站进程内真实支付：平台凭据→可信验签回调/主动查单→激活原生订阅→代理分润→**/v1 走订阅桶**，全链路已覆盖；真实资金演示需显式安全开关。
 - ✅ **[已建成 · 非待办] 违禁词屏蔽** —— relay 转发前扫描用户输入（`agenthook.ScanUserInput`）+ 违规日志 + 管理员/代理词库 CRUD + 全站基础库 + 违规审阅 + 4 前端页，均已落地（表 `moderation_banned_words`/`moderation_content_violations`）。规格 `doc/detailed-design.md` §2.14。~~"明日新功能"~~ 系旧文档误记（2026-07-07 核实纠正）。
 - ✅ **[已上线并验证 2026-07-17] 限流安全修复 + 8a 源站锁 CF-only + C1 密钥轮换**（版本 `019b915-dirty-20260717-191443`）—— ① money 端点（购买×2/充值/兑换/提现共 5 处）限流改**按认证用户计桶** `CriticalUserRateLimit`，免疫伪造 XFF 绕过；② 全局 `gin.TrustedPlatform=CF-Connecting-IP` 取真实客户端 IP（线上双验证：本机带头压过伪造 XFF ✅、Mac 经 CF 记真实 IP 179.255.144.58 ✅，非静默空操作）；③ **8a 源站侧完成**——两个手动 vhost（api-443/wildcard）注入 `nginx allow CF段+本机; deny all`（include `/www/server/nginx/conf/cloudflare-only.conf`，备份 `/root/nginx-8a-backup-20260717-192209`），三角验证经 CF 200 / 直连绕 CF 403 / 本机 200，**api 回调域名不受影响**；④ **C1 遗留补齐**——服务器 `.env` 补随机 `SESSION_SECRET`/`CRYPTO_SECRET`（各 `openssl rand -hex 32`、分权），旧泄露密钥作废（代价：全站登出一次，已用户确认）。
 - 真正剩余（少）：7c-2 满额主动推送（可选，需渠道）｜ 8c 运维零头 ｜ **8a 仅剩 CF 面板侧**：源站锁 CF-only 已完成 ✅，仅需**你在 CF 面板把 SSL 模式设为 Full (strict)**（证书已是 CF Origin CA，源站已只认 CF 回源）｜ 真实支付（待你给商户凭据）｜ gemini 换上游。（7c 风控、6b 代理管理 UI 均已完成。）**完整现状见 [STATUS.md](doc/tasks/STATUS.md)。**

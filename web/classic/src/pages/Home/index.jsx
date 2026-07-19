@@ -30,7 +30,10 @@ import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { API_ENDPOINTS } from '../../constants/common.constant';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
-import { marked } from 'marked';
+import {
+  renderSafeMarkdown,
+  sanitizeHtmlContent,
+} from '../../helpers/sanitize';
 import { useTranslation } from 'react-i18next';
 import {
   IconGithubLogo,
@@ -40,6 +43,10 @@ import {
 } from '@douyinfe/semi-icons';
 import { Link } from 'react-router-dom';
 import NoticeModal from '../../components/layout/NoticeModal';
+import {
+  normalizeHttpNavigationUrl,
+  openHttpUrlInNewTab,
+} from '../../helpers/safeNavigation';
 import {
   Moonshot,
   OpenAI,
@@ -75,34 +82,26 @@ const Home = () => {
   const isMobile = useIsMobile();
   const isDemoSiteMode = statusState?.status?.demo_site_enabled || false;
   const docsLink = statusState?.status?.docs_link || '';
+  const safeDocsLink = normalizeHttpNavigationUrl(docsLink);
   const serverAddress =
     statusState?.status?.server_address || `${window.location.origin}`;
   const endpointItems = API_ENDPOINTS.map((e) => ({ value: e }));
   const [endpointIndex, setEndpointIndex] = useState(0);
   const isChinese = i18n.language.startsWith('zh');
+  const homePageUrl = normalizeHttpNavigationUrl(homePageContent);
 
   const displayHomePageContent = async () => {
     setHomePageContent(localStorage.getItem('home_page_content') || '');
     const res = await API.get('/api/home_page_content');
     const { success, message, data } = res.data;
     if (success) {
-      let content = data;
-      if (!data.startsWith('https://')) {
-        content = marked.parse(data);
+      const iframeUrl = normalizeHttpNavigationUrl(data);
+      let content = iframeUrl || data;
+      if (!iframeUrl) {
+        content = renderSafeMarkdown(data);
       }
       setHomePageContent(content);
       localStorage.setItem('home_page_content', content);
-
-      // 如果内容是 URL，则发送主题模式
-      if (data.startsWith('https://')) {
-        const iframe = document.querySelector('iframe');
-        if (iframe) {
-          iframe.onload = () => {
-            iframe.contentWindow.postMessage({ themeMode: actualTheme }, '*');
-            iframe.contentWindow.postMessage({ lang: i18n.language }, '*');
-          };
-        }
-      }
     } else {
       showError(message);
       setHomePageContent('加载首页内容失败...');
@@ -230,21 +229,20 @@ const Home = () => {
                       className='flex items-center !rounded-3xl px-6 py-2'
                       icon={<IconGithubLogo />}
                       onClick={() =>
-                        window.open(
+                        openHttpUrlInNewTab(
                           'https://github.com/QuantumNous/new-api',
-                          '_blank',
                         )
                       }
                     >
                       {statusState.status.version}
                     </Button>
                   ) : (
-                    docsLink && (
+                    safeDocsLink && (
                       <Button
                         size={isMobile ? 'default' : 'large'}
                         className='flex items-center !rounded-3xl px-6 py-2'
                         icon={<IconFile />}
-                        onClick={() => window.open(docsLink, '_blank')}
+                        onClick={() => openHttpUrlInNewTab(safeDocsLink)}
                       >
                         {t('文档')}
                       </Button>
@@ -336,15 +334,31 @@ const Home = () => {
         </div>
       ) : (
         <div className='classic-page-fill overflow-x-hidden w-full'>
-          {homePageContent.startsWith('https://') ? (
+          {homePageUrl ? (
             <iframe
-              src={homePageContent}
+              src={homePageUrl}
+              sandbox='allow-forms allow-popups allow-scripts'
+              referrerPolicy='no-referrer'
+              title={t('首页')}
+              onLoad={(event) => {
+                const targetOrigin = new URL(homePageUrl).origin;
+                event.currentTarget.contentWindow?.postMessage(
+                  { themeMode: actualTheme },
+                  targetOrigin,
+                );
+                event.currentTarget.contentWindow?.postMessage(
+                  { lang: i18n.language },
+                  targetOrigin,
+                );
+              }}
               className='w-full h-screen border-none'
             />
           ) : (
             <div
               className='mt-[60px]'
-              dangerouslySetInnerHTML={{ __html: homePageContent }}
+              dangerouslySetInnerHTML={{
+                __html: sanitizeHtmlContent(homePageContent),
+              }}
             />
           )}
         </div>

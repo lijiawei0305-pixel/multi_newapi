@@ -23,6 +23,7 @@ type WaffoPancakeCreateSessionParams struct {
 	ProductID               string
 	BuyerIdentity           string
 	PriceSnapshot           *WaffoPancakePriceSnapshot
+	Metadata                map[string]string
 	BuyerEmail              string
 	ExpiresInSeconds        *int
 	OrderMerchantExternalID string
@@ -60,7 +61,15 @@ type WaffoPancakeWebhookData struct {
 	Currency                      string
 	Amount                        string
 	TaxAmount                     string
+	Subtotal                      string
+	Total                         string
 	ProductName                   string
+	OrderMetadata                 map[string]string
+	ProductMetadata               map[string]string
+	PaymentID                     string
+	PaymentStatus                 string
+	PaymentMethod                 string
+	PaymentDate                   string
 	MerchantProvidedBuyerIdentity string
 }
 
@@ -111,22 +120,7 @@ func CreateWaffoPancakeCheckoutSession(ctx context.Context, params *WaffoPancake
 		return nil, fmt.Errorf("build Waffo Pancake client: %w", err)
 	}
 
-	sdkParams := pancake.AuthenticatedCheckoutParams{
-		CreateCheckoutSessionParams: pancake.CreateCheckoutSessionParams{
-			ProductID:               params.ProductID,
-			Currency:                "USD",
-			BuyerEmail:              optionalString(params.BuyerEmail),
-			ExpiresInSeconds:        params.ExpiresInSeconds,
-			OrderMerchantExternalID: optionalString(params.OrderMerchantExternalID),
-		},
-		BuyerIdentity: params.BuyerIdentity,
-	}
-	if params.PriceSnapshot != nil {
-		sdkParams.PriceSnapshot = &pancake.PriceInfo{
-			Amount:      params.PriceSnapshot.Amount,
-			TaxCategory: pancake.TaxCategory(params.PriceSnapshot.TaxCategory),
-		}
-	}
+	sdkParams := buildWaffoPancakeAuthenticatedCheckoutParams(params)
 
 	session, err := client.Checkout.Authenticated.Create(ctx, sdkParams)
 	if err != nil {
@@ -144,12 +138,51 @@ func CreateWaffoPancakeCheckoutSession(ctx context.Context, params *WaffoPancake
 	}, nil
 }
 
+func buildWaffoPancakeAuthenticatedCheckoutParams(params *WaffoPancakeCreateSessionParams) pancake.AuthenticatedCheckoutParams {
+	sdkParams := pancake.AuthenticatedCheckoutParams{
+		CreateCheckoutSessionParams: pancake.CreateCheckoutSessionParams{
+			ProductID:               params.ProductID,
+			Currency:                "USD",
+			BuyerEmail:              optionalString(params.BuyerEmail),
+			ExpiresInSeconds:        params.ExpiresInSeconds,
+			Metadata:                cloneStringMap(params.Metadata),
+			OrderMerchantExternalID: optionalString(params.OrderMerchantExternalID),
+		},
+		BuyerIdentity: params.BuyerIdentity,
+	}
+	if params.PriceSnapshot != nil {
+		sdkParams.PriceSnapshot = &pancake.PriceInfo{
+			Amount:      params.PriceSnapshot.Amount,
+			TaxCategory: pancake.TaxCategory(params.PriceSnapshot.TaxCategory),
+		}
+	}
+	return sdkParams
+}
+
 func optionalString(s string) *string {
 	if strings.TrimSpace(s) == "" {
 		return nil
 	}
 	v := s
 	return &v
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	clone := make(map[string]string, len(source))
+	for key, value := range source {
+		clone[key] = value
+	}
+	return clone
+}
+
+func optionalStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // WaffoPancakeBuyerIdentityFromUserID renders the canonical buyer identity
@@ -165,6 +198,13 @@ func VerifyConfiguredWaffoPancakeWebhook(payload string, signatureHeader string)
 	evt, err := pancake.VerifyWebhookTyped[pancake.WebhookEventData](payload, signatureHeader, nil)
 	if err != nil {
 		return nil, err
+	}
+	return convertWaffoPancakeWebhookEvent(evt), nil
+}
+
+func convertWaffoPancakeWebhookEvent(evt *pancake.TypedWebhookEvent[pancake.WebhookEventData]) *WaffoPancakeWebhookEvent {
+	if evt == nil {
+		return nil
 	}
 	identity := ""
 	if evt.Data.MerchantProvidedBuyerIdentity != nil {
@@ -188,10 +228,18 @@ func VerifyConfiguredWaffoPancakeWebhook(payload string, signatureHeader string)
 			Currency:                      evt.Data.Currency,
 			Amount:                        evt.Data.Amount,
 			TaxAmount:                     evt.Data.TaxAmount,
+			Subtotal:                      optionalStringValue(evt.Data.Subtotal),
+			Total:                         optionalStringValue(evt.Data.Total),
 			ProductName:                   evt.Data.ProductName,
+			OrderMetadata:                 cloneStringMap(evt.Data.OrderMetadata),
+			ProductMetadata:               cloneStringMap(evt.Data.ProductMetadata),
+			PaymentID:                     optionalStringValue(evt.Data.PaymentID),
+			PaymentStatus:                 optionalStringValue(evt.Data.PaymentStatus),
+			PaymentMethod:                 optionalStringValue(evt.Data.PaymentMethod),
+			PaymentDate:                   optionalStringValue(evt.Data.PaymentDate),
 			MerchantProvidedBuyerIdentity: identity,
 		},
-	}, nil
+	}
 }
 
 // ResolveWaffoPancakeTradeNo maps a verified webhook event to a local TopUp

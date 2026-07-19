@@ -17,6 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from './api'
+import {
+  normalizeHttpNavigationUrl,
+  openHttpUrlInNewTab,
+} from './safe-navigation'
 
 // ============================================================================
 // OAuth URL Builders
@@ -26,7 +30,11 @@ import { api } from './api'
  * Build GitHub OAuth URL
  */
 export function buildGitHubOAuthUrl(clientId: string, state: string): string {
-  return `https://github.com/login/oauth/authorize?client_id=${clientId}&state=${state}&scope=user:email`
+  const url = new URL('https://github.com/login/oauth/authorize')
+  url.searchParams.set('client_id', clientId)
+  url.searchParams.set('state', state)
+  url.searchParams.set('scope', 'user:email')
+  return url.toString()
 }
 
 /**
@@ -53,7 +61,11 @@ export function buildOIDCOAuthUrl(
   clientId: string,
   state: string
 ): string {
-  const url = new URL(authUrl)
+  const normalizedAuthUrl = normalizeHttpNavigationUrl(authUrl)
+  if (!normalizedAuthUrl) {
+    throw new Error('OIDC authorization endpoint must use HTTP or HTTPS')
+  }
+  const url = new URL(normalizedAuthUrl)
   url.searchParams.set('client_id', clientId)
   url.searchParams.set('redirect_uri', `${window.location.origin}/oauth/oidc`)
   url.searchParams.set('response_type', 'code')
@@ -66,7 +78,11 @@ export function buildOIDCOAuthUrl(
  * Build LinuxDO OAuth URL
  */
 export function buildLinuxDOOAuthUrl(clientId: string, state: string): string {
-  return `https://connect.linux.do/oauth2/authorize?response_type=code&client_id=${clientId}&state=${state}`
+  const url = new URL('https://connect.linux.do/oauth2/authorize')
+  url.searchParams.set('response_type', 'code')
+  url.searchParams.set('client_id', clientId)
+  url.searchParams.set('state', state)
+  return url.toString()
 }
 
 // ============================================================================
@@ -104,7 +120,7 @@ export async function handleGitHubOAuth(clientId: string): Promise<void> {
   if (!state) return
 
   const url = buildGitHubOAuthUrl(clientId, state)
-  window.open(url, '_blank')
+  openHttpUrlInNewTab(url)
 }
 
 /**
@@ -115,7 +131,7 @@ export async function handleDiscordOAuth(clientId: string): Promise<void> {
   if (!state) return
 
   const url = buildDiscordOAuthUrl(clientId, state)
-  window.open(url, '_blank')
+  openHttpUrlInNewTab(url)
 }
 
 /**
@@ -129,7 +145,7 @@ export async function handleOIDCOAuth(
   if (!state) return
 
   const url = buildOIDCOAuthUrl(authUrl, clientId, state)
-  window.open(url, '_blank')
+  openHttpUrlInNewTab(url)
 }
 
 /**
@@ -140,5 +156,5 @@ export async function handleLinuxDOOAuth(clientId: string): Promise<void> {
   if (!state) return
 
   const url = buildLinuxDOOAuthUrl(clientId, state)
-  window.open(url, '_blank')
+  openHttpUrlInNewTab(url)
 }

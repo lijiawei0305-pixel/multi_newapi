@@ -385,11 +385,11 @@ func (m *Message) writeSessionID(buf *bytes.Buffer) error {
 	}
 
 	size := len(m.SessionID)
-	if int64(size) > math.MaxUint32 {
+	if uint64(size) > math.MaxUint32 {
 		return fmt.Errorf("session ID size (%d) exceeds max(uint32)", size)
 	}
 
-	if err := binary.Write(buf, binary.BigEndian, uint32(size)); err != nil {
+	if err := binary.Write(buf, binary.BigEndian, uint32(size)); err != nil { // #nosec G115 -- size is bounded above.
 		return err
 	}
 
@@ -407,11 +407,11 @@ func (m *Message) writeErrorCode(buf *bytes.Buffer) error {
 
 func (m *Message) writePayload(buf *bytes.Buffer) error {
 	size := len(m.Payload)
-	if int64(size) > math.MaxUint32 {
+	if uint64(size) > math.MaxUint32 {
 		return fmt.Errorf("payload size (%d) exceeds max(uint32)", size)
 	}
 
-	if err := binary.Write(buf, binary.BigEndian, uint32(size)); err != nil {
+	if err := binary.Write(buf, binary.BigEndian, uint32(size)); err != nil { // #nosec G115 -- size is bounded above.
 		return err
 	}
 

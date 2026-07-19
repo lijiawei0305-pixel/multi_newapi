@@ -64,7 +64,10 @@ func refreshCodexOAuthToken(
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, errors.New("codex oauth refresh request failed")
 	}
 	defer resp.Body.Close()
 
@@ -74,8 +77,8 @@ func refreshCodexOAuthToken(
 		ExpiresIn    int    `json:"expires_in"`
 	}
 
-	if err := common.DecodeJson(resp.Body, &payload); err != nil {
-		return nil, err
+	if err := common.DecodeJsonWithLimit(resp.Body, &payload, common.ControlPlaneJSONMaxBytes); err != nil {
+		return nil, errors.New("codex oauth refresh response is invalid")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("codex oauth refresh failed: status=%d", resp.StatusCode)

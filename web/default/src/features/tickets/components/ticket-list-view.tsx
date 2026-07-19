@@ -16,9 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+
 import { SectionPageLayout } from '@/components/layout'
+
 import type { TicketApiAdapter } from '../audience'
 import { ticketKeys } from '../query-keys'
 import type { CreateTicketPayload, TicketListQuery } from '../types'

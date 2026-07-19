@@ -55,9 +55,8 @@ export function applySiteBranding(
 
   if (name) {
     document.title = name
-    const metaTitle = document.querySelector<HTMLMetaElement>(
-      'meta[name="title"]'
-    )
+    const metaTitle =
+      document.querySelector<HTMLMetaElement>('meta[name="title"]')
     if (metaTitle) metaTitle.setAttribute('content', name)
   }
   if (logo) applyFaviconToDom(logo)

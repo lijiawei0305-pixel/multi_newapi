@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { BILLING_CACHE_VAR_MAP } from './billing-expr'
+import { evaluateSafeBillingExpression } from './safe-billing-evaluator'
 
 export const CACHE_MODE_TIMED = 'timed'
 export const CACHE_MODE_GENERIC = 'generic'
@@ -46,6 +47,7 @@ export type VisualTier = {
 
 export type VisualConfig = {
   tiers: VisualTier[]
+  version?: 1
 }
 
 export function getTierCacheMode(
@@ -107,19 +109,36 @@ export function normalizeVisualConfig(
 function buildConditionStr(conditions: TierConditionInput[]): string {
   if (!conditions || conditions.length === 0) return ''
   return conditions
-    .filter((c) => c.var && c.op && c.value != null && c.value !== '')
-    .map((c) => `${c.var} ${c.op} ${c.value}`)
+    .map((condition) => {
+      const value = Number(condition.value)
+      if (
+        !['p', 'c', 'len'].includes(condition.var) ||
+        !['<', '<=', '>', '>='].includes(condition.op) ||
+        condition.value === '' ||
+        !Number.isFinite(value)
+      ) {
+        throw new Error('Invalid visual tier configuration')
+      }
+      return `${condition.var} ${condition.op} ${value}`
+    })
     .join(' && ')
 }
 
 function buildTierBodyExpr(tier: VisualTier): string {
   const parts: string[] = []
-  const ic = Number(tier.input_unit_cost) || 0
-  const oc = Number(tier.output_unit_cost) || 0
+  const ic = Number(tier.input_unit_cost)
+  const oc = Number(tier.output_unit_cost)
+  if (!Number.isFinite(ic) || !Number.isFinite(oc)) {
+    throw new Error('Invalid visual tier configuration')
+  }
   parts.push(`p * ${ic}`)
   parts.push(`c * ${oc}`)
   for (const cv of BILLING_CACHE_VAR_MAP) {
-    const v = Number((tier as Record<string, unknown>)[cv.field]) || 0
+    const rawValue = (tier as Record<string, unknown>)[cv.field]
+    const v = rawValue == null || rawValue === '' ? 0 : Number(rawValue)
+    if (!Number.isFinite(v)) {
+      throw new Error('Invalid visual tier configuration')
+    }
     if (v !== 0) parts.push(`${cv.exprVar} * ${v}`)
   }
   return parts.join(' + ')
@@ -133,22 +152,36 @@ export function generateExprFromVisualConfig(
   }
   const tiers = config.tiers
 
+  if (tiers.length > 1) {
+    for (let index = 0; index < tiers.length - 1; index += 1) {
+      if (!buildConditionStr(tiers[index].conditions)) {
+        throw new Error('Invalid visual tier configuration')
+      }
+    }
+    if (buildConditionStr(tiers.at(-1)?.conditions ?? [])) {
+      throw new Error('Invalid visual tier configuration')
+    }
+  }
+
   if (tiers.length === 1) {
     const tier = tiers[0]
     const label = tier.label || 'default'
-    const body = `tier("${label}", ${buildTierBodyExpr(tier)})`
+    const body = `tier(${JSON.stringify(label)}, ${buildTierBodyExpr(tier)})`
     const cond = buildConditionStr(tier.conditions)
     if (cond) {
-      return `${cond} ? ${body} : p * 0 + c * 0`
+      return applyVisualExpressionVersion(
+        config,
+        `${cond} ? ${body} : p * 0 + c * 0`
+      )
     }
-    return body
+    return applyVisualExpressionVersion(config, body)
   }
 
   const parts: string[] = []
   for (let i = 0; i < tiers.length; i++) {
     const tier = tiers[i]
     const label = tier.label || `tier_${i + 1}`
-    const body = `tier("${label}", ${buildTierBodyExpr(tier)})`
+    const body = `tier(${JSON.stringify(label)}, ${buildTierBodyExpr(tier)})`
     const cond = buildConditionStr(tier.conditions)
 
     if (i < tiers.length - 1 && cond) {
@@ -157,7 +190,14 @@ export function generateExprFromVisualConfig(
       parts.push(body)
     }
   }
-  return parts.join(' : ')
+  return applyVisualExpressionVersion(config, parts.join(' : '))
+}
+
+function applyVisualExpressionVersion(
+  config: VisualConfig,
+  expression: string
+): string {
+  return config.version === 1 ? `v1:${expression}` : expression
 }
 
 export function tryParseVisualConfig(
@@ -166,38 +206,48 @@ export function tryParseVisualConfig(
   if (!exprStr) return null
   try {
     let body = exprStr
-    const versionMatch = body.match(/^v\d+:([\s\S]*)$/)
-    if (versionMatch) body = versionMatch[1]
+    let version: 1 | undefined
+    const versionMatch = body.match(/^v(\d+):([\s\S]*)$/)
+    if (versionMatch) {
+      if (versionMatch[1] !== '1') return null
+      version = 1
+      body = versionMatch[2]
+    }
     const cacheVarNames = BILLING_CACHE_VAR_MAP.map((cv) => cv.exprVar)
+    const numberPattern = '[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?'
     const optCacheStr = cacheVarNames
-      .map((v) => `(?:\\s*\\+\\s*${v}\\s*\\*\\s*([\\d.eE+-]+))?`)
+      .map((v) => `(?:\\s*\\+\\s*${v}\\s*\\*\\s*(${numberPattern}))?`)
       .join('')
 
-    const bodyPat = `p\\s*\\*\\s*([\\d.eE+-]+)\\s*\\+\\s*c\\s*\\*\\s*([\\d.eE+-]+)${optCacheStr}`
+    const bodyPat = `p\\s*\\*\\s*(${numberPattern})\\s*\\+\\s*c\\s*\\*\\s*(${numberPattern})${optCacheStr}`
+    const labelPattern = '"((?:\\\\.|[^"\\\\])*)"'
 
-    const singleRe = new RegExp(`^tier\\("([^"]*)",\\s*${bodyPat}\\)$`)
+    const singleRe = new RegExp(`^tier\\(${labelPattern},\\s*${bodyPat}\\)$`)
     const simple = body.match(singleRe)
     if (simple) {
       const tier: Record<string, unknown> = {
         conditions: [],
-        input_unit_cost: Number(simple[2]),
-        output_unit_cost: Number(simple[3]),
-        label: simple[1],
+        input_unit_cost: parseFiniteVisualNumber(simple[2]),
+        output_unit_cost: parseFiniteVisualNumber(simple[3]),
+        label: decodeTierLabel(simple[1]),
       }
       BILLING_CACHE_VAR_MAP.forEach((cv, i) => {
         const val = simple[4 + i]
-        if (val != null) tier[cv.field] = Number(val)
+        if (val != null) tier[cv.field] = parseFiniteVisualNumber(val)
       })
-      return normalizeVisualConfig({
+      const config = normalizeVisualConfig({
         tiers: [normalizeVisualTier(tier as Partial<VisualTier>)],
+        version,
       })
+      if (!visualExpressionMatches(exprStr, config)) return null
+      return config
     }
 
     const condGroup =
-      `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)` +
-      `(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`
+      `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*${numberPattern})` +
+      `(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*${numberPattern})*)`
     const tierRe = new RegExp(
-      `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*${bodyPat}\\)`,
+      `(?:${condGroup}\\s*\\?\\s*)?tier\\(${labelPattern},\\s*${bodyPat}\\)`,
       'g'
     )
     const tiers: VisualTier[] = []
@@ -207,40 +257,75 @@ export function tryParseVisualConfig(
       const conditions: TierConditionInput[] = []
       if (condStr) {
         for (const cp of condStr.split(/\s*&&\s*/)) {
-          const cm = cp.trim().match(/^(p|c|len)\s*(<|<=|>|>=)\s*([\d.eE+]+)$/)
+          const cm = cp
+            .trim()
+            .match(
+              new RegExp(`^(p|c|len)\\s*(<|<=|>|>=)\\s*(${numberPattern})$`)
+            )
           if (cm) {
             conditions.push({
               var: cm[1] as TierConditionInput['var'],
               op: cm[2] as TierConditionInput['op'],
-              value: Number(cm[3]),
+              value: parseFiniteVisualNumber(cm[3]),
             })
           }
         }
       }
       const tier: Record<string, unknown> = {
         conditions,
-        input_unit_cost: Number(match[3]),
-        output_unit_cost: Number(match[4]),
-        label: match[2],
+        input_unit_cost: parseFiniteVisualNumber(match[3]),
+        output_unit_cost: parseFiniteVisualNumber(match[4]),
+        label: decodeTierLabel(match[2]),
       }
       const m = match
       BILLING_CACHE_VAR_MAP.forEach((cv, i) => {
         const val = m[5 + i]
-        if (val != null) tier[cv.field] = Number(val)
+        if (val != null) tier[cv.field] = parseFiniteVisualNumber(val)
       })
       tiers.push(normalizeVisualTier(tier as Partial<VisualTier>))
     }
     if (tiers.length === 0) return null
 
-    const cfg = normalizeVisualConfig({ tiers })
-    const regenerated = generateExprFromVisualConfig(cfg)
-    if (regenerated.replace(/\s+/g, '') !== body.replace(/\s+/g, '')) {
-      return null
-    }
+    const cfg = normalizeVisualConfig({ tiers, version })
+    if (!visualExpressionMatches(exprStr, cfg)) return null
     return cfg
   } catch {
     return null
   }
+}
+
+export function createInitialVisualEditorState(exprStr: string): {
+  mode: 'visual' | 'raw'
+  visualConfig: VisualConfig | null
+} {
+  const visualConfig = tryParseVisualConfig(exprStr)
+  if (visualConfig) return { mode: 'visual', visualConfig }
+  if (exprStr) return { mode: 'raw', visualConfig: null }
+  return { mode: 'visual', visualConfig: createDefaultVisualConfig() }
+}
+
+function decodeTierLabel(encodedBody: string): string {
+  const value: unknown = JSON.parse(`"${encodedBody}"`)
+  if (typeof value !== 'string') throw new Error('Tier label is not a string')
+  return value
+}
+
+function parseFiniteVisualNumber(value: string): number {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    throw new Error('Invalid visual tier configuration')
+  }
+  return parsed
+}
+
+function visualExpressionMatches(
+  expression: string,
+  config: VisualConfig
+): boolean {
+  const regenerated = generateExprFromVisualConfig(config)
+  return (
+    regenerated.replaceAll(/\s+/g, '') === expression.replaceAll(/\s+/g, '')
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -270,48 +355,39 @@ export type EvalResult = {
 
 export function evalExprLocally(
   exprStr: string,
-  promptTokens: number,
-  completionTokens: number,
+  billableInputTokens: number,
+  billableOutputTokens: number,
+  fullInputLength: number,
   extraTokenValues: ExtraTokenValues
 ): EvalResult {
   try {
     if (!exprStr || !exprStr.trim()) {
       return { cost: 0, matchedTier: '', error: null }
     }
-    let matchedTier = ''
-    const tierFn = (name: string, value: number) => {
-      matchedTier = name
-      return value
-    }
-    const cacheReadTokens = extraTokenValues.cacheReadTokens || 0
-    const cacheCreateTokens = extraTokenValues.cacheCreateTokens || 0
-    const cacheCreate1hTokens = extraTokenValues.cacheCreate1hTokens || 0
-    const len =
-      promptTokens + cacheReadTokens + cacheCreateTokens + cacheCreate1hTokens
-    const env: Record<string, unknown> = {
-      p: promptTokens,
-      c: completionTokens,
-      len,
-      tier: tierFn,
-      max: Math.max,
-      min: Math.min,
-      abs: Math.abs,
-      ceil: Math.ceil,
-      floor: Math.floor,
+    const env: Record<string, number> = {
+      p: billableInputTokens,
+      c: billableOutputTokens,
+      len: fullInputLength,
     }
     for (const field of ESTIMATOR_VARS) {
       env[field.var] = extraTokenValues[field.stateKey] || 0
     }
-    const fn = new Function(
-      ...Object.keys(env),
-      `"use strict"; return (${exprStr});`
-    )
-    const cost = Number(fn(...Object.values(env))) || 0
-    return { cost, matchedTier, error: null }
+    const result = evaluateSafeBillingExpression(exprStr, env)
+    return { cost: result.value, matchedTier: result.matchedTier, error: null }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     return { cost: 0, matchedTier: '', error: message }
   }
+}
+
+export function convertRawBillingCostToQuota(
+  rawCost: number,
+  quotaPerUnit: number
+): number {
+  if (!Number.isFinite(rawCost) || !Number.isFinite(quotaPerUnit)) {
+    throw new Error('Billing cost conversion requires finite values')
+  }
+  return (rawCost / 1_000_000) * quotaPerUnit
 }
 
 export function exprUsesExtraVars(exprStr: string): boolean {

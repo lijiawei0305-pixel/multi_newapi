@@ -16,17 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Fragment, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Fragment, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
   Table,
   TableBody,
@@ -36,6 +34,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
+
 import {
   getPaymentOverview,
   listHistory,
@@ -60,19 +59,34 @@ function statusMeta(
 ): { label: string; badge: string } {
   switch (status) {
     case 'created':
-      return { label: t('Awaiting Payment', { defaultValue: '待支付' }), badge: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300' }
+      return {
+        label: t('Awaiting Payment', { defaultValue: '待支付' }),
+        badge:
+          'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+      }
     case 'paid':
-      return { label: t('Received, Pending Credit', { defaultValue: '已收款待入账' }), badge: 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300' }
+      return {
+        label: t('Received, Pending Credit', { defaultValue: '已收款待入账' }),
+        badge: 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+      }
     case 'credited':
-      return { label: t('Payment Successful', { defaultValue: '支付成功' }), badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' }
+      return {
+        label: t('Payment Successful', { defaultValue: '支付成功' }),
+        badge:
+          'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+      }
     case 'failed':
-      return { label: t('Payment Failed', { defaultValue: '支付失败' }), badge: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300' }
+      return {
+        label: t('Payment Failed', { defaultValue: '支付失败' }),
+        badge: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300',
+      }
     default:
       return { label: status, badge: 'bg-muted text-muted-foreground' }
   }
 }
 
-const cny = (v: number) => `¥${(Number(v) || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const cny = (v: number) =>
+  `¥${(Number(v) || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtTime = (ts: number) =>
   new Date(ts * 1000).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
 
@@ -84,7 +98,9 @@ function presetRange(preset: string): { start: number; end: number } {
     d.setHours(0, 0, 0, 0)
     return { start: Math.floor(d.getTime() / 1000), end }
   }
-  const days = preset === '7d' ? 7 : preset === '90d' ? 90 : 30
+  let days = 30
+  if (preset === '7d') days = 7
+  else if (preset === '90d') days = 90
   return { start: end - days * 86400, end }
 }
 
@@ -163,7 +179,9 @@ export function PaymentReconcile() {
     (overview?.summary ?? []).map((s) => [s.status, s])
   )
   const orders = overview?.orders
-  const totalPages = orders ? Math.max(1, Math.ceil(orders.total / PAGE_SIZE)) : 1
+  const totalPages = orders
+    ? Math.max(1, Math.ceil(orders.total / PAGE_SIZE))
+    : 1
 
   // ---- 对账运维（折叠区）----
   const [opsOpen, setOpsOpen] = useState(false)
@@ -182,19 +200,15 @@ export function PaymentReconcile() {
 
   const hb = stuckData?.heartbeat
   const failedCount = hb?.last_failed_count ?? 0
-  const statusKind = failedCount > 0 ? 'fail' : stuck.length > 0 ? 'stuck' : 'ok'
-  const statusLabel =
-    statusKind === 'fail'
-      ? t('Has failures', { defaultValue: '有失败' })
-      : statusKind === 'stuck'
-        ? t('Has stuck orders', { defaultValue: '有卡单' })
-        : t('Normal', { defaultValue: '正常' })
-  const statusClass =
-    statusKind === 'fail'
-      ? 'text-red-600'
-      : statusKind === 'stuck'
-        ? 'text-yellow-600'
-        : 'text-green-600'
+  let statusLabel = t('Normal', { defaultValue: '正常' })
+  let statusClass = 'text-green-600'
+  if (failedCount > 0) {
+    statusLabel = t('Has failures', { defaultValue: '有失败' })
+    statusClass = 'text-red-600'
+  } else if (stuck.length > 0) {
+    statusLabel = t('Has stuck orders', { defaultValue: '有卡单' })
+    statusClass = 'text-yellow-600'
+  }
 
   const [lastResult, setLastResult] = useState('')
   const runMut = useMutation({
@@ -216,28 +230,37 @@ export function PaymentReconcile() {
             failed: rcgFailed,
             defaultValue: `RCG 扫${r?.scanned ?? 0}/入账${r?.credited?.length ?? 0}/失败${rcgFailed}`,
           }),
-          t('RCG-created scanned {{scanned}}/credited {{credited}}/expired {{expired}}/failed {{failed}}', {
-            scanned: c?.scanned ?? 0,
-            credited: c?.credited?.length ?? 0,
-            expired: c?.expired?.length ?? 0,
-            failed: rcgCreatedFailed,
-            defaultValue: `RCG-created 扫${c?.scanned ?? 0}/入账${c?.credited?.length ?? 0}/过期${c?.expired?.length ?? 0}/失败${rcgCreatedFailed}`,
-          }),
-          t('SUB scanned {{scanned}}/activated {{activated}}/unpaid {{unpaid}}/failed {{failed}}', {
-            scanned: s?.scanned ?? 0,
-            activated: s?.activated?.length ?? 0,
-            unpaid: s?.unpaid?.length ?? 0,
-            failed: subFailed,
-            defaultValue: `SUB 扫${s?.scanned ?? 0}/激活${s?.activated?.length ?? 0}/未付${s?.unpaid?.length ?? 0}/失败${subFailed}`,
-          }),
-          t('AGT scanned {{scanned}}/activated {{activated}}/unpaid {{unpaid}}/expired {{expired}}/failed {{failed}}', {
-            scanned: g?.scanned ?? 0,
-            activated: g?.activated?.length ?? 0,
-            unpaid: g?.unpaid?.length ?? 0,
-            expired: g?.expired?.length ?? 0,
-            failed: agtFailed,
-            defaultValue: `AGT 扫${g?.scanned ?? 0}/激活${g?.activated?.length ?? 0}/未付${g?.unpaid?.length ?? 0}/过期${g?.expired?.length ?? 0}/失败${agtFailed}`,
-          }),
+          t(
+            'RCG-created scanned {{scanned}}/credited {{credited}}/expired {{expired}}/failed {{failed}}',
+            {
+              scanned: c?.scanned ?? 0,
+              credited: c?.credited?.length ?? 0,
+              expired: c?.expired?.length ?? 0,
+              failed: rcgCreatedFailed,
+              defaultValue: `RCG-created 扫${c?.scanned ?? 0}/入账${c?.credited?.length ?? 0}/过期${c?.expired?.length ?? 0}/失败${rcgCreatedFailed}`,
+            }
+          ),
+          t(
+            'SUB scanned {{scanned}}/activated {{activated}}/unpaid {{unpaid}}/failed {{failed}}',
+            {
+              scanned: s?.scanned ?? 0,
+              activated: s?.activated?.length ?? 0,
+              unpaid: s?.unpaid?.length ?? 0,
+              failed: subFailed,
+              defaultValue: `SUB 扫${s?.scanned ?? 0}/激活${s?.activated?.length ?? 0}/未付${s?.unpaid?.length ?? 0}/失败${subFailed}`,
+            }
+          ),
+          t(
+            'AGT scanned {{scanned}}/activated {{activated}}/unpaid {{unpaid}}/expired {{expired}}/failed {{failed}}',
+            {
+              scanned: g?.scanned ?? 0,
+              activated: g?.activated?.length ?? 0,
+              unpaid: g?.unpaid?.length ?? 0,
+              expired: g?.expired?.length ?? 0,
+              failed: agtFailed,
+              defaultValue: `AGT 扫${g?.scanned ?? 0}/激活${g?.activated?.length ?? 0}/未付${g?.unpaid?.length ?? 0}/过期${g?.expired?.length ?? 0}/失败${agtFailed}`,
+            }
+          ),
         ].join(' · ')
       )
       qc.invalidateQueries({ queryKey: ['admin-reconcile-stuck'] })
@@ -273,9 +296,15 @@ export function PaymentReconcile() {
               setPage(1)
             }}
           >
-            <NativeSelectOption value=''>{t('All Methods', { defaultValue: '全部方式' })}</NativeSelectOption>
-            <NativeSelectOption value='wxpay'>{t('WeChat', { defaultValue: '微信' })}</NativeSelectOption>
-            <NativeSelectOption value='alipay'>{t('Alipay', { defaultValue: '支付宝' })}</NativeSelectOption>
+            <NativeSelectOption value=''>
+              {t('All Methods', { defaultValue: '全部方式' })}
+            </NativeSelectOption>
+            <NativeSelectOption value='wxpay'>
+              {t('WeChat', { defaultValue: '微信' })}
+            </NativeSelectOption>
+            <NativeSelectOption value='alipay'>
+              {t('Alipay', { defaultValue: '支付宝' })}
+            </NativeSelectOption>
           </NativeSelect>
           <NativeSelect
             className='w-32'
@@ -285,9 +314,15 @@ export function PaymentReconcile() {
               setPage(1)
             }}
           >
-            <NativeSelectOption value=''>{t('All Order Types', { defaultValue: '全部类型' })}</NativeSelectOption>
-            <NativeSelectOption value='recharge'>{t('Recharge', { defaultValue: '充值' })}</NativeSelectOption>
-            <NativeSelectOption value='subscription'>{t('Subscription Plan', { defaultValue: '套餐订阅' })}</NativeSelectOption>
+            <NativeSelectOption value=''>
+              {t('All Order Types', { defaultValue: '全部类型' })}
+            </NativeSelectOption>
+            <NativeSelectOption value='recharge'>
+              {t('Recharge', { defaultValue: '充值' })}
+            </NativeSelectOption>
+            <NativeSelectOption value='subscription'>
+              {t('Subscription Plan', { defaultValue: '套餐订阅' })}
+            </NativeSelectOption>
           </NativeSelect>
         </div>
 
@@ -320,7 +355,10 @@ export function PaymentReconcile() {
                     {meta.label}
                   </span>
                   <span className='text-muted-foreground text-xs tabular-nums'>
-                    {t('{{count}} orders', { count: row?.count ?? 0, defaultValue: '{{count}} 笔' })}
+                    {t('{{count}} orders', {
+                      count: row?.count ?? 0,
+                      defaultValue: '{{count}} 笔',
+                    })}
                   </span>
                 </div>
                 <div className='mt-2 font-mono text-lg font-bold tabular-nums'>
@@ -332,67 +370,98 @@ export function PaymentReconcile() {
         </div>
 
         {/* ---- Order list ---- */}
-        <div className='overflow-hidden rounded-lg border' data-testid='pay-orders'>
+        <div
+          className='overflow-hidden rounded-lg border'
+          data-testid='pay-orders'
+        >
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t('Order No', { defaultValue: '订单号' })}</TableHead>
+                <TableHead>
+                  {t('Order No', { defaultValue: '订单号' })}
+                </TableHead>
                 <TableHead>{t('Type', { defaultValue: '类型' })}</TableHead>
                 <TableHead>{t('Method', { defaultValue: '方式' })}</TableHead>
                 <TableHead>{t('Amount', { defaultValue: '金额' })}</TableHead>
                 <TableHead>{t('Status', { defaultValue: '状态' })}</TableHead>
-                <TableHead>{t('User / Tenant', { defaultValue: '用户/租户' })}</TableHead>
+                <TableHead>
+                  {t('User / Tenant', { defaultValue: '用户/租户' })}
+                </TableHead>
                 <TableHead>{t('Time', { defaultValue: '时间' })}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {ovLoading ? (
+              {ovLoading && (
                 <TableRow>
-                  <TableCell colSpan={7} className='text-muted-foreground text-center'>
+                  <TableCell
+                    colSpan={7}
+                    className='text-muted-foreground text-center'
+                  >
                     {t('Loading...', { defaultValue: '加载中…' })}
                   </TableCell>
                 </TableRow>
-              ) : !orders || orders.items.length === 0 ? (
+              )}
+              {!ovLoading && (!orders || orders.items.length === 0) && (
                 <TableRow>
-                  <TableCell colSpan={7} className='text-muted-foreground text-center'>
+                  <TableCell
+                    colSpan={7}
+                    className='text-muted-foreground text-center'
+                  >
                     {t('No Orders', { defaultValue: '无订单' })}
                   </TableCell>
                 </TableRow>
-              ) : (
+              )}
+              {!ovLoading &&
+                orders &&
+                orders.items.length > 0 &&
                 orders.items.map((o) => {
                   const meta = statusMeta(o.status, t)
+                  let providerLabel: string = o.provider
+                  if (o.provider === 'wxpay') {
+                    providerLabel = t('WeChat', { defaultValue: '微信' })
+                  } else if (o.provider === 'alipay') {
+                    providerLabel = t('Alipay', { defaultValue: '支付宝' })
+                  }
                   return (
-                    <TableRow key={o.order_no} data-testid={`pay-row-${o.order_no}`}>
-                      <TableCell className='font-mono text-xs'>{o.order_no}</TableCell>
+                    <TableRow
+                      key={o.order_no}
+                      data-testid={`pay-row-${o.order_no}`}
+                    >
+                      <TableCell className='font-mono text-xs'>
+                        {o.order_no}
+                      </TableCell>
                       <TableCell>
                         {o.type === 'recharge'
                           ? t('Recharge', { defaultValue: '充值' })
                           : t('Plan', { defaultValue: '套餐' })}
                       </TableCell>
-                      <TableCell>
-                        {o.provider === 'wxpay'
-                          ? t('WeChat', { defaultValue: '微信' })
-                          : o.provider === 'alipay'
-                            ? t('Alipay', { defaultValue: '支付宝' })
-                            : o.provider}
+                      <TableCell>{providerLabel}</TableCell>
+                      <TableCell className='tabular-nums'>
+                        {cny(o.amount_cny)}
                       </TableCell>
-                      <TableCell className='tabular-nums'>{cny(o.amount_cny)}</TableCell>
                       <TableCell>
-                        <span className={cn('rounded px-1.5 py-0.5 text-xs font-medium', meta.badge)}>
+                        <span
+                          className={cn(
+                            'rounded px-1.5 py-0.5 text-xs font-medium',
+                            meta.badge
+                          )}
+                        >
                           {meta.label}
                         </span>
                       </TableCell>
                       <TableCell className='tabular-nums'>
                         {o.user_id}
-                        <span className='text-muted-foreground'> / {o.tenant_id}</span>
+                        <span className='text-muted-foreground'>
+                          {' '}
+                          / {o.tenant_id}
+                        </span>
                       </TableCell>
                       <TableCell className='text-muted-foreground text-xs'>
                         {fmtTime(o.created_at_ts)}
                       </TableCell>
                     </TableRow>
                   )
-                })
-              )}
+                })}
             </TableBody>
           </Table>
         </div>
@@ -441,7 +510,9 @@ export function PaymentReconcile() {
             {t('Reconcile Ops (Stuck Orders / Run History / Run Now)', {
               defaultValue: '对账运维（卡单 / 运行记录 / 立即对账）',
             })}
-            <span className={cn('ml-2 text-xs', statusClass)}>· {statusLabel}</span>
+            <span className={cn('ml-2 text-xs', statusClass)}>
+              · {statusLabel}
+            </span>
           </button>
           {opsOpen && (
             <div className='space-y-3 border-t p-4'>
@@ -449,7 +520,10 @@ export function PaymentReconcile() {
                 <span>
                   {t('Last Reconciled:', { defaultValue: '上次对账：' })}
                   {hb?.last_run_at
-                    ? t('{{time}} ago', { time: relTime(hb.last_run_at), defaultValue: '{{time}} 前' })
+                    ? t('{{time}} ago', {
+                        time: relTime(hb.last_run_at),
+                        defaultValue: '{{time}} 前',
+                      })
                     : t('Never Run', { defaultValue: '从未' })}
                 </span>
                 <span>
@@ -476,52 +550,95 @@ export function PaymentReconcile() {
                 {t(
                   'Auto-reconcile runs every 5 minutes; only orders still stuck past the threshold are listed here.',
                   {
-                    defaultValue: '自动对账每 5 分钟一次；只有超过阈值仍卡住的订单才列在这里。',
+                    defaultValue:
+                      '自动对账每 5 分钟一次；只有超过阈值仍卡住的订单才列在这里。',
                   }
                 )}
               </p>
               {lastResult && (
-                <div className='bg-muted/40 rounded-md border p-3 text-sm' data-testid='reconcile-result'>
+                <div
+                  className='bg-muted/40 rounded-md border p-3 text-sm'
+                  data-testid='reconcile-result'
+                >
                   {t('Last Run:', { defaultValue: '上次运行：' })}
                   {lastResult}
                 </div>
               )}
-              <div className='overflow-hidden rounded-lg border' data-testid='stuck-table'>
+              <div
+                className='overflow-hidden rounded-lg border'
+                data-testid='stuck-table'
+              >
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>{t('Type', { defaultValue: '类型' })}</TableHead>
-                      <TableHead>{t('Order No', { defaultValue: '订单号' })}</TableHead>
-                      <TableHead>{t('Tenant', { defaultValue: '租户' })}</TableHead>
-                      <TableHead>{t('User', { defaultValue: '用户' })}</TableHead>
-                      <TableHead>{t('Amount', { defaultValue: '金额' })}</TableHead>
-                      <TableHead>{t('Status', { defaultValue: '状态' })}</TableHead>
-                      <TableHead>{t('Stuck For', { defaultValue: '卡住' })}</TableHead>
+                      <TableHead>
+                        {t('Type', { defaultValue: '类型' })}
+                      </TableHead>
+                      <TableHead>
+                        {t('Order No', { defaultValue: '订单号' })}
+                      </TableHead>
+                      <TableHead>
+                        {t('Tenant', { defaultValue: '租户' })}
+                      </TableHead>
+                      <TableHead>
+                        {t('User', { defaultValue: '用户' })}
+                      </TableHead>
+                      <TableHead>
+                        {t('Amount', { defaultValue: '金额' })}
+                      </TableHead>
+                      <TableHead>
+                        {t('Status', { defaultValue: '状态' })}
+                      </TableHead>
+                      <TableHead>
+                        {t('Stuck For', { defaultValue: '卡住' })}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {stuck.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className='text-muted-foreground text-center'>
+                        <TableCell
+                          colSpan={7}
+                          className='text-muted-foreground text-center'
+                        >
                           {t('No stuck orders', { defaultValue: '无卡单' })}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      stuck.map((o) => (
-                        <TableRow key={o.order_no} data-testid={`stuck-row-${o.order_no}`}>
-                          <TableCell>
-                            <Badge variant={o.kind === 'RCG' ? 'secondary' : o.kind === 'AGT' ? 'destructive' : 'outline'}>{o.kind}</Badge>
-                          </TableCell>
-                          <TableCell className='font-mono text-xs'>{o.order_no}</TableCell>
-                          <TableCell className='tabular-nums'>{o.tenant_id}</TableCell>
-                          <TableCell className='tabular-nums'>{o.user_id}</TableCell>
-                          <TableCell className='tabular-nums'>¥{o.amount}</TableCell>
-                          <TableCell>{o.status}</TableCell>
-                          <TableCell className='text-muted-foreground text-sm'>
-                            {Math.round(o.stuck_secs / 60)}m
-                          </TableCell>
-                        </TableRow>
-                      ))
+                      stuck.map((o) => {
+                        let kindVariant:
+                          | 'secondary'
+                          | 'destructive'
+                          | 'outline' = 'outline'
+                        if (o.kind === 'RCG') kindVariant = 'secondary'
+                        else if (o.kind === 'AGT') kindVariant = 'destructive'
+                        return (
+                          <TableRow
+                            key={o.order_no}
+                            data-testid={`stuck-row-${o.order_no}`}
+                          >
+                            <TableCell>
+                              <Badge variant={kindVariant}>{o.kind}</Badge>
+                            </TableCell>
+                            <TableCell className='font-mono text-xs'>
+                              {o.order_no}
+                            </TableCell>
+                            <TableCell className='tabular-nums'>
+                              {o.tenant_id}
+                            </TableCell>
+                            <TableCell className='tabular-nums'>
+                              {o.user_id}
+                            </TableCell>
+                            <TableCell className='tabular-nums'>
+                              ¥{o.amount}
+                            </TableCell>
+                            <TableCell>{o.status}</TableCell>
+                            <TableCell className='text-muted-foreground text-sm'>
+                              {Math.round(o.stuck_secs / 60)}m
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })
                     )}
                   </TableBody>
                 </Table>
@@ -529,20 +646,32 @@ export function PaymentReconcile() {
               <h3 className='mt-4 mb-1 text-sm font-medium'>
                 {t('Reconcile Run History', { defaultValue: '对账运行记录' })}
               </h3>
-              <div className='overflow-hidden rounded-lg border' data-testid='history-table'>
+              <div
+                className='overflow-hidden rounded-lg border'
+                data-testid='history-table'
+              >
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className='w-8'></TableHead>
-                      <TableHead>{t('Time', { defaultValue: '时间' })}</TableHead>
-                      <TableHead>{t('Trigger', { defaultValue: '触发' })}</TableHead>
-                      <TableHead>{t('Summary', { defaultValue: '摘要' })}</TableHead>
+                      <TableHead className='w-8' />
+                      <TableHead>
+                        {t('Time', { defaultValue: '时间' })}
+                      </TableHead>
+                      <TableHead>
+                        {t('Trigger', { defaultValue: '触发' })}
+                      </TableHead>
+                      <TableHead>
+                        {t('Summary', { defaultValue: '摘要' })}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {history.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className='text-muted-foreground text-center'>
+                        <TableCell
+                          colSpan={4}
+                          className='text-muted-foreground text-center'
+                        >
                           {t('No history yet', { defaultValue: '暂无记录' })}
                         </TableCell>
                       </TableRow>
@@ -551,7 +680,12 @@ export function PaymentReconcile() {
                         <Fragment key={run.id}>
                           <TableRow
                             className='cursor-pointer'
-                            onClick={() => setExpanded((m) => ({ ...m, [run.id]: !m[run.id] }))}
+                            onClick={() =>
+                              setExpanded((m) => ({
+                                ...m,
+                                [run.id]: !m[run.id],
+                              }))
+                            }
                             data-testid={`history-row-${run.id}`}
                           >
                             <TableCell>
@@ -561,15 +695,25 @@ export function PaymentReconcile() {
                                 <ChevronRight className='size-4' />
                               )}
                             </TableCell>
-                            <TableCell className='text-sm'>{fmtTime(run.ran_at)}</TableCell>
+                            <TableCell className='text-sm'>
+                              {fmtTime(run.ran_at)}
+                            </TableCell>
                             <TableCell>
-                              <Badge variant={run.trigger === 'manual' ? 'default' : 'secondary'}>
+                              <Badge
+                                variant={
+                                  run.trigger === 'manual'
+                                    ? 'default'
+                                    : 'secondary'
+                                }
+                              >
                                 {run.trigger === 'manual'
                                   ? t('Manual', { defaultValue: '手动' })
                                   : t('Scheduled', { defaultValue: '定时' })}
                               </Badge>
                             </TableCell>
-                            <TableCell className='text-sm'>{run.summary}</TableCell>
+                            <TableCell className='text-sm'>
+                              {run.summary}
+                            </TableCell>
                           </TableRow>
                           {expanded[run.id] && (
                             <TableRow data-testid={`history-detail-${run.id}`}>

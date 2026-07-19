@@ -2,7 +2,9 @@ package mtwire
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -10,7 +12,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/agent"
 	"github.com/QuantumNous/new-api/internal/agentplan"
 	"github.com/QuantumNous/new-api/internal/payment"
@@ -32,12 +33,14 @@ import (
 // AgentPlanOrderPrefix 是代理套餐订单号前缀。支付回调据此分发到 ActivatePaidAgentPlanOrder。
 const AgentPlanOrderPrefix = "AGT"
 
-// 订单激活状态机。pending/activated 为主链；expired 为对账过期终态（见 agent_plan_reconcile.go）。
+// 订单激活状态机。pending→activating 的条件 UPDATE 在任何开通副作用前取得持久认领；activated 为
+// 完成态。expired 是本地未付判断，但后续可信已付事实可以将其重新认领为 activating。
 const (
-	agtOrderPending   = "pending"
-	agtOrderActivated = "activated"
-	// agtOrderExpired 终态：pending 单下单超时仍未付 / 网关查无此单（永不会被支付），由对账过期兜底置此
-	// （对齐 SUB subOrderExpired，止住二维码失效后的无谓查单/告警重试）。
+	agtOrderPending    = "pending"
+	agtOrderActivating = "activating"
+	agtOrderActivated  = "activated"
+	// agtOrderExpired 本地扫描终态：pending 单超时仍未付 / 网关查无此单时停止主动查单；若平台后续
+	// 给出可信已付回调，仍可恢复为 activating（正向付款事实优先）。
 	agtOrderExpired = "expired"
 )
 
@@ -95,9 +98,20 @@ type agentMembershipRow struct {
 // TableName 固定表名。
 func (agentMembershipRow) TableName() string { return "mt_agent_memberships" }
 
-// migrateAgentPlanBridge 建 AGT 两张表（由 App.Migrate 调用）。
+// agentMembershipGrantRow 是会员有效期的逐订单应用台账。order_no 主键保证同一已付订单无论因回调重推、
+// 进程崩溃恢复还是多实例重入，都只会把 ValidDays 加到会员到期时间一次。
+type agentMembershipGrantRow struct {
+	OrderNo   string    `gorm:"column:order_no;primaryKey;type:varchar(64)"`
+	TenantID  int64     `gorm:"column:tenant_id;not null;index"`
+	ValidDays int       `gorm:"column:valid_days;not null"`
+	AppliedAt time.Time `gorm:"column:applied_at"`
+}
+
+func (agentMembershipGrantRow) TableName() string { return "mt_agent_membership_grants" }
+
+// migrateAgentPlanBridge 建 AGT 订单、会员与逐订单续期 grant 三张表（由 App.Migrate 调用）。
 func migrateAgentPlanBridge(db *gorm.DB) error {
-	return db.AutoMigrate(&agentPlanOrderRow{}, &agentMembershipRow{})
+	return db.AutoMigrate(&agentPlanOrderRow{}, &agentMembershipRow{}, &agentMembershipGrantRow{})
 }
 
 // ---- 订单存储 ----
@@ -119,10 +133,11 @@ var notifyActivateAgentPlan = func(a *App, ctx context.Context, orderNo string, 
 
 // ActivatePaidAgentPlanOrder 支付成功后激活一笔代理套餐订单（供回调按 AGT 前缀分发）：
 //
-//	① 取订单（mt_agent_plan_orders，pending）；② 反篡改金额校验；③ 开通/升级代理（create-or-upgrade）
-//	+ 写会员台账（含到期）；④ CAS pending→activated（幂等：已 activated 直接返回 nil）。
+//	① 取订单；② 反篡改金额校验；③ CAS pending|expired→activating 持久认领；④ 开通/升级代理
+//	（create-or-upgrade）+ 按 source order 恰一次累加会员有效期；⑤ CAS activating→activated。
 //
-// 幂等：③ provision 全部按 tenant/owner upsert 幂等；④ CAS 保证会员台账不重复起算有效期。
+// activating 超过 reconcileMinAge 可被新调用方原子退回 pending 后重新认领，恢复认领后崩溃的 saga；
+// 会员 grant 台账保证恢复不会重复加有效期。
 func (a *App) ActivatePaidAgentPlanOrder(ctx context.Context, orderNo string, paidAmountCNY float64) error {
 	if !IsAgentPlanOrderNo(orderNo) {
 		return payment.ErrOrderInvalid
@@ -138,55 +153,88 @@ func (a *App) ActivatePaidAgentPlanOrder(ctx context.Context, orderNo string, pa
 
 	// 按 owner 串行化:支付平台常并发重推回调,若两个回调都读到 pending 都进 provision,新代理
 	// 会各自建同一 owner 派生的同一 slug 租户(唯一键兜底不产生孤儿,但会撞键报错 + 无谓重试)。
-	// 串行后同一 owner 至多一个激活在跑,其余在临界区内重读到 activated 即幂等短路,杜绝双 provision。
-	// 刻意保持 provision 先行、CAS 后置的既有顺序 → 维持「activated ⟹ 已 provision」不变量:对账兜底
-	// ReconcileStuckAgentPlans 会重驱动 pending 单再次走本函数(查到已付即补激活),故绝不能留 activated-
-	// 未provision 卡单。锁细节见 activation_lock.go;对账兜底见 agent_plan_reconcile.go。
+	// 串行后同一 owner 至多一个激活在跑,其余在临界区内重读状态。DB 的 pending→activating CAS 才是
+	// 跨实例权威认领；进程锁只减少本实例重复工作。陈旧 activating 由对账恢复，会员 grant 台账兜底
+	// 副作用重入不重复续期。锁细节见 activation_lock.go；对账兜底见 agent_plan_reconcile.go。
 	unlock := lockAgentActivation(ord.OwnerUserID)
 	defer unlock()
 
-	// 临界区内重读订单:拿锁前可能已被并发赢家激活(owner/amount/grant 快照不会变,仅状态会变)。
-	if err := a.DB.WithContext(ctx).Take(&ord, "order_no = ?", orderNo).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	for {
+		// 临界区内重读订单：拿锁前可能已被并发赢家推进（业务快照不变，仅状态/更新时间变化）。
+		if err := a.DB.WithContext(ctx).Take(&ord, "order_no = ?", orderNo).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return payment.ErrOrderInvalid
+			}
+			return err
+		}
+		if ord.Status == agtOrderActivated {
+			return nil
+		}
+		// 反篡改：回传实付须与库内订单一致（<=0 表示已由主动查单确认，跳过比对）。
+		if !amountMatchesCNY(paidAmountCNY, ord.AmountCNY) {
+			return payment.ErrAmountMismatch
+		}
+
+		switch ord.Status {
+		case agtOrderActivating:
+			// 新鲜认领由另一调用方持有，返回错误让支付平台继续重推。过期认领说明进程可能在副作用
+			// 中崩溃：仅一个调用方能把它 CAS 回 pending，随后循环重新执行 pending→activating 认领。
+			staleCutoff := time.Now().Add(-reconcileMinAge)
+			if !ord.UpdatedAt.Before(staleCutoff) {
+				return errors.New("agent plan activation is already in progress")
+			}
+			res := a.DB.WithContext(ctx).Model(&agentPlanOrderRow{}).
+				Where("order_no = ? AND status = ? AND updated_at < ?", orderNo, agtOrderActivating, staleCutoff).
+				Updates(map[string]any{"status": agtOrderPending, "updated_at": time.Now()})
+			if res.Error != nil {
+				return res.Error
+			}
+			continue
+		case agtOrderPending, agtOrderExpired:
+			// 可信已付事实可覆盖本地 expired 判断。任何开通副作用前先持久认领；RowsAffected 必须为 1。
+			res := a.DB.WithContext(ctx).Model(&agentPlanOrderRow{}).
+				Where("order_no = ? AND status = ?", orderNo, ord.Status).
+				Updates(map[string]any{"status": agtOrderActivating, "updated_at": time.Now()})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				continue
+			}
+			ord.Status = agtOrderActivating
+		default:
 			return payment.ErrOrderInvalid
 		}
-		return err
-	}
-	if ord.Status == agtOrderActivated {
-		return nil // 幂等：已激活（含并发败者在此短路，不再进 provision）
-	}
-	if ord.Status != agtOrderPending {
-		// 过期终态单收到「已确认支付」驱动＝网关自相矛盾（先答未付/查无此单致过期，随后又确认已付，
-		// 2h 边界迟到回调竞态）：钱已收但订单已终态，绝不静默吞掉——大声留痕供人工核查退款或手工激活
-		// （audit 2026-07-17 #7；对账路径的该错误同时会进 res.Failed 触发告警）。
-		if ord.Status == agtOrderExpired {
-			common.SysError("AGT 已付驱动命中过期终态单 " + orderNo + "：钱已收但订单已过期，需人工核查（退款或手工激活）")
+
+		// 只有成功取得 pending|expired→activating 认领的调用方才能进入副作用链。
+		agentTenantID, err := a.provisionAgentFromOrder(ctx, &ord)
+		if err != nil {
+			return err // 留 activating；5 分钟后由回调/对账安全恢复
 		}
-		return payment.ErrOrderInvalid
-	}
-	// 反篡改：回传实付须与库内订单一致（<=0 表示对账兜底查单未提供 → 跳过比对）。
-	if !amountMatchesCNY(paidAmountCNY, ord.AmountCNY) {
-		return payment.ErrAmountMismatch
-	}
 
-	// ③ 开通/升级代理 + 写会员台账（幂等；已由上方 owner 锁保证同一 owner 串行进入）。
-	agentTenantID, err := a.provisionAgentFromOrder(ctx, &ord)
-	if err != nil {
-		return err
+		res := a.DB.WithContext(ctx).Model(&agentPlanOrderRow{}).
+			Where("order_no = ? AND status = ?", orderNo, agtOrderActivating).
+			Updates(map[string]any{
+				"status":          agtOrderActivated,
+				"agent_tenant_id": agentTenantID,
+				"updated_at":      time.Now(),
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 1 {
+			return nil
+		}
+		// 绝不忽略最终 CAS 失败：只有确认别的恢复者已完成 activated 才能幂等成功。
+		var current agentPlanOrderRow
+		if err := a.DB.WithContext(ctx).Take(&current, "order_no = ?", orderNo).Error; err != nil {
+			return err
+		}
+		if current.Status == agtOrderActivated {
+			return nil
+		}
+		return errors.New("agent plan activation lost its durable claim")
 	}
-
-	// ④ CAS pending→activated，回填代理租户。
-	res := a.DB.WithContext(ctx).Model(&agentPlanOrderRow{}).
-		Where("order_no = ? AND status = ?", orderNo, agtOrderPending).
-		Updates(map[string]any{
-			"status":          agtOrderActivated,
-			"agent_tenant_id": agentTenantID,
-			"updated_at":      time.Now(),
-		})
-	if res.Error != nil {
-		return res.Error
-	}
-	return nil
 }
 
 // provisionAgentFromOrder 把订单买家开通/升级为对应档位代理，并写会员台账（含到期）。返回代理租户 id。
@@ -196,7 +244,6 @@ func (a *App) ActivatePaidAgentPlanOrder(ctx context.Context, orderNo string, pa
 // 管理员配置）。全部按 tenant/owner 幂等，可被回调重试安全重入。
 func (a *App) provisionAgentFromOrder(ctx context.Context, ord *agentPlanOrderRow) (int64, error) {
 	now := time.Now()
-	expireAt := now.AddDate(0, 0, maxInt(ord.ValidDays, 1))
 
 	// 已是代理？→ 升级既有租户。
 	tenantID, tstatus, existing, err := a.agentTenantByOwner(ctx, ord.OwnerUserID)
@@ -277,52 +324,49 @@ func (a *App) provisionAgentFromOrder(ctx context.Context, ord *agentPlanOrderRo
 		if err := a.AgentRepo.EnsureWallet(ctx, tenantID, ord.OwnerUserID); err != nil {
 			return 0, err
 		}
-		if err := a.upsertMembership(ctx, tenantID, ord, now, expireAt); err != nil {
+		if err := a.upsertMembership(ctx, tenantID, ord, now); err != nil {
 			return 0, err
 		}
 		return tenantID, nil
 	}
 
 	// 新代理：建租户 + 归属 + 档位 + 钱包（复刻 admin 建代理）。
+	// A positive anchor whose tenant row no longer exists means the unpaid
+	// expiry path legitimately released this order's reservation. A trusted
+	// late-paid callback still has to deliver value; if another buyer acquired
+	// the original slug in that interval, recovery may use an order-derived slug
+	// instead of either stealing the new buyer's slug or leaving paid money stuck.
+	releasedReservation := false
+	if ord.AgentTenantID > 0 {
+		var anchorCount int64
+		if err := a.DB.WithContext(ctx).Table("tenants").
+			Where("id = ? AND owner_user_id = ?", ord.AgentTenantID, ord.OwnerUserID).
+			Count(&anchorCount).Error; err != nil {
+			return 0, err
+		}
+		releasedReservation = anchorCount == 0
+	}
 	slug := normalizeAgentSlug(ord.Slug, ord.OwnerUserID)
 	name := ord.Name
 	if name == "" {
 		name = "代理站 " + slug
 	}
-	t, err := a.TenantService.Create(ctx, tenant.CreateTenantInput{
-		Slug:             slug,
-		Name:             name,
-		TokenplanEnabled: true,
-		SkipSubdomain:    ord.GrantLevel < 1, // L0 普通代理不发子域名
-	})
+	t, err := a.createOrClaimAgentTenant(ctx, ord, slug, name)
+	if err != nil && releasedReservation && errors.Is(err, tenant.ErrSlugDuplicate) {
+		for attempt := 0; attempt < 16; attempt++ {
+			recoverySlug := paidAgentRecoverySlug(ord, attempt)
+			t, err = a.createOrClaimAgentTenant(ctx, ord, recoverySlug, name)
+			if err == nil {
+				slug = recoverySlug
+				break
+			}
+			if !errors.Is(err, tenant.ErrSlugDuplicate) {
+				return 0, err
+			}
+		}
+	}
 	if err != nil {
-		// 崩溃自愈（audit 2026-07-17 发现#6）：本分支六步非事务、且归属（SetOwnerUserID）晚于建行——
-		// CreateTenant 后进程重建（部署 force-recreate 是例行事件）/DB 抖动会留下「slug 已占、
-		// owner_user_id=0、active」的孤儿行：owner 反查双查询都看不见它、却占着 slug，重试确定性
-		// SLUG_DUPLICATE，付款单永久卡 pending（正是发现#5 触发(b) 的自我毒化机制）。撞键时认领该
-		// 无归属 active 行续跑（其后各步本就幂等；先认领再落归属，任意再崩重试都能按 owner 找到、
-		// 经升级分支自愈）。已归属的他人行绝不认领——真冲突保持卡单可见。预留式（发现#5）已让新单
-		// 不走本分支；此处兜底遗留 pending 单、历史孤儿行与预留释放竞态残余。
-		if !errors.Is(err, tenant.ErrSlugDuplicate) {
-			return 0, err
-		}
-		var row struct{ ID int64 }
-		if ferr := a.DB.WithContext(ctx).Table("tenants").Select("id").
-			Where("slug = ? AND owner_user_id = 0 AND status = ?", slug, string(tenant.StatusActive)).
-			Take(&row).Error; ferr != nil {
-			if errors.Is(ferr, gorm.ErrRecordNotFound) {
-				return 0, err // 真冲突（他人已归属/非本分支产物）：原样上抛 SLUG_DUPLICATE
-			}
-			return 0, ferr
-		}
-		t = &tenant.Tenant{ID: row.ID, Slug: slug}
-		// 孤儿现场可能崩在 CreateDomain 之前（无域名行）：独立档补派生子域名，幂等
-		// ——审计修复 snippet 漏了这步，照抄会交付「付独立档钱没有站」。
-		if ord.GrantLevel >= 1 {
-			if derr := a.TenantService.EnsureSubdomain(ctx, t.ID, slug); derr != nil {
-				return 0, derr
-			}
-		}
+		return 0, err
 	}
 	if err := a.TenantRepo.SetOwnerUserID(ctx, t.ID, ord.OwnerUserID); err != nil {
 		return 0, err
@@ -345,40 +389,106 @@ func (a *App) provisionAgentFromOrder(ctx context.Context, ord *agentPlanOrderRo
 	if err := a.AgentRepo.EnsureWallet(ctx, t.ID, ord.OwnerUserID); err != nil {
 		return 0, err
 	}
-	if err := a.upsertMembership(ctx, t.ID, ord, now, expireAt); err != nil {
+	if err := a.upsertMembership(ctx, t.ID, ord, now); err != nil {
 		return 0, err
 	}
 	return t.ID, nil
 }
 
-// upsertMembership 幂等写/更新代理会员台账（一租户一条 active，含到期时间；供 P4 到期降级）。
-func (a *App) upsertMembership(ctx context.Context, tenantID int64, ord *agentPlanOrderRow, start, expire time.Time) error {
-	row := agentMembershipRow{
-		TenantID:      tenantID,
-		OwnerUserID:   ord.OwnerUserID,
-		PlanCode:      ord.PlanCode,
-		GrantLevel:    ord.GrantLevel,
-		GrantCanAPI:   ord.GrantCanAPI,
-		SourceOrderNo: ord.OrderNo,
-		Status:        agtMembershipActive,
-		StartAt:       start,
-		ExpireAt:      expire,
-		CreatedAt:     start,
-		UpdatedAt:     start,
+// createOrClaimAgentTenant creates one agent tenant candidate and recovers the
+// precise crash gap where Create succeeded before owner assignment. It never
+// claims an active tenant already owned by another user.
+func (a *App) createOrClaimAgentTenant(ctx context.Context, ord *agentPlanOrderRow, slug string, name string) (*tenant.Tenant, error) {
+	t, err := a.TenantService.Create(ctx, tenant.CreateTenantInput{
+		Slug:             slug,
+		Name:             name,
+		TokenplanEnabled: true,
+		SkipSubdomain:    ord.GrantLevel < 1,
+	})
+	if err == nil || !errors.Is(err, tenant.ErrSlugDuplicate) {
+		return t, err
 	}
-	return a.DB.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "tenant_id"}},
-		DoUpdates: clause.Assignments(map[string]any{
+	var row struct{ ID int64 }
+	lookupErr := a.DB.WithContext(ctx).Table("tenants").Select("id").
+		Where("slug = ? AND owner_user_id = 0 AND status = ?", slug, string(tenant.StatusActive)).
+		Take(&row).Error
+	if lookupErr != nil {
+		if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		return nil, lookupErr
+	}
+	t = &tenant.Tenant{ID: row.ID, Slug: slug}
+	if ord.GrantLevel >= 1 {
+		if ensureErr := a.TenantService.EnsureSubdomain(ctx, t.ID, slug); ensureErr != nil {
+			return nil, ensureErr
+		}
+	}
+	return t, nil
+}
+
+func paidAgentRecoverySlug(ord *agentPlanOrderRow, attempt int) string {
+	digest := sha256.Sum256([]byte(ord.OrderNo))
+	base := fmt.Sprintf("agent%d-%x", ord.OwnerUserID, digest[:6])
+	if attempt == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s-%d", base, attempt+1)
+}
+
+// upsertMembership 按 source order 恰一次延长会员：先在同一事务插入 order_no 唯一 grant；重复订单
+// RowsAffected=0 直接幂等返回。首次应用从 max(now, current_expire_at) 起累加 ValidDays，续费不会覆盖
+// 尚未使用的剩余天数；grant 与会员更新任一步失败会一起回滚。
+func (a *App) upsertMembership(ctx context.Context, tenantID int64, ord *agentPlanOrderRow, now time.Time) error {
+	validDays := ord.ValidDays
+	if validDays < 1 {
+		validDays = 1
+	}
+	return a.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		grant := agentMembershipGrantRow{
+			OrderNo: ord.OrderNo, TenantID: tenantID, ValidDays: validDays, AppliedAt: now,
+		}
+		created := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&grant)
+		if created.Error != nil {
+			return created.Error
+		}
+		if created.RowsAffected == 0 {
+			return nil
+		}
+
+		var current agentMembershipRow
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&current, "tenant_id = ?", tenantID).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return tx.Create(&agentMembershipRow{
+				TenantID: tenantID, OwnerUserID: ord.OwnerUserID, PlanCode: ord.PlanCode,
+				GrantLevel: ord.GrantLevel, GrantCanAPI: ord.GrantCanAPI, SourceOrderNo: ord.OrderNo,
+				Status: agtMembershipActive, StartAt: now, ExpireAt: now.AddDate(0, 0, validDays),
+				CreatedAt: now, UpdatedAt: now,
+			}).Error
+		}
+		if err != nil {
+			return err
+		}
+
+		base := now
+		startAt := current.StartAt
+		if current.ExpireAt.After(now) {
+			base = current.ExpireAt
+		} else {
+			startAt = now
+		}
+		return tx.Model(&agentMembershipRow{}).Where("tenant_id = ?", tenantID).Updates(map[string]any{
+			"owner_user_id":   ord.OwnerUserID,
 			"plan_code":       ord.PlanCode,
 			"grant_level":     ord.GrantLevel,
 			"grant_can_api":   ord.GrantCanAPI,
 			"source_order_no": ord.OrderNo,
 			"status":          agtMembershipActive,
-			"start_at":        start,
-			"expire_at":       expire,
-			"updated_at":      start,
-		}),
-	}).Create(&row).Error
+			"start_at":        startAt,
+			"expire_at":       base.AddDate(0, 0, validDays),
+			"updated_at":      now,
+		}).Error
+	})
 }
 
 // agentTenantByOwner 找买家名下未删除的代理租户（1:1）；无则 found=false。同时回其 status（active/suspended）——
@@ -455,8 +565,8 @@ func (a *App) precheckAndReserveAgentSlug(ctx context.Context, ownerUserID int64
 		// 把兄弟单计入——防「先单过期→释放→他人抢注→后单已付撞键」。真旧站无 pending 引用 → 0。
 		var n int64
 		if err := a.DB.WithContext(ctx).Model(&agentPlanOrderRow{}).
-			Where("owner_user_id = ? AND agent_tenant_id = ? AND status = ?",
-				ownerUserID, delID, agtOrderPending).Count(&n).Error; err != nil {
+			Where("owner_user_id = ? AND agent_tenant_id = ? AND status IN ?",
+				ownerUserID, delID, []string{agtOrderPending, agtOrderActivating}).Count(&n).Error; err != nil {
 			return 0, err
 		}
 		if n > 0 {
@@ -511,13 +621,17 @@ func (a *App) precheckAndReserveAgentSlug(ctx context.Context, ownerUserID int64
 // 绝不触碰 tenant_domains（预留从不建域名行）。id<=0（无预留）直接 no-op。
 // 只允许以「订单 agent_tenant_id 锚点」调用——绝不按 owner 反查删除，防误删真实软删旧站。
 func (a *App) releaseAgentSlugReservation(ctx context.Context, tenantID int64) error {
+	return releaseAgentSlugReservationTx(a.DB.WithContext(ctx), tenantID)
+}
+
+func releaseAgentSlugReservationTx(tx *gorm.DB, tenantID int64) error {
 	if tenantID <= 0 {
 		return nil
 	}
-	return a.DB.WithContext(ctx).Exec(
+	return tx.Exec(
 		`DELETE FROM tenants WHERE id = ? AND status = ? AND NOT EXISTS (
-			SELECT 1 FROM mt_agent_plan_orders WHERE agent_tenant_id = ? AND status = ?)`,
-		tenantID, string(tenant.StatusDeleted), tenantID, agtOrderPending).Error
+			SELECT 1 FROM mt_agent_plan_orders WHERE agent_tenant_id = ? AND status IN (?, ?))`,
+		tenantID, string(tenant.StatusDeleted), tenantID, agtOrderPending, agtOrderActivating).Error
 }
 
 // normalizeAgentSlug 规整/兜底代理子域名 slug：非空取原值（tenant.Create 会再校验格式/查重/保留词），
@@ -528,12 +642,4 @@ func normalizeAgentSlug(slug string, userID int64) string {
 		return "agent" + strconv.FormatInt(userID, 10)
 	}
 	return s
-}
-
-// maxInt 返回两者较大值。
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

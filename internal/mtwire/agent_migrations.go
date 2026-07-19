@@ -2,67 +2,80 @@ package mtwire
 
 import "gorm.io/gorm"
 
-// ============================================================================
-// 迁移：users.tenant_id（new-api 原生表，幂等 raw ALTER，不改 model.User struct）
-// ============================================================================
+// usersOwnershipColumns is deliberately separate from model.User: these are
+// multitenant-owned columns on the native users table, so upstream rebases do
+// not need to carry mtwire fields in the core model. GORM still gets a real
+// schema here, which lets its migrator emit valid SQLite/MySQL/PostgreSQL DDL.
+type usersOwnershipColumns struct {
+	TenantID           int64 `gorm:"column:tenant_id;not null;default:0;index:idx_users_tenant"`
+	PromotionChannelID int64 `gorm:"column:promotion_channel_id;not null;default:0;index:idx_users_promotion_channel"`
+}
 
-// migrateUsersTenantID 幂等地给 new-api 原生 users 表加 tenant_id 列 + 索引：
-// 先查 information_schema 确认无列才 ALTER（避免重复执行报错），不触碰 new-api 的 model.User
-// （加字段会在 upstream rebase 时冲突，见 RETRO「原生表增列」）。下级归属读写均走轻量 Table 查询。
+func (usersOwnershipColumns) TableName() string { return "users" }
+
+// legacyAgentProfileColumns describes only the removed column. It is not used
+// by normal reads or writes; it gives the non-SQLite GORM migrators enough
+// schema information to quote the table and column for their dialect.
+type legacyAgentProfileColumns struct {
+	Type string `gorm:"column:type"`
+}
+
+func (legacyAgentProfileColumns) TableName() string { return "agent_profiles" }
+
+// migrateUsersOwnershipColumn adds one mtwire-owned users column and its index.
+// Keeping the index as a separate step makes the migration restart-safe when a
+// previous startup added the column but failed before creating the index.
+func migrateUsersOwnershipColumn(db *gorm.DB, field, index string) error {
+	columns := &usersOwnershipColumns{}
+	if !db.Migrator().HasColumn(columns, field) {
+		if err := db.Migrator().AddColumn(columns, field); err != nil {
+			return err
+		}
+	}
+	if !db.Migrator().HasIndex(columns, index) {
+		if err := db.Migrator().CreateIndex(columns, index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateUsersTenantID idempotently adds users.tenant_id and its lookup index
+// without modifying the native model.User struct.
 func migrateUsersTenantID(db *gorm.DB) error {
-	var count int64
-	if err := db.Raw(
-		`SELECT COUNT(*) FROM information_schema.columns
-		 WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'tenant_id'`,
-	).Scan(&count).Error; err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil // 已有列：幂等跳过
-	}
-	return db.Exec(
-		`ALTER TABLE users ADD COLUMN tenant_id BIGINT NOT NULL DEFAULT 0,
-		 ADD INDEX idx_users_tenant (tenant_id)`,
-	).Error
+	return migrateUsersOwnershipColumn(db, "TenantID", "idx_users_tenant")
 }
 
-// migrateUsersPromotionChannelID 幂等地给 new-api 原生 users 表加 promotion_channel_id 列 + 索引
-// （= agent_promotion_channels.id；经渠道码注册的用户落此列，0 = 无渠道）。与 tenant_id 同套路：
-// 先查 information_schema 确认无列才 ALTER，不触碰 new-api 的 model.User（避免 upstream rebase 冲突）。
+// migrateUsersPromotionChannelID idempotently adds
+// users.promotion_channel_id and its lookup index without modifying the native
+// model.User struct.
 func migrateUsersPromotionChannelID(db *gorm.DB) error {
-	var count int64
-	if err := db.Raw(
-		`SELECT COUNT(*) FROM information_schema.columns
-		 WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'promotion_channel_id'`,
-	).Scan(&count).Error; err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil // 已有列：幂等跳过
-	}
-	return db.Exec(
-		`ALTER TABLE users ADD COLUMN promotion_channel_id BIGINT NOT NULL DEFAULT 0,
-		 ADD INDEX idx_users_promotion_channel (promotion_channel_id)`,
-	).Error
+	return migrateUsersOwnershipColumn(db, "PromotionChannelID", "idx_users_promotion_channel")
 }
 
-// migrateAgentProfilesDropType 一次性破坏性迁移：现有代理全部升为独立档（level=1）后删除废弃的 type 列。
-// 幂等：以 type 列是否仍存在为一次性信号——列已删即跳过，绝不重复回填（避免每次启动重置 level）。
-// 与 migrateUsersTenantID 同套路：information_schema 守卫的 raw MySQL；本地 sqlite 不覆盖，服务器验证。
+func dropLegacyAgentProfileTypeColumn(db *gorm.DB, legacy *legacyAgentProfileColumns) error {
+	if db.Dialector.Name() == "sqlite" {
+		// glebarez/sqlite's GORM migrator rebuilds the whole table for
+		// DropColumn. Its DDL parser cannot reliably parse the decimal(20,8)
+		// columns in agent_profiles, while the bundled SQLite supports native
+		// DROP COLUMN. Native DDL avoids that lossy rebuild path.
+		return db.Exec(`ALTER TABLE "agent_profiles" DROP COLUMN "type"`).Error
+	}
+	return db.Migrator().DropColumn(legacy, "Type")
+}
+
+// migrateAgentProfilesDropType promotes existing agents to the independent
+// tier and removes the obsolete type column exactly once. Column existence is
+// the durable migration marker, so later startups never reset level again.
 func migrateAgentProfilesDropType(db *gorm.DB) error {
-	var count int64
-	if err := db.Raw(
-		`SELECT COUNT(*) FROM information_schema.columns
-		 WHERE table_schema = DATABASE() AND table_name = 'agent_profiles' AND column_name = 'type'`,
-	).Scan(&count).Error; err != nil {
+	legacy := &legacyAgentProfileColumns{}
+	if !db.Migrator().HasColumn(legacy, "Type") {
+		return nil
+	}
+	if err := db.Session(&gorm.Session{AllowGlobalUpdate: true}).
+		Table(legacy.TableName()).
+		UpdateColumn("level", 1).Error; err != nil {
 		return err
 	}
-	if count == 0 {
-		return nil // type 列已删：一次性迁移已执行，幂等跳过
-	}
-	// 回填：现有代理全部升为独立档（不拉黑已有站点，spec §3 迁移）。仅当 type 列尚存时执行，故只跑一次。
-	if err := db.Exec(`UPDATE agent_profiles SET level = 1`).Error; err != nil {
-		return err
-	}
-	return db.Exec(`ALTER TABLE agent_profiles DROP COLUMN type`).Error
+	return dropLegacyAgentProfileTypeColumn(db, legacy)
 }

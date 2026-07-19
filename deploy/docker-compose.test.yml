@@ -1,4 +1,5 @@
-# 集成自测编排（Phase 2 · new-api fork）。部署时用项目名隔离：
+# 历史文件名保留为 docker-compose.test.yml，但自 2026-07-03 单栈收敛后，
+# 它就是 new-api fork 的唯一现网 / 生产编排，不得当作可销毁测试栈：
 #   docker compose -p newapi_test -f deploy/docker-compose.test.yml up -d --build
 # 不写 container_name / 外部网络：靠 -p 前缀隔离，默认网络自动创建。
 # app 直接构建仓库根的 new-api Dockerfile（多阶段：bun 构建 web/default+classic → go build 内嵌）。
@@ -8,7 +9,8 @@ services:
       context: ..            # 上下文为仓库根（new-api Dockerfile 在根）
       dockerfile: Dockerfile
     ports:
-      - "127.0.0.1:3100:3000" # 仅本机回环暴露，避免裸公网
+      # APP_PORT 只用于隔离的恢复演练申请临时端口；生产未设置时仍固定 3100。
+      - "127.0.0.1:${APP_PORT:-3100}:3000" # 仅本机回环暴露，避免裸公网
     environment:
       # —— new-api 期望的变量 ——
       # DB root 密码同样不入 git（C1，2026-07-17 修复；与下方 SESSION_SECRET 同款问题）：
@@ -32,27 +34,18 @@ services:
       #   轮换会使旧 cookie 全失效（用户需重登）、缓存键重算（无数据损失）。详见 RETRO 2026-07-16 与 CLAUDE.md C1。
       SESSION_SECRET: "${SESSION_SECRET:?SESSION_SECRET 必须在服务器 .env 设为随机值，禁止内联默认（内联=把根密钥写进 git）}"
       CRYPTO_SECRET: "${CRYPTO_SECRET:?CRYPTO_SECRET 必须在服务器 .env 设为随机值，且与 SESSION_SECRET 不同（分权，勿复用）}"
+      DEPLOYMENT_ENV: "production"
+      SESSION_COOKIE_SECURE: "true"
       TZ: "Asia/Shanghai"
       PORT: "3000"
       # —— 7c 多档风控：调用前 RPM 限流默认阈值（每分钟每用户，0=关闭）。压测后设 60=合理常用值（≈1 req/s/用户）。——
       RISK_DEFAULT_RPM: "60"
-      # —— 计费写放大优化（2026-07-09）：批量聚合额度/统计写，消除 channels.used_quota 等热行锁竞争。——
-      #   前提：Redis 为额度权威（cacheDecr* 同步扣 Redis），故 DB 列滞后 ≤INTERVAL 秒不会超扣。
-      #   INTERVAL=5：app 崩溃最多丢 5s 的 DB 统计列精度（used_quota/request_count/channel used_quota）；可花余额以 Redis 为准。
-      #   激活方式：docker compose -p newapi_test -f deploy/docker-compose.test.yml up -d app（仅重启 app，~5-15s）。
-      BATCH_UPDATE_ENABLED: "true"
-      BATCH_UPDATE_INTERVAL: "5"
-      # —— 自研计费 hook 写放大优化（2026-07-09，发现 #9）：BATCH_UPDATE 只批量 5 类原生计数，覆盖不到
-      #   本 fork 追加的两类自研每请求写——mt_wallet_consume_log INSERT + agent_earning_logs/agent_wallets
-      #   收益事务（agent_wallets 是每租户热行，同租户并发全串行在其行锁上，是吞吐天花板主嫌）。开启后二者
-      #   改进程内缓冲 + 定时批量落库（单事务多行 INSERT + 按租户合并 UPSERT，消除热行争用）；均以 requestID
-      #   幂等，SIGTERM 优雅 flush 兜底计划重启，缓冲打满退回同步写。方向安全（只会少计代理收益、绝不多付）。
-      #   **默认开启**（2026-07-09 低峰激活）：服务器构建 + 单测通过后启用；真实小流量灰度核对因上游渠道暂缺
-      #   未能做，但方向安全（只会少计代理收益、绝不多付）+ requestID 幂等 + SIGTERM 优雅 flush 兜底，故先低峰
-      #   开启、生产观察账目一致性。关闭回退：改 "false" 再
-      #   `docker compose -p newapi_test -f deploy/docker-compose.test.yml --env-file .env up -d app`。INTERVAL=硬崩溃最坏丢账窗口(秒)。
-      AGENT_HOOK_ASYNC_ENABLED: "true"
-      AGENT_HOOK_ASYNC_INTERVAL: "2"
+      # —— 财务持久化安全默认 ——
+      # 余额/额度以数据库条件更新为权威，Redis 只作缓存/风控状态，不能用缓存成功掩盖 DB 写失败。
+      # 生产禁用进程内批量计费与代理 hook 缓冲，避免进程崩溃窗口丢失扣费统计、消费台账或可提现收益。
+      # 若未来启用，必须先把队列改为持久化 outbox 并用崩溃恢复/幂等重放测试证明零丢账。
+      BATCH_UPDATE_ENABLED: "false"
+      AGENT_HOOK_ASYNC_ENABLED: "false"
       # —— 上游渠道凭据：仅引用服务器 .env 的同名变量，值不入库（compose 自动插值），供后续 relay 自测（5b）用 ——
       UPSTREAM_BASE_URL: "${UPSTREAM_BASE_URL}"
       UPSTREAM_API_KEY: "${UPSTREAM_API_KEY}"
@@ -60,11 +53,19 @@ services:
       # 异步回调公网基址，回填 notify_url（= 此值 + /api/pay/{wechat,alipay}/notify）。
       MT_PAY_NOTIFY_BASE: "${MT_PAY_NOTIFY_BASE:-https://tokendream.wedreamhub.com}"
       # —— 自定义域名（OEM，§6）：内网回写端点共享密钥（引用服务器 .env，值不入库）+ A 记录目标 IP（前端指引）——
-      MT_INTERNAL_SECRET: "${MT_INTERNAL_SECRET}"
+      MT_INTERNAL_SECRET: "${MT_INTERNAL_SECRET:?MT_INTERNAL_SECRET 必须在服务器 .env 设为随机值}"
       MT_SITE_IP: "${MT_SITE_IP:-64.90.4.114}"
     depends_on:
       - mysql
       - redis
+    # Docker health 只判进程存活，避免 DB/Redis 短故障触发无意义重启。
+    # 发布与巡检另用 /health/ready 做直连 DB + 已配置 Redis 验收。
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--timeout=5", "--output-document=/dev/null", "http://127.0.0.1:3000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
     restart: on-failure       # 等待 mysql/redis 就绪期间由此兜底重启
 
   # 注：原 auth-service 独立支付网关已退役（微信/支付宝改为主站进程内真实 SDK，凭据存 DB）。
@@ -73,14 +74,13 @@ services:
   mysql:
     image: mysql:8.2
     # 让 root 用 native_password，避免 caching_sha2 在非 TLS 下的公钥交换问题。
-    # 计费写放大优化（2026-07-09）：放宽 per-commit fsync，将单连接提交吞吐从 ~523 抬到 ~5763 commits/s（11×）。
-    #   innodb-flush-log-at-trx-commit=2：每次 commit 刷 redo 到 OS cache、每秒 fsync 一次 → 进程崩溃不丢，仅宿主机断电丢 ≤1s。
-    #   sync-binlog=0：binlog 交由 OS 定期刷盘（本栈 binlog 仅本地、无从库/PITR 需求）。
-    # 运行中的实例已由 `SET PERSIST` 写入数据卷 mysqld-auto.cnf；此处 command 供全新卷（from-scratch 部署）兜底。
+    # 财务状态必须以已提交事务为恢复边界：redo 与 binlog 都在每次 commit 时持久化。
+    # 禁止为吞吐改成 innodb_flush_log_at_trx_commit=2 / sync_binlog=0；宿主掉电会让已确认的
+    # 额度、支付或收益事务从磁盘消失。存量实例若曾 SET PERSIST 为宽松值，发布前须恢复为 1/1。
     command: >
       --default-authentication-plugin=mysql_native_password
-      --innodb-flush-log-at-trx-commit=2
-      --sync-binlog=0
+      --innodb-flush-log-at-trx-commit=1
+      --sync-binlog=1
     environment:
       # 真值只存服务器 .env（C1）；仅新数据卷首次初始化时被 mysqld 消费，存量卷改密码见 app.SQL_DSN 处注释。
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 必须在服务器 .env 提供，禁止内联默认（见 C1）}"
@@ -91,7 +91,8 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:latest       # new-api 经 REDIS_CONN_STRING=redis://redis 使用（无密码，仅测试）
+    # 固定到已验证的 Redis 7 补丁版，避免 `latest` 在发布时静默换主版本/存储格式。
+    image: redis:7.4.9-alpine # 现网 app 经 REDIS_CONN_STRING=redis://redis 访问；仅 compose 内网可达，不发布宿主端口。
     # —— 持久化（Critical，2026-07-16 修复：限购去重键此前只活在**无卷** Redis，容器重建即全站 Trial 终身限购
     #   一次性归零、且限购在 DB 无任何后备台账 → 所有历史买家可再薅一份，无日志无告警）——
     #   ① 挂 named volume redis_test_data:/data —— RDB/AOF 落盘到卷，键跨容器重建 / `compose down` / 镜像重拉

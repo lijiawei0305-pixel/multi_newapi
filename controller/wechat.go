@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,13 +22,13 @@ type wechatLoginResponse struct {
 	Data    string `json:"data"`
 }
 
-func getWeChatIdByCode(code string) (string, error) {
+func getWeChatIdByCode(ctx context.Context, code string) (string, error) {
 	if code == "" {
 		return "", errors.New("无效的参数")
 	}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/wechat/user?code=%s", common.WeChatServerAddress, url.QueryEscape(code)), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/wechat/user?code=%s", common.WeChatServerAddress, url.QueryEscape(code)), nil)
 	if err != nil {
-		return "", err
+		return "", errors.New("无法创建微信验证请求")
 	}
 	req.Header.Set("Authorization", common.WeChatServerToken)
 	client := http.Client{
@@ -36,16 +36,19 @@ func getWeChatIdByCode(code string) (string, error) {
 	}
 	httpResponse, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", errors.New("微信验证服务暂时不可用")
 	}
 	defer httpResponse.Body.Close()
+	if httpResponse.StatusCode != http.StatusOK {
+		return "", errors.New("微信验证服务暂时不可用")
+	}
 	var res wechatLoginResponse
-	err = json.NewDecoder(httpResponse.Body).Decode(&res)
+	err = common.DecodeJsonWithLimit(httpResponse.Body, &res, common.ControlPlaneJSONMaxBytes)
 	if err != nil {
-		return "", err
+		return "", errors.New("微信验证服务返回了无效响应")
 	}
 	if !res.Success {
-		return "", errors.New(res.Message)
+		return "", errors.New("微信验证失败")
 	}
 	if res.Data == "" {
 		return "", errors.New("验证码错误或已过期")
@@ -62,7 +65,7 @@ func WeChatAuth(c *gin.Context) {
 		return
 	}
 	code := c.Query("code")
-	wechatId, err := getWeChatIdByCode(code)
+	wechatId, err := getWeChatIdByCode(c.Request.Context(), code)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"message": err.Error(),
@@ -143,7 +146,7 @@ func WeChatBind(c *gin.Context) {
 		return
 	}
 	code := req.Code
-	wechatId, err := getWeChatIdByCode(code)
+	wechatId, err := getWeChatIdByCode(c.Request.Context(), code)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"message": err.Error(),

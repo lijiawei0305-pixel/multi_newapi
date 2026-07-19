@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
   Building2,
@@ -27,10 +26,13 @@ import {
   PiggyBank,
   Split,
   Store,
+  type LucideIcon,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+
 import { cny } from '../lib'
 import type { AdminFinanceOverview, AgentFinanceOverview } from '../types'
 
@@ -97,13 +99,18 @@ function OverviewSkeletonGrid({
   gridCols: string
 }) {
   return (
-    <div className={cn('grid grid-cols-2 gap-3', gridCols)} data-testid='overview-cards'>
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className='rounded-lg border px-3 py-3 sm:px-4'>
-          <Skeleton className='h-3.5 w-20' />
-          <Skeleton className='mt-2 h-6 w-24' />
-        </div>
-      ))}
+    <div
+      className={cn('grid grid-cols-2 gap-3', gridCols)}
+      data-testid='overview-cards'
+    >
+      {['one', 'two', 'three', 'four', 'five', 'six']
+        .slice(0, count)
+        .map((slot) => (
+          <div key={slot} className='rounded-lg border px-3 py-3 sm:px-4'>
+            <Skeleton className='h-3.5 w-20' />
+            <Skeleton className='mt-2 h-6 w-24' />
+          </div>
+        ))}
     </div>
   )
 }
@@ -124,7 +131,10 @@ export function OverviewCards(props: OverviewCardsProps) {
       return (
         <section className='flex flex-col gap-2' data-testid='overview-section'>
           {heading}
-          <OverviewSkeletonGrid count={6} gridCols='sm:grid-cols-3 xl:grid-cols-6' />
+          <OverviewSkeletonGrid
+            count={6}
+            gridCols='sm:grid-cols-3 xl:grid-cols-6'
+          />
         </section>
       )
     }
@@ -132,7 +142,9 @@ export function OverviewCards(props: OverviewCardsProps) {
     // 顺序 + 显示名对齐 doc/admin-finance-report-simplify.md §二（6 卡重命名+重排）。
     const cards: KpiCard[] = [
       {
-        label: t('Mainsite Tokenplan Revenue', { defaultValue: '主站套餐收入' }),
+        label: t('Mainsite Tokenplan Revenue', {
+          defaultValue: '主站套餐收入',
+        }),
         value: cny(overview.mainsite_tokenplan_revenue_cny),
         icon: Landmark,
         testid: 'kpi-overview-mainsite-tokenplan-revenue',
@@ -217,13 +229,17 @@ export function OverviewCards(props: OverviewCardsProps) {
       testid: 'kpi-overview-tokenplan-withdrawable',
     },
     {
-      label: t('Apikey Consumption Revenue', { defaultValue: 'apikey 消费收益' }),
+      label: t('Apikey Consumption Revenue', {
+        defaultValue: 'apikey 消费收益',
+      }),
       value: cny(overview.apikey_consumption_cny),
       icon: KeyRound,
       testid: 'kpi-overview-apikey-consumption',
     },
     {
-      label: t('Consumption Withdrawable', { defaultValue: 'apikey消费可提现' }),
+      label: t('Consumption Withdrawable', {
+        defaultValue: 'apikey消费可提现',
+      }),
       value: cny(overview.consumption_withdrawable_cny),
       icon: HandCoins,
       testid: 'kpi-overview-consumption-withdrawable',

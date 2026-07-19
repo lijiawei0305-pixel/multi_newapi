@@ -16,11 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Ticket } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
+import {
+  sideDrawerContentClassName,
+  sideDrawerFooterClassName,
+  sideDrawerFormClassName,
+  sideDrawerHeaderClassName,
+} from '@/components/drawer-layout'
 import { SectionPageLayout } from '@/components/layout'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
@@ -43,13 +50,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  sideDrawerContentClassName,
-  sideDrawerFooterClassName,
-  sideDrawerFormClassName,
-  sideDrawerHeaderClassName,
-} from '@/components/drawer-layout'
 import { fmtDateTime, usd } from '@/lib/agent-format'
+
 import { createRedemptions, getRedemptions } from './api'
 import type { Redemption } from './types'
 
@@ -124,9 +126,7 @@ function CreateRedemptionDrawer({
         <SheetHeader className={sideDrawerHeaderClassName()}>
           <SheetTitle>{t('Generate Redemption Codes')}</SheetTitle>
           <SheetDescription>
-            {t(
-              'Codes are pre-deducted from your quota as count × amount_usd.'
-            )}
+            {t('Codes are pre-deducted from your quota as count × amount_usd.')}
           </SheetDescription>
         </SheetHeader>
 
@@ -141,7 +141,7 @@ function CreateRedemptionDrawer({
               min={0}
               value={amount || ''}
               onChange={(e) => {
-                const parsed = parseFloat(e.target.value)
+                const parsed = Number.parseFloat(e.target.value)
                 setAmount(Number.isNaN(parsed) ? 0 : parsed)
               }}
               placeholder='0.00'
@@ -158,7 +158,7 @@ function CreateRedemptionDrawer({
               step='1'
               value={count || ''}
               onChange={(e) => {
-                const parsed = parseInt(e.target.value, 10)
+                const parsed = Number.parseInt(e.target.value, 10)
                 setCount(Number.isNaN(parsed) ? 0 : parsed)
               }}
               placeholder='1'
@@ -232,7 +232,7 @@ export function Redemptions() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading ? (
+                {isLoading && (
                   <TableRow>
                     <TableCell
                       colSpan={4}
@@ -241,7 +241,8 @@ export function Redemptions() {
                       {t('Loading...')}
                     </TableCell>
                   </TableRow>
-                ) : rows.length === 0 ? (
+                )}
+                {!isLoading && rows.length === 0 && (
                   <TableRow>
                     <TableCell
                       colSpan={4}
@@ -250,7 +251,9 @@ export function Redemptions() {
                       {t('No redemption codes yet')}
                     </TableCell>
                   </TableRow>
-                ) : (
+                )}
+                {!isLoading &&
+                  rows.length > 0 &&
                   rows.map((row: Redemption) => {
                     const meta = statusMeta(row.status, t)
                     return (
@@ -276,8 +279,7 @@ export function Redemptions() {
                         </TableCell>
                       </TableRow>
                     )
-                  })
-                )}
+                  })}
               </TableBody>
             </Table>
           </div>

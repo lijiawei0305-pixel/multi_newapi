@@ -17,7 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Link } from '@tanstack/react-router'
+
 import { cn } from '@/lib/utils'
+
 import type { TopNavLink } from '../types'
 
 interface NavLinkItemProps {
@@ -74,9 +76,9 @@ export function NavLinkList({
 }: NavLinkListProps) {
   return (
     <>
-      {links.map((link, index) => (
+      {links.map((link) => (
         <NavLinkItem
-          key={index}
+          key={`${link.href}-${link.title}`}
           link={link}
           className={cn(className, itemClassName)}
         />

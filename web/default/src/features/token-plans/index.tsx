@@ -17,7 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+
 import { SectionPageLayout } from '@/components/layout'
+
 import { TokenPlansDialogs } from './components/token-plans-dialogs'
 import { TokenPlansPrimaryButtons } from './components/token-plans-primary-buttons'
 import { TokenPlansProvider } from './components/token-plans-provider'

@@ -16,15 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useReducer } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { useTranslation } from 'react-i18next'
 import { AlertTriangle, X } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useReducer } from 'react'
+import { useTranslation } from 'react-i18next'
+
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { getTenantTokenPlans } from '@/features/tenant-plans/api'
+import { cn } from '@/lib/utils'
+
 import { getSelfSubscriptionFull } from '../api'
 import { computeUsageAlert } from '../lib/usage-alert'
 
@@ -77,18 +79,25 @@ export function SubscriptionUsageBanner() {
   const message = (() => {
     switch (alert.level) {
       case 'exhausted':
-        return t('Your plan quota is exhausted. Renew or switch plans to continue.', {
-          defaultValue: '你的套餐额度已用尽，续费或换套餐以继续使用。',
-        })
+        return t(
+          'Your plan quota is exhausted. Renew or switch plans to continue.',
+          {
+            defaultValue: '你的套餐额度已用尽，续费或换套餐以继续使用。',
+          }
+        )
       case 'expired':
         return t('Your plan has expired. Renew now to continue using it.', {
           defaultValue: '你的套餐已到期，立即续费以继续使用。',
         })
       case 'expiring':
-        return t('Your plan expires in {{days}} day(s) — renew soon to avoid interruption.', {
-          defaultValue: '你的套餐将于 {{days}} 天后到期，及时续费以免服务中断。',
-          days: alert.daysLeft,
-        })
+        return t(
+          'Your plan expires in {{days}} day(s) — renew soon to avoid interruption.',
+          {
+            defaultValue:
+              '你的套餐将于 {{days}} 天后到期，及时续费以免服务中断。',
+            days: alert.daysLeft,
+          }
+        )
       default:
         return t('Your plan has used {{pct}}%, running low — renew soon.', {
           defaultValue: '你的套餐已用 {{pct}}%，快用完了，建议尽快续费。',

@@ -46,14 +46,20 @@ const NONE_CREDENTIAL: PlaygroundCredential = {
   sendGroup: null,
 }
 
-const PlaygroundCredentialContext = createContext<PlaygroundCredentialContextValue | null>(null)
+const PlaygroundCredentialContext =
+  createContext<PlaygroundCredentialContextValue | null>(null)
 
-export function PlaygroundCredentialProvider({ children }: { children: React.ReactNode }) {
-  const [credential, setCredential] = useState<PlaygroundCredential>(NONE_CREDENTIAL)
+export function PlaygroundCredentialProvider({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const [credential, setCredential] =
+    useState<PlaygroundCredential>(NONE_CREDENTIAL)
 
   const value = useMemo<PlaygroundCredentialContextValue>(
     () => ({ ...credential, setCredential }),
-    [credential],
+    [credential]
   )
 
   return (
@@ -67,7 +73,7 @@ export function usePlaygroundCredential(): PlaygroundCredentialContextValue {
   const ctx = useContext(PlaygroundCredentialContext)
   if (ctx === null) {
     throw new Error(
-      'usePlaygroundCredential 必须在 <PlaygroundCredentialProvider> 内部使用',
+      'usePlaygroundCredential 必须在 <PlaygroundCredentialProvider> 内部使用'
     )
   }
   return ctx

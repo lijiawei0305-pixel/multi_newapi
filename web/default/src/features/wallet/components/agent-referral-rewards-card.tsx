@@ -16,13 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Gift } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { agentContextQueryOptions } from '@/lib/agent-context'
-import { computeTimeRange } from '@/lib/time'
+
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -41,6 +40,8 @@ import {
   createPromotionChannel,
   getPromotionChannels,
 } from '@/features/promotion-channels/api'
+import { agentContextQueryOptions } from '@/lib/agent-context'
+import { computeTimeRange } from '@/lib/time'
 
 // ============================================================================
 // 「代理邀请返现」面板(doc/l0-agent-wallet-referral.md):仅普通代理(L0,
@@ -187,7 +188,10 @@ export function AgentReferralRewardsCard() {
 
   return (
     <>
-      <div className='rounded-lg border p-4 sm:p-5' data-testid='agent-referral-card'>
+      <div
+        className='rounded-lg border p-4 sm:p-5'
+        data-testid='agent-referral-card'
+      >
         <div className='mb-3 flex flex-wrap items-center gap-2'>
           <Gift className='text-primary size-4' />
           <h3 className='text-sm font-semibold'>
@@ -200,9 +204,7 @@ export function AgentReferralRewardsCard() {
           </span>
         </div>
 
-        {
-          /* 邀请链接 */
-        }
+        {/* 邀请链接 */}
         <div className='mb-4'>
           {inviteLink ? (
             <div className='flex items-center gap-2'>
@@ -213,7 +215,8 @@ export function AgentReferralRewardsCard() {
                 onFocus={(e) => e.currentTarget.select()}
               />
               <Button size='sm' variant='outline' onClick={copyLink}>
-                <Copy className='size-4' /> {t('Copy', { defaultValue: '复制' })}
+                <Copy className='size-4' />{' '}
+                {t('Copy', { defaultValue: '复制' })}
               </Button>
             </div>
           ) : (
@@ -229,9 +232,7 @@ export function AgentReferralRewardsCard() {
           )}
         </div>
 
-        {
-          /* 统计 */
-        }
+        {/* 统计 */}
         <div className='grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5'>
           <Stat
             label={t('Total invited users', { defaultValue: '邀请总人数' })}
@@ -261,13 +262,12 @@ export function AgentReferralRewardsCard() {
         </div>
         <p className='text-muted-foreground mt-2 text-xs'>
           {t('Referral stats footnote', {
-            defaultValue: '消费、购买与返现为近 365 天统计;邀请人数与可提现为累计值。',
+            defaultValue:
+              '消费、购买与返现为近 365 天统计;邀请人数与可提现为累计值。',
           })}
         </p>
 
-        {
-          /* 收款账户 + 提现 */
-        }
+        {/* 收款账户 + 提现 */}
         <div className='mt-4 flex flex-col gap-3'>
           <div className='flex items-center justify-between gap-2'>
             <span className='text-sm font-medium'>

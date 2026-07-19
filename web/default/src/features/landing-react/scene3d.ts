@@ -1,4 +1,3 @@
-// @ts-nocheck
 /* WeDream 落地页统一 3D 场景 —— 灯泡 + 两条 3D 轨道 + 全息卫星,同一 WebGL 画布。
    替代旧 orbit.ts(SVG)并吸收 bulb3d.ts(灯泡)。本文件随实现计划分任务扩建:
    T3 灯泡骨架 → T4 轨道 → T5 卫星 → T6 方向 → T7 进动 → T8 缓停/锁定 → T9 选中副作用。
@@ -7,12 +6,35 @@
    - 相机不再"贴着灯泡"取景,改用 yun 取景(fov 45 / z 4.6),给轨道留出空间(灯泡因此变小、留白待轨道填)。
    - 画布不再是 --b3d 定尺方块,而是铺满 .hero-visual;渲染缓冲固定高 940(保 bloom 归一化一致,见旧注释)
      宽随盒子宽高比,ResizeObserver 适配。透明叠加(AlphaFromLuma)保留,让黑底/极光透出。 */
+/* Lint override rationale: this upstream-parity Three.js scene keeps a small
+   set of explicit-any bridges for shader uniforms, sprites, and browser
+   globals without a stable common type. The module remains in `tsgo -b`. */
 import {
-  ACESFilmicToneMapping, AdditiveBlending, AmbientLight, BufferAttribute, BufferGeometry,
-  CanvasTexture, Color, Curve, CylinderGeometry, DoubleSide, Group, MathUtils, Mesh,
-  MeshBasicMaterial, MeshPhongMaterial, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry,
-  PointLight, Points, PointsMaterial, Quaternion, Raycaster, Scene, ShaderMaterial, SphereGeometry,
-  SRGBColorSpace, Sprite, SpriteMaterial, TorusGeometry, TubeGeometry, Vector2, Vector3, WebGLRenderer,
+  ACESFilmicToneMapping,
+  AdditiveBlending,
+  AmbientLight,
+  BufferAttribute,
+  BufferGeometry,
+  Color,
+  Curve,
+  CylinderGeometry,
+  DoubleSide,
+  Group,
+  Mesh,
+  MeshPhongMaterial,
+  PerspectiveCamera,
+  PointLight,
+  Points,
+  Raycaster,
+  Scene,
+  ShaderMaterial,
+  SphereGeometry,
+  Sprite,
+  SpriteMaterial,
+  TubeGeometry,
+  Vector2,
+  Vector3,
+  WebGLRenderer,
 } from 'three'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
@@ -22,7 +44,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 
 import i18n from '@/i18n/config'
 
-import { approach, drawLogoCanvas, makeGlowTexture, sampleAlphaToPoints } from './scene3d-assets'
+import { approach, makeGlowTexture } from './scene3d-assets'
 import { LOGOS, MODELS, ORBITS } from './scene3d-config'
 import { nextSelection } from './scene3d-interaction'
 
@@ -31,7 +53,9 @@ const RENDER_H = 940 // 渲染缓冲高度固定(bloom 归一化一致);宽 = �
 const BULB_SCALE = 1.5 // 灯泡整体放大(与轨道解耦:轨道半径在 config 里单独收小 → 大灯泡 + 小轨道)
 const SHIFT_X = -0.28 // 灯泡+轨道整体左移(用户觉得太靠右);同步用于灯泡剪影遮罩中心
 
-export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void> {
+export async function initScene3d(
+  canvas: HTMLCanvasElement
+): Promise<() => void> {
   const PRM = matchMedia('(prefers-reduced-motion: reduce)').matches
   const FROZEN_T = 12.0
 
@@ -126,7 +150,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   // ---- 点云数据 ----
   const buf = await fetch(DATA_URL).then((r) => r.arrayBuffer())
   const f = new Float32Array(buf)
-  if (f.length !== 240000) throw new Error('dengpao 数据长度异常: ' + f.length)
+  if (f.length !== 240000) throw new Error(`dengpao 数据长度异常: ${f.length}`)
 
   // ---- 渲染器 / 场景 / 相机 ----
   const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true })
@@ -152,11 +176,16 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   const positions = new Float32Array(40000 * 3)
   const normals = new Float32Array(40000 * 3)
   const randoms = new Float32Array(40000)
-  let minY = Infinity, maxY = -Infinity
+  let minY = Infinity,
+    maxY = -Infinity
   for (let i = 0; i < 40000; i++) {
     const y = f[i * 6 + 1]
-    positions[i * 3] = f[i * 6]; positions[i * 3 + 1] = y; positions[i * 3 + 2] = f[i * 6 + 2]
-    normals[i * 3] = f[i * 6 + 3]; normals[i * 3 + 1] = f[i * 6 + 4]; normals[i * 3 + 2] = f[i * 6 + 5]
+    positions[i * 3] = f[i * 6]
+    positions[i * 3 + 1] = y
+    positions[i * 3 + 2] = f[i * 6 + 2]
+    normals[i * 3] = f[i * 6 + 3]
+    normals[i * 3 + 1] = f[i * 6 + 4]
+    normals[i * 3 + 2] = f[i * 6 + 5]
     randoms[i] = Math.random()
     if (y < minY) minY = y
     if (y > maxY) maxY = y
@@ -166,30 +195,60 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   geo.setAttribute('aNormal', new BufferAttribute(normals, 3))
   geo.setAttribute('aRandom', new BufferAttribute(randoms, 1))
   const particleMaterial = new ShaderMaterial({
-    vertexShader: bulbVertexShader, fragmentShader: bulbFragmentShader,
+    vertexShader: bulbVertexShader,
+    fragmentShader: bulbFragmentShader,
     uniforms: {
-      uTime: { value: 0.0 }, uSize: { value: 0.055 }, uEdgeColor: { value: new Vector3(0.0, 0.65, 1.0) },
-      uMouseOrigin: { value: new Vector3(0, 0, 99) }, uMouseDir: { value: new Vector3(0, 0, -1) },
-      uRepelStrength: { value: 0.0 }, uRepelRadius: { value: 0.26 }, uRepelPower: { value: 0.16 },
+      uTime: { value: 0.0 },
+      uSize: { value: 0.055 },
+      uEdgeColor: { value: new Vector3(0.0, 0.65, 1.0) },
+      uMouseOrigin: { value: new Vector3(0, 0, 99) },
+      uMouseDir: { value: new Vector3(0, 0, -1) },
+      uRepelStrength: { value: 0.0 },
+      uRepelRadius: { value: 0.26 },
+      uRepelPower: { value: 0.16 },
     },
-    transparent: true, depthWrite: false, blending: AdditiveBlending,
+    transparent: true,
+    depthWrite: false,
+    blending: AdditiveBlending,
   })
   const bulbPoints = new Points(geo, particleMaterial)
   root.add(bulbPoints)
 
   // ---- 玻璃壳 + 辉光 ----
   const glassMat = new MeshPhongMaterial({
-    color: 0x8be5ff, transparent: true, opacity: 0.05, shininess: 120, specular: 0xffffff, side: DoubleSide, depthWrite: false,
+    color: 0x8be5ff,
+    transparent: true,
+    opacity: 0.05,
+    shininess: 120,
+    specular: 0xffffff,
+    side: DoubleSide,
+    depthWrite: false,
   })
-  const dome = new Mesh(new SphereGeometry(0.36, 40, 40), glassMat); dome.position.y = 0.14; root.add(dome)
-  const neck = new Mesh(new CylinderGeometry(0.36, 0.2, 0.32, 32, 1, true), glassMat); neck.position.y = -0.16; root.add(neck)
-  const glowSprite = new Sprite(new SpriteMaterial({
-    map: makeGlowTexture('#00f0ff'), transparent: true, opacity: 0.4, blending: AdditiveBlending, depthWrite: false,
-  }))
-  glowSprite.scale.set(0.58, 0.58, 1.0); glowSprite.position.y = 0.14; root.add(glowSprite)
+  const dome = new Mesh(new SphereGeometry(0.36, 40, 40), glassMat)
+  dome.position.y = 0.14
+  root.add(dome)
+  const neck = new Mesh(
+    new CylinderGeometry(0.36, 0.2, 0.32, 32, 1, true),
+    glassMat
+  )
+  neck.position.y = -0.16
+  root.add(neck)
+  const glowSprite = new Sprite(
+    new SpriteMaterial({
+      map: makeGlowTexture('#00f0ff'),
+      transparent: true,
+      opacity: 0.4,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    })
+  )
+  glowSprite.scale.set(0.58, 0.58, 1.0)
+  glowSprite.position.y = 0.14
+  root.add(glowSprite)
 
   // 灯泡垂直居中(其视觉中线 ≈ y0,轨道将绕此展开)。相机用 yun 取景(fov 45)给轨道留空间。
-  const top = Math.max(maxY, 0.5), bottom = Math.min(minY, -0.5)
+  const top = Math.max(maxY, 0.5),
+    bottom = Math.min(minY, -0.5)
   root.scale.setScalar(BULB_SCALE)
   root.position.set(SHIFT_X, (-(top + bottom) / 2) * BULB_SCALE, 0)
 
@@ -199,10 +258,17 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   const flows: any[] = [] // 沿轨道飞驰的光点(第一版 .fp 的 3D 版)
   class OrbitCurve extends Curve<Vector3> {
     radius: number
-    constructor(radius: number) { super(); this.radius = radius }
+    constructor(radius: number) {
+      super()
+      this.radius = radius
+    }
     getPoint(t: number, target = new Vector3()) {
       const theta = t * Math.PI * 2
-      return target.set(this.radius * Math.cos(theta), 0, this.radius * Math.sin(theta))
+      return target.set(
+        this.radius * Math.cos(theta),
+        0,
+        this.radius * Math.sin(theta)
+      )
     }
   }
   function createOrbit(cfg: any) {
@@ -215,17 +281,33 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     tiltGroup.rotation.set(cfg.tilt[0], cfg.tilt[1], cfg.tilt[2])
     spinGroup.add(tiltGroup)
     const makeLayer = (radiusScale: number, opacity: number) => {
-      const geometry = new TubeGeometry(new OrbitCurve(cfg.radius), 256, cfg.tubeRadius * radiusScale, 6, true)
+      const geometry = new TubeGeometry(
+        new OrbitCurve(cfg.radius),
+        256,
+        cfg.tubeRadius * radiusScale,
+        6,
+        true
+      )
       const material = new ShaderMaterial({
-        vertexShader: orbitVertexShader, fragmentShader: orbitFragmentShader,
+        vertexShader: orbitVertexShader,
+        fragmentShader: orbitFragmentShader,
         uniforms: {
-          uColor: { value: new Color(cfg.color) }, uOpacity: { value: opacity },
-          uTime: { value: 0 }, uDir: { value: Math.sign(cfg.speed) || 1 },
-          uSatCount: { value: cfg.keys.length }, uSatAngles: { value: new Array(8).fill(0) },
-          uWakeStrength: { value: cfg.wakeStrength }, uWakeFalloff: { value: cfg.wakeFalloff },
-          uBulbView: { value: new Vector3() }, uMaskRadius: { value: new Vector2(0.48 * BULB_SCALE, 0.7 * BULB_SCALE) },
+          uColor: { value: new Color(cfg.color) },
+          uOpacity: { value: opacity },
+          uTime: { value: 0 },
+          uDir: { value: Math.sign(cfg.speed) || 1 },
+          uSatCount: { value: cfg.keys.length },
+          uSatAngles: { value: Array.from({ length: 8 }, () => 0) },
+          uWakeStrength: { value: cfg.wakeStrength },
+          uWakeFalloff: { value: cfg.wakeFalloff },
+          uBulbView: { value: new Vector3() },
+          uMaskRadius: {
+            value: new Vector2(0.48 * BULB_SCALE, 0.7 * BULB_SCALE),
+          },
         },
-        transparent: true, depthWrite: false, blending: AdditiveBlending,
+        transparent: true,
+        depthWrite: false,
+        blending: AdditiveBlending,
       })
       orbitMaterials.push({ material, cfg })
       const tube = new Mesh(geometry, material)
@@ -238,10 +320,24 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     const flowTex = makeGlowTexture(cfg.color)
     const FLOW_N = cfg.ring === 'inner' ? 5 : 7
     for (let j = 0; j < FLOW_N; j++) {
-      const s = new Sprite(new SpriteMaterial({ map: flowTex, transparent: true, opacity: 0.9, blending: AdditiveBlending, depthWrite: false }))
-      s.scale.set(0.02, 0.02, 1); s.raycast = () => {}
+      const s = new Sprite(
+        new SpriteMaterial({
+          map: flowTex,
+          transparent: true,
+          opacity: 0.9,
+          blending: AdditiveBlending,
+          depthWrite: false,
+        })
+      )
+      s.scale.set(0.02, 0.02, 1)
+      s.raycast = () => {}
       tiltGroup.add(s)
-      flows.push({ s, radius: cfg.radius, phase: (j / FLOW_N) * Math.PI * 2, speed: cfg.flowSpeed })
+      flows.push({
+        s,
+        radius: cfg.radius,
+        phase: (j / FLOW_N) * Math.PI * 2,
+        speed: cfg.flowSpeed,
+      })
     }
     return { spinGroup, tiltGroup }
   }
@@ -261,17 +357,33 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     const step = (Math.PI * 2) / cfg.keys.length
     cfg.keys.forEach((key: string, i: number) => {
       const el = document.createElement('div')
-      el.className = 'chip ' + (b === 0 ? 'main' : 'alt')
+      el.className = `chip ${b === 0 ? 'main' : 'alt'}`
       el.dataset.mid = key
       const spin = 12 + ((b * 5 + i * 7) % 9)
       const dir = (i + b) % 2 ? 'reverse' : 'normal'
-      el.innerHTML = `<span class="shell"><span class="disc" style="--spin:${spin}s;--dir:${dir}">`
-        + LOGOS[key].replaceAll('__id__', 'u' + b + '_' + i) + '</span></span>'
-      el.style.left = '0'; el.style.top = '0'; el.style.margin = '0'; el.style.pointerEvents = 'auto'
-      el.addEventListener('mouseenter', () => { hoverKey = key })
-      el.addEventListener('mouseleave', () => { hoverKey = null })
-      stage.appendChild(el); addedChips.push(el)
-      chips.push({ el, group: tiltGroup, baseAngle: i * step, speed: cfg.speed, radius: cfg.radius, zi: -1 })
+      el.innerHTML = `<span class="shell"><span class="disc" style="--spin:${spin}s;--dir:${dir}">${LOGOS[
+        key
+      ].replaceAll('__id__', `u${b}_${i}`)}</span></span>`
+      el.style.left = '0'
+      el.style.top = '0'
+      el.style.margin = '0'
+      el.style.pointerEvents = 'auto'
+      el.addEventListener('mouseenter', () => {
+        hoverKey = key
+      })
+      el.addEventListener('mouseleave', () => {
+        hoverKey = null
+      })
+      stage.appendChild(el)
+      addedChips.push(el)
+      chips.push({
+        el,
+        group: tiltGroup,
+        baseAngle: i * step,
+        speed: cfg.speed,
+        radius: cfg.radius,
+        zi: -1,
+      })
     })
   })
   const _cw = new Vector3()
@@ -279,7 +391,12 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   // ---- 后处理 ----
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
-  const bloom = new UnrealBloomPass(new Vector2(RENDER_H, RENDER_H), 0.45, 0.42, 0.9)
+  const bloom = new UnrealBloomPass(
+    new Vector2(RENDER_H, RENDER_H),
+    0.45,
+    0.42,
+    0.9
+  )
   composer.addPass(bloom)
   composer.addPass(new OutputPass())
   composer.addPass(new ShaderPass(AlphaFromLumaShader))
@@ -292,7 +409,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     const bw = Math.max(1, boxEl?.clientWidth || canvas.clientWidth || 1)
     const bh = Math.max(1, boxEl?.clientHeight || canvas.clientHeight || 1)
     const aspect = Math.min(2.2, Math.max(0.6, bw / bh))
-    const H = RENDER_H, W = Math.round(H * aspect)
+    const H = RENDER_H,
+      W = Math.round(H * aspect)
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
     renderer.setSize(W, H, false)
     composer.setSize(W, H)
@@ -302,7 +420,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   }
   let ro: ResizeObserver | null = null
   if ('ResizeObserver' in window && canvas.parentElement) {
-    ro = new ResizeObserver(() => layoutSize()); ro.observe(canvas.parentElement)
+    ro = new ResizeObserver(() => layoutSize())
+    ro.observe(canvas.parentElement)
   }
   addEventListener('resize', layoutSize)
 
@@ -319,7 +438,9 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     mouseNDC.y = -((e.clientY - r.top) / r.height) * 2 + 1
     pointerInCanvas = Math.abs(mouseNDC.x) < 1.05 && Math.abs(mouseNDC.y) < 1.05
   }
-  const onMouseLeave = () => { pointerInCanvas = false }
+  const onMouseLeave = () => {
+    pointerInCanvas = false
+  }
   const onPointerDown = (e: PointerEvent) => {
     if (!(window as any).__scene3dActive) return
     const r = canvas.getBoundingClientRect()
@@ -327,49 +448,73 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     const ny = -((e.clientY - r.top) / r.height) * 2 + 1
     if (nx * nx + ny * ny < 0.5 * 0.5) surge()
   }
-  function surge() { if (!PRM && (window as any).__scene3dActive) surgeT0 = performance.now() / 1000 }
+  function surge() {
+    if (!PRM && (window as any).__scene3dActive) {
+      surgeT0 = performance.now() / 1000
+    }
+  }
   addEventListener('mousemove', onMouseMove)
   document.addEventListener('mouseleave', onMouseLeave)
   addEventListener('pointerdown', onPointerDown, true)
 
   function hexToRgb(hex: string) {
-    const n = parseInt(hex.slice(1), 16)
-    return { r: ((n >> 16) & 255) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 }
+    const n = Number.parseInt(hex.slice(1), 16)
+    return {
+      r: ((n >> 16) & 255) / 255,
+      g: ((n >> 8) & 255) / 255,
+      b: (n & 255) / 255,
+    }
   }
   function lightenHex(hex: string, amt: number) {
-    const n = parseInt(hex.slice(1), 16)
-    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
+    const n = Number.parseInt(hex.slice(1), 16)
+    const r = (n >> 16) & 255,
+      g = (n >> 8) & 255,
+      b = n & 255
     const m = (c: number) => Math.round(c + (255 - c) * amt)
     return `rgb(${m(r)},${m(g)},${m(b)})`
   }
   function setCoreColor(hex: string | null) {
     const c = hex ? hexToRgb(hex) : { r: 0.0, g: 0.65, b: 1.0 }
-    coreTarget.r = c.r; coreTarget.g = c.g; coreTarget.b = c.b
+    coreTarget.r = c.r
+    coreTarget.g = c.g
+    coreTarget.b = c.b
     surge()
   }
 
   // ---- 悬停锁定 + 缓停 + HUD/染色/让位 ----
-  const varsEl = (canvas.closest('.wd-landing-root') as HTMLElement) || document.documentElement
+  const varsEl =
+    (canvas.closest('.wd-landing-root') as HTMLElement) ||
+    document.documentElement
   const raycaster = new Raycaster()
   raycaster.params.Points.threshold = 0.02
-  let orbitPhase = 0, speedFactor = 1
+  let orbitPhase = 0,
+    speedFactor = 1
   let selected: string | null = null
 
   // HUD 文案走现有中文 i18n(key=英文原句;W5)。DOM 结构在 index.tsx 的 #hud。
   function setHud(m: any) {
-    const set = (id: string, val: string) => { const el = document.getElementById(id); if (el) el.textContent = val }
-    set('hud-prov', i18n.t(m.provider)); set('hud-name', i18n.t(m.name)); set('hud-desc', i18n.t(m.desc))
-    set('hud-scene', m.scene ? i18n.t(m.scene) : ''); set('hud-tele', i18n.t(m.telemetry))
-    const box = document.getElementById('hud'); if (box) (box as HTMLElement).style.borderLeftColor = m.color
-    const dot = document.querySelector('#hud .hud-dot') as HTMLElement | null; if (dot) dot.style.background = m.color
+    const set = (id: string, val: string) => {
+      const el = document.querySelector(`#${id}`)
+      if (el) el.textContent = val
+    }
+    set('hud-prov', i18n.t(m.provider))
+    set('hud-name', i18n.t(m.name))
+    set('hud-desc', i18n.t(m.desc))
+    set('hud-scene', m.scene ? i18n.t(m.scene) : '')
+    set('hud-tele', i18n.t(m.telemetry))
+    const box = document.querySelector('#hud')
+    if (box) (box as HTMLElement).style.borderLeftColor = m.color
+    const dot = document.querySelector('#hud .hud-dot') as HTMLElement | null
+    if (dot) dot.style.background = m.color
   }
   function onSelectChange(key: string | null) {
-    const hudBox = document.getElementById('hud')
+    const hudBox = document.querySelector('#hud')
     const heroRight = document.querySelector('.hero-right')
     if (key) {
       const col = MODELS[key].color
       setHud(MODELS[key])
-      hudBox?.classList.add('show'); heroRight?.classList.add('card-open')
+      hudBox?.classList.add('show')
+      heroRight?.classList.add('card-open')
       setCoreColor(col)
       varsEl.style.setProperty('--wd-brand', col) // 页眉 logo(实心)
       // 标题两行渐变:g1=品牌色、g2=其浅色 → @property 平滑过渡(见 landing-css)
@@ -377,7 +522,8 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       varsEl.style.setProperty('--wd-g2', lightenHex(col, 0.5))
       document.body.style.cursor = 'pointer'
     } else {
-      hudBox?.classList.remove('show'); heroRight?.classList.remove('card-open')
+      hudBox?.classList.remove('show')
+      heroRight?.classList.remove('card-open')
       setCoreColor(null)
       varsEl.style.removeProperty('--wd-brand')
       varsEl.style.removeProperty('--wd-g1')
@@ -387,23 +533,37 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
   }
 
   // ---- 动画 ----
-  let last = 0, heroVisible = true, rafId = 0
+  let last = 0,
+    heroVisible = true,
+    rafId = 0
   const stageEl = document.querySelector('.hero-stage')
   let io: IntersectionObserver | null = null
   if (stageEl && 'IntersectionObserver' in window) {
-    io = new IntersectionObserver((es) => { heroVisible = es[0].isIntersecting }, { threshold: 0 })
+    io = new IntersectionObserver(
+      (es) => {
+        heroVisible = es[0].isIntersecting
+      },
+      { threshold: 0 }
+    )
     io.observe(stageEl)
   }
   function renderTick(t: number, dt: number) {
     const u = particleMaterial.uniforms
     u.uTime.value = t
     if (!PRM) {
-      if (pointerInCanvas) cursorRayDir.set(mouseNDC.x, mouseNDC.y, 0.5).unproject(camera).sub(camera.position).normalize()
+      if (pointerInCanvas) {
+        cursorRayDir
+          .set(mouseNDC.x, mouseNDC.y, 0.5)
+          .unproject(camera)
+          .sub(camera.position)
+          .normalize()
+      }
       u.uMouseOrigin.value.copy(camera.position)
       u.uMouseDir.value.lerp(cursorRayDir, 1 - Math.exp(-9 * dt)).normalize()
       const target = pointerInCanvas ? 1 : 0
       const ease = target > u.uRepelStrength.value ? 5 : 2.2
-      u.uRepelStrength.value += (target - u.uRepelStrength.value) * (1 - Math.exp(-ease * dt))
+      u.uRepelStrength.value +=
+        (target - u.uRepelStrength.value) * (1 - Math.exp(-ease * dt))
     }
     const kc = 1 - Math.exp(-6 * dt)
     coreCur.r += (coreTarget.r - coreCur.r) * kc
@@ -413,7 +573,7 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     pointLight.color.setRGB(coreCur.r, coreCur.g, coreCur.b)
     root.rotation.y = t * 0.02
     const k = (t - surgeT0) / 0.7
-    const env = (k >= 0 && k <= 1) ? Math.sin(Math.PI * k) : 0
+    const env = k >= 0 && k <= 1 ? Math.sin(Math.PI * k) : 0
     glowSprite.material.opacity = 0.4 + 0.18 * env
     pointLight.intensity = 1.5 + 1.3 * env
     // 轨道相位累积时钟:speedFactor 缓动 1↔0 → 悬停时整轨平滑冻结、移开平滑恢复,不跳帧。
@@ -430,7 +590,9 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
       material.uniforms.uBulbView.value.copy(_bulbView)
       const step = (Math.PI * 2) / cfg.keys.length
       const arr = material.uniforms.uSatAngles.value
-      for (let i = 0; i < cfg.keys.length; i++) arr[i] = (i * step + cfg.speed * orbitPhase) % (Math.PI * 2)
+      for (let i = 0; i < cfg.keys.length; i++) {
+        arr[i] = (i * step + cfg.speed * orbitPhase) % (Math.PI * 2)
+      }
     }
     // 光点沿轨道飞驰 + 远近淡化/缩放(随 orbitPhase,停轨时也停)
     for (const fl of flows) {
@@ -445,19 +607,28 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     composer.render()
 
     // 芯片定位:投影 3D 轨道位置到屏幕 + z-index 前后遮挡(渲染后 matrixWorld 含本帧进动摆)
-    const cw = canvas.clientWidth || 1, ch = canvas.clientHeight || 1
+    const cw = canvas.clientWidth || 1,
+      ch = canvas.clientHeight || 1
     for (const c of chips) {
       const angle = c.baseAngle + c.speed * orbitPhase
-      _cw.set(c.radius * Math.cos(angle), Math.sin(orbitPhase * 1.5 + c.baseAngle) * 0.03, c.radius * Math.sin(angle))
+      _cw.set(
+        c.radius * Math.cos(angle),
+        Math.sin(orbitPhase * 1.5 + c.baseAngle) * 0.03,
+        c.radius * Math.sin(angle)
+      )
       c.group.localToWorld(_cw)
       const worldZ = _cw.z
       _cw.project(camera)
-      const px = (_cw.x * 0.5 + 0.5) * cw, py = (-_cw.y * 0.5 + 0.5) * ch
+      const px = (_cw.x * 0.5 + 0.5) * cw,
+        py = (-_cw.y * 0.5 + 0.5) * ch
       const d = Math.min(1, Math.max(0, (worldZ + c.radius) / (2 * c.radius)))
       c.el.style.transform = `translate(${px.toFixed(1)}px,${py.toFixed(1)}px) translate(-50%,-50%) scale(${(0.62 + 0.5 * d).toFixed(3)})`
       c.el.style.opacity = (0.35 + 0.65 * d).toFixed(3)
       const zi = worldZ > 0 ? 7 : 5
-      if (zi !== c.zi) { c.zi = zi; c.el.style.zIndex = String(zi) }
+      if (zi !== c.zi) {
+        c.zi = zi
+        c.el.style.zIndex = String(zi)
+      }
     }
 
     // 悬停(DOM 芯片 mouseenter 设 hoverKey)→ 吸附锁定 → 缓停/恢复
@@ -476,9 +647,14 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
 
   ;(window as any).__scene3dActive = true
   ;(window as any).__scene3d = {
-    surge, setCoreColor,
-    get points() { return bulbPoints.geometry.attributes.position.count },
-    get selected() { return selected },
+    surge,
+    setCoreColor,
+    get points() {
+      return bulbPoints.geometry.attributes.position.count
+    },
+    get selected() {
+      return selected
+    },
   }
 
   layoutSize()
@@ -491,9 +667,14 @@ export async function initScene3d(canvas: HTMLCanvasElement): Promise<() => void
     document.removeEventListener('mouseleave', onMouseLeave)
     removeEventListener('pointerdown', onPointerDown, true)
     removeEventListener('resize', layoutSize)
-    ro?.disconnect(); io?.disconnect()
+    ro?.disconnect()
+    io?.disconnect()
     addedChips.forEach((e) => e.remove())
-    try { renderer.dispose() } catch { /* noop */ }
+    try {
+      renderer.dispose()
+    } catch {
+      /* noop */
+    }
     document.body.classList.remove('webgl3d')
     delete (window as any).__scene3d
     ;(window as any).__scene3dActive = false

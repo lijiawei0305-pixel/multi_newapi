@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useState } from 'react'
+
 import { getTenantRechargeMethods, type TenantRechargeMethod } from '../api'
 
 /**
@@ -34,9 +35,12 @@ export function useRechargeMethods() {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    getTenantRechargeMethods()
+    void getTenantRechargeMethods()
       .then((res) => {
         if (!cancelled) setMethods(res.methods)
+      })
+      .catch(() => {
+        if (!cancelled) setMethods([])
       })
       .finally(() => {
         if (!cancelled) setLoading(false)

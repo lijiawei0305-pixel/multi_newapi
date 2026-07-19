@@ -1,3 +1,5 @@
+import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
+
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -33,7 +35,7 @@ import type { PresetAmount, TopupInfo } from '../types'
  */
 function isSafariBrowser(): boolean {
   return (
-    navigator.userAgent.indexOf('Safari') > -1 &&
+    navigator.userAgent.includes('Safari') &&
     navigator.userAgent.indexOf('Chrome') < 1
   )
 }
@@ -44,14 +46,17 @@ function isSafariBrowser(): boolean {
 export function submitPaymentForm(
   url: string,
   params: Record<string, unknown>
-): void {
+): boolean {
+  const safeUrl = normalizeHttpNavigationUrl(url)
+  if (!safeUrl) return false
   const form = document.createElement('form')
-  form.action = url
+  form.action = safeUrl
   form.method = 'POST'
 
   // Don't open in new tab for Safari
   if (!isSafariBrowser()) {
     form.target = '_blank'
+    form.rel = 'noopener noreferrer'
   }
 
   // Add form parameters
@@ -66,6 +71,7 @@ export function submitPaymentForm(
   document.body.appendChild(form)
   form.submit()
   document.body.removeChild(form)
+  return true
 }
 
 /**

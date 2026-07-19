@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -123,14 +124,6 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return false
 	}
 
-	if err := PostConsumeQuota(relayInfo, feeQuota, 0, true); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("failed to charge violation fee: %s", err.Error()))
-		return false
-	}
-
-	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, feeQuota)
-	model.UpdateChannelUsedQuota(relayInfo.ChannelId, feeQuota)
-
 	useTimeSeconds := time.Now().Unix() - relayInfo.StartTime.Unix()
 	tokenName := ctx.GetString("token_name")
 	oai := apiErr.ToOpenAIError()
@@ -147,7 +140,7 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		"violation_fee_marker": CSAMViolationMarker,
 	}
 
-	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
+	logParams := model.RecordConsumeLogParams{
 		ChannelId:      relayInfo.ChannelId,
 		ModelName:      relayInfo.OriginModelName,
 		TokenName:      tokenName,
@@ -158,7 +151,21 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		IsStream:       relayInfo.IsStream,
 		Group:          relayInfo.UsingGroup,
 		Other:          other,
-	})
+	}
+	projection := consumeBillingProjection(ctx, relayInfo, "violation_fee", "violation_fee", logParams, true)
+	if err := PostConsumeQuotaWithProjectionOperation(relayInfo, feeQuota, 0, true, "violation_fee", projection); err != nil {
+		var recoveryPending *model.BillingTerminalRecoveryPendingError
+		if errors.As(err, &recoveryPending) {
+			common.SysLog("violation fee terminal intent is durable and pending replay: " + err.Error())
+			return true
+		}
+		if billingProjectionFactCommitted(projection) {
+			common.SysLog("violation fee terminal fact committed with durable follow-up pending: " + err.Error())
+			return true
+		}
+		logger.LogError(ctx, fmt.Sprintf("failed to charge violation fee: %s", err.Error()))
+		return false
+	}
 
 	return true
 }

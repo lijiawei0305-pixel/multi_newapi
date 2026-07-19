@@ -20,8 +20,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, RefreshCw, ServerCog } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { formatTimestampRelative, formatTimestampToDate } from '@/lib/format'
-import { cn } from '@/lib/utils'
+
 import { ErrorState } from '@/components/error-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -48,6 +47,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { formatTimestampRelative, formatTimestampToDate } from '@/lib/format'
+import { cn } from '@/lib/utils'
+
 import { listSystemInstances } from '../api'
 import type { SystemInstance, SystemInstanceStatus } from '../types'
 
@@ -225,7 +227,9 @@ function SystemInstancesList(props: SystemInstancesTableProps) {
             </TableHead>
             <TableHead className='h-9 w-[100px] text-xs'>{t('Role')}</TableHead>
             <TableHead className='h-9 w-[96px] text-xs'>{t('CPU')}</TableHead>
-            <TableHead className='h-9 w-[96px] text-xs'>{t('Memory')}</TableHead>
+            <TableHead className='h-9 w-[96px] text-xs'>
+              {t('Memory')}
+            </TableHead>
             <TableHead className='h-9 w-[96px] text-xs'>
               {t('Storage')}
             </TableHead>
@@ -320,7 +324,10 @@ function SystemInstancesList(props: SystemInstancesTableProps) {
                 <TableCell className='py-2.5 align-middle'>
                   <Badge
                     variant='secondary'
-                    className={cn('gap-1.5', STATUS_CLASS_NAME[instance.status])}
+                    className={cn(
+                      'gap-1.5',
+                      STATUS_CLASS_NAME[instance.status]
+                    )}
                   >
                     <span
                       className={cn(
@@ -394,11 +401,11 @@ function SystemInstancesList(props: SystemInstancesTableProps) {
                     {runtimeLabel(instance)}
                   </div>
                 </TableCell>
-                <TableCell className='text-muted-foreground py-2.5 text-xs whitespace-nowrap align-middle'>
+                <TableCell className='text-muted-foreground py-2.5 align-middle text-xs whitespace-nowrap'>
                   {formatTimestampToDate(instance.started_at)}
                 </TableCell>
                 <TableCell
-                  className='text-muted-foreground py-2.5 pr-4 text-xs whitespace-nowrap align-middle'
+                  className='text-muted-foreground py-2.5 pr-4 align-middle text-xs whitespace-nowrap'
                   title={formatTimestampToDate(instance.last_seen_at)}
                 >
                   {formatTimestampRelative(
@@ -479,13 +486,14 @@ export function SystemInstancesPanel() {
       </div>
 
       <div aria-busy={instancesQuery.isFetching}>
-        {loading ? (
+        {loading && (
           <div className='space-y-2 p-4 sm:p-5'>
-            {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className='h-9 w-full rounded-md' />
+            {['instance-one', 'instance-two', 'instance-three'].map((slot) => (
+              <Skeleton key={slot} className='h-9 w-full rounded-md' />
             ))}
           </div>
-        ) : instancesQuery.isError ? (
+        )}
+        {!loading && instancesQuery.isError && (
           <ErrorState
             title={t('We could not load instances.')}
             description={
@@ -498,7 +506,8 @@ export function SystemInstancesPanel() {
             }}
             className='min-h-[220px]'
           />
-        ) : instances.length === 0 ? (
+        )}
+        {!loading && !instancesQuery.isError && instances.length === 0 && (
           <div className='px-4 py-10 text-center sm:px-5'>
             <div className='bg-muted mx-auto mb-3 flex size-10 items-center justify-center rounded-lg'>
               <ServerCog
@@ -510,7 +519,8 @@ export function SystemInstancesPanel() {
               {t('No instances have reported yet.')}
             </p>
           </div>
-        ) : (
+        )}
+        {!loading && !instancesQuery.isError && instances.length > 0 && (
           <div className='p-4 sm:p-5'>
             <SystemInstancesList instances={instances} />
           </div>

@@ -1,6 +1,7 @@
 package ali
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -13,12 +14,12 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
-	"github.com/samber/lo"
 )
 
 func oaiImage2AliImageRequest(info *relaycommon.RelayInfo, request dto.ImageRequest, isSync bool) (*AliImageRequest, error) {
@@ -35,8 +36,11 @@ func oaiImage2AliImageRequest(info *relaycommon.RelayInfo, request dto.ImageRequ
 			// 兼容没有parameters字段的情况，从openai标准字段中提取参数
 			imageRequest.Parameters = AliImageParameters{
 				Size:      strings.Replace(request.Size, "x", "*", -1),
-				N:         int(lo.FromPtrOr(request.N, uint(1))),
 				Watermark: request.Watermark,
+			}
+			if request.N != nil {
+				n := common.SaturatingUintToInt(*request.N)
+				imageRequest.Parameters.N = &n
 			}
 		}
 		if val, ok := request.Extra["input"]; ok {
@@ -53,9 +57,12 @@ func oaiImage2AliImageRequest(info *relaycommon.RelayInfo, request dto.ImageRequ
 			info.PriceData.AddOtherRatio("prompt_extend", 2)
 		}
 	}
+	if imageRequest.Parameters.N != nil && *imageRequest.Parameters.N <= 0 {
+		return nil, errors.New("parameters.n must be greater than zero")
+	}
 
-	if imageRequest.Parameters.N != 0 {
-		info.PriceData.AddOtherRatio("n", float64(imageRequest.Parameters.N))
+	if imageRequest.Parameters.N != nil && *imageRequest.Parameters.N > 0 {
+		info.PriceData.AddOtherRatio("n", float64(*imageRequest.Parameters.N))
 	}
 
 	// 同步图片模型和异步图片模型请求格式不一样
@@ -180,33 +187,39 @@ func oaiFormEdit2AliImageEdit(c *gin.Context, info *relaycommon.RelayInfo, reque
 		},
 	}
 	imageRequest.Parameters = AliImageParameters{
-		N:         int(lo.FromPtrOr(request.N, uint(1))),
 		Watermark: request.Watermark,
+	}
+	if request.N != nil {
+		n := common.SaturatingUintToInt(*request.N)
+		imageRequest.Parameters.N = &n
 	}
 	return &imageRequest, nil
 }
 
-func updateTask(info *relaycommon.RelayInfo, taskID string) (*AliResponse, error, []byte) {
+func updateTask(ctx context.Context, info *relaycommon.RelayInfo, taskID string) (*AliResponse, error, []byte) {
 	url := fmt.Sprintf("%s/api/v1/tasks/%s", info.ChannelBaseUrl, taskID)
 
 	var aliResponse AliResponse
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return &aliResponse, err, nil
 	}
 
 	req.Header.Set("Authorization", "Bearer "+info.ApiKey)
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		common.SysLog("updateTask client.Do err: " + err.Error())
+		common.SysLog(fmt.Sprintf("updateTask client.Do failed: error_type=%T", err))
 		return &aliResponse, err, nil
 	}
 	defer resp.Body.Close()
 
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
+	if err != nil {
+		return &aliResponse, err, nil
+	}
 
 	var response AliResponse
 	err = common.Unmarshal(responseBody, &response)
@@ -226,16 +239,42 @@ func asyncTaskWait(c *gin.Context, info *relaycommon.RelayInfo, taskID string) (
 	var taskResponse AliResponse
 	var responseBody []byte
 
-	time.Sleep(time.Duration(5) * time.Second)
+	requestContext := context.Background()
+	if c != nil && c.Request != nil {
+		requestContext = c.Request.Context()
+	}
+	timeoutSeconds := common.GetEnvOrDefault("RELAY_ALI_IMAGE_POLL_TIMEOUT_SECONDS", 210)
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 210
+	}
+	ctx, cancel := context.WithTimeout(requestContext, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+	service.MarkUpstreamAccepted(c)
+	initialTimer := time.NewTimer(5 * time.Second)
+	select {
+	case <-ctx.Done():
+		initialTimer.Stop()
+		return nil, nil, ctx.Err()
+	case <-initialTimer.C:
+	}
 
 	for {
 		logger.LogDebug(c, "asyncTaskWait step %d/%d, wait %d seconds", step, maxStep, waitSeconds)
 		step++
-		rsp, err, body := updateTask(info, taskID)
+		rsp, err, body := updateTask(ctx, info, taskID)
 		responseBody = body
 		if err != nil {
 			logger.LogWarn(c, "asyncTaskWait UpdateTask err: "+err.Error())
-			time.Sleep(time.Duration(waitSeconds) * time.Second)
+			if step >= maxStep {
+				break
+			}
+			timer := time.NewTimer(time.Duration(waitSeconds) * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, nil, ctx.Err()
+			case <-timer.C:
+			}
 			continue
 		}
 
@@ -256,44 +295,65 @@ func asyncTaskWait(c *gin.Context, info *relaycommon.RelayInfo, taskID string) (
 		if step >= maxStep {
 			break
 		}
-		time.Sleep(time.Duration(waitSeconds) * time.Second)
+		timer := time.NewTimer(time.Duration(waitSeconds) * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 
 	return nil, nil, fmt.Errorf("aliAsyncTaskWait timeout")
 }
 
-func responseAli2OpenAIImage(c *gin.Context, response *AliResponse, originBody []byte, info *relaycommon.RelayInfo, responseFormat string) *dto.ImageResponse {
+func responseAli2OpenAIImage(c *gin.Context, response *AliResponse, originBody []byte, info *relaycommon.RelayInfo, responseFormat string) (*dto.ImageResponse, error) {
 	imageResponse := dto.ImageResponse{
 		Created: info.StartTime.Unix(),
 	}
+	budget := service.NewImageResponseEncodedBudget()
+	if err := budget.ReserveEncodedBytes(int64(len(originBody))); err != nil {
+		return nil, err
+	}
 
 	if len(response.Output.Results) > 0 {
-		imageResponse.Data = response.Output.ResultToOpenAIImageDate(c, responseFormat)
+		imageResponse.Data = response.Output.ResultToOpenAIImageDate(c, responseFormat, budget)
 	} else if len(response.Output.Choices) > 0 {
-		imageResponse.Data = response.Output.ChoicesToOpenAIImageDate(c, responseFormat)
+		imageResponse.Data = response.Output.ChoicesToOpenAIImageDate(c, responseFormat, budget)
 	}
 
 	imageResponse.Metadata = originBody
-	return &imageResponse
+	return &imageResponse, nil
 }
 
 func aliImageHandler(a *Adaptor, c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*types.NewAPIError, *dto.Usage) {
+	if resp == nil || resp.Body == nil {
+		return types.NewError(errors.New("Ali image response is unavailable"), types.ErrorCodeBadResponse), nil
+	}
+	defer service.CloseResponseBodyGracefully(resp)
 	responseFormat := c.GetString("response_format")
 
 	var aliTaskResponse AliResponse
-	responseBody, err := io.ReadAll(resp.Body)
+	responseBody, err := common.ReadAllWithLimit(resp.Body)
 	if err != nil {
-		return types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError), nil
+		service.MarkUpstreamAccepted(c)
+		common.SysError(fmt.Sprintf("accepted Ali image response read failed: error_type=%T", err))
+		return channel.AcceptedResponseDeliveryError(), nil
 	}
-	service.CloseResponseBodyGracefully(resp)
 	err = common.Unmarshal(responseBody, &aliTaskResponse)
 	if err != nil {
-		return types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError), nil
+		service.MarkUpstreamAccepted(c)
+		common.SysError(fmt.Sprintf("accepted Ali image response decode failed: error_type=%T", err))
+		return channel.AcceptedResponseDeliveryError(), nil
 	}
 
-	if aliTaskResponse.Message != "" {
-		logger.LogError(c, "ali_async_task_failed: "+aliTaskResponse.Message)
-		return types.NewError(errors.New(aliTaskResponse.Message), types.ErrorCodeBadResponse), nil
+	if aliTaskResponse.Message != "" || aliTaskResponse.Code != "" {
+		logger.LogError(c, fmt.Sprintf("ali_async_task_failed code=%s message_%s", aliTaskResponse.Code, logger.PayloadMetadata([]byte(aliTaskResponse.Message))))
+		message := aliTaskResponse.Message
+		if message == "" {
+			message = aliTaskResponse.Code
+		}
+		return types.NewError(errors.New(message), types.ErrorCodeBadResponse), nil
 	}
 
 	var (
@@ -302,10 +362,15 @@ func aliImageHandler(a *Adaptor, c *gin.Context, resp *http.Response, info *rela
 	)
 
 	if a.IsSyncImageModel {
+		service.MarkUpstreamAccepted(c)
 		aliResponse = &aliTaskResponse
 		originRespBody = responseBody
 	} else {
 		// 异步图片模型需要轮询任务结果
+		if strings.TrimSpace(aliTaskResponse.Output.TaskId) == "" {
+			service.MarkUpstreamAccepted(c)
+			return channel.AcceptedResponseDeliveryError(), nil
+		}
 		aliResponse, originRespBody, err = asyncTaskWait(c, info, aliTaskResponse.Output.TaskId)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeBadResponse), nil
@@ -321,22 +386,32 @@ func aliImageHandler(a *Adaptor, c *gin.Context, resp *http.Response, info *rela
 	}
 
 	if a.IsSyncImageModel {
-		logger.LogDebug(c, "ali_sync_image_result: %s", originRespBody)
+		logger.LogPayload(c, "Ali sync image result", originRespBody)
 	} else {
-		logger.LogDebug(c, "ali_async_image_result: %s", originRespBody)
+		logger.LogPayload(c, "Ali async image result", originRespBody)
 	}
 
-	imageResponses := responseAli2OpenAIImage(c, aliResponse, originRespBody, info, responseFormat)
+	imageResponses, err := responseAli2OpenAIImage(c, aliResponse, originRespBody, info, responseFormat)
+	if err != nil {
+		common.SysError(fmt.Sprintf("accepted Ali image response exceeded cumulative encoded budget: error_type=%T", err))
+		return channel.AcceptedResponseDeliveryError(), nil
+	}
+	if len(imageResponses.Data) == 0 {
+		return channel.AcceptedResponseDeliveryError(), nil
+	}
 	if aliResponse.Usage.ImageCount != 0 {
 		info.PriceData.AddOtherRatio("n", float64(aliResponse.Usage.ImageCount))
 	} else if len(imageResponses.Data) != 0 {
 		info.PriceData.AddOtherRatio("n", float64(len(imageResponses.Data)))
 	}
-	jsonResponse, err := common.Marshal(imageResponses)
-	if err != nil {
-		return types.NewError(err, types.ErrorCodeBadResponseBody), nil
+	c.Writer.Header().Set("Content-Type", "application/json")
+	c.Writer.WriteHeader(http.StatusOK)
+	if err := channel.WriteImageResponse(c.Writer, imageResponses); err != nil {
+		if buffered, ok := c.Writer.(*common.BufferedResponseWriter); ok {
+			_ = buffered.Fail(err)
+		}
+		return channel.AcceptedResponseDeliveryError(), nil
 	}
-	service.IOCopyBytesGracefully(c, resp, jsonResponse)
 
 	return nil, &dto.Usage{}
 }

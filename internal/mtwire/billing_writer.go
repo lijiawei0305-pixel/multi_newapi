@@ -1,21 +1,14 @@
 package mtwire
 
-// billingWriter：自研计费 hook 的「每请求同步写」异步批处理器（AGENT_HOOK_ASYNC_ENABLED 开启才生效）。
+// billingWriter：钱包消耗展示台账的异步批处理器（AGENT_HOOK_ASYNC_ENABLED 开启才生效）。
 //
 // 背景（发现 #9 / 写放大）：上游 BATCH_UPDATE 只批量 5 类原生计数；本 fork 追加的两类自研写不在其覆盖内——
-//   1. mt_wallet_consume_log 的 INSERT（display-only 钱包消耗台账，recordWalletConsume）；
-//   2. agent_earning_logs + agent_wallets 的收益事务（AppendEarning：INSERT 台账 + UPSERT 钱包累加）。
-// 即便开 BATCH_UPDATE，归属代理的用户每笔 /v1 消费仍额外产 1 次 INSERT + 1 个 2 语句事务，且 agent_wallets
-// 是**每租户热行**——同租户并发请求全串行在这一行的行锁上，是吞吐天花板的主嫌。两类写均 best-effort + 以
-// requestID 幂等（ON CONFLICT DO NOTHING）⇒ 天然可异步/可合并/可重试。
+// mt_wallet_consume_log 的 INSERT（display-only 钱包消耗台账，recordWalletConsume）。该台账不产生收益、
+// 不改变余额，以 requestID 幂等，适合批量写入并在失败后重试。真实可提现收益 agent_earning_logs +
+// agent_wallets 明确不进入本进程缓冲：creditEarning 必须在请求路径同步提交，进程崩溃不能吞掉待付收益。
 //
-// 本 writer 把它们进程内缓冲，按 interval 定时（或达阈值主动）在**单事务**里批量落库：
-//   - 台账：多行 INSERT ... ON CONFLICT DO NOTHING（N 语句 → 1 语句）；
-//   - 收益：逐条幂等 INSERT 甄别首次入账，按租户合并金额后每租户仅 1 次 UPSERT（消除热行跨请求争用）。
-//
-// 持久性取舍（触钱，已与用户确认）：异步只改「何时落库」，不改幂等——重放不双计。硬崩溃最坏丢 ≤ interval 的
-// 记账（方向安全：只会少计代理收益，绝不多付平台）；计划重启由 SIGTERM 信号钩子优雅 flush 兜底。缓冲打满即
-// 退回同步写，绝不丢账、绝不无界增长。关闭时维持逐请求同步写，与优化前逐字节等价。
+// 本 writer 按 interval 定时（或达阈值主动）多行 INSERT ... ON CONFLICT DO NOTHING，把 N 次展示台账
+// INSERT 合并为批次。失败批次回填队首等待下一轮；缓冲打满时新行同步兜底，防止无界增长。
 
 import (
 	"context"
@@ -30,9 +23,6 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/internal/agent"
-	agentrepo "github.com/QuantumNous/new-api/internal/agent/gormrepo"
-
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
@@ -43,16 +33,14 @@ const (
 	billingShutdownWait   = 8 * time.Second // 优雅关闭 flush 最长等待（< docker 默认 10s SIGTERM grace）
 )
 
-// billingWriter 缓冲两类计费写并定时批量落库。所有字段的并发访问经 mu 保护（buffer）或为只读构造后不变（db/repo）。
+// billingWriter 缓冲展示台账并定时批量落库。buffer 经 mu 保护；db 在构造后只读。
 type billingWriter struct {
-	db   *gorm.DB
-	repo *agentrepo.Repo // 具体类型：AppendEarningsBatch 是非接口辅助方法（同 EnsureWallet/ListProfiles）
+	db *gorm.DB
 
 	interval time.Duration
 
 	mu          sync.Mutex
 	consumeRows []walletConsumeRow
-	earnings    []agent.EarningEntry
 
 	wake      chan struct{} // 缓冲达阈值时主动唤醒 flush（非阻塞 poke；flush 恒在 run goroutine 上，绝不占用请求 goroutine）
 	stopCh    chan struct{}
@@ -62,14 +50,13 @@ type billingWriter struct {
 }
 
 // newBillingWriter 构造（不启动）writer。interval<=0 兜底 2s。
-func newBillingWriter(db *gorm.DB, repo *agentrepo.Repo) *billingWriter {
+func newBillingWriter(db *gorm.DB) *billingWriter {
 	interval := time.Duration(common.AgentHookAsyncInterval) * time.Second
 	if interval <= 0 {
 		interval = 2 * time.Second
 	}
 	return &billingWriter{
 		db:       db,
-		repo:     repo,
 		interval: interval,
 		wake:     make(chan struct{}, 1),
 		stopCh:   make(chan struct{}),
@@ -95,32 +82,7 @@ func (w *billingWriter) enqueueConsume(row walletConsumeRow) {
 		return
 	}
 	w.consumeRows = append(w.consumeRows, row)
-	poke := len(w.consumeRows)+len(w.earnings) >= billingFlushThreshold
-	w.mu.Unlock()
-	if poke {
-		w.pokeFlush()
-	}
-}
-
-// enqueueEarning 缓冲一条收益入账；先复刻 earningSink 的校验/时间戳（异步路径绕过了 sink）。打满则同步兜底写。
-func (w *billingWriter) enqueueEarning(e agent.EarningEntry) {
-	if err := e.Validate(); err != nil {
-		common.SysError("mtwire: billing writer drop invalid earning: " + err.Error())
-		return
-	}
-	if e.CreatedAt.IsZero() {
-		e.CreatedAt = time.Now() // 以消费发生时刻入账（缓冲期不改），保报表时间口径准
-	}
-	w.mu.Lock()
-	if len(w.earnings) >= billingHardCap {
-		w.mu.Unlock()
-		if _, err := w.repo.AppendEarningsBatch(context.Background(), []agent.EarningEntry{e}); err != nil {
-			common.SysError("mtwire: billing writer earnings sync-fallback failed: " + err.Error())
-		}
-		return
-	}
-	w.earnings = append(w.earnings, e)
-	poke := len(w.consumeRows)+len(w.earnings) >= billingFlushThreshold
+	poke := len(w.consumeRows) >= billingFlushThreshold
 	w.mu.Unlock()
 	if poke {
 		w.pokeFlush()
@@ -158,9 +120,7 @@ func (w *billingWriter) run() {
 func (w *billingWriter) flush() {
 	w.mu.Lock()
 	consume := w.consumeRows
-	earnings := w.earnings
 	w.consumeRows = nil
-	w.earnings = nil
 	w.mu.Unlock()
 
 	if len(consume) > 0 {
@@ -169,12 +129,6 @@ func (w *billingWriter) flush() {
 			CreateInBatches(consume, billingConsumeBatch).Error; err != nil {
 			common.SysError("mtwire: billing writer flush consume-log failed (requeue): " + err.Error())
 			w.requeueConsume(consume)
-		}
-	}
-	if len(earnings) > 0 {
-		if _, err := w.repo.AppendEarningsBatch(context.Background(), earnings); err != nil {
-			common.SysError("mtwire: billing writer flush earnings failed (requeue): " + err.Error())
-			w.requeueEarnings(earnings)
 		}
 	}
 }
@@ -195,17 +149,6 @@ func (w *billingWriter) requeueConsume(rows []walletConsumeRow) {
 	if over := len(w.consumeRows) - billingHardCap; over > 0 {
 		w.consumeRows = w.consumeRows[:billingHardCap]
 		common.SysError(fmt.Sprintf("mtwire: billing writer consume-log buffer over cap, dropped %d rows", over))
-	}
-}
-
-// requeueEarnings 同 requeueConsume：失败收益回填头部、超上限丢最新。留最旧的失败记账（方向安全：宁可晚记不错记）。
-func (w *billingWriter) requeueEarnings(rows []agent.EarningEntry) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.earnings = append(rows, w.earnings...)
-	if over := len(w.earnings) - billingHardCap; over > 0 {
-		w.earnings = w.earnings[:billingHardCap]
-		common.SysError(fmt.Sprintf("mtwire: billing writer earnings buffer over cap, dropped %d entries", over))
 	}
 }
 

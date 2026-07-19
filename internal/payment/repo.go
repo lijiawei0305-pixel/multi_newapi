@@ -11,7 +11,7 @@ import (
 // 关键点：订单号唯一插入（Create）与状态机迁移（CompareAndSetStatus）在同一把互斥锁下完成
 // 「读-判定-写」，**模拟 detailed-design §6.2 的唯一约束 + 状态机条件 UPDATE**：
 // 高并发重复回调下，created→paid 的 CAS 只有一个胜者，从而不重复入账。
-// 真实 GORM 实现（order_no 唯一索引、行锁/条件 UPDATE、scopeByTenant、迁移）顺延（见报告 TODO）。
+// 生产 GORM 实现（order_no 唯一索引、行锁/条件 UPDATE、scopeByTenant、迁移）位于 gormrepo 子包。
 type MemRepo struct {
 	mu     sync.Mutex
 	orders map[string]*PayOrder // key: order_no

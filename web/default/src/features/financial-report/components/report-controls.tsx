@@ -16,9 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import { CalendarDays, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -30,6 +31,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import dayjs from '@/lib/dayjs'
 import { computeTimeRange } from '@/lib/time'
+
 import {
   GRANULARITY_OPTIONS,
   LENS_OPTIONS,
@@ -78,7 +80,9 @@ export function ReportControls(props: ReportControlsProps) {
   const { t } = useTranslation()
   const [preset, setPreset] = useState<string>('30d')
 
-  const startStr = dayjs(props.range.start_timestamp * 1000).format('YYYY-MM-DD')
+  const startStr = dayjs(props.range.start_timestamp * 1000).format(
+    'YYYY-MM-DD'
+  )
   const endStr = dayjs(props.range.end_timestamp * 1000).format('YYYY-MM-DD')
 
   const applyPreset = (value: string | null) => {
@@ -209,7 +213,9 @@ export function ReportControls(props: ReportControlsProps) {
             onClick={props.onRefresh}
             data-testid='report-refresh'
           >
-            <RefreshCw className={props.refreshing ? 'animate-spin' : undefined} />
+            <RefreshCw
+              className={props.refreshing ? 'animate-spin' : undefined}
+            />
             {t('Refresh')}
           </Button>
         )}

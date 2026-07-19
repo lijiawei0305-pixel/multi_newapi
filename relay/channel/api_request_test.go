@@ -1,19 +1,458 @@
 package channel
 
 import (
+	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
+func TestDoRequestCancelsProviderWhenDownstreamContextEnds(t *testing.T) {
+	t.Setenv("NO_PROXY", "*")
+	service.InitHttpClient()
+
+	providerStarted := make(chan struct{})
+	providerCanceled := make(chan struct{})
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(providerStarted)
+		<-r.Context().Done()
+		close(providerCanceled)
+	}))
+	defer provider.Close()
+
+	downstreamCtx, cancelDownstream := context.WithCancel(context.Background())
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(downstreamCtx)
+
+	// Deliberately construct the provider request with a background context.
+	// doRequest must still bind it to the caller before client.Do.
+	providerRequest, err := http.NewRequestWithContext(context.Background(), http.MethodPost, provider.URL, nil)
+	require.NoError(t, err)
+
+	result := make(chan error, 1)
+	go func() {
+		_, requestErr := DoRequest(c, providerRequest, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+		result <- requestErr
+	}()
+
+	select {
+	case <-providerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider request did not start")
+	}
+	cancelDownstream()
+
+	select {
+	case <-providerCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider did not observe downstream cancellation")
+	}
+	select {
+	case requestErr := <-result:
+		require.Error(t, requestErr)
+		require.EqualError(t, requestErr, "upstream error: do request failed")
+	case <-time.After(2 * time.Second):
+		t.Fatal("DoRequest did not return after downstream cancellation")
+	}
+}
+
+func TestDoRequestNonStreamDeadlineBeforeResponseHeaders(t *testing.T) {
+	t.Setenv("NO_PROXY", "*")
+	t.Setenv("RELAY_NON_STREAM_TIMEOUT_SECONDS", "1")
+	service.InitHttpClient()
+
+	providerStarted := make(chan struct{})
+	providerCanceled := make(chan struct{})
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(providerStarted)
+		<-r.Context().Done()
+		close(providerCanceled)
+	}))
+	defer provider.Close()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	providerRequest, err := http.NewRequest(http.MethodPost, provider.URL+"?api_key=must-not-leak", nil)
+	require.NoError(t, err)
+
+	result := make(chan error, 1)
+	go func() {
+		_, requestErr := DoRequest(c, providerRequest, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+		result <- requestErr
+	}()
+	select {
+	case <-providerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider request did not start")
+	}
+	select {
+	case requestErr := <-result:
+		require.EqualError(t, requestErr, "upstream error: do request failed")
+		require.NotContains(t, requestErr.Error(), provider.URL)
+		require.NotContains(t, requestErr.Error(), "must-not-leak")
+	case <-time.After(7 * time.Second):
+		t.Fatal("non-stream header deadline did not fire")
+	}
+	select {
+	case <-providerCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider did not observe non-stream header deadline")
+	}
+}
+
+func TestDoRequestNonStreamDeadlineRemainsActiveForResponseBody(t *testing.T) {
+	t.Setenv("NO_PROXY", "*")
+	t.Setenv("RELAY_NON_STREAM_TIMEOUT_SECONDS", "1")
+	service.InitHttpClient()
+
+	bodyStarted := make(chan struct{})
+	providerCanceled := make(chan struct{})
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"partial":"`)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		close(bodyStarted)
+		<-r.Context().Done()
+		close(providerCanceled)
+	}))
+	defer provider.Close()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	providerRequest, err := http.NewRequest(http.MethodPost, provider.URL, nil)
+	require.NoError(t, err)
+	resp, err := DoRequest(c, providerRequest, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	select {
+	case <-bodyStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider body did not start")
+	}
+
+	readDone := make(chan error, 1)
+	go func() {
+		_, readErr := io.ReadAll(resp.Body)
+		readDone <- readErr
+	}()
+	select {
+	case readErr := <-readDone:
+		require.Error(t, readErr)
+	case <-time.After(7 * time.Second):
+		t.Fatal("non-stream body deadline did not remain active after headers")
+	}
+	select {
+	case <-providerCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider did not observe non-stream body deadline")
+	}
+}
+
+func TestDoRequestBodyCloseReleasesNonStreamContext(t *testing.T) {
+	t.Setenv("NO_PROXY", "*")
+	t.Setenv("RELAY_NON_STREAM_TIMEOUT_SECONDS", "30")
+	service.InitHttpClient()
+
+	providerCanceled := make(chan struct{})
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "x")
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+		close(providerCanceled)
+	}))
+	defer provider.Close()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	providerRequest, err := http.NewRequest(http.MethodPost, provider.URL, nil)
+	require.NoError(t, err)
+	resp, err := DoRequest(c, providerRequest, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+	select {
+	case <-providerCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("closing response body did not release its non-stream context")
+	}
+}
+
+func TestDoRequestCancellationInterruptsSlowResponseBody(t *testing.T) {
+	t.Setenv("NO_PROXY", "*")
+	service.InitHttpClient()
+
+	bodyStarted := make(chan struct{})
+	providerCanceled := make(chan struct{})
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"partial":"`)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		close(bodyStarted)
+		<-r.Context().Done()
+		close(providerCanceled)
+	}))
+	defer provider.Close()
+
+	downstreamCtx, cancelDownstream := context.WithCancel(context.Background())
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(downstreamCtx)
+	providerRequest, err := http.NewRequest(http.MethodPost, provider.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := DoRequest(c, providerRequest, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	select {
+	case <-bodyStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider did not start the response body")
+	}
+
+	cancelDownstream()
+	readDone := make(chan error, 1)
+	go func() {
+		_, readErr := io.ReadAll(resp.Body)
+		readDone <- readErr
+	}()
+
+	select {
+	case <-providerCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider body remained active after downstream cancellation")
+	}
+	select {
+	case readErr := <-readDone:
+		require.Error(t, readErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("response body read did not unblock after cancellation")
+	}
+}
+
+type blockingPreHeaderPingWriter struct {
+	gin.ResponseWriter
+
+	writeStarted chan struct{}
+	releaseWrite chan struct{}
+	writeErr     error
+	panicOnWrite bool
+	startOnce    sync.Once
+	activeWrites atomic.Int32
+	maxActive    atomic.Int32
+	writeCount   atomic.Int32
+}
+
+func (w *blockingPreHeaderPingWriter) Write(data []byte) (int, error) {
+	w.writeCount.Add(1)
+	active := w.activeWrites.Add(1)
+	defer w.activeWrites.Add(-1)
+	for {
+		maximum := w.maxActive.Load()
+		if active <= maximum || w.maxActive.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	w.startOnce.Do(func() { close(w.writeStarted) })
+	if w.releaseWrite != nil {
+		<-w.releaseWrite
+	}
+	if w.panicOnWrite {
+		panic("test response writer panic")
+	}
+	if w.writeErr != nil {
+		return 0, w.writeErr
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func newPreHeaderPingTestContext(t *testing.T, writer *blockingPreHeaderPingWriter) *gin.Context {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	writer.ResponseWriter = c.Writer
+	c.Writer = writer
+	return c
+}
+
+func TestDoRequestWithPreHeaderPingsSerializesResponseWriterHandoff(t *testing.T) {
+	writer := &blockingPreHeaderPingWriter{
+		writeStarted: make(chan struct{}),
+		releaseWrite: make(chan struct{}),
+	}
+	c := newPreHeaderPingTestContext(t, writer)
+
+	allowUpstreamResponse := make(chan struct{})
+	upstreamFinished := make(chan struct{})
+	expectedResponse := &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}
+	requestResult := make(chan upstreamRequestResult, 1)
+	go func() {
+		response, err := doRequestWithPreHeaderPings(c, time.Millisecond, func() (*http.Response, error) {
+			<-allowUpstreamResponse
+			close(upstreamFinished)
+			return expectedResponse, nil
+		})
+		requestResult <- upstreamRequestResult{response: response, err: err}
+	}()
+
+	select {
+	case <-writer.writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pre-header ping did not start")
+	}
+	close(allowUpstreamResponse)
+	select {
+	case <-upstreamFinished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream request did not finish")
+	}
+
+	// The provider response is ready, but the handoff cannot occur while a
+	// pre-header ping still owns the writer.
+	select {
+	case <-requestResult:
+		t.Fatal("request returned while a pre-header ping write was still active")
+	default:
+	}
+
+	close(writer.releaseWrite)
+	select {
+	case result := <-requestResult:
+		require.NoError(t, result.err)
+		require.Same(t, expectedResponse, result.response)
+	case <-time.After(2 * time.Second):
+		t.Fatal("request did not return after the ping write completed")
+	}
+
+	_, err := c.Writer.Write([]byte("data: downstream handler\n\n"))
+	require.NoError(t, err)
+	require.Equal(t, int32(1), writer.maxActive.Load(), "ping and protocol handler writes must never overlap")
+}
+
+func TestDoRequestWithPreHeaderPingsJoinsInFlightWriteAfterCancellation(t *testing.T) {
+	writer := &blockingPreHeaderPingWriter{
+		writeStarted: make(chan struct{}),
+		releaseWrite: make(chan struct{}),
+	}
+	c := newPreHeaderPingTestContext(t, writer)
+	downstreamContext, cancelDownstream := context.WithCancel(c.Request.Context())
+	c.Request = c.Request.WithContext(downstreamContext)
+
+	upstreamCanceled := make(chan struct{})
+	requestResult := make(chan upstreamRequestResult, 1)
+	go func() {
+		response, err := doRequestWithPreHeaderPings(c, time.Millisecond, func() (*http.Response, error) {
+			<-c.Request.Context().Done()
+			close(upstreamCanceled)
+			return nil, c.Request.Context().Err()
+		})
+		requestResult <- upstreamRequestResult{response: response, err: err}
+	}()
+
+	select {
+	case <-writer.writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pre-header ping did not start")
+	}
+	cancelDownstream()
+	select {
+	case <-upstreamCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream request did not observe downstream cancellation")
+	}
+	select {
+	case <-requestResult:
+		t.Fatal("canceled request returned while its ping write was still active")
+	default:
+	}
+
+	close(writer.releaseWrite)
+	select {
+	case result := <-requestResult:
+		require.Nil(t, result.response)
+		require.ErrorIs(t, result.err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("canceled request did not return after its ping write completed")
+	}
+	require.Zero(t, writer.activeWrites.Load())
+	require.Equal(t, int32(1), writer.writeCount.Load(), "cancellation must leave no detached ping writer")
+}
+
+func TestDoRequestWithPreHeaderPingsStopsAfterWriteFailure(t *testing.T) {
+	writeFailure := errors.New("downstream write failed")
+	writer := &blockingPreHeaderPingWriter{
+		writeStarted: make(chan struct{}),
+		writeErr:     writeFailure,
+	}
+	c := newPreHeaderPingTestContext(t, writer)
+
+	allowUpstreamResponse := make(chan struct{})
+	expectedResponse := &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}
+	requestResult := make(chan upstreamRequestResult, 1)
+	go func() {
+		response, err := doRequestWithPreHeaderPings(c, time.Millisecond, func() (*http.Response, error) {
+			<-allowUpstreamResponse
+			return expectedResponse, nil
+		})
+		requestResult <- upstreamRequestResult{response: response, err: err}
+	}()
+
+	select {
+	case <-writer.writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pre-header ping did not start")
+	}
+	close(allowUpstreamResponse)
+	select {
+	case result := <-requestResult:
+		require.NoError(t, result.err)
+		require.Same(t, expectedResponse, result.response)
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider response was lost after a downstream ping failure")
+	}
+	require.Equal(t, int32(1), writer.writeCount.Load(), "a failed ping must disable later pre-header writes")
+}
+
+func TestSendPreHeaderPingRecoversWriterPanic(t *testing.T) {
+	writer := &blockingPreHeaderPingWriter{
+		writeStarted: make(chan struct{}),
+		panicOnWrite: true,
+	}
+	c := newPreHeaderPingTestContext(t, writer)
+
+	err := sendPreHeaderPing(c)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "panic recovered")
+}
+
 func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -36,7 +475,6 @@ func TestProcessHeaderOverride_ChannelTestSkipsPassthroughRules(t *testing.T) {
 func TestProcessHeaderOverride_ChannelTestSkipsClientHeaderPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -60,7 +498,6 @@ func TestProcessHeaderOverride_ChannelTestSkipsClientHeaderPlaceholder(t *testin
 func TestProcessHeaderOverride_NonTestKeepsClientHeaderPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -83,7 +520,6 @@ func TestProcessHeaderOverride_NonTestKeepsClientHeaderPlaceholder(t *testing.T)
 func TestProcessHeaderOverride_RuntimeOverrideIsFinalHeaderMap(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -114,7 +550,6 @@ func TestProcessHeaderOverride_RuntimeOverrideIsFinalHeaderMap(t *testing.T) {
 func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -141,7 +576,6 @@ func TestProcessHeaderOverride_PassthroughSkipsAcceptEncoding(t *testing.T) {
 func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.T) {
 	t.Parallel()
 
-	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)

@@ -16,9 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import DOMPurify from 'dompurify'
 import { useMemo } from 'react'
 
+import { sanitizeUntrustedRichHtml } from '@/lib/safe-html'
 import { cn } from '@/lib/utils'
 
 interface HtmlContentProps {
@@ -27,7 +27,10 @@ interface HtmlContentProps {
 }
 
 export function HtmlContent(props: HtmlContentProps) {
-  const html = useMemo(() => DOMPurify.sanitize(props.content), [props.content])
+  const html = useMemo(
+    () => sanitizeUntrustedRichHtml(props.content),
+    [props.content]
+  )
 
   return (
     <div

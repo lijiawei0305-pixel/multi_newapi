@@ -15,7 +15,7 @@ mkdir -p "$STATE_DIR"
 SECRET="$(internal_secret)"
 if [[ -z "$SECRET" ]]; then log "no MT_INTERNAL_SECRET; abort loop"; exit 1; fi
 
-resp="$(curl -fsS "${API_BASE}/pending-cert" -H "X-Internal-Secret: ${SECRET}" 2>>"$LOG_FILE")" || { log "pending-cert fetch failed"; exit 0; }
+resp="$(internal_api_curl "$SECRET" -fsS "${API_BASE}/pending-cert" 2>>"$LOG_FILE")" || { log "pending-cert fetch failed"; exit 0; }
 
 # 解析 data.domains[]（优先 jq，回退 python3，再回退 grep）。
 parse_domains() {
@@ -40,7 +40,7 @@ backoff_minutes() {
 # 前端「SSL 到期提醒」续期后会变假警报(P3 #9)。复用 cert-issued 回写(幂等,重置 active 无副作用)。
 REFRESH_STAMP="$STATE_DIR/.expiry-refresh"
 if [[ ! -f "$REFRESH_STAMP" || -n "$(find "$REFRESH_STAMP" -mmin +1200 2>/dev/null)" ]]; then
-  act="$(curl -fsS "${API_BASE}/active-cert" -H "X-Internal-Secret: ${SECRET}" 2>>"$LOG_FILE")" || act=""
+  act="$(internal_api_curl "$SECRET" -fsS "${API_BASE}/active-cert" 2>>"$LOG_FILE")" || act=""
   if [[ -n "$act" ]]; then
     mapfile -t actives < <(parse_domains "$act")
     n=0

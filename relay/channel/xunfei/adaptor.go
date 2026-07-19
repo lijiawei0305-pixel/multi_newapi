@@ -24,9 +24,7 @@ func (a *Adaptor) ConvertGeminiRequest(*gin.Context, *relaycommon.RelayInfo, *dt
 }
 
 func (a *Adaptor) ConvertClaudeRequest(*gin.Context, *relaycommon.RelayInfo, *dto.ClaudeRequest) (any, error) {
-	//TODO implement me
-	panic("implement me")
-	return nil, nil
+	return nil, channel.NewUnsupportedConversionError("Xunfei", "Claude")
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
@@ -74,15 +72,15 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
-	// xunfei's request is not http request, so we don't need to do anything here
-	dummyResp := &http.Response{}
-	dummyResp.StatusCode = http.StatusOK
-	return dummyResp, nil
+	// Xunfei opens its WebSocket only after DoResponse validates credentials and
+	// the converted request. Returning nil prevents the generic relay layer from
+	// treating a synthetic HTTP 200 as provider acceptance.
+	return nil, nil
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
 	splits := strings.Split(info.ApiKey, "|")
-	if len(splits) != 3 {
+	if len(splits) != 3 || strings.TrimSpace(splits[0]) == "" || strings.TrimSpace(splits[1]) == "" || strings.TrimSpace(splits[2]) == "" {
 		return nil, types.NewError(errors.New("invalid auth"), types.ErrorCodeChannelInvalidKey)
 	}
 	if a.request == nil {

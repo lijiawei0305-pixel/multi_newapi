@@ -17,8 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import React, { useState } from 'react'
+
 import useDialogState from '@/hooks/use-dialog'
-import { type Agent, type AgentsDialogType } from '../types'
+
+import type { Agent, AgentsDialogType } from '../types'
 
 type AgentsContextType = {
   open: AgentsDialogType | null

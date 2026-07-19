@@ -142,7 +142,14 @@ try {
   headers = stripProtectedHeaders(files)
   const result = spawnSync(
     'oxfmt',
-    ['-c', '.oxfmtrc.json', '--ignore-path', '.gitignore', '--write', '.'],
+    [
+      '-c',
+      '.oxfmtrc.json',
+      '--ignore-path',
+      '../../.gitignore',
+      '--write',
+      '.',
+    ],
     {
       cwd: root,
       stdio: 'inherit',
