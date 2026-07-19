@@ -16,6 +16,7 @@ require gzip
 require sha256sum
 require tar
 require_db_pass
+require_redis_pass
 printf '%s\n' "$DB_NAME" | grep -Eq '^[A-Za-z0-9_-]+$' \
   || die "DB_NAME 含非法标识符字符：$DB_NAME"
 

@@ -2,6 +2,7 @@ name: Publish Docker image (alpha)
 
 permissions:
   contents: read
+  deployments: read
 
 on:
   push:
@@ -49,6 +50,11 @@ jobs:
             exit 1
           fi
           printf 'value=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Fail closed unless container publish Environment is protected
+        env:
+          GH_TOKEN: ${{ secrets.ENVIRONMENT_AUDIT_TOKEN || github.token }}
+        run: bash scripts/verify-github-environments.sh container-publish
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5

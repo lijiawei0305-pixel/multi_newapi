@@ -13,15 +13,12 @@ services:
       - "127.0.0.1:${APP_PORT:-3100}:3000" # 仅本机回环暴露，避免裸公网
     environment:
       # —— new-api 期望的变量 ——
-      # DB root 密码同样不入 git（C1，2026-07-17 修复；与下方 SESSION_SECRET 同款问题）：
-      #   过去在本文件内联 root 密码字面量（本行 SQL_DSN + mysql 服务的 MYSQL_ROOT_PASSWORD + ops/lib.sh 默认值，
-      #   三处同值、低熵、已进 git）。MySQL 虽未发布 ports:（仅 compose 网络内可达），但任一容器沦陷/仓库读者
-      #   + 宿主立足点即可直升唯一生产库 root——与「仓库读者不可信」的 C1 假设矛盾。
-      #   修法同款 fail-closed：真值只存服务器 /root/newapi-test/.env(600) 的 MYSQL_ROOT_PASSWORD，缺失即拒绝部署。
-      #   注意：MYSQL_ROOT_PASSWORD 仅在 mysql 数据卷**首次初始化**时生效；对已有卷改密码须先在库内
-      #   ALTER USER，再同步 .env，二者不同步会导致 app 连不上库。
-      SQL_DSN: "root:${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 必须在服务器 .env 提供，禁止内联默认（内联=把 DB root 密码写进 git，见 C1）}@tcp(mysql:3306)/new-api-test"
-      REDIS_CONN_STRING: "redis://redis"
+      # app 不再持有 MySQL root。mysql-access-bootstrap 在每次启动前幂等创建/轮换
+      # schema-scoped 用户；密码只存 root:600 的服务器 .env。缺失即 Compose fail-closed。
+      SQL_DSN: "${MYSQL_APP_USER:-newapi}:${MYSQL_APP_PASSWORD:?MYSQL_APP_PASSWORD 必须在服务器 .env 提供 64 位十六进制随机值}@tcp(mysql:3306)/new-api-test"
+      # Redis default 用户关闭；app 仅使用显式 ACL 用户。账号/密码采用 URI-safe 的
+      # 标识符与十六进制格式，redis 启动命令会在读取任何数据前再次验证。
+      REDIS_CONN_STRING: "redis://${REDIS_APP_USER:-newapi}:${REDIS_PASSWORD:?REDIS_PASSWORD 必须在服务器 .env 提供 64 位十六进制随机值}@redis"
       # —— 会话/加密根密钥（Critical，2026-07-16 修复）——
       #   过去内联了一个 48 字符默认值(fd17844 引入)：服务器 .env 未设同名键 → compose 插值回落到 git 字面量，
       #   于是「签会话 cookie」与「派生 API token 缓存键的 HMAC」共用一把「进过 git、可被任何仓库读者读到」的根密钥。
@@ -56,8 +53,10 @@ services:
       MT_INTERNAL_SECRET: "${MT_INTERNAL_SECRET:?MT_INTERNAL_SECRET 必须在服务器 .env 设为随机值}"
       MT_SITE_IP: "${MT_SITE_IP:-64.90.4.114}"
     depends_on:
-      - mysql
-      - redis
+      mysql-access-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     # Docker health 只判进程存活，避免 DB/Redis 短故障触发无意义重启。
     # 发布与巡检另用 /health/ready 做直连 DB + 已配置 Redis 验收。
     healthcheck:
@@ -72,13 +71,15 @@ services:
   # 不再构建/启动 auth-service 容器；其代码仍在仓库（dormant）。
 
   mysql:
-    image: mysql:8.2
-    # 让 root 用 native_password，避免 caching_sha2 在非 TLS 下的公钥交换问题。
+    # 先锁定现网已验证的 linux/amd64 制品；8.4 LTS 必须按 data-services-hardening.md
+    # 在隔离恢复演练后用 MYSQL_IMAGE 覆盖，禁止直接复用已升级 datadir 回退。
+    image: "${MYSQL_IMAGE:-mysql:8.2@sha256:212fe73edca5df6ff14826d5eb975c914bfb91f82a2e923f9050568f99525da1}"
+    # 保持 MySQL 当前默认认证插件（8.2/8.4 均为 caching_sha2_password）；Go MySQL
+    # driver 已支持该协议。不要固定 8.4 已移除的 default-authentication-plugin。
     # 财务状态必须以已提交事务为恢复边界：redo 与 binlog 都在每次 commit 时持久化。
     # 禁止为吞吐改成 innodb_flush_log_at_trx_commit=2 / sync_binlog=0；宿主掉电会让已确认的
     # 额度、支付或收益事务从磁盘消失。存量实例若曾 SET PERSIST 为宽松值，发布前须恢复为 1/1。
     command: >
-      --default-authentication-plugin=mysql_native_password
       --innodb-flush-log-at-trx-commit=1
       --sync-binlog=1
     environment:
@@ -90,9 +91,46 @@ services:
     # 数据服务同样需自愈：OOM/宿主重启后自动拉起（此前缺失，崩了需人工介入）。见 RETRO 2026-07-16。
     restart: unless-stopped
 
+  # 对已有 volume，MYSQL_USER/MYSQL_PASSWORD 初始化变量不会再次执行；因此用一次性
+  # bootstrap 通过 root 幂等创建/轮换 schema 专用账号，成功后 app 才可启动。
+  # 密码通过环境 + SQL stdin 传入，不出现在 mysql 客户端 argv。
+  mysql-access-bootstrap:
+    image: "${MYSQL_IMAGE:-mysql:8.2@sha256:212fe73edca5df6ff14826d5eb975c914bfb91f82a2e923f9050568f99525da1}"
+    depends_on:
+      mysql:
+        condition: service_started
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 必须在服务器 .env 提供}"
+      MYSQL_APP_USER: "${MYSQL_APP_USER:-newapi}"
+      MYSQL_APP_PASSWORD: "${MYSQL_APP_PASSWORD:?MYSQL_APP_PASSWORD 必须在服务器 .env 提供 64 位十六进制随机值}"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        case "$$MYSQL_APP_USER" in
+          ''|*[!A-Za-z0-9_]*) echo 'MYSQL_APP_USER must be an alphanumeric SQL identifier' >&2; exit 64 ;;
+        esac
+        case "$$MYSQL_APP_PASSWORD" in
+          *[!0-9a-fA-F]*|'') echo 'MYSQL_APP_PASSWORD must be hexadecimal' >&2; exit 64 ;;
+        esac
+        [ "$${#MYSQL_APP_PASSWORD}" -ge 64 ] && [ "$${#MYSQL_APP_PASSWORD}" -le 128 ] || {
+          echo 'MYSQL_APP_PASSWORD must contain 64-128 hexadecimal characters' >&2
+          exit 64
+        }
+        deadline=$$(( $$(date +%s) + 90 ))
+        until MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -hmysql -uroot --silent; do
+          [ "$$(date +%s)" -lt "$$deadline" ] || { echo 'MySQL did not become ready' >&2; exit 1; }
+          sleep 2
+        done
+        printf "CREATE USER IF NOT EXISTS '%s'@'%%' IDENTIFIED BY '%s';\nALTER USER '%s'@'%%' IDENTIFIED BY '%s';\nGRANT ALL PRIVILEGES ON \`new-api-test\`.* TO '%s'@'%%';\n" \
+          "$$MYSQL_APP_USER" "$$MYSQL_APP_PASSWORD" "$$MYSQL_APP_USER" "$$MYSQL_APP_PASSWORD" "$$MYSQL_APP_USER" \
+          | MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -hmysql -uroot
+        MYSQL_PWD="$$MYSQL_APP_PASSWORD" mysql -hmysql -u"$$MYSQL_APP_USER" -Dnew-api-test -Nse 'SELECT DATABASE()' \
+          | grep -Fx 'new-api-test' >/dev/null
+    restart: "no"
+
   redis:
     # 固定到现网已写入 RDB v14 的 Redis 8.8 补丁版；降级到 Redis 7 无法读取既有 AOF/RDB。
-    image: redis:8.8.0 # 现网 app 经 REDIS_CONN_STRING=redis://redis 访问；仅 compose 内网可达，不发布宿主端口。
+    image: "${REDIS_IMAGE:-redis:8.8.0@sha256:234c902a2db49461a129e2d4aeff85b28cf20187ed274a67f6e50995fa713c7b}"
     # —— 持久化（Critical，2026-07-16 修复：限购去重键此前只活在**无卷** Redis，容器重建即全站 Trial 终身限购
     #   一次性归零、且限购在 DB 无任何后备台账 → 所有历史买家可再薅一份，无日志无告警）——
     #   ① 挂 named volume redis_test_data:/data —— RDB/AOF 落盘到卷，键跨容器重建 / `compose down` / 镜像重拉
@@ -101,7 +139,29 @@ services:
     #      （save 3600/300/60，最坏丢 ~300s）。AOF 与 RDB 并存作双保险，均落在同一持久卷。
     #   注：本改动需一次容器重建（`up -d` 会 recreate redis）方生效；重建瞬间旧内存键会丢——线上现状本就 0 键
     #      （主审员实测 risk:trial:* = 0），故无损失。详见 RETRO 2026-07-16 与 CLAUDE.md C4。
-    command: redis-server --appendonly yes
+    environment:
+      REDIS_APP_USER: "${REDIS_APP_USER:-newapi}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD 必须在服务器 .env 提供 64 位十六进制随机值}"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        case "$$REDIS_APP_USER" in
+          ''|*[!A-Za-z0-9_-]*) echo 'REDIS_APP_USER must be an ACL-safe identifier' >&2; exit 64 ;;
+        esac
+        case "$$REDIS_PASSWORD" in
+          *[!0-9a-fA-F]*|'') echo 'REDIS_PASSWORD must be hexadecimal' >&2; exit 64 ;;
+        esac
+        [ "$${#REDIS_PASSWORD}" -ge 64 ] && [ "$${#REDIS_PASSWORD}" -le 128 ] || {
+          echo 'REDIS_PASSWORD must contain 64-128 hexadecimal characters' >&2
+          exit 64
+        }
+        umask 077
+        printf 'user default off\nuser %s on >%s ~* +@all -acl -config -debug -flushall -flushdb -migrate -module -monitor -replicaof -slaveof -shutdown\n' \
+          "$$REDIS_APP_USER" "$$REDIS_PASSWORD" > /run/newapi-users.acl
+        chown redis:redis /run/newapi-users.acl
+        # 继续走官方 entrypoint，让 Redis 从 root 降权到镜像内 redis 用户；直接
+        # exec redis-server 会绕过官方 gosu 降权逻辑。
+        exec docker-entrypoint.sh redis-server --appendonly yes --aclfile /run/newapi-users.acl
     volumes:
       - redis_test_data:/data
     # OOM/镜像升级/宿主重启后自愈：无此策略则 redis 崩了不会自己起来，需人工介入。

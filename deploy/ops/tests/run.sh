@@ -144,6 +144,16 @@ if [[ "$args" == compose\ *" exec -T mysql sh -c "*" newapi-mysql-client mysqldu
   while [ "$i" -lt 300 ]; do printf 'INSERT INTO t VALUES (%s, %s);\n' "$i" "$((i * 7919))"; i=$((i + 1)); done
   exit 0
 fi
+if [[ "$args" == compose\ *" exec -T redis sh -c "*" newapi-redis-client newapi "* ]]; then
+  cat >/dev/null
+  case "$args" in
+    *" newapi-redis-client newapi --raw PING") printf 'PONG\n' ;;
+    *" newapi-redis-client newapi SAVE") exit 0 ;;
+    *" newapi-redis-client newapi --raw INFO keyspace") printf '# Keyspace\ndb0:keys=1,expires=0,avg_ttl=0\n' ;;
+    *) printf 'unexpected authenticated Redis call: %s\n' "$args" >&2; exit 97 ;;
+  esac
+  exit 0
+fi
 case "$args" in
   "compose "*" ps -a -q app") printf 'app-cid\n' ;;
   "compose "*" ps -a -q redis") printf 'redis-cid\n' ;;
@@ -154,10 +164,7 @@ case "$args" in
   "compose "*" stop app") printf 'false\n' > "$DOCKER_STATE" ;;
   "compose "*" start app") printf 'true\n' > "$DOCKER_STATE" ;;
   "compose "*" exec -T mysql sh -c "*) exit 0 ;;
-  "compose "*" exec -T redis redis-cli --raw PING") printf 'PONG\n' ;;
-  "compose "*" exec -T redis redis-cli SAVE") exit 0 ;;
   "compose "*" exec -T redis redis-check-rdb /data/dump.rdb") exit 0 ;;
-  "compose "*" exec -T redis redis-cli --raw INFO keyspace") printf '# Keyspace\ndb0:keys=1,expires=0,avg_ttl=0\n' ;;
   "compose "*" cp redis:/data/dump.rdb "*) exit 23 ;;
   *) printf 'unexpected fake docker call: %s\n' "$args" >&2; exit 97 ;;
 esac
@@ -165,6 +172,7 @@ FAKE_DOCKER
   chmod +x "$fake/docker"
 
   if PATH="$fake:$PATH" DOCKER_STATE="$state" DOCKER_CALLS="$calls" DB_PASS=test-password \
+    REDIS_PASS=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BACKUP_OFFSITE_REQUIRED=0 \
     BACKUP_DIR="$tmp/backups" SERVER_REPO="$tmp/server" \
     OPS_LOCK_DIR="$tmp/ops.lock" \
     COMPOSE_FILE="$tmp/server/compose.yml" ENV_FILE="$tmp/server/.env" \
@@ -194,7 +202,7 @@ test_deploy_aborts_on_backup_failure() (
 case "$*" in
   "rev-parse --short HEAD") printf 'abc1234\n' ;;
   "rev-parse --abbrev-ref HEAD") printf 'main\n' ;;
-  "status --porcelain") exit 0 ;;
+  "status --porcelain --untracked-files=all") exit 0 ;;
   "tag -f "*) exit 0 ;;
   *) exit 1 ;;
 esac
@@ -222,6 +230,42 @@ FAKE_SSH
   fi
 )
 
+test_deploy_rejects_dirty_checkout_before_remote_access() (
+  set -euo pipefail
+  local tmp fake output ssh_log
+  tmp="$(mktemp -d)"
+  trap 'rm -rf -- "$tmp"' EXIT
+  fake="$tmp/bin"
+  output="$tmp/deploy.out"
+  ssh_log="$tmp/ssh.log"
+  mkdir -p "$fake" "$tmp/local"
+  cat > "$fake/git" <<'FAKE_DIRTY_GIT'
+#!/usr/bin/env bash
+case "$*" in
+  "rev-parse --short HEAD") printf 'abc1234\n' ;;
+  "rev-parse --abbrev-ref HEAD") printf 'main\n' ;;
+  "status --porcelain --untracked-files=all") printf '?? runner-only-file\n' ;;
+  *) exit 1 ;;
+esac
+FAKE_DIRTY_GIT
+  cat > "$fake/ssh" <<'FAKE_DIRTY_SSH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$SSH_LOG"
+exit 99
+FAKE_DIRTY_SSH
+  chmod +x "$fake/git" "$fake/ssh"
+
+  if PATH="$fake:$PATH" SSH_LOG="$ssh_log" SKIP_PREFLIGHT=1 \
+    LOCAL_REPO="$tmp/local" SSH_HOST=fake SERVER_REPO=/srv/newapi \
+    COMPOSE_FILE=/srv/newapi/deploy/docker-compose.test.yml ENV_FILE=/srv/newapi/.env \
+    bash "$ROOT/deploy/ops/deploy.sh" > "$output" 2>&1; then
+    fail "deploy accepted a dirty checkout"
+  fi
+  grep -Fq '工作树或 index 非干净状态' "$output" \
+    || fail "dirty checkout refusal did not explain the reproducibility boundary"
+  [ ! -s "$ssh_log" ] || fail "dirty checkout reached the server before refusal"
+)
+
 test_all_deploy_remote_programs_parse() (
   set -euo pipefail
   local tmp fake output
@@ -236,7 +280,8 @@ test_all_deploy_remote_programs_parse() (
 case "$*" in
   "rev-parse --short HEAD") printf 'abc1234\n' ;;
   "rev-parse --abbrev-ref HEAD") printf 'main\n' ;;
-  "status --porcelain") exit 0 ;;
+  "status --porcelain --untracked-files=all") exit 0 ;;
+  "archive --format=tar HEAD -- . :(exclude)bulb-orbit") /usr/bin/tar -cf - . ;;
   "tag -f "*) exit 0 ;;
   *) exit 1 ;;
 esac
@@ -348,6 +393,7 @@ esac
 FAKE_RESTORE_DOCKER
   chmod +x "$fake/docker"
   if PATH="$fake:$PATH" DOCKER_LOG="$docker_log" DB_PASS=test-password \
+    REDIS_PASS=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
     SERVER_REPO="$tmp/server" COMPOSE_FILE="$tmp/server/compose.yml" ENV_FILE="$tmp/server/.env" \
     BACKUP_DIR="$tmp/backups" OPS_LOCK_DIR="$tmp/ops.lock" \
     bash "$ROOT/deploy/ops/restore.sh" "$manifest" >"$tmp/restore.out" 2>&1; then
@@ -375,7 +421,11 @@ test_restore_orchestration_contract_converts_rdb_to_aof_and_reconciles() (
   printf 'current-v1\n' > "$tmp/server/VERSION"
   printf '{"version":"current-v1"}\n' > "$tmp/server/deploy-manifest.json"
   printf 'services: {}\n' > "$tmp/server/deploy/docker-compose.test.yml"
-  printf 'MYSQL_ROOT_PASSWORD=test-password\n' > "$tmp/server/.env"
+  {
+    printf 'MYSQL_ROOT_PASSWORD=test-password\n'
+    printf 'REDIS_APP_USER=newapi\n'
+    printf 'REDIS_PASSWORD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+  } > "$tmp/server/.env"
   printf 'nginx\n' > "$tmp/nginx.conf"
   printf 'cert\n' > "$tmp/cert/fullchain.pem"
 
@@ -430,6 +480,17 @@ if [[ "$args" == compose\ *" exec -T mysql sh -c "*" newapi-mysql-client mysql "
   if [[ "$args" == *"SELECT SCHEMA_NAME"* ]]; then printf 'new-api-test\n'; fi
   exit 0
 fi
+if [[ "$args" == compose\ *" exec -T redis sh -c "*" newapi-redis-client newapi "* ]]; then
+  cat >/dev/null
+  case "$args" in
+    *" newapi-redis-client newapi SAVE") exit 0 ;;
+    *" newapi-redis-client newapi --raw PING") printf 'PONG\n' ;;
+    *" newapi-redis-client newapi --raw INFO keyspace") printf '# Keyspace\ndb0:keys=1,expires=0,avg_ttl=0\n' ;;
+    *" newapi-redis-client newapi --raw INFO persistence") persistence ;;
+    *) printf 'unexpected authenticated Redis call: %s\n' "$args" >&2; exit 96 ;;
+  esac
+  exit 0
+fi
 case "$args" in
   "compose "*" ps -a -q app") printf 'app-cid\n' ;;
   "compose "*" ps -a -q redis") printf 'redis-cid\n' ;;
@@ -444,11 +505,7 @@ case "$args" in
   "compose "*" stop redis") printf 'false\n' > "$REDIS_STATE" ;;
   "compose "*" start redis") printf 'true\n' > "$REDIS_STATE" ;;
   "compose "*" exec -T mysql sh -c "*) exit 0 ;;
-  "compose "*" exec -T redis redis-cli SAVE") exit 0 ;;
   "compose "*" exec -T redis redis-check-rdb /data/dump.rdb") exit 0 ;;
-  "compose "*" exec -T redis redis-cli --raw PING") printf 'PONG\n' ;;
-  "compose "*" exec -T redis redis-cli --raw INFO keyspace") printf '# Keyspace\ndb0:keys=1,expires=0,avg_ttl=0\n' ;;
-  "compose "*" exec -T redis redis-cli --raw INFO persistence") persistence ;;
   "compose "*" cp redis:/data/dump.rdb "*)
     destination="${!#}"
     printf 'pre-restore-rdb\n' > "$destination"
@@ -470,6 +527,7 @@ FAKE_FULL_RESTORE_DOCKER
 
   printf 'newapi_test\n' | PATH="$fake:$PATH" DOCKER_LOG="$docker_log" \
     APP_STATE="$app_state" REDIS_STATE="$redis_state" DB_PASS=test-password \
+    REDIS_PASS=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa BACKUP_OFFSITE_REQUIRED=0 \
     MAINTENANCE_CONFIRMED=1 SERVER_REPO="$tmp/server" \
     COMPOSE_FILE="$tmp/server/deploy/docker-compose.test.yml" ENV_FILE="$tmp/server/.env" \
     BACKUP_DIR="$tmp/backups" OPS_LOCK_DIR="$tmp/ops.lock" \
@@ -658,7 +716,7 @@ test_health_and_https_contract() (
 
 test_secrets_stay_out_of_process_arguments() (
   set -euo pipefail
-  local tmp fake db_secret internal_secret path
+  local tmp fake db_secret redis_secret internal_secret path
   tmp="$(mktemp -d)"
   trap 'rm -rf -- "$tmp"' EXIT
   fake="$tmp/bin"
@@ -691,7 +749,7 @@ while [ "$#" -gt 0 ] && [ "$1" != exec ]; do shift; done
 shift
 [ "${1:-}" = -T ] || exit 95
 shift
-[ "${1:-}" = mysql ] || exit 96
+[ "${1:-}" = mysql ] || [ "${1:-}" = redis ] || exit 96
 shift
 exec "$@"
 FAKE_SECRET_DOCKER
@@ -712,7 +770,14 @@ cat "$defaults" >> "$MYSQL_DEFAULT_CAPTURE"
 cat >> "$MYSQL_STDIN_CAPTURE"
 [ "${FAKE_MYSQL_FAIL:-0}" != 1 ] || exit 23
 FAKE_SECRET_MYSQL
-  chmod +x "$fake/curl" "$fake/docker" "$fake/mysql"
+  cat > "$fake/redis-cli" <<'FAKE_SECRET_REDIS'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$REDIS_ARGV_LOG"
+printf '%s\n' "${REDISCLI_AUTH:-}" >> "$REDIS_AUTH_CAPTURE"
+printf 'PONG\n'
+FAKE_SECRET_REDIS
+  chmod +x "$fake/curl" "$fake/docker" "$fake/mysql" "$fake/redis-cli"
 
   internal_secret='internal-secret-must-not-appear-in-argv'
   PATH="$fake:$PATH" CURL_ARGV_LOG="$tmp/curl.argv" \
@@ -756,6 +821,19 @@ FAKE_SECRET_MYSQL
   while IFS= read -r path; do
     [ ! -e "$path" ] || fail "MySQL temporary defaults file survived client exit: $path"
   done < "$tmp/mysql.paths"
+
+  redis_secret='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  PATH="$fake:$PATH" REDIS_PASS="$redis_secret" REDIS_USER=newapi \
+    DOCKER_ARGV_LOG="$tmp/docker.argv" REDIS_ARGV_LOG="$tmp/redis.argv" \
+    REDIS_AUTH_CAPTURE="$tmp/redis.auth" SERVER_REPO="$tmp/server" \
+    COMPOSE_FILE="$tmp/compose.yml" ENV_FILE="$tmp/.env" \
+    bash -c '. "$1"; require_redis_pass; redis_cli_service --raw PING' _ \
+      "$ROOT/deploy/ops/lib.sh" | grep -Fxq PONG
+  if grep -Fq "$redis_secret" "$tmp/docker.argv" "$tmp/redis.argv"; then
+    fail "REDIS_PASSWORD leaked into docker/redis-cli argv"
+  fi
+  grep -Fxq "$redis_secret" "$tmp/redis.auth" \
+    || fail "Redis helper did not inject authentication through stdin/environment"
 
   if grep -R -nE --include='*.sh' -- '-p"?\$DB_PASS|-H "X-Internal-Secret: \$\{?[A-Za-z_]' \
       "$ROOT/deploy/ops" "$ROOT/scripts" >/dev/null; then
@@ -866,7 +944,7 @@ test_session_security_deployment_docs_contract() (
     fi
   done
 
-  for redis_compose in "$quick" "$dev" "$production"; do
+  for redis_compose in "$quick" "$dev"; do
     grep -Fq 'image: redis:7.4.9-alpine' "$redis_compose" \
       || fail "Compose does not pin the verified Redis patch image: $redis_compose"
     grep -Fq -- '--appendonly' "$redis_compose" \
@@ -875,6 +953,12 @@ test_session_security_deployment_docs_contract() (
       fail "Compose still uses a mutable Redis tag: $redis_compose"
     fi
   done
+  grep -Fq 'redis:8.8.0@sha256:234c902a2db49461a129e2d4aeff85b28cf20187ed274a67f6e50995fa713c7b' "$production" \
+    || fail "production Redis is not pinned to the verified immutable digest"
+  grep -Fq 'mysql:8.2@sha256:212fe73edca5df6ff14826d5eb975c914bfb91f82a2e923f9050568f99525da1' "$production" \
+    || fail "production MySQL is not pinned to the verified immutable digest"
+  grep -Fq -- '--appendonly yes --aclfile' "$production" \
+    || fail "production Redis does not enable AOF together with an ACL file"
   grep -Fq 'redis_data:/data' "$quick" \
     || fail "Quick Start Redis has no persistent named volume"
   grep -Fq 'redis_data:' "$quick" \
@@ -892,6 +976,21 @@ test_session_security_deployment_docs_contract() (
     || fail "production Compose does not fail closed on missing SESSION_SECRET"
   grep -Fq 'CRYPTO_SECRET: "${CRYPTO_SECRET:?' "$production" \
     || fail "production Compose does not fail closed on missing CRYPTO_SECRET"
+  grep -Fq 'SQL_DSN: "${MYSQL_APP_USER:-newapi}:${MYSQL_APP_PASSWORD:?' "$production" \
+    || fail "production app does not fail closed on a dedicated MySQL credential"
+  if grep -Eq 'SQL_DSN:[[:space:]]*"?root:' "$production"; then
+    fail "production app still connects to MySQL as root"
+  fi
+  grep -Fq 'REDIS_CONN_STRING: "redis://${REDIS_APP_USER:-newapi}:${REDIS_PASSWORD:?' "$production" \
+    || fail "production app does not use an authenticated Redis ACL URI"
+  grep -Fq 'user default off' "$production" \
+    || fail "production Redis does not disable the anonymous default user"
+  grep -Fq 'exec docker-entrypoint.sh redis-server' "$production" \
+    || fail "production Redis bypasses the official non-root entrypoint"
+  grep -Fq -- '-flushall -flushdb' "$production" \
+    || fail "production Redis ACL still grants destructive database flush commands"
+  grep -Fq 'mysql-access-bootstrap:' "$production" \
+    || fail "production Compose has no existing-volume user bootstrap"
   grep -Fq 'BATCH_UPDATE_ENABLED: "false"' "$production" \
     || fail "production Compose re-enabled crash-lossy quota/stat batching"
   grep -Fq 'AGENT_HOOK_ASYNC_ENABLED: "false"' "$production" \
@@ -907,7 +1006,7 @@ test_session_security_deployment_docs_contract() (
     fail "production Compose still documents a lossy cache/earning model as safe"
   fi
 
-  for empty_secret in MT_INTERNAL_SECRET MYSQL_ROOT_PASSWORD SESSION_SECRET CRYPTO_SECRET UPSTREAM_API_KEY; do
+  for empty_secret in MT_INTERNAL_SECRET MYSQL_ROOT_PASSWORD MYSQL_APP_PASSWORD REDIS_PASSWORD SESSION_SECRET CRYPTO_SECRET UPSTREAM_API_KEY; do
     grep -Eq "^${empty_secret}=$" "$env_example" \
       || fail "environment example must leave $empty_secret empty so Compose cannot accept a known placeholder"
   done
@@ -993,10 +1092,179 @@ test_documented_commands_match_build_drivers() (
     || fail "deploy helper visibility lint rejected the executable release scripts"
 )
 
+test_offsite_copy_is_encrypted_verified_and_fail_closed() (
+  set -euo pipefail
+  local tmp fake store manifest db redis config recipient malicious_remote second_manifest encrypted_remote
+  tmp="$(mktemp -d)"
+  trap 'rm -rf -- "$tmp"' EXIT
+  fake="$tmp/bin"
+  store="$tmp/remote"
+  mkdir -p "$fake" "$store" "$tmp/backups" "$tmp/server"
+  recipient='age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq'
+
+  make_offsite_fixture() {
+    local ts="$1" target
+    target="$tmp/backups/backup-$ts.manifest"
+    db="$tmp/backups/db-$ts.sql.gz"
+    redis="$tmp/backups/redis-$ts.rdb"
+    config="$tmp/backups/config-$ts.tar.gz"
+    printf 'database\n' > "$db"
+    printf 'redis\n' > "$redis"
+    printf 'config\n' > "$config"
+    {
+      printf 'format=newapi-backup-v1\n'
+      printf 'timestamp=%s\n' "$ts"
+      printf 'stack=newapi_test\n'
+      printf 'db_name=new-api-test\n'
+      printf 'consistency=writers-stopped\n'
+      printf 'app_version=verified-v1\n'
+      printf 'redis_keys=1\n'
+      printf 'db_file=%s\n' "$(basename "$db")"
+      printf 'db_sha256=%s\n' "$(sha256sum "$db" | awk '{print $1}')"
+      printf 'redis_file=%s\n' "$(basename "$redis")"
+      printf 'redis_sha256=%s\n' "$(sha256sum "$redis" | awk '{print $1}')"
+      printf 'config_file=%s\n' "$(basename "$config")"
+      printf 'config_sha256=%s\n' "$(sha256sum "$config" | awk '{print $1}')"
+    } > "$target"
+    printf '%s\n' "$target"
+  }
+
+  cat > "$fake/age" <<'FAKE_AGE'
+#!/usr/bin/env bash
+set -euo pipefail
+output=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output) output=$2; shift 2 ;;
+    --recipient) shift 2 ;;
+    *) exit 64 ;;
+  esac
+done
+[ -n "$output" ]
+{ printf 'AGE-ENCRYPTED-FIXTURE\n'; cat; } > "$output"
+FAKE_AGE
+  cat > "$fake/rclone" <<'FAKE_RCLONE'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$1" = copyto ] || exit 64
+shift
+[ "${1:-}" != --immutable ] || shift
+source=$1
+destination=$2
+if [[ "$source" == fake:* ]]; then
+  cp "$RCLONE_STORE/$(basename "$source")" "$destination"
+  [ "${RCLONE_TAMPER_DOWNLOAD:-0}" != 1 ] || printf 'tampered\n' >> "$destination"
+else
+  cp "$source" "$RCLONE_STORE/$(basename "$destination")"
+fi
+FAKE_RCLONE
+  chmod +x "$fake/age" "$fake/rclone"
+
+  manifest="$(make_offsite_fixture 20260719-120010)"
+  malicious_remote="fake:bucket/\$(touch $tmp/pwned)"
+  PATH="$fake:$PATH" RCLONE_STORE="$store" BACKUP_DIR="$tmp/backups" \
+    SERVER_REPO="$tmp/server" ENV_FILE="$tmp/missing.env" \
+    BACKUP_OFFSITE_REQUIRED=1 BACKUP_OFFSITE_REMOTE="$malicious_remote" \
+    BACKUP_OFFSITE_AGE_RECIPIENT="$recipient" \
+    bash "$ROOT/deploy/ops/offsite-copy.sh" "$manifest" >/dev/null
+  [ ! -e "$tmp/pwned" ] || fail "offsite destination was evaluated as shell code"
+  [ -s "$tmp/backups/offsite-20260719-120010.receipt" ] \
+    || fail "verified offsite upload wrote no receipt"
+  grep -Fq 'verification=full-download-sha256' "$tmp/backups/offsite-20260719-120010.receipt" \
+    || fail "offsite receipt does not prove full-download verification"
+  encrypted_remote="$(find "$store" -maxdepth 1 -type f -name 'newapi-newapi_test-20260719-120010-*.tar.gz.age' -print | head -n1)"
+  [ -n "$encrypted_remote" ] && grep -Fq 'AGE-ENCRYPTED-FIXTURE' "$encrypted_remote" \
+    || fail "offsite upload bypassed encryption"
+
+  second_manifest="$(make_offsite_fixture 20260719-120011)"
+  if PATH="$fake:$PATH" RCLONE_STORE="$store" RCLONE_TAMPER_DOWNLOAD=1 \
+    BACKUP_DIR="$tmp/backups" SERVER_REPO="$tmp/server" ENV_FILE="$tmp/missing.env" \
+    BACKUP_OFFSITE_REQUIRED=1 BACKUP_OFFSITE_REMOTE='fake:bucket/backups' \
+    BACKUP_OFFSITE_AGE_RECIPIENT="$recipient" \
+    bash "$ROOT/deploy/ops/offsite-copy.sh" "$second_manifest" >/dev/null 2>&1; then
+    fail "offsite copy accepted a corrupted round-trip download"
+  fi
+  [ ! -e "$tmp/backups/offsite-20260719-120011.receipt" ] \
+    || fail "failed offsite verification committed a success receipt"
+
+  if PATH="$fake:$PATH" RCLONE_STORE="$store" BACKUP_DIR="$tmp/backups" \
+    SERVER_REPO="$tmp/server" ENV_FILE="$tmp/missing.env" \
+    BACKUP_OFFSITE_REQUIRED= BACKUP_OFFSITE_REMOTE= BACKUP_OFFSITE_AGE_RECIPIENT= \
+    bash "$ROOT/deploy/ops/offsite-copy.sh" "$second_manifest" >/dev/null 2>&1; then
+    fail "production default accepted missing offsite configuration"
+  fi
+  if grep -nE '^[[:space:]]*eval[[:space:]]' "$ROOT/deploy/ops/offsite-copy.sh" >/dev/null; then
+    fail "offsite path executes configuration through eval"
+  fi
+)
+
+test_github_environment_audit_is_read_only_and_fail_closed() (
+  set -euo pipefail
+  local tmp fake evidence
+  tmp="$(mktemp -d)"
+  trap 'rm -rf -- "$tmp"' EXIT
+  fake="$tmp/bin"
+  evidence="$tmp/evidence.json"
+  mkdir -p "$fake"
+  cat > "$fake/gh" <<'FAKE_GH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$GH_CALLS"
+[ "$1" = api ] || exit 64
+case "$*" in
+  *container-publish|*release-publish)
+    if [ "${GH_BAD_RULES:-0}" = 1 ]; then
+      printf '{"can_admins_bypass":true,"protection_rules":[],"deployment_branch_policy":null}\n'
+    else
+      printf '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","reviewers":[{"type":"User","reviewer":{"login":"reviewer"}}]},{"type":"wait_timer","wait_timer":5}],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}\n'
+    fi
+    ;;
+  *) exit 1 ;;
+esac
+FAKE_GH
+  chmod +x "$fake/gh"
+
+  PATH="$fake:$PATH" GH_CALLS="$tmp/gh.calls" \
+    GITHUB_REPOSITORY=owner/repository GITHUB_ENVIRONMENT_EVIDENCE_OUT="$evidence" \
+    bash "$ROOT/scripts/verify-github-environments.sh" >/dev/null \
+    || fail "Environment audit rejected a fully protected fixture"
+  [ "$(jq 'length' "$evidence")" = 2 ] || fail "Environment audit did not emit both sanitized records"
+  [ "$(jq '[.[].required_reviewers] | min' "$evidence")" -ge 1 ] \
+    || fail "Environment audit lost required-reviewer evidence"
+  if PATH="$fake:$PATH" GH_CALLS="$tmp/gh.calls" GH_BAD_RULES=1 \
+    GITHUB_REPOSITORY=owner/repository \
+    bash "$ROOT/scripts/verify-github-environments.sh" container-publish >/dev/null 2>&1; then
+    fail "Environment audit accepted missing reviewers/branch policy/admin bypass"
+  fi
+  if grep -Eq '(^|[[:space:]])(put|post|patch|delete)([[:space:]]|$)' "$tmp/gh.calls"; then
+    fail "Environment audit attempted a mutating GitHub API method"
+  fi
+)
+
+test_clean_checkout_gate_rejects_runner_inputs() (
+  set -euo pipefail
+  local tmp sha
+  tmp="$(mktemp -d)"
+  trap 'rm -rf -- "$tmp"' EXIT
+  git -C "$tmp" init -q
+  git -C "$tmp" config user.name test
+  git -C "$tmp" config user.email test@example.invalid
+  printf 'tracked\n' > "$tmp/tracked.txt"
+  git -C "$tmp" add tracked.txt
+  git -C "$tmp" commit -qm initial
+  sha="$(git -C "$tmp" rev-parse HEAD)"
+  (cd "$tmp" && EXPECTED_CHECKOUT_SHA="$sha" bash "$ROOT/scripts/verify-clean-checkout.sh" >/dev/null)
+  printf 'runner-only\n' > "$tmp/untracked.txt"
+  if (cd "$tmp" && bash "$ROOT/scripts/verify-clean-checkout.sh" >/dev/null 2>&1); then
+    fail "clean-checkout gate accepted an untracked runner input"
+  fi
+)
+
 run_test "manifest tamper detection and clean release extraction" test_manifest_checksum_and_clean_extract
 run_test "shared ops lock rejects a different operation owner" test_ops_lock_rejects_unrelated_owner
 run_test "Redis backup failure aborts and removes the partial set" test_redis_backup_failure_is_fatal
 run_test "deploy stops before mutation when backup fails" test_deploy_aborts_on_backup_failure
+run_test "deploy rejects a dirty checkout before server access" test_deploy_rejects_dirty_checkout_before_remote_access
 run_test "every remote deploy program parses through the success path" test_all_deploy_remote_programs_parse
 run_test "ACME checksum mismatch executes and writes nothing" test_acme_checksum_failure_writes_nothing
 run_test "restore refuses to mutate before maintenance confirmation" test_restore_requires_maintenance_before_mutation
@@ -1007,4 +1275,7 @@ run_test "internal and database secrets stay out of process arguments" test_secr
 run_test "single-stack payment docs and demo fail closed before real funds" test_payment_topology_and_demo_safety_contract
 run_test "local and production session-security deployment modes stay explicit" test_session_security_deployment_docs_contract
 run_test "documented Electron and legacy-image commands match executable build topology" test_documented_commands_match_build_drivers
+run_test "offsite backup encrypts, round-trip verifies, and fails closed" test_offsite_copy_is_encrypted_verified_and_fail_closed
+run_test "GitHub Environment audit is read-only and fail-closed" test_github_environment_audit_is_read_only_and_fail_closed
+run_test "clean checkout gate rejects runner-supplied inputs" test_clean_checkout_gate_rejects_runner_inputs
 printf '1..%d\n' "$TESTS"

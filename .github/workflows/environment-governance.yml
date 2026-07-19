@@ -1,0 +1,36 @@
+name: GitHub Environment Governance Audit
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: read
+
+jobs:
+  audit:
+    name: Verify publish Environment protection
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Verify clean source boundary
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ github.sha }}
+        run: bash scripts/verify-clean-checkout.sh
+      - name: Read and verify Environment rules
+        env:
+          GH_TOKEN: ${{ secrets.ENVIRONMENT_AUDIT_TOKEN || github.token }}
+          GITHUB_ENVIRONMENT_EVIDENCE_OUT: artifacts/github-environments.json
+        run: bash scripts/verify-github-environments.sh
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: github-environment-governance
+          path: artifacts/github-environments.json
+          if-no-files-found: warn
+          retention-days: 30

@@ -46,6 +46,20 @@ if [ -z "${DB_PASS:-}" ] && [ -f "$ENV_FILE" ]; then
   DB_PASS="$(sed -n 's/^MYSQL_ROOT_PASSWORD=//p' "$ENV_FILE" | tail -n 1 | sed "s/^['\"]//;s/['\"]\$//")"
 fi
 
+# Redis 应用 ACL 凭据。与 DB root 运维凭据不同，Redis 的运维命令使用与 app
+# 相同的受认证 ACL 用户；密码只经 stdin 送入容器内 redis-cli 环境，不进 argv。
+REDIS_USER="${REDIS_USER:-}"
+REDIS_PASS="${REDIS_PASS:-}"
+if [ -f "$ENV_FILE" ]; then
+  if [ -z "$REDIS_USER" ]; then
+    REDIS_USER="$(sed -n 's/^REDIS_APP_USER=//p' "$ENV_FILE" | tail -n 1 | sed "s/^['\"]//;s/['\"]\$//")"
+  fi
+  if [ -z "$REDIS_PASS" ]; then
+    REDIS_PASS="$(sed -n 's/^REDIS_PASSWORD=//p' "$ENV_FILE" | tail -n 1 | sed "s/^['\"]//;s/['\"]\$//")"
+  fi
+fi
+REDIS_USER="${REDIS_USER:-newapi}"
+
 # ── 备份 / 保留 ─────────────────────────────────────────────────────────────────
 BACKUP_DIR="${BACKUP_DIR:-/root/backups}"
 KEEP="${KEEP:-7}"                   # 各类备份各保留最近 N 份
@@ -153,6 +167,14 @@ require_db_pass() {
   esac
 }
 
+require_redis_pass() {
+  [ -n "${REDIS_PASS:-}" ] || die "REDIS_PASS 未设置且 $ENV_FILE 缺 REDIS_PASSWORD——生产 Redis 强制 ACL 认证，禁止匿名运维。"
+  printf '%s\n' "$REDIS_USER" | grep -Eq '^[A-Za-z][A-Za-z0-9_-]{0,31}$' \
+    || die "REDIS_USER 格式非法：$REDIS_USER"
+  printf '%s\n' "$REDIS_PASS" | grep -Eq '^[0-9a-fA-F]{64,128}$' \
+    || die "REDIS_PASSWORD 必须是 64–128 位十六进制随机值（建议 openssl rand -hex 32）"
+}
+
 # mysql_secret_container_exec：在 MySQL 容器内从 stdin 读取第一行密码，
 # 写入短命 0600 defaults-extra-file 后执行 mysql/mysqldump。密码不进入
 # 宿主或容器的 argv；成功、失败和中断都由 EXIT trap 删除临时文件。
@@ -195,6 +217,19 @@ mysql_with_secret_input() {
   local tool="$1"
   shift
   { printf '%s\n' "$DB_PASS"; cat; } | mysql_secret_container_exec "$tool" "$@"
+}
+
+# redis_cli_service <args...>：密码经 stdin 注入容器内 REDISCLI_AUTH，绝不
+# 作为 docker/redis-cli 参数出现。--no-auth-warning 避免运维日志产生噪声。
+redis_cli_service() {
+  printf '%s\n' "$REDIS_PASS" | dc exec -T "$REDIS_SVC" sh -c '
+    set -eu
+    user=$1
+    shift
+    IFS= read -r REDISCLI_AUTH
+    export REDISCLI_AUTH
+    exec redis-cli --user "$user" --no-auth-warning "$@"
+  ' newapi-redis-client "$REDIS_USER" "$@"
 }
 
 acquire_ops_lock() {
@@ -401,11 +436,11 @@ db_ready() {
 }
 
 redis_ready() {
-  [ "$(dc exec -T "$REDIS_SVC" redis-cli --raw PING 2>/dev/null | tr -d '\r')" = "PONG" ]
+  [ "$(redis_cli_service --raw PING 2>/dev/null | tr -d '\r')" = "PONG" ]
 }
 
 redis_key_count_service() {
-  dc exec -T "$REDIS_SVC" redis-cli --raw INFO keyspace 2>/dev/null \
+  redis_cli_service --raw INFO keyspace 2>/dev/null \
     | tr -d '\r' | awk -F'[=,]' '/^db[0-9]+:keys=/{sum += $2} END{print sum + 0}'
 }
 
@@ -422,7 +457,7 @@ redis_persistence_value_container() {
 
 redis_persistence_value_service() {
   local key="$1"
-  dc exec -T "$REDIS_SVC" redis-cli --raw INFO persistence 2>/dev/null \
+  redis_cli_service --raw INFO persistence 2>/dev/null \
     | tr -d '\r' | awk -F: -v wanted="$key" '$1 == wanted {print $2; exit}'
 }
 

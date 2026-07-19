@@ -132,16 +132,17 @@ curl -fsS -H 'Host: www.wedreamhub.com' http://127.0.0.1:3100/health/ready
 `ssh newapi628` 后 `crontab -e` 加入：
 
 ```cron
-# 每日 02:30 停写配对备份（MySQL + Redis + config + SHA-256 manifest，保留最近 7 组）
+# 每日 02:30 停写配对备份；生产 .env 应设 BACKUP_OFFSITE_REQUIRED=1，
+# 使 age 加密、rclone 异地复制或回读 SHA-256 任一失败都返回非零。
 30 2 * * *   /root/newapi-test/deploy/ops/backup.sh      >> /var/log/newapi-backup.log 2>&1
 # 每 5 分钟健康巡检（失败退出码=失败数；配 ALERT_WEBHOOK 可推送告警）
 */5 * * * *  ALERT_WEBHOOK= /root/newapi-test/deploy/ops/healthcheck.sh >> /var/log/newapi-health.log 2>&1
 ```
 
 建议：
-- 备份目录 `/root/backups` 定期外迁（异地/对象存储），防单机磁盘故障。
+- 配置独立账号/区域的 rclone remote 与 age recipient，并在对象存储侧强制 Object Lock/不可变保留、生命周期和失败告警；脚本不会把“上传成功”冒充存储端不可变策略证明。
 - `healthcheck.sh` 的 `ALERT_WEBHOOK` 接飞书/钉钉/企业微信机器人后，失败即推送。
-- 上线后首日人工抽查一次 `restore.sh`（在另备库/演练环境）验证备份**可恢复**，而非只"有备份"。
+- 每月至少从异地加密副本在隔离环境执行一次完整 restore，归档 RTO/RPO、readiness 与 reconcile 结果；GitHub disposable drill 证明仓库链路，不替代跨账号副本演练。
 
 ---
 
@@ -154,3 +155,5 @@ curl -fsS -H 'Host: www.wedreamhub.com' http://127.0.0.1:3100/health/ready
 - [ ] `deploy.sh` 跑通一次（含自动成对 `:prev` 镜像/release + 部署前配对备份）。
 - [ ] `healthcheck.sh` 全绿；备份/巡检 cron 已装并产出日志。
 - [ ] 演练 `rollback.sh` 与一次 `restore.sh`（演练环境）成功。
+- [ ] `BACKUP_OFFSITE_REQUIRED=1`；异地 receipt、存储端 Object Lock/跨账号保留证据及首次远端 restore RTO/RPO 均已归档。
+- [ ] 已按 `data-services-hardening.md` 验证 app 非 root DB 会话、Redis 匿名 PING 被拒、镜像 digest 与回滚路径。

@@ -21,7 +21,8 @@
 | compose 文件 `COMPOSE_FILE` | `$SERVER_REPO/deploy/docker-compose.test.yml` |
 | env 文件 `ENV_FILE` | `$SERVER_REPO/.env`（含上游 Key，600，不入库） |
 | app 回环端口 | `127.0.0.1:3100` |
-| MySQL | 库 `new-api-test`，用户 root；密码不入库（C1）：只存服务器 `.env` 的 `MYSQL_ROOT_PASSWORD`，lib.sh 自动读取 |
+| MySQL | app 使用 schema 专用用户 `MYSQL_APP_USER`；root 只供一次性账号 bootstrap 与备份/恢复，密码均只存服务器 `.env` |
+| Redis | default 用户关闭；app/ops 使用 `REDIS_APP_USER` + `REDIS_PASSWORD` ACL；凭据不进命令行 |
 | Host 头 `HOST_HEADER` | `tokendream.wedreamhub.com` |
 | 备份目录 `BACKUP_DIR` / 保留 `KEEP` | `/root/backups` / `7` |
 | app 镜像名 | `newapi_test-app` |
@@ -32,7 +33,8 @@
 ## 各脚本职责
 
 - **`deploy.sh`**（Mac）— 预检 → 强制发布前配对备份 → 保存 `:prev` → 上传可重建归档 → 只解包到全新 staging 并换树 → 记录后台构建真实退出码 → 严格验证 MySQL/Redis/app 与唯一版本。备份失败会在上传前中止；只有回滚的版本/readiness 也通过才报“已回滚”。
-- **`backup.sh`**（服务器）— 短暂停 app 建立停写点，生成一个 `backup-<ts>.manifest` 权威恢复集：MySQL gzip + Redis RDB + `.env`/compose/nginx/证书/版本上下文，三个产物都带 SHA-256。Redis 失败会废弃整组，不会留下不可成对恢复的“半份备份”。
+- **`backup.sh`**（服务器）— 短暂停 app 建立停写点，生成一个 `backup-<ts>.manifest` 权威恢复集：MySQL gzip + Redis RDB + `.env`/compose/nginx/证书/版本上下文，三个产物都带 SHA-256。Redis 失败会废弃整组；配置异地目标后自动调用 `offsite-copy.sh` 加密上传并完整回读校验。
+- **`offsite-copy.sh <manifest>`**（服务器）— 只接受已通过 manifest/SHA-256 校验的配对集，用 age recipient 加密后经 rclone 复制到异地，重新下载比对 SHA-256 后才原子写本地 receipt；不 source `.env`、不使用 `eval`。
 - **`restore.sh <backup-*.manifest>`**（服务器，**危险·成对覆盖生产状态**）— 先校验 manifest/三个 SHA-256/gzip/tar/RDB，要求外部维护停流确认与**键入栈名**，强制 pre-backup 后配对恢复 MySQL + Redis。MySQL 会先删整库再导入，不留恢复点后新表；Redis 7 先以 `appendonly=no` 加载 RDB，再在活进程开 AOF、等 rewrite 成功，最后用正式 compose 重启并复核 key 数。任一 readiness/版本/reconcile 闸门失败都保持 app stopped、保留已验证恢复副本与 ops lock，且不自动撤维护模式。
 - **`rollback.sh`**（服务器，危险）— 默认同时换回与 `:prev` 成对的镜像 + 源码/compose release，不会留下新旧混合树；`--to <YYYYMMDD-HHMMSS>` 从已绑定 SHA-256 的服务器归档解包到空 staging 再重建。服务器 release 无 `.git`，因此不支持 `--git`。两种模式都只在版本/readiness 精确通过后成功返回。
 - **`healthcheck.sh`**（服务器）— app `/health/live` 进程存活 + `/health/ready` 直连 DB/已配置 Redis + app/mysql/redis 三容器 + 磁盘/内存阈值。退役 auth-service 不再是健康依赖。
@@ -51,6 +53,11 @@ cd /root/newapi-test/deploy/ops
 # 手动备份
 ./backup.sh
 
+# 必须异地成功才允许 backup/deploy 成功（生产必须写入 .env）
+# BACKUP_OFFSITE_REQUIRED=1
+# BACKUP_OFFSITE_REMOTE=s3-worm:newapi-production/backups
+# BACKUP_OFFSITE_AGE_RECIPIENT=age1...
+
 # 健康巡检（接 cron 看退出码）
 ./healthcheck.sh
 
@@ -62,6 +69,23 @@ cd /root/newapi-test/deploy/ops
 # 配对恢复 DB + Redis（危险：先在 Nginx/CF 维护停流）
 MAINTENANCE_CONFIRMED=1 ./restore.sh /root/backups/backup-20260719-120000.manifest
 ```
+
+### 从异地副本恢复到隔离 staging（不直接覆盖生产）
+
+把 `offsite-<ts>.receipt` 与 receipt 中的 `encrypted_file` 从对象存储下载到
+一次性隔离主机，先按 `encrypted_sha256` 校验，再用**不存放在生产服务器**的 age
+identity 解密到空目录：
+
+```bash
+sha256sum encrypted-file.tar.gz.age
+mkdir -m 700 recovered
+age --decrypt --identity /secure/offline/identity.txt encrypted-file.tar.gz.age \
+  | tar --no-same-owner -xzf - -C recovered
+```
+
+随后在隔离栈用 `verify_backup_manifest`、`restore.sh`、readiness 与 `reconcile.sh`
+完成整套验收并记录 RTO/RPO。不要把 age 私钥复制到生产主机，也不要把解密流
+直接 pipe 到生产 restore；远端副本首次真实演练仍是外部验收项。
 
 ## crontab（服务器；示例见 go-live.md §5）
 
@@ -77,9 +101,10 @@ MAINTENANCE_CONFIRMED=1 ./restore.sh /root/backups/backup-20260719-120000.manife
 - `backup`/`restore`/`deploy`/`rollback` 共用 `/run/lock/newapi-ops.lock.d`。运维进程崩溃或部分恢复时锁会故意 fail-closed 保留；先核对 app 仍 stopped、外部维护仍在、数据/对账已收敛，再按 `owner` token 人工清锁，不得为了“让脚本能跑”直接删。
 - MySQL 密码只通过 stdin 送入容器内短命 `0600` client option file；成功、失败或中断都自动删除。禁止恢复 `mysql -p<password>` / `mysqldump -p<password>` 写法，否则密码会出现在 `ps` 和 `/proc/*/cmdline`。
 - `rollback.sh` 默认模式前提：`deploy.sh` 在备份通过后成对保存 `:prev` + `prev-<ts>.*` 并原子更新 `prev.current`。多版本回退使用 `/root/deploy-archives/src-<ts>.tgz` + `.version` + `.manifest.json` + `.release`；`.release` 绑定三件 SHA-256 与版本，不依赖 `.git`。
-- 上传默认排除 `.git`/`.env*`/`node_modules`/`web/*/dist`/`.DS_Store`/`._*`；服务器 `.env` 是换树时唯一明确保留的 release 外状态。
+- 部署只接受干净 Git checkout，并由 `git archive HEAD` 生成上传内容；工作树 ignored/untracked 文件不会进入 release。服务器 `.env` 是换树时唯一明确保留的 release 外状态。
 - config tar 用于审计/人工灾备上下文，`restore.sh` 不会自动覆盖当前 `.env`/Nginx/证书。先核对后手工恢复，避免在数据恢复脚本中意外换密钥或改入口。
-- `/root/backups` 的 7 份默认保留只是**同机恢复点**，不是完整灾备。未将备份加密复制到异地、不可变且有版本的存储，并从该副本实际演练恢复前，不得宣称已覆盖整机/磁盘丢失场景。
+- `/root/backups` 的 7 份默认保留只是**同机恢复点**。生产应设置 `BACKUP_OFFSITE_REQUIRED=1`；脚本能证明 age 加密、异地上传与完整回读摘要，但对象锁/跨账号不可变保留仍须存储端策略证明。未从远端副本实际演练恢复前，不得宣称已覆盖整机/磁盘丢失场景。
+- MySQL 专用用户、Redis ACL、当前镜像 digest、8.4 LTS 隔离升级与回滚步骤见 [`data-services-hardening.md`](data-services-hardening.md)。仓库迁移路径不等于生产已执行，必须归档环境侧验收证据。
 
 ## 脚本回归测试与真实恢复演练
 

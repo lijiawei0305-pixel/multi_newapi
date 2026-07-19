@@ -71,8 +71,15 @@ export DB_PASS="${secret_seed:0:32}"
 session_secret="$(printf 'session:%s' "$secret_seed" | sha256sum | awk '{print $1}')"
 crypto_secret="$(printf 'crypto:%s' "$secret_seed" | sha256sum | awk '{print $1}')"
 internal_secret="$(printf 'internal:%s' "$secret_seed" | sha256sum | awk '{print $1}')"
+mysql_app_password="$(printf 'mysql-app:%s' "$secret_seed" | sha256sum | awk '{print $1}')"
+redis_password="$(printf 'redis:%s' "$secret_seed" | sha256sum | awk '{print $1}')"
 {
   printf 'MYSQL_ROOT_PASSWORD=%s\n' "$DB_PASS"
+  printf 'MYSQL_APP_USER=newapi\n'
+  printf 'MYSQL_APP_PASSWORD=%s\n' "$mysql_app_password"
+  printf 'REDIS_APP_USER=newapi\n'
+  printf 'REDIS_PASSWORD=%s\n' "$redis_password"
+  printf 'BACKUP_OFFSITE_REQUIRED=0\n'
   printf 'SESSION_SECRET=%s\n' "$session_secret"
   printf 'CRYPTO_SECRET=%s\n' "$crypto_secret"
   printf 'MT_INTERNAL_SECRET=%s\n' "$internal_secret"
@@ -125,7 +132,7 @@ mysql_scalar() {
 }
 
 redis_scalar() {
-  dc exec -T "$REDIS_SVC" redis-cli --raw "$@" 2>/dev/null | tr -d '\r'
+  redis_cli_service --raw "$@" 2>/dev/null | tr -d '\r'
 }
 
 printf '[restore-drill] starting real isolated stack %s on %s\n' "$STACK" "$(uname -s)"

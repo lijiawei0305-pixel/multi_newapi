@@ -3,7 +3,8 @@
 #
 # 不变量：
 #   1. 旧版数据配对备份失败即中止，不存在“带病继续发布”。
-#   2. 源码归档只解包到全新 staging，再原子换树；不 overlay 旧目录。
+#   2. 只允许干净 Git checkout，并从 HEAD 对象生成归档；忽略文件/runner 残留
+#      无法混入发布。归档只解包到全新 staging，再原子换树。
 #   3. 构建成功、MySQL/Redis/app 就绪且线上版本精确匹配后才删旧树。
 #   4. 失败后只有回滚版本/readiness 验收通过，才报告“已回滚”。
 #
@@ -89,12 +90,12 @@ done
 GIT_SHA="$(cd "$LOCAL_REPO" && git rev-parse --short HEAD 2>/dev/null || echo nogit)"
 GIT_BRANCH="$(cd "$LOCAL_REPO" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo nogit)"
 GIT_DIRTY=false
-DIRTY_SUFFIX=""
-if [ -n "$(cd "$LOCAL_REPO" && git status --porcelain 2>/dev/null)" ]; then
-  GIT_DIRTY=true
-  DIRTY_SUFFIX="-dirty"
+[ "$GIT_SHA" != nogit ] && [ "$GIT_BRANCH" != nogit ] \
+  || die "LOCAL_REPO 必须是可验证 Git checkout，拒绝从临时目录拼装发布。"
+if [ -n "$(cd "$LOCAL_REPO" && git status --porcelain --untracked-files=all)" ]; then
+  die "工作树或 index 非干净状态；请先形成可审查提交，再从 HEAD 发布。"
 fi
-APP_VERSION="${GIT_SHA}${DIRTY_SUFFIX}-${TS}"
+APP_VERSION="${GIT_SHA}-${TS}"
 
 json_escape() {
   local value="$1"
@@ -197,6 +198,60 @@ if [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
 else
   log "1/8 跳过预检（SKIP_PREFLIGHT=1）"
 fi
+
+# 新 production Compose 会在 app 启动前创建 schema-scoped MySQL 用户并启用
+# Redis ACL。先验证服务器 .env 已完成无损迁移所需的外部密钥准备，避免换树/构建
+# 后才发现缺凭据。只检查格式和权限，不输出任何 secret。
+log "验证服务器数据服务最小权限迁移凭据…"
+remote "
+  set -eu
+  [ -f '$ENV_FILE' ] || { echo 'missing runtime env: $ENV_FILE' >&2; exit 1; }
+  [ ! -L '$ENV_FILE' ] || { echo 'runtime env must not be a symlink' >&2; exit 1; }
+  command -v age >/dev/null || { echo 'age is required for production offsite backup' >&2; exit 1; }
+  command -v rclone >/dev/null || { echo 'rclone is required for production offsite backup' >&2; exit 1; }
+  mode=\$(stat -c %a '$ENV_FILE' 2>/dev/null || stat -f %Lp '$ENV_FILE')
+  [ \"\$mode\" = 600 ] || { echo 'runtime env must have mode 600' >&2; exit 1; }
+  value_of() {
+    key=\$1
+    count=\$(grep -Ec \"^\${key}=\" '$ENV_FILE' 2>/dev/null || true)
+    [ \"\$count\" = 1 ] || { echo \"runtime env must contain exactly one \${key}\" >&2; exit 1; }
+    sed -n \"s/^\${key}=//p\" '$ENV_FILE' | sed \"s/^['\\\"]//;s/['\\\"]\$//\"
+  }
+  optional_value_of() {
+    key=\$1
+    count=\$(grep -Ec \"^\${key}=\" '$ENV_FILE' 2>/dev/null || true)
+    [ \"\$count\" -le 1 ] || { echo \"runtime env contains duplicate \${key}\" >&2; exit 1; }
+    [ \"\$count\" = 1 ] || return 0
+    sed -n \"s/^\${key}=//p\" '$ENV_FILE' | sed \"s/^['\\\"]//;s/['\\\"]\$//\"
+  }
+  mysql_user=\$(value_of MYSQL_APP_USER)
+  redis_user=\$(value_of REDIS_APP_USER)
+  mysql_pass=\$(value_of MYSQL_APP_PASSWORD)
+  redis_pass=\$(value_of REDIS_PASSWORD)
+  offsite_required=\$(value_of BACKUP_OFFSITE_REQUIRED)
+  offsite_remote=\$(value_of BACKUP_OFFSITE_REMOTE)
+  offsite_recipient=\$(value_of BACKUP_OFFSITE_AGE_RECIPIENT)
+  printf '%s\\n' \"\$mysql_user\" | grep -Eq '^[A-Za-z][A-Za-z0-9_]{0,31}$'
+  printf '%s\\n' \"\$redis_user\" | grep -Eq '^[A-Za-z][A-Za-z0-9_-]{0,31}$'
+  printf '%s\\n' \"\$mysql_pass\" | grep -Eq '^[0-9a-fA-F]{64,128}$'
+  printf '%s\\n' \"\$redis_pass\" | grep -Eq '^[0-9a-fA-F]{64,128}$'
+  [ \"\$mysql_pass\" != \"\$redis_pass\" ] || { echo 'MySQL and Redis passwords must differ' >&2; exit 1; }
+  [ \"\$offsite_required\" = 1 ] || { echo 'production requires BACKUP_OFFSITE_REQUIRED=1' >&2; exit 1; }
+  printf '%s\\n' \"\$offsite_remote\" | grep -Eq '^[A-Za-z0-9_.-]+:[^[:cntrl:]]+$'
+  printf '%s\\n' \"\$offsite_recipient\" | grep -Eq '^(age1[0-9a-z]{20,}|age1[a-z0-9-]+|ssh-(rsa|ed25519)[[:space:]][A-Za-z0-9+/=]+)$'
+  offsite_remote_name=\${offsite_remote%%:*}:
+  rclone listremotes | grep -Fx \"\$offsite_remote_name\" >/dev/null || {
+    echo 'configured BACKUP_OFFSITE_REMOTE is absent from rclone config' >&2
+    exit 1
+  }
+  for image_key in MYSQL_IMAGE REDIS_IMAGE; do
+    image=\$(optional_value_of \"\$image_key\")
+    [ -z \"\$image\" ] || printf '%s\\n' \"\$image\" | grep -Eq '^[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}$' || {
+      echo \"\$image_key override must pin a tag and sha256 digest\" >&2
+      exit 1
+    }
+  done
+" || die "服务器 .env 尚未准备最小权限凭据与强制异地备份配置；未触碰线上状态。"
 
 log "2/8 标记本次 HEAD：$TAG"
 (cd "$LOCAL_REPO" && git tag -f "$TAG" >/dev/null 2>&1) \
@@ -327,7 +382,7 @@ if ! remote "
   die_keep_lock "无法以交易方式成对保存 :prev 镜像与源码 release；已保留 ops lock 供核对。"
 fi
 
-log "5/8 上传可重建归档（不含 .git/密钥/构建产物）"
+log "5/8 从干净 HEAD 上传可重建归档（不读取工作树忽略文件）"
 remote "
   set -e
   mkdir -p '$ARCHIVE_DIR'
@@ -335,17 +390,8 @@ remote "
     [ ! -e \"\$path\" ]
   done
 "
-COPYFILE_DISABLE=1 tar czf - \
-  --exclude='./.git' \
-  --exclude='./.env' \
-  --exclude='./.env.*' \
-  --exclude='node_modules' \
-  --exclude='./web/default/dist' \
-  --exclude='./web/classic/dist' \
-  --exclude='.DS_Store' \
-  --exclude='._*' \
-  --exclude='./bulb-orbit' \
-  -C "$LOCAL_REPO" . \
+(cd "$LOCAL_REPO" && git archive --format=tar HEAD -- . ':(exclude)bulb-orbit') \
+  | gzip \
   | remote "
       set -e
       tmp='$ARCHIVE.tmp'

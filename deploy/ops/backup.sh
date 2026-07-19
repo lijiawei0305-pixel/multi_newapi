@@ -22,6 +22,7 @@ require gzip
 require sha256sum
 require tar
 require_db_pass
+require_redis_pass
 ensure_backup_dir
 acquire_ops_lock backup
 
@@ -80,7 +81,7 @@ APP_IMAGE_VERSION="$(docker run --rm "$APP_IMAGE_ID" --version 2>/dev/null | tr 
   || die "源码 VERSION=$APP_VERSION 与运行制品=$APP_IMAGE_VERSION 不一致，拒绝生成误导恢复集"
 if container_running "$APP_CID"; then
   APP_WAS_RUNNING=1
-  log "0/4 暂停 $APP_SVC，建立 MySQL/Redis 同一停写时间线…"
+  log "0/5 暂停 $APP_SVC，建立 MySQL/Redis 同一停写时间线…"
   dc stop "$APP_SVC" >/dev/null
 fi
 if container_running "$APP_CID"; then
@@ -90,7 +91,7 @@ db_ready || die "MySQL 未就绪，无法备份"
 redis_ready || die "Redis 未就绪，无法备份"
 
 # ── 1) MySQL：停写窗口内的一致事务快照 ─────────────────────────────────────────
-log "1/4 mysqldump $DB_NAME → $DB_OUT"
+log "1/5 mysqldump $DB_NAME → $DB_OUT"
 mysql_with_secret mysqldump -u"$DB_USER" \
     --single-transaction --quick --routines --triggers --events \
     --databases "$DB_NAME" \
@@ -100,12 +101,12 @@ gzip -t "$DB_OUT" || die "mysqldump gzip 完整性校验失败：$DB_OUT"
 ok "DB 备份完成（$(du -h "$DB_OUT" | cut -f1)）"
 
 # ── 2) Redis：SAVE 后拷出可独立恢复的 RDB ───────────────────────────────────────────
-log "2/4 redis SAVE → $REDIS_OUT"
+log "2/5 redis SAVE → $REDIS_OUT"
 REDIS_CID="$(service_container_id "$REDIS_SVC")"
 [ -n "$REDIS_CID" ] || die "找不到 $REDIS_SVC 容器"
 REDIS_IMAGE_ID="$(docker inspect -f '{{.Image}}' "$REDIS_CID")"
 [ -n "$REDIS_IMAGE_ID" ] || die "无法读取 Redis 不可变镜像 ID"
-dc exec -T "$REDIS_SVC" redis-cli SAVE >/dev/null
+redis_cli_service SAVE >/dev/null
 dc exec -T "$REDIS_SVC" redis-check-rdb /data/dump.rdb >/dev/null \
   || die "Redis 容器内 dump.rdb 校验失败"
 REDIS_KEYS="$(redis_key_count_service)"
@@ -120,7 +121,7 @@ docker run --rm \
 ok "Redis 备份完成（$(du -h "$REDIS_OUT" | cut -f1)）"
 
 # ── 3) 配置与版本上下文 ───────────────────────────────────────────────────────────────────
-log "3/4 打包配置/版本 → $CFG_OUT"
+log "3/5 打包配置/版本 → $CFG_OUT"
 [ -f "$ENV_FILE" ] || die "缺少生产 env：$ENV_FILE"
 [ -f "$COMPOSE_FILE" ] || die "缺少 production compose：$COMPOSE_FILE"
 [ -f "$NGINX_VHOST" ] || die "缺少 nginx vhost：$NGINX_VHOST"
@@ -139,7 +140,7 @@ tar tzf "$CFG_OUT" >/dev/null || die "config tar 完整性校验失败：$CFG_OU
 ok "配置备份完成（$(du -h "$CFG_OUT" | cut -f1)）"
 
 # ── 4) manifest 最后原子就位；没有 manifest 就不是可恢复集 ─────────────────────────────
-log "4/4 生成配对 manifest + SHA-256 → $MANIFEST_OUT"
+log "4/5 生成配对 manifest + SHA-256 → $MANIFEST_OUT"
 {
   printf 'format=%s\n' "$BACKUP_FORMAT"
   printf 'timestamp=%s\n' "$TS"
@@ -160,7 +161,14 @@ mv "$MANIFEST_TMP" "$MANIFEST_OUT"
 chmod 600 "$DB_OUT" "$REDIS_OUT" "$CFG_OUT" "$MANIFEST_OUT"
 verify_backup_manifest "$MANIFEST_OUT"
 BACKUP_COMPLETE=1
+
+# 已配置异地目标时自动加密、上传并从远端完整回读验证。required=1 时，
+# 缺凭据、上传失败或回读摘要不一致都会让 backup 返回失败；本地已验证恢复集
+# 仍会保留，供排障后重试，不会因远端故障反而丢掉唯一可用恢复点。
+log "5/5 异地加密复制与回读校验…"
+"$(dirname "$0")/offsite-copy.sh" "$MANIFEST_OUT"
+
 if [ "${SKIP_PRUNE:-0}" != "1" ]; then prune_backup_sets; fi
 
 ok "配对备份集完成：$MANIFEST_OUT（保留最近 $KEEP 组）"
-warn "config 备份含 .env/证书私钥；产物已设 600，仍须仅存 root 可访问且定期异地加密备份"
+warn "config 备份含 .env/证书私钥；同机产物已设 600。只有 BACKUP_OFFSITE_REQUIRED=1 且远端对象锁/跨账号保留已由存储侧证明时，才可宣称覆盖整机丢失。"

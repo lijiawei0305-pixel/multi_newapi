@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  deployments: read
 
 concurrency:
   group: formal-release-${{ github.ref_name || github.run_id }}
@@ -59,6 +60,11 @@ jobs:
           fi
           printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
           printf 'commit=%s\n' "$VERIFIED_COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Fail closed unless release publish Environment is protected
+        env:
+          GH_TOKEN: ${{ secrets.ENVIRONMENT_AUDIT_TOKEN || github.token }}
+        run: bash scripts/verify-github-environments.sh release-publish
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
