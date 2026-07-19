@@ -22,7 +22,7 @@ func TestTokenAuthRejectsAfterHardDeleteAndCachesAreGone(t *testing.T) {
 	redisClient := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.UserOAuthBinding{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.AuthCacheInvalidation{}, &model.UserOAuthBinding{}))
 
 	previousDB := model.DB
 	previousLogDB := model.LOG_DB

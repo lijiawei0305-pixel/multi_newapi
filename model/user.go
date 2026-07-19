@@ -51,18 +51,20 @@ type User struct {
 	StripeCustomer   string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 	CreatedAt        int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	LastLoginAt      int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+	AuthVersion      int64                      `json:"-" gorm:"type:bigint;not null;default:0"`
 	AdminPermissions map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
-		Id:       user.Id,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
+		Id:          user.Id,
+		Group:       user.Group,
+		Quota:       user.Quota,
+		Status:      user.Status,
+		Username:    user.Username,
+		Setting:     user.Setting,
+		Email:       user.Email,
+		AuthVersion: user.AuthVersion,
 	}
 	return cache
 }
@@ -335,6 +337,9 @@ func HardDeleteUserById(id int) error {
 		if err := deleteUserOAuthBindingsByUserId(tx, id); err != nil {
 			return err
 		}
+		if err := prepareUserAuthCacheInvalidationTx(tx, id); err != nil {
+			return err
+		}
 		return tx.Unscoped().Delete(&User{}, "id = ?", id).Error
 	}); err != nil {
 		return err
@@ -527,7 +532,9 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 }
 
 func (user *User) Update(updatePassword bool) error {
-	if err := user.UpdateWithTx(DB, updatePassword); err != nil {
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		return user.UpdateWithTx(tx, updatePassword)
+	}); err != nil {
 		return err
 	}
 	return invalidateUserCache(user.Id)
@@ -542,15 +549,20 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 		}
 	}
 	newUser := *user
-	tx.First(&user, user.Id)
-	if err = tx.Model(user).Updates(newUser).Error; err != nil {
+	var stored User
+	if err = tx.First(&stored, user.Id).Error; err != nil {
 		return err
 	}
-	return nil
+	if err = tx.Model(&stored).Omit("auth_version").Updates(newUser).Error; err != nil {
+		return err
+	}
+	return prepareUserAuthCacheInvalidationTx(tx, user.Id)
 }
 
 func (user *User) Edit(updatePassword bool) error {
-	if err := user.EditWithTx(DB, updatePassword); err != nil {
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		return user.EditWithTx(tx, updatePassword)
+	}); err != nil {
 		return err
 	}
 	return invalidateUserCache(user.Id)
@@ -576,11 +588,14 @@ func (user *User) EditWithTx(tx *gorm.DB, updatePassword bool) error {
 		updates["password"] = newUser.Password
 	}
 
-	tx.First(&user, user.Id)
-	if err = tx.Model(user).Updates(updates).Error; err != nil {
+	var stored User
+	if err = tx.First(&stored, user.Id).Error; err != nil {
 		return err
 	}
-	return nil
+	if err = tx.Model(&stored).Updates(updates).Error; err != nil {
+		return err
+	}
+	return prepareUserAuthCacheInvalidationTx(tx, user.Id)
 }
 
 func (user *User) ClearBinding(bindingType string) error {
@@ -603,7 +618,12 @@ func (user *User) ClearBinding(bindingType string) error {
 		return errors.New("invalid binding type")
 	}
 
-	if err := DB.Model(&User{}).Where("id = ?", user.Id).Update(column, "").Error; err != nil {
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&User{}).Where("id = ?", user.Id).Update(column, "").Error; err != nil {
+			return err
+		}
+		return prepareUserAuthCacheInvalidationTx(tx, user.Id)
+	}); err != nil {
 		return err
 	}
 
@@ -618,7 +638,12 @@ func (user *User) Delete() error {
 	if user.Id == 0 {
 		return errors.New("id 为空！")
 	}
-	if err := DB.Delete(user).Error; err != nil {
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := prepareUserAuthCacheInvalidationTx(tx, user.Id); err != nil {
+			return err
+		}
+		return tx.Delete(user).Error
+	}); err != nil {
 		return err
 	}
 

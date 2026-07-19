@@ -372,6 +372,9 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
+	if err = model.InitAuthCacheInvalidationReconciler(); err != nil {
+		return fmt.Errorf("initialize authorization cache invalidation reconciler: %w", err)
+	}
 
 	perfmetrics.Init()
 

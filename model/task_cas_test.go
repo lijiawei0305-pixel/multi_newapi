@@ -39,6 +39,7 @@ func TestMain(m *testing.M) {
 		&Midjourney{},
 		&User{},
 		&Token{},
+		&AuthCacheInvalidation{},
 		&Log{},
 		&Channel{},
 		&QuotaData{},
@@ -91,6 +92,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM midjourneys")
 		DB.Exec("DELETE FROM users")
 		DB.Exec("DELETE FROM tokens")
+		DB.Exec("DELETE FROM auth_cache_invalidations")
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM channels")
 		DB.Exec("DELETE FROM quota_data")

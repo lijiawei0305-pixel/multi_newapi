@@ -99,8 +99,8 @@ func openTokenControllerTestDB(t *testing.T) *gorm.DB {
 func migrateTokenControllerTestDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
 
-	if err := db.AutoMigrate(&model.Token{}); err != nil {
-		t.Fatalf("failed to migrate token table: %v", err)
+	if err := db.AutoMigrate(&model.Token{}, &model.AuthCacheInvalidation{}); err != nil {
+		t.Fatalf("failed to migrate token authorization tables: %v", err)
 	}
 }
 

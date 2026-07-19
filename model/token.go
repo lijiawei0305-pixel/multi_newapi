@@ -27,6 +27,7 @@ type Token struct {
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	AuthVersion        int64          `json:"-" gorm:"type:bigint;not null;default:0"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
@@ -295,8 +296,13 @@ func (token *Token) Insert() error {
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
-	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
+			"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error; err != nil {
+			return err
+		}
+		return prepareTokenAuthCacheInvalidationTx(tx, token)
+	})
 	if err != nil {
 		return err
 	}
@@ -308,7 +314,12 @@ func (token *Token) Update() (err error) {
 
 func (token *Token) SelectUpdate() (err error) {
 	// This can update zero values
-	err = DB.Model(token).Select("accessed_time", "status").Updates(token).Error
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(token).Select("accessed_time", "status").Updates(token).Error; err != nil {
+			return err
+		}
+		return prepareTokenAuthCacheInvalidationTx(tx, token)
+	})
 	if err != nil {
 		return err
 	}
@@ -319,7 +330,12 @@ func (token *Token) SelectUpdate() (err error) {
 }
 
 func (token *Token) Delete() (err error) {
-	err = DB.Delete(token).Error
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := prepareTokenAuthCacheInvalidationTx(tx, token); err != nil {
+			return err
+		}
+		return tx.Delete(token).Error
+	})
 	if err != nil {
 		return err
 	}
@@ -454,9 +470,16 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 	tx := DB.Begin()
 
 	var tokens []Token
-	if err := tx.Where("user_id = ? AND id IN (?)", userId, ids).Find(&tokens).Error; err != nil {
+	if err := tx.Where("user_id = ? AND id IN (?)", userId, ids).Order("id ASC").Find(&tokens).Error; err != nil {
 		tx.Rollback()
 		return 0, err
+	}
+
+	for i := range tokens {
+		if err := prepareTokenAuthCacheInvalidationTx(tx, &tokens[i]); err != nil {
+			tx.Rollback()
+			return 0, err
+		}
 	}
 
 	if err := tx.Where("user_id = ? AND id IN (?)", userId, ids).Delete(&Token{}).Error; err != nil {

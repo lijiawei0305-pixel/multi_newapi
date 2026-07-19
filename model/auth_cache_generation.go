@@ -60,9 +60,10 @@ func fillAuthCacheIfCurrent(cacheKey string, snapshot authCacheGenerationSnapsho
 		hook(cacheKey, true)
 	}
 
-	_, err := common.RedisHSetObjIfGeneration(
+	_, err := common.RedisHSetObjIfGenerationUnlessFenced(
 		cacheKey,
 		snapshot.key,
+		authCacheFenceKey(cacheKey),
 		snapshot.value,
 		obj,
 		time.Duration(common.RedisKeyCacheSeconds())*time.Second,

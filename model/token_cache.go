@@ -18,7 +18,7 @@ func cacheFillToken(token Token, generation authCacheGenerationSnapshot) error {
 }
 
 func cacheDeleteToken(key string) error {
-	return invalidateAuthCache(getTokenCacheKey(key))
+	return flushAuthCacheInvalidations(getTokenCacheKey(key))
 }
 
 func cacheIncrTokenQuota(key string, increment int64) error {
@@ -34,8 +34,16 @@ func cacheGetTokenByKey(key string) (*Token, error) {
 	if !common.RedisEnabled {
 		return nil, fmt.Errorf("redis is not enabled")
 	}
+	cacheKey := getTokenCacheKey(key)
+	fenced, err := isAuthCacheFenced(cacheKey)
+	if err != nil {
+		return nil, err
+	}
+	if fenced {
+		return nil, fmt.Errorf("token authorization cache is fenced")
+	}
 	var token Token
-	err := common.RedisHGetObj(getTokenCacheKey(key), &token)
+	err = common.RedisHGetObj(cacheKey, &token)
 	if err != nil {
 		return nil, err
 	}
