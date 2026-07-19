@@ -230,6 +230,159 @@ FAKE_SSH
   fi
 )
 
+test_deploy_bootstraps_current_head_offsite_before_release_mutation() (
+  set -euo pipefail
+  local tmp fake output ssh_log git_log backup_state backup_line offsite_line
+  tmp="$(mktemp -d)"
+  trap 'rm -rf -- "$tmp"' EXIT
+  fake="$tmp/bin"
+  output="$tmp/deploy.out"
+  ssh_log="$tmp/ssh.log"
+  git_log="$tmp/git.log"
+  backup_state="$tmp/backup.done"
+  mkdir -p "$fake" "$tmp/local"
+
+  cat > "$fake/git" <<'FAKE_OFFSITE_GIT'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "$GIT_LOG"
+case "$*" in
+  "rev-parse --short HEAD") printf 'abc1234\n' ;;
+  "rev-parse --abbrev-ref HEAD") printf 'main\n' ;;
+  "status --porcelain --untracked-files=all") exit 0 ;;
+  "tag -f "*) exit 0 ;;
+  "archive --format=tar HEAD -- deploy/ops/lib.sh deploy/ops/offsite-copy.sh")
+    printf 'audited-helper-from-head\n'
+    ;;
+  *) exit 97 ;;
+esac
+FAKE_OFFSITE_GIT
+  cat > "$fake/ssh" <<'FAKE_OFFSITE_SSH'
+#!/usr/bin/env bash
+set -u
+shift
+cmd="$*"
+printf '%s\n' "$cmd" >> "$SSH_LOG"
+cat >/dev/null || true
+case "$cmd" in
+  *"find '/srv/backups' -maxdepth 1 -type f -name 'backup-*.manifest'"*)
+    [ ! -f "$BACKUP_STATE" ] || printf 'backup-20260719-120099.manifest\n'
+    ;;
+  *"test -x '/srv/newapi/deploy/ops/backup.sh'"*) exit 0 ;;
+  *"BACKUP_DIR='/srv/backups' '/srv/newapi/deploy/ops/backup.sh'"*)
+    touch "$BACKUP_STATE"
+    ;;
+  *"manifest_sha="*"encrypted_file="*) printf 'missing\n' ;;
+  *"bash '/srv/newapi.offsite-stage-"*"/deploy/ops/offsite-copy.sh' '/srv/backups/backup-20260719-120099.manifest'"*)
+    [[ "$cmd" == *"cat '/srv/ops.lock/owner'"* ]] || exit 91
+    [[ "$cmd" == *"OPS_LOCK_DIR='/srv/ops.lock' OPS_LOCK_TOKEN='deploy-"* ]] || exit 92
+    exit 23
+    ;;
+esac
+exit 0
+FAKE_OFFSITE_SSH
+  chmod +x "$fake/git" "$fake/ssh"
+
+  if PATH="$fake:$PATH" GIT_LOG="$git_log" SSH_LOG="$ssh_log" BACKUP_STATE="$backup_state" \
+    SKIP_PREFLIGHT=1 LOCAL_REPO="$tmp/local" SSH_HOST=fake SERVER_REPO=/srv/newapi \
+    COMPOSE_FILE=/srv/newapi/deploy/docker-compose.test.yml ENV_FILE=/srv/newapi/.env \
+    BACKUP_DIR=/srv/backups ARCHIVE_DIR=/srv/archive OPS_LOCK_DIR=/srv/ops.lock \
+    bash "$ROOT/deploy/ops/deploy.sh" >"$output" 2>&1; then
+    fail "deploy continued after the bootstrapped offsite verification failed"
+  fi
+
+  grep -Fq '本次发布前备份未完成异地加密上传' "$output" \
+    || { cat "$output" >&2; fail "deploy did not explain the offsite fail-closed abort"; }
+  grep -Fxq 'archive --format=tar HEAD -- deploy/ops/lib.sh deploy/ops/offsite-copy.sh' "$git_log" \
+    || fail "deploy did not source the bootstrap helper exclusively from git archive HEAD"
+  grep -Fq "BACKUP_DIR='/srv/backups' '/srv/newapi/deploy/ops/backup.sh'" "$ssh_log" \
+    || fail "deploy did not pass the selected BACKUP_DIR to the old backup script"
+  grep -Fq "'/srv/backups/backup-20260719-120099.manifest'" "$ssh_log" \
+    || fail "deploy did not bind offsite verification to the one newly-created manifest"
+
+  backup_line="$(grep -nF "BACKUP_DIR='/srv/backups' '/srv/newapi/deploy/ops/backup.sh'" "$ssh_log" | head -n1 | cut -d: -f1)"
+  offsite_line="$(grep -nF "/deploy/ops/offsite-copy.sh' '/srv/backups/backup-20260719-120099.manifest'" "$ssh_log" | tail -n1 | cut -d: -f1)"
+  [ -n "$backup_line" ] && [ -n "$offsite_line" ] && [ "$backup_line" -lt "$offsite_line" ] \
+    || fail "offsite verification did not happen after the new paired backup"
+  if grep -Eq "docker image inspect '/?newapi_test-app:latest|/srv/archive/src-[0-9]{8}-[0-9]{6}|/srv/newapi\.stage-[0-9]{8}-[0-9]{6}|deploy-build\.status" "$ssh_log"; then
+    fail "deploy reached :prev/release archive/tree swap/build after offsite failure"
+  fi
+  if grep -Eq "(cp|install|mv)[[:space:]].*'/srv/newapi/deploy/ops/(lib|offsite-copy)\.sh'" "$ssh_log"; then
+    fail "bootstrap helper overlaid the currently running release tree"
+  fi
+)
+
+test_deploy_accepts_bound_receipt_without_duplicate_offsite_copy() (
+  set -euo pipefail
+  local tmp fake output ssh_log git_log backup_state
+  tmp="$(mktemp -d)"
+  trap 'rm -rf -- "$tmp"' EXIT
+  fake="$tmp/bin"
+  output="$tmp/deploy.out"
+  ssh_log="$tmp/ssh.log"
+  git_log="$tmp/git.log"
+  backup_state="$tmp/backup.done"
+  mkdir -p "$fake" "$tmp/local"
+
+  cat > "$fake/git" <<'FAKE_RECEIPT_GIT'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "$GIT_LOG"
+case "$*" in
+  "rev-parse --short HEAD") printf 'abc1234\n' ;;
+  "rev-parse --abbrev-ref HEAD") printf 'main\n' ;;
+  "status --porcelain --untracked-files=all") exit 0 ;;
+  "tag -f "*) exit 0 ;;
+  *) exit 97 ;;
+esac
+FAKE_RECEIPT_GIT
+  cat > "$fake/ssh" <<'FAKE_RECEIPT_SSH'
+#!/usr/bin/env bash
+set -u
+shift
+cmd="$*"
+printf '%s\n' "$cmd" >> "$SSH_LOG"
+cat >/dev/null || true
+case "$cmd" in
+  *"find '/srv/backups' -maxdepth 1 -type f -name 'backup-*.manifest'"*)
+    [ ! -f "$BACKUP_STATE" ] || printf 'backup-20260719-120100.manifest\n'
+    ;;
+  *"test -x '/srv/newapi/deploy/ops/backup.sh'"*) exit 0 ;;
+  *"BACKUP_DIR='/srv/backups' '/srv/newapi/deploy/ops/backup.sh'"*)
+    touch "$BACKUP_STATE"
+    ;;
+  *"manifest_sha="*"encrypted_file="*)
+    [[ "$cmd" == *"source_manifest=backup-20260719-120100.manifest"* ]] || exit 91
+    [[ "$cmd" == *"source_manifest_sha256=\$manifest_sha"* ]] || exit 92
+    [[ "$cmd" == *"verification=full-download-sha256"* ]] || exit 93
+    printf 'valid\n'
+    ;;
+  *"docker image inspect 'newapi_test-app:latest'"*) exit 61 ;;
+esac
+exit 0
+FAKE_RECEIPT_SSH
+  chmod +x "$fake/git" "$fake/ssh"
+
+  if PATH="$fake:$PATH" GIT_LOG="$git_log" SSH_LOG="$ssh_log" BACKUP_STATE="$backup_state" \
+    SKIP_PREFLIGHT=1 LOCAL_REPO="$tmp/local" SSH_HOST=fake SERVER_REPO=/srv/newapi \
+    COMPOSE_FILE=/srv/newapi/deploy/docker-compose.test.yml ENV_FILE=/srv/newapi/.env \
+    BACKUP_DIR=/srv/backups ARCHIVE_DIR=/srv/archive OPS_LOCK_DIR=/srv/ops.lock \
+    bash "$ROOT/deploy/ops/deploy.sh" >"$output" 2>&1; then
+    fail "receipt fixture unexpectedly reached a complete deploy"
+  fi
+
+  grep -Fq '已由服务器 backup.sh 完成异地回读验真' "$output" \
+    || { cat "$output" >&2; fail "deploy rejected a strictly-bound existing receipt"; }
+  if grep -Fq 'archive --format=tar HEAD -- deploy/ops/lib.sh deploy/ops/offsite-copy.sh' "$git_log"; then
+    fail "deploy uploaded the bootstrap helper even though the new backup already had a valid receipt"
+  fi
+  if grep -Fq '/deploy/ops/offsite-copy.sh' "$ssh_log"; then
+    fail "deploy repeated offsite-copy for a manifest with a valid bound receipt"
+  fi
+  grep -Fq 'source_manifest_sha256=' "$ssh_log" \
+    || fail "deploy accepted an existing receipt without binding it to the actual manifest SHA-256"
+)
+
 test_deploy_rejects_dirty_checkout_before_remote_access() (
   set -euo pipefail
   local tmp fake output ssh_log
@@ -281,7 +434,7 @@ case "$*" in
   "rev-parse --short HEAD") printf 'abc1234\n' ;;
   "rev-parse --abbrev-ref HEAD") printf 'main\n' ;;
   "status --porcelain --untracked-files=all") exit 0 ;;
-  "archive --format=tar HEAD -- . :(exclude)bulb-orbit") /usr/bin/tar -cf - . ;;
+  "archive --format=tar HEAD -- "*) /usr/bin/tar -cf - . ;;
   "tag -f "*) exit 0 ;;
   *) exit 1 ;;
 esac
@@ -294,6 +447,11 @@ cmd="$*"
 cat >/dev/null || true
 bash -n -c "$cmd" || exit 90
 case "$cmd" in
+  *"find '"*"/backups' -maxdepth 1 -type f -name 'backup-*.manifest'"*)
+    [ ! -f "$SSH_BACKUP_STATE" ] || printf 'backup-20260719-120099.manifest\n'
+    ;;
+  *"/deploy/ops/backup.sh'"*) touch "$SSH_BACKUP_STATE" ;;
+  *"manifest_sha="*"encrypted_file="*) printf 'missing\n' ;;
   *"cat '"*"/deploy-build.status' 2>/dev/null"*) printf '0\n' ;;
   *"docker image inspect -f"*":latest"*) printf 'sha256:new\n' ;;
   *"docker image inspect -f"*":prev"*) printf 'sha256:old\n' ;;
@@ -301,7 +459,7 @@ esac
 FAKE_PARSE_SSH
   chmod +x "$fake/git" "$fake/ssh"
 
-  PATH="$fake:$PATH" SKIP_PREFLIGHT=1 LOCAL_REPO="$tmp/local" SSH_HOST=fake \
+  PATH="$fake:$PATH" SSH_BACKUP_STATE="$tmp/backup.done" SKIP_PREFLIGHT=1 LOCAL_REPO="$tmp/local" SSH_HOST=fake \
     SERVER_REPO="$tmp/server" COMPOSE_FILE="$tmp/server/deploy/docker-compose.test.yml" \
     ENV_FILE="$tmp/server/.env" ARCHIVE_DIR="$tmp/archive" OPS_LOCK_DIR="$tmp/ops.lock" \
     HEALTH_TIMEOUT=30 ARCHIVE_KEEP=2 \
@@ -1264,6 +1422,8 @@ run_test "manifest tamper detection and clean release extraction" test_manifest_
 run_test "shared ops lock rejects a different operation owner" test_ops_lock_rejects_unrelated_owner
 run_test "Redis backup failure aborts and removes the partial set" test_redis_backup_failure_is_fatal
 run_test "deploy stops before mutation when backup fails" test_deploy_aborts_on_backup_failure
+run_test "deploy bootstraps current-HEAD offsite verification before release mutation" test_deploy_bootstraps_current_head_offsite_before_release_mutation
+run_test "deploy reuses a strictly-bound receipt without duplicate offsite copy" test_deploy_accepts_bound_receipt_without_duplicate_offsite_copy
 run_test "deploy rejects a dirty checkout before server access" test_deploy_rejects_dirty_checkout_before_remote_access
 run_test "every remote deploy program parses through the success path" test_all_deploy_remote_programs_parse
 run_test "ACME checksum mismatch executes and writes nothing" test_acme_checksum_failure_writes_nothing

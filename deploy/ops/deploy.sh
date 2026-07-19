@@ -3,6 +3,8 @@
 #
 # 不变量：
 #   1. 旧版数据配对备份失败即中止，不存在“带病继续发布”。
+#      即使服务器仍运行不含 offsite-copy 的旧 release，本次刚生成的 manifest
+#      也必须由当前本地 HEAD 中的已审计 helper 加密上传并完整回读验真。
 #   2. 只允许干净 Git checkout，并从 HEAD 对象生成归档；忽略文件/runner 残留
 #      无法混入发布。归档只解包到全新 staging，再原子换树。
 #   3. 构建成功、MySQL/Redis/app 就绪且线上版本精确匹配后才删旧树。
@@ -33,6 +35,7 @@ HOST_HEADER="${HOST_HEADER:-tokendream.wedreamhub.com}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-600}"
 ARCHIVE_DIR="${ARCHIVE_DIR:-/root/deploy-archives}"
 ARCHIVE_KEEP="${ARCHIVE_KEEP:-7}"
+BACKUP_DIR="${BACKUP_DIR:-/root/backups}"
 APP_IMG="${STACK}-${APP_SVC}"
 DC="docker compose -p $STACK --env-file $ENV_FILE -f $COMPOSE_FILE"
 
@@ -54,10 +57,13 @@ MANIFEST_SIDECAR="$ARCHIVE_DIR/src-$TS.manifest.json"
 RELEASE_SIDECAR="$ARCHIVE_DIR/src-$TS.release"
 REMOTE_STAGE="${SERVER_REPO}.stage-${TS}"
 OLD_TREE="${SERVER_REPO}.pre-${TS}"
+OFFSITE_STAGE="${SERVER_REPO}.offsite-stage-${TS}"
 OPS_LOCK_DIR="${OPS_LOCK_DIR:-/run/lock/newapi-ops.lock.d}"
 OPS_LOCK_TOKEN="deploy-$TS-$$-${RANDOM:-0}"
 DEPLOY_LOCK_HELD=0
 KEEP_DEPLOY_LOCK=0
+OFFSITE_STAGE_CREATED=0
+OFFSITE_STAGE_CLEANUP_SAFE=1
 
 valid_remote_path() {
   local path="$1"
@@ -75,6 +81,8 @@ valid_remote_file() {
 
 valid_remote_path "$SERVER_REPO" || die "SERVER_REPO 不是安全的受管 release 路径：$SERVER_REPO"
 valid_remote_path "$ARCHIVE_DIR" || die "ARCHIVE_DIR 不是安全路径：$ARCHIVE_DIR"
+valid_remote_path "$BACKUP_DIR" || die "BACKUP_DIR 不是安全路径：$BACKUP_DIR"
+valid_remote_path "$OFFSITE_STAGE" || die "OFFSITE_STAGE 不是安全路径：$OFFSITE_STAGE"
 valid_remote_path "$OPS_LOCK_DIR" || die "OPS_LOCK_DIR 不是安全路径：$OPS_LOCK_DIR"
 valid_remote_file "$COMPOSE_FILE" || die "COMPOSE_FILE 路径非法：$COMPOSE_FILE"
 valid_remote_file "$ENV_FILE" || die "ENV_FILE 路径非法：$ENV_FILE"
@@ -115,6 +123,20 @@ MANIFEST_JSON="$(printf \
 release_deploy_lock() {
   local rc=$?
   trap - EXIT
+  if [ "$OFFSITE_STAGE_CREATED" = 1 ] && [ "$OFFSITE_STAGE_CLEANUP_SAFE" = 1 ]; then
+    if remote "
+      set -e
+      [ \"\$(cat '$OPS_LOCK_DIR/owner' 2>/dev/null)\" = '$OPS_LOCK_TOKEN' ]
+      case '$OFFSITE_STAGE' in '$SERVER_REPO'.offsite-stage-*) : ;; *) exit 1 ;; esac
+      rm -rf -- '$OFFSITE_STAGE'
+    "; then
+      OFFSITE_STAGE_CREATED=0
+    else
+      log "异地 helper staging 清理失败；为防并发操作，保留 ops lock：$OPS_LOCK_DIR"
+      KEEP_DEPLOY_LOCK=1
+      rc=1
+    fi
+  fi
   if [ "$DEPLOY_LOCK_HELD" = 1 ]; then
     if [ "$KEEP_DEPLOY_LOCK" = 1 ]; then
       log "远端状态未能安全收敛；为防并发操作，故意保留 ops lock：$OPS_LOCK_DIR"
@@ -276,13 +298,23 @@ DEPLOY_LOCK_HELD=1
 trap release_deploy_lock EXIT
 
 log "3/8 生成发布前配对备份"
+BACKUP_CREATED=0
+if ! BACKUP_MANIFESTS_BEFORE="$(remote "
+  set -e
+  [ ! -e '$BACKUP_DIR' ] || [ -d '$BACKUP_DIR' ]
+  [ ! -d '$BACKUP_DIR' ] || find '$BACKUP_DIR' -maxdepth 1 -type f -name 'backup-*.manifest' -printf '%f\\n' \
+    | grep -E '^backup-[0-9]{8}-[0-9]{6}\\.manifest$' | LC_ALL=C sort
+")"; then
+  die "无法读取发布前备份清单；未运行备份或触碰 release。"
+fi
 if remote "test -x '$SERVER_REPO/deploy/ops/backup.sh'"; then
   backup_rc=0
-  remote "OPS_LOCK_DIR='$OPS_LOCK_DIR' OPS_LOCK_TOKEN='$OPS_LOCK_TOKEN' STACK='$STACK' EXPECTED_STACK='$EXPECTED_STACK' SERVER_REPO='$SERVER_REPO' COMPOSE_FILE='$COMPOSE_FILE' ENV_FILE='$ENV_FILE' '$SERVER_REPO/deploy/ops/backup.sh'" || backup_rc=$?
+  remote "OPS_LOCK_DIR='$OPS_LOCK_DIR' OPS_LOCK_TOKEN='$OPS_LOCK_TOKEN' STACK='$STACK' EXPECTED_STACK='$EXPECTED_STACK' SERVER_REPO='$SERVER_REPO' COMPOSE_FILE='$COMPOSE_FILE' ENV_FILE='$ENV_FILE' BACKUP_DIR='$BACKUP_DIR' '$SERVER_REPO/deploy/ops/backup.sh'" || backup_rc=$?
   if [ "$backup_rc" != 0 ]; then
     [ "$backup_rc" != 255 ] || die_keep_lock "发布前备份期间 SSH 中断，无法证明远端备份进程已退出；已保留 ops lock。"
     die "发布前备份失败；已在上传/换树之前中止。"
   fi
+  BACKUP_CREATED=1
 else
   [ "${ALLOW_INITIAL_NO_BACKUP:-0}" = "1" ] \
     || die "找不到可执行 backup.sh，且未显式允许首次空环境。"
@@ -292,6 +324,142 @@ else
   [ -z "$MYSQL_CID" ] \
     || die "已存在 mysql 容器 $MYSQL_CID；禁止以‘首次部署’跳过备份。"
   log "显式允许首次空环境无备份（已成功查询且未发现 mysql 容器）"
+fi
+
+if [ "$BACKUP_CREATED" = 1 ]; then
+  if ! BACKUP_MANIFESTS_AFTER="$(remote "
+    set -e
+    [ -d '$BACKUP_DIR' ]
+    find '$BACKUP_DIR' -maxdepth 1 -type f -name 'backup-*.manifest' -printf '%f\\n' \
+      | grep -E '^backup-[0-9]{8}-[0-9]{6}\\.manifest$' | LC_ALL=C sort
+  ")"; then
+    die "备份返回成功但无法读取产物清单；已在发布归档上传/换树之前中止。"
+  fi
+  NEW_BACKUP_MANIFESTS="$(comm -13 \
+    <([ -z "$BACKUP_MANIFESTS_BEFORE" ] || printf '%s\n' "$BACKUP_MANIFESTS_BEFORE") \
+    <([ -z "$BACKUP_MANIFESTS_AFTER" ] || printf '%s\n' "$BACKUP_MANIFESTS_AFTER"))"
+  NEW_BACKUP_COUNT="$(printf '%s\n' "$NEW_BACKUP_MANIFESTS" | awk 'NF { count++ } END { print count + 0 }')"
+  [ "$NEW_BACKUP_COUNT" = 1 ] \
+    || die "发布前备份必须且只能新增一个 manifest，实际新增 $NEW_BACKUP_COUNT；已在发布归档上传/换树之前中止。"
+  BACKUP_MANIFEST_NAME="$(printf '%s\n' "$NEW_BACKUP_MANIFESTS" | awk 'NF { print; exit }')"
+  printf '%s\n' "$BACKUP_MANIFEST_NAME" | grep -Eq '^backup-[0-9]{8}-[0-9]{6}\.manifest$' \
+    || die "发布前备份 manifest 文件名非法：$BACKUP_MANIFEST_NAME"
+  BACKUP_MANIFEST="$BACKUP_DIR/$BACKUP_MANIFEST_NAME"
+  BACKUP_TS="${BACKUP_MANIFEST_NAME#backup-}"
+  BACKUP_TS="${BACKUP_TS%.manifest}"
+
+  # 新版服务器 backup.sh 会自行完成异地复制；严格校验它留下的 receipt 与本次
+  # manifest 名称/实际 SHA/完整回读证明绑定后直接接受，避免重复上传。首轮迁移的
+  # 旧 backup.sh 没有 offsite-copy，也没有 receipt；此时才把当前本地 HEAD 的两个
+  # 已审计 helper 解到受控 sibling，在同一 ops lock 内补齐异地验证，绝不 overlay
+  # 当前 release 树。
+  log "3.5/8 验证本次配对备份的异地回读证明"
+  receipt_rc=0
+  OFFSITE_RECEIPT_STATE="$(remote "
+    set -e
+    [ \"\$(cat '$OPS_LOCK_DIR/owner' 2>/dev/null)\" = '$OPS_LOCK_TOKEN' ]
+    manifest='$BACKUP_MANIFEST'
+    receipt='$BACKUP_DIR/offsite-$BACKUP_TS.receipt'
+    if [ ! -e \"\$receipt\" ]; then
+      printf 'missing\\n'
+      exit 0
+    fi
+    [ -f \"\$receipt\" ]
+    [ ! -L \"\$receipt\" ]
+    mode=\$(stat -c %a \"\$receipt\" 2>/dev/null || stat -f %Lp \"\$receipt\")
+    [ \"\$mode\" = 600 ]
+    for key in format timestamp stack source_manifest source_manifest_sha256 \
+      encrypted_file encrypted_sha256 verification; do
+      [ \"\$(grep -c \"^\${key}=\" \"\$receipt\")\" = 1 ]
+    done
+    manifest_sha=\$(sha256sum \"\$manifest\" | cut -d ' ' -f1)
+    [ \"\$(grep -Fxc 'format=newapi-offsite-v1' \"\$receipt\")\" = 1 ]
+    [ \"\$(grep -Fxc 'timestamp=$BACKUP_TS' \"\$receipt\")\" = 1 ]
+    [ \"\$(grep -Fxc 'stack=$STACK' \"\$receipt\")\" = 1 ]
+    [ \"\$(grep -Fxc 'source_manifest=$BACKUP_MANIFEST_NAME' \"\$receipt\")\" = 1 ]
+    [ \"\$(grep -Fxc \"source_manifest_sha256=\$manifest_sha\" \"\$receipt\")\" = 1 ]
+    [ \"\$(grep -Fxc 'verification=full-download-sha256' \"\$receipt\")\" = 1 ]
+    encrypted_file=\$(sed -n 's/^encrypted_file=//p' \"\$receipt\")
+    encrypted_sha=\$(sed -n 's/^encrypted_sha256=//p' \"\$receipt\")
+    printf '%s\\n' \"\$encrypted_sha\" | grep -Eq '^[0-9a-f]{64}$'
+    encrypted_prefix=\$(printf '%s' \"\$encrypted_sha\" | cut -c1-16)
+    [ \"\$encrypted_file\" = \"newapi-$STACK-$BACKUP_TS-\$encrypted_prefix.tar.gz.age\" ]
+    printf 'valid\\n'
+  ")" || receipt_rc=$?
+  if [ "$receipt_rc" != 0 ]; then
+    if [ "$receipt_rc" = 255 ]; then
+      die_keep_lock "读取本次异地 receipt 时 SSH 中断；已保留 ops lock，未上传发布归档或换树。"
+    fi
+    die "本次备份已存在异地 receipt，但其 manifest/SHA-256/回读证明绑定无效；已在发布归档上传/换树之前中止。"
+  fi
+  case "$OFFSITE_RECEIPT_STATE" in
+    valid)
+      ok "本次配对备份已由服务器 backup.sh 完成异地回读验真：$BACKUP_MANIFEST_NAME"
+      ;;
+    missing)
+      if ! remote "
+        set -e
+        [ \"\$(cat '$OPS_LOCK_DIR/owner' 2>/dev/null)\" = '$OPS_LOCK_TOKEN' ]
+        [ ! -e '$OFFSITE_STAGE' ]
+        mkdir -m 700 '$OFFSITE_STAGE'
+      "; then
+        OFFSITE_STAGE_CLEANUP_SAFE=0
+        die_keep_lock "无法建立隔离的异地 helper staging；远端状态不确定，未上传发布归档或换树。"
+      fi
+      OFFSITE_STAGE_CREATED=1
+      if ! (cd "$LOCAL_REPO" && git archive --format=tar HEAD -- \
+        deploy/ops/lib.sh deploy/ops/offsite-copy.sh) \
+        | gzip \
+        | remote "
+            set -e
+            [ \"\$(cat '$OPS_LOCK_DIR/owner' 2>/dev/null)\" = '$OPS_LOCK_TOKEN' ]
+            tar --no-same-owner -xzf - -C '$OFFSITE_STAGE'
+            test -f '$OFFSITE_STAGE/deploy/ops/lib.sh'
+            test ! -L '$OFFSITE_STAGE/deploy/ops/lib.sh'
+            test -f '$OFFSITE_STAGE/deploy/ops/offsite-copy.sh'
+            test ! -L '$OFFSITE_STAGE/deploy/ops/offsite-copy.sh'
+            [ \"\$(find '$OFFSITE_STAGE' -type f | wc -l)\" = 2 ]
+            [ \"\$(find '$OFFSITE_STAGE' -type l | wc -l)\" = 0 ]
+          "; then
+        OFFSITE_STAGE_CLEANUP_SAFE=0
+        die_keep_lock "当前 HEAD 的异地 helper 上传/校验失败；远端状态不确定，未上传发布归档或换树。"
+      fi
+
+      offsite_rc=0
+      remote "
+        set -e
+        [ \"\$(cat '$OPS_LOCK_DIR/owner' 2>/dev/null)\" = '$OPS_LOCK_TOKEN' ]
+        STACK='$STACK' EXPECTED_STACK='$EXPECTED_STACK' SERVER_REPO='$SERVER_REPO' \
+          COMPOSE_FILE='$COMPOSE_FILE' ENV_FILE='$ENV_FILE' BACKUP_DIR='$BACKUP_DIR' \
+          OPS_LOCK_DIR='$OPS_LOCK_DIR' OPS_LOCK_TOKEN='$OPS_LOCK_TOKEN' \
+          bash '$OFFSITE_STAGE/deploy/ops/offsite-copy.sh' '$BACKUP_MANIFEST'
+        receipt='$BACKUP_DIR/offsite-$BACKUP_TS.receipt'
+        [ -s \"\$receipt\" ]
+        [ \"\$(grep -Fxc 'source_manifest=$BACKUP_MANIFEST_NAME' \"\$receipt\")\" = 1 ]
+        [ \"\$(grep -Fxc 'verification=full-download-sha256' \"\$receipt\")\" = 1 ]
+      " || offsite_rc=$?
+      if [ "$offsite_rc" != 0 ]; then
+        if [ "$offsite_rc" = 255 ]; then
+          OFFSITE_STAGE_CLEANUP_SAFE=0
+          die_keep_lock "异地上传/回读期间 SSH 中断，无法证明远端进程已退出；已保留 ops lock，未上传发布归档或换树。"
+        fi
+        die "本次发布前备份未完成异地加密上传、完整回读 SHA-256 与 receipt 验证；已在发布归档上传/换树之前中止。"
+      fi
+      if ! remote "
+        set -e
+        [ \"\$(cat '$OPS_LOCK_DIR/owner' 2>/dev/null)\" = '$OPS_LOCK_TOKEN' ]
+        rm -rf -- '$OFFSITE_STAGE'
+      "; then
+        OFFSITE_STAGE_CLEANUP_SAFE=0
+        die_keep_lock "异地 helper 已成功，但 staging 清理结果不确定；已保留 ops lock，未上传发布归档或换树。"
+      fi
+      OFFSITE_STAGE_CREATED=0
+      ok "本次配对备份已由当前 HEAD helper 完成异地回读验真：$BACKUP_MANIFEST_NAME"
+      ;;
+    *)
+      die "异地 receipt 状态非法；已在发布归档上传/换树之前中止。"
+      ;;
+  esac
 fi
 
 log "4/8 备份通过后，成对保存当前 :prev 镜像 + 干净源码 release"

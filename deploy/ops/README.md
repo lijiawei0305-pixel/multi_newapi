@@ -32,7 +32,7 @@
 
 ## 各脚本职责
 
-- **`deploy.sh`**（Mac）— 预检 → 强制发布前配对备份 → 保存 `:prev` → 上传可重建归档 → 只解包到全新 staging 并换树 → 记录后台构建真实退出码 → 严格验证 MySQL/Redis/app 与唯一版本。备份失败会在上传前中止；只有回滚的版本/readiness 也通过才报“已回滚”。
+- **`deploy.sh`**（Mac）— 预检 → 强制发布前配对备份 → 只接受本次刚新增的唯一 manifest；若新版服务器 `backup.sh` 已留下与 manifest 名称、实际 SHA-256、完整回读证明严格绑定的 receipt，则直接复用；若首轮迁移的旧脚本没有 receipt，才从当前本地 `HEAD` 抽取 `lib.sh` + `offsite-copy.sh` 到服务器隔离 sibling，补做 age/rclone 异地上传与完整回读验真 → 保存 `:prev` → 上传可重建归档 → 只解包到全新 staging 并换树 → 记录后台构建真实退出码 → 严格验证 MySQL/Redis/app 与唯一版本。已有但绑定无效的 receipt 会 fail-closed；helper 不覆盖现役源码树，且全程复用 deploy 持有的 ops lock。只有回滚的版本/readiness 也通过才报“已回滚”。
 - **`backup.sh`**（服务器）— 短暂停 app 建立停写点，生成一个 `backup-<ts>.manifest` 权威恢复集：MySQL gzip + Redis RDB + `.env`/compose/nginx/证书/版本上下文，三个产物都带 SHA-256。Redis 失败会废弃整组；配置异地目标后自动调用 `offsite-copy.sh` 加密上传并完整回读校验。
 - **`offsite-copy.sh <manifest>`**（服务器）— 只接受已通过 manifest/SHA-256 校验的配对集，用 age recipient 加密后经 rclone 复制到异地，重新下载比对 SHA-256 后才原子写本地 receipt；不 source `.env`、不使用 `eval`。
 - **`restore.sh <backup-*.manifest>`**（服务器，**危险·成对覆盖生产状态**）— 先校验 manifest/三个 SHA-256/gzip/tar/RDB，要求外部维护停流确认与**键入栈名**，强制 pre-backup 后配对恢复 MySQL + Redis。MySQL 会先删整库再导入，不留恢复点后新表；Redis 7 先以 `appendonly=no` 加载 RDB，再在活进程开 AOF、等 rewrite 成功，最后用正式 compose 重启并复核 key 数。任一 readiness/版本/reconcile 闸门失败都保持 app stopped、保留已验证恢复副本与 ops lock，且不自动撤维护模式。

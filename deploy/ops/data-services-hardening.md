@@ -49,7 +49,17 @@ drift; it does **not** claim that MySQL 8.2 is the desired long-term release.
 ## Phase 1 — reversible credential migration
 
 Run the normal `deploy.sh`. Its mandatory paired backup happens before release
-replacement. On the first hardened start:
+replacement. During the first migration from an older release, the deploy driver
+first checks whether the one manifest created by this deployment already has a
+receipt strictly bound to its name, actual SHA-256, and full-download
+verification. A valid receipt from the current server backup is reused to avoid
+duplicating the immutable upload; an invalid existing receipt stops the release.
+When an older backup script produced no receipt, the driver extracts only the
+audited `lib.sh` and `offsite-copy.sh` from the local clean `HEAD` into an
+isolated server-side sibling. While retaining the same operations lock, it
+requires the encrypted upload, full-download SHA-256 check, and receipt before
+it uploads or swaps the release. It never overlays the currently running release.
+On the first hardened start:
 
 - `mysql-access-bootstrap` waits for MySQL, then idempotently creates or rotates
   `newapi@%` and grants privileges only on ``new-api-test``. It uses root only in
