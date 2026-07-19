@@ -67,6 +67,9 @@ func SetRelayRouter(router *gin.Engine) {
 		playgroundRouter.POST("/chat/completions", controller.Playground)
 	}
 	relayV1Router := router.Group("/v1")
+	// Origin 必须在 TokenAuth 之前校验：Realtime 客户端可把 API key 放在
+	// Sec-WebSocket-Protocol，未知网页 Origin 不应进入令牌解析路径。
+	relayV1Router.Use(middleware.WebSocketOriginGuard())
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
