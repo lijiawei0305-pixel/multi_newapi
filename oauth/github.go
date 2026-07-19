@@ -40,7 +40,7 @@ func (p *GitHubProvider) GetName() string {
 }
 
 func (p *GitHubProvider) IsEnabled() bool {
-	return common.GitHubOAuthEnabled
+	return common.GetAuthRuntimeConfig().GitHubOAuthEnabled
 }
 
 func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.Context) (*OAuthToken, error) {
@@ -50,9 +50,10 @@ func (p *GitHubProvider) ExchangeToken(ctx context.Context, code string, c *gin.
 
 	logger.LogDebug(ctx, "[OAuth-GitHub] ExchangeToken authorization_code_%s", logger.PayloadMetadata([]byte(code)))
 
+	authRuntime := common.GetAuthRuntimeConfig()
 	values := map[string]string{
-		"client_id":     common.GitHubClientId,
-		"client_secret": common.GitHubClientSecret,
+		"client_id":     authRuntime.GitHubClientID,
+		"client_secret": authRuntime.GitHubClientSecret,
 		"code":          code,
 	}
 	jsonData, err := common.Marshal(values)

@@ -39,15 +39,16 @@ func InitOptionMap() {
 	common.OptionMap["FileDownloadPermission"] = strconv.Itoa(common.FileDownloadPermission)
 	common.OptionMap["ImageUploadPermission"] = strconv.Itoa(common.ImageUploadPermission)
 	common.OptionMap["ImageDownloadPermission"] = strconv.Itoa(common.ImageDownloadPermission)
-	common.OptionMap["PasswordLoginEnabled"] = strconv.FormatBool(common.PasswordLoginEnabled)
-	common.OptionMap["PasswordRegisterEnabled"] = strconv.FormatBool(common.PasswordRegisterEnabled)
-	common.OptionMap["EmailVerificationEnabled"] = strconv.FormatBool(common.EmailVerificationEnabled)
-	common.OptionMap["GitHubOAuthEnabled"] = strconv.FormatBool(common.GitHubOAuthEnabled)
-	common.OptionMap["LinuxDOOAuthEnabled"] = strconv.FormatBool(common.LinuxDOOAuthEnabled)
-	common.OptionMap["TelegramOAuthEnabled"] = strconv.FormatBool(common.TelegramOAuthEnabled)
-	common.OptionMap["WeChatAuthEnabled"] = strconv.FormatBool(common.WeChatAuthEnabled)
-	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(common.TurnstileCheckEnabled)
-	common.OptionMap["RegisterEnabled"] = strconv.FormatBool(common.RegisterEnabled)
+	authRuntime := common.GetAuthRuntimeConfig()
+	common.OptionMap["PasswordLoginEnabled"] = strconv.FormatBool(authRuntime.PasswordLoginEnabled)
+	common.OptionMap["PasswordRegisterEnabled"] = strconv.FormatBool(authRuntime.PasswordRegisterEnabled)
+	common.OptionMap["EmailVerificationEnabled"] = strconv.FormatBool(authRuntime.EmailVerificationEnabled)
+	common.OptionMap["GitHubOAuthEnabled"] = strconv.FormatBool(authRuntime.GitHubOAuthEnabled)
+	common.OptionMap["LinuxDOOAuthEnabled"] = strconv.FormatBool(authRuntime.LinuxDOOAuthEnabled)
+	common.OptionMap["TelegramOAuthEnabled"] = strconv.FormatBool(authRuntime.TelegramOAuthEnabled)
+	common.OptionMap["WeChatAuthEnabled"] = strconv.FormatBool(authRuntime.WeChatAuthEnabled)
+	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(authRuntime.TurnstileCheckEnabled)
+	common.OptionMap["RegisterEnabled"] = strconv.FormatBool(authRuntime.RegisterEnabled)
 	common.OptionMap["AutomaticDisableChannelEnabled"] = strconv.FormatBool(common.AutomaticDisableChannelEnabled)
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
@@ -57,9 +58,9 @@ func InitOptionMap() {
 	common.OptionMap["TaskEnabled"] = strconv.FormatBool(common.TaskEnabled)
 	common.OptionMap["DataExportEnabled"] = strconv.FormatBool(common.DataExportEnabled)
 	common.OptionMap["ChannelDisableThreshold"] = strconv.FormatFloat(common.ChannelDisableThreshold, 'f', -1, 64)
-	common.OptionMap["EmailDomainRestrictionEnabled"] = strconv.FormatBool(common.EmailDomainRestrictionEnabled)
-	common.OptionMap["EmailAliasRestrictionEnabled"] = strconv.FormatBool(common.EmailAliasRestrictionEnabled)
-	common.OptionMap["EmailDomainWhitelist"] = strings.Join(common.EmailDomainWhitelist, ",")
+	common.OptionMap["EmailDomainRestrictionEnabled"] = strconv.FormatBool(authRuntime.EmailDomainRestrictionEnabled)
+	common.OptionMap["EmailAliasRestrictionEnabled"] = strconv.FormatBool(authRuntime.EmailAliasRestrictionEnabled)
+	common.OptionMap["EmailDomainWhitelist"] = authRuntime.EmailDomainWhitelistString()
 	common.OptionMap["SMTPServer"] = ""
 	common.OptionMap["SMTPFrom"] = ""
 	common.OptionMap["SMTPPort"] = strconv.Itoa(common.SMTPPort)
@@ -92,22 +93,23 @@ func InitOptionMap() {
 	common.OptionMap["StripePriceId"] = setting.StripePriceId
 	common.OptionMap["StripeUnitPrice"] = strconv.FormatFloat(setting.StripeUnitPrice, 'f', -1, 64)
 	common.OptionMap["StripePromotionCodesEnabled"] = strconv.FormatBool(setting.StripePromotionCodesEnabled)
-	// 微信支付 / 支付宝 原生支付凭据
-	common.OptionMap["WechatPayEnabled"] = strconv.FormatBool(setting.WechatPayEnabled)
-	common.OptionMap["WechatPayAppID"] = setting.WechatPayAppID
-	common.OptionMap["WechatPayMchID"] = setting.WechatPayMchID
-	common.OptionMap["WechatPayAPIv3Key"] = setting.WechatPayAPIv3Key
-	common.OptionMap["WechatPayCertSerial"] = setting.WechatPayCertSerial
-	common.OptionMap["WechatPayPrivateKey"] = setting.WechatPayPrivateKey
-	common.OptionMap["WechatPayPublicKeyID"] = setting.WechatPayPublicKeyID
-	common.OptionMap["WechatPayPublicKey"] = setting.WechatPayPublicKey
-	common.OptionMap["AlipayEnabled"] = strconv.FormatBool(setting.AlipayEnabled)
-	common.OptionMap["AlipayAppID"] = setting.AlipayAppID
-	common.OptionMap["AlipayPrivateKey"] = setting.AlipayPrivateKey
-	common.OptionMap["AlipayPublicKey"] = setting.AlipayPublicKey
-	common.OptionMap["AlipaySellerID"] = setting.AlipaySellerID
-	common.OptionMap["AlipayReturnURL"] = setting.AlipayReturnURL
-	common.OptionMap["AlipaySandbox"] = strconv.FormatBool(setting.AlipaySandbox)
+	// 微信支付 / 支付宝原生支付凭据必须从同一个不可变快照读取，避免初始化期间混用字段。
+	nativePayment := setting.GetNativePaymentConfig()
+	common.OptionMap["WechatPayEnabled"] = strconv.FormatBool(nativePayment.WechatPayEnabled)
+	common.OptionMap["WechatPayAppID"] = nativePayment.WechatPayAppID
+	common.OptionMap["WechatPayMchID"] = nativePayment.WechatPayMchID
+	common.OptionMap["WechatPayAPIv3Key"] = nativePayment.WechatPayAPIv3Key
+	common.OptionMap["WechatPayCertSerial"] = nativePayment.WechatPayCertSerial
+	common.OptionMap["WechatPayPrivateKey"] = nativePayment.WechatPayPrivateKey
+	common.OptionMap["WechatPayPublicKeyID"] = nativePayment.WechatPayPublicKeyID
+	common.OptionMap["WechatPayPublicKey"] = nativePayment.WechatPayPublicKey
+	common.OptionMap["AlipayEnabled"] = strconv.FormatBool(nativePayment.AlipayEnabled)
+	common.OptionMap["AlipayAppID"] = nativePayment.AlipayAppID
+	common.OptionMap["AlipayPrivateKey"] = nativePayment.AlipayPrivateKey
+	common.OptionMap["AlipayPublicKey"] = nativePayment.AlipayPublicKey
+	common.OptionMap["AlipaySellerID"] = nativePayment.AlipaySellerID
+	common.OptionMap["AlipayReturnURL"] = nativePayment.AlipayReturnURL
+	common.OptionMap["AlipaySandbox"] = strconv.FormatBool(nativePayment.AlipaySandbox)
 	common.OptionMap["CreemApiKey"] = setting.CreemApiKey
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
@@ -154,10 +156,11 @@ func InitOptionMap() {
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
-	common.OptionMap["ModelRequestRateLimitCount"] = strconv.Itoa(setting.ModelRequestRateLimitCount)
-	common.OptionMap["ModelRequestRateLimitDurationMinutes"] = strconv.Itoa(setting.ModelRequestRateLimitDurationMinutes)
-	common.OptionMap["ModelRequestRateLimitSuccessCount"] = strconv.Itoa(setting.ModelRequestRateLimitSuccessCount)
-	common.OptionMap["ModelRequestRateLimitGroup"] = setting.ModelRequestRateLimitGroup2JSONString()
+	modelRateLimit := setting.GetModelRequestRateLimitConfig()
+	common.OptionMap["ModelRequestRateLimitCount"] = strconv.Itoa(modelRateLimit.Count)
+	common.OptionMap["ModelRequestRateLimitDurationMinutes"] = strconv.Itoa(modelRateLimit.DurationMinutes)
+	common.OptionMap["ModelRequestRateLimitSuccessCount"] = strconv.Itoa(modelRateLimit.SuccessCount)
+	common.OptionMap["ModelRequestRateLimitGroup"] = modelRateLimit.GroupRateLimitsJSONString()
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
@@ -185,7 +188,7 @@ func InitOptionMap() {
 	common.OptionMap["CheckSensitiveEnabled"] = strconv.FormatBool(setting.CheckSensitiveEnabled)
 	common.OptionMap["DemoSiteEnabled"] = strconv.FormatBool(operation_setting.DemoSiteEnabled)
 	common.OptionMap["SelfUseModeEnabled"] = strconv.FormatBool(operation_setting.SelfUseModeEnabled)
-	common.OptionMap["ModelRequestRateLimitEnabled"] = strconv.FormatBool(setting.ModelRequestRateLimitEnabled)
+	common.OptionMap["ModelRequestRateLimitEnabled"] = strconv.FormatBool(modelRateLimit.Enabled)
 	common.OptionMap["CheckSensitiveOnPromptEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnPromptEnabled)
 	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
 	common.OptionMap["SensitiveWords"] = setting.SensitiveWordsToString()
@@ -211,6 +214,7 @@ func loadOptionsFromDatabase() {
 		common.SysLog("failed to load options from database: " + err.Error())
 		return
 	}
+	coupledOptionChanges := make(map[string]string)
 	for _, option := range options {
 		common.OptionMapRWMutex.RLock()
 		current, loaded := common.OptionMap[option.Key]
@@ -218,9 +222,18 @@ func loadOptionsFromDatabase() {
 		if loaded && current == option.Value {
 			continue
 		}
+		if common.IsAuthRuntimeOption(option.Key) || setting.IsNativePaymentOption(option.Key) || setting.IsModelRequestRateLimitOption(option.Key) {
+			coupledOptionChanges[option.Key] = option.Value
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
+		}
+	}
+	if len(coupledOptionChanges) > 0 {
+		if err := updateOptionMaps(coupledOptionChanges); err != nil {
+			common.SysLog("failed to update coupled runtime options: " + err.Error())
 		}
 	}
 }
@@ -254,10 +267,10 @@ func UpdateOption(key string, value string) error {
 }
 
 // UpdateOptionsBulk persists multiple key/value pairs in a single database
-// transaction, then dispatches them through updateOptionMap in one pass. If
-// any DB write fails the whole transaction rolls back and no in-memory state
-// is touched — safe for callers that must commit a set of related options
-// atomically (e.g. payment gateway binding).
+// transaction, then publishes their runtime state in one pass. Coupled native
+// payment credentials are exposed through one immutable snapshot. If any DB
+// write fails the whole transaction rolls back and no in-memory state is
+// touched.
 func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
@@ -286,12 +299,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if err != nil {
 		return err
 	}
-	for k, v := range values {
-		if err := updateOptionMap(k, v); err != nil {
-			return err
-		}
-	}
-	return nil
+	return updateOptionMaps(values)
 }
 
 // ValidateOptionValue validates values that have structured or scalar runtime
@@ -381,9 +389,35 @@ func ValidateOptionValue(key string, value string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
-	if err := ValidateOptionValue(key, value); err != nil {
+	return updateOptionMaps(map[string]string{key: value})
+}
+
+// updateOptionMaps publishes a set of committed runtime options. Native
+// payment credentials are collected and stored as one immutable snapshot only
+// after every value has passed validation, so readers never observe a partial
+// bulk rotation.
+func updateOptionMaps(values map[string]string) error {
+	for key, value := range values {
+		if err := ValidateOptionValue(key, value); err != nil {
+			return err
+		}
+	}
+	for key, value := range values {
+		if err := updateOptionRuntime(key, value); err != nil {
+			return err
+		}
+	}
+	if _, err := setting.ApplyNativePaymentOptions(values); err != nil {
 		return err
 	}
+	if _, err := common.ApplyAuthRuntimeOptions(values); err != nil {
+		return err
+	}
+	_, err := setting.ApplyModelRequestRateLimitOptions(values)
+	return err
+}
+
+func updateOptionRuntime(key string, value string) (err error) {
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 	common.OptionMap[key] = value
@@ -410,28 +444,11 @@ func updateOptionMap(key string, value string) (err error) {
 	if strings.HasSuffix(key, "Enabled") || key == "DefaultCollapseSidebar" || key == "DefaultUseAutoGroup" || key == "SMTPForceAuthLogin" || key == "SMTPInsecureSkipVerify" {
 		boolValue := value == "true"
 		switch key {
-		case "PasswordRegisterEnabled":
-			common.PasswordRegisterEnabled = boolValue
-		case "PasswordLoginEnabled":
-			common.PasswordLoginEnabled = boolValue
-		case "EmailVerificationEnabled":
-			common.EmailVerificationEnabled = boolValue
-		case "GitHubOAuthEnabled":
-			common.GitHubOAuthEnabled = boolValue
-		case "LinuxDOOAuthEnabled":
-			common.LinuxDOOAuthEnabled = boolValue
-		case "WeChatAuthEnabled":
-			common.WeChatAuthEnabled = boolValue
-		case "TelegramOAuthEnabled":
-			common.TelegramOAuthEnabled = boolValue
-		case "TurnstileCheckEnabled":
-			common.TurnstileCheckEnabled = boolValue
-		case "RegisterEnabled":
-			common.RegisterEnabled = boolValue
-		case "EmailDomainRestrictionEnabled":
-			common.EmailDomainRestrictionEnabled = boolValue
-		case "EmailAliasRestrictionEnabled":
-			common.EmailAliasRestrictionEnabled = boolValue
+		case "PasswordRegisterEnabled", "PasswordLoginEnabled", "EmailVerificationEnabled",
+			"GitHubOAuthEnabled", "LinuxDOOAuthEnabled", "WeChatAuthEnabled", "TelegramOAuthEnabled",
+			"TurnstileCheckEnabled", "RegisterEnabled", "EmailDomainRestrictionEnabled",
+			"EmailAliasRestrictionEnabled":
+			// updateOptionMaps atomically publishes the complete auth runtime snapshot.
 		case "AutomaticDisableChannelEnabled":
 			common.AutomaticDisableChannelEnabled = boolValue
 		case "AutomaticEnableChannelEnabled":
@@ -477,7 +494,7 @@ func updateOptionMap(key string, value string) (err error) {
 		case "CheckSensitiveOnPromptEnabled":
 			setting.CheckSensitiveOnPromptEnabled = boolValue
 		case "ModelRequestRateLimitEnabled":
-			setting.ModelRequestRateLimitEnabled = boolValue
+			// updateOptionMaps atomically publishes the complete rate-limit snapshot.
 		case "StopOnSensitiveEnabled":
 			setting.StopOnSensitiveEnabled = boolValue
 		case "SMTPSSLEnabled":
@@ -498,7 +515,7 @@ func updateOptionMap(key string, value string) (err error) {
 	}
 	switch key {
 	case "EmailDomainWhitelist":
-		common.EmailDomainWhitelist = strings.Split(value, ",")
+		// updateOptionMaps atomically publishes the whitelist with its auth switches.
 	case "SMTPServer":
 		common.SMTPServer = value
 	case "SMTPPort":
@@ -546,37 +563,7 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.StripeMinTopUp, _ = strconv.Atoi(value)
 	case "StripePromotionCodesEnabled":
 		setting.StripePromotionCodesEnabled = value == "true"
-	// 微信支付 / 支付宝 原生支付凭据
-	case "WechatPayEnabled":
-		setting.WechatPayEnabled, _ = strconv.ParseBool(value)
-	case "WechatPayAppID":
-		setting.WechatPayAppID = value
-	case "WechatPayMchID":
-		setting.WechatPayMchID = value
-	case "WechatPayAPIv3Key":
-		setting.WechatPayAPIv3Key = value
-	case "WechatPayCertSerial":
-		setting.WechatPayCertSerial = value
-	case "WechatPayPrivateKey":
-		setting.WechatPayPrivateKey = value
-	case "WechatPayPublicKeyID":
-		setting.WechatPayPublicKeyID = value
-	case "WechatPayPublicKey":
-		setting.WechatPayPublicKey = value
-	case "AlipayEnabled":
-		setting.AlipayEnabled, _ = strconv.ParseBool(value)
-	case "AlipayAppID":
-		setting.AlipayAppID = value
-	case "AlipayPrivateKey":
-		setting.AlipayPrivateKey = value
-	case "AlipayPublicKey":
-		setting.AlipayPublicKey = value
-	case "AlipaySellerID":
-		setting.AlipaySellerID = value
-	case "AlipayReturnURL":
-		setting.AlipayReturnURL = value
-	case "AlipaySandbox":
-		setting.AlipaySandbox, _ = strconv.ParseBool(value)
+	// 微信支付 / 支付宝原生支付配置由 updateOptionMaps 在本函数返回后一次性发布。
 	case "CreemApiKey":
 		setting.CreemApiKey = value
 	case "CreemProducts":
@@ -631,36 +618,17 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.WaffoPancakeMinTopUp, _ = strconv.Atoi(value)
 	case "TopupGroupRatio":
 		err = common.UpdateTopupGroupRatioByJSONString(value)
-	case "GitHubClientId":
-		common.GitHubClientId = value
-	case "GitHubClientSecret":
-		common.GitHubClientSecret = value
-	case "LinuxDOClientId":
-		common.LinuxDOClientId = value
-	case "LinuxDOClientSecret":
-		common.LinuxDOClientSecret = value
-	case "LinuxDOMinimumTrustLevel":
-		common.LinuxDOMinimumTrustLevel, _ = strconv.Atoi(value)
+	case "GitHubClientId", "GitHubClientSecret", "LinuxDOClientId", "LinuxDOClientSecret",
+		"LinuxDOMinimumTrustLevel", "WeChatServerAddress", "WeChatServerToken",
+		"WeChatAccountQRCodeImageURL", "TelegramBotToken", "TelegramBotName",
+		"TurnstileSiteKey", "TurnstileSecretKey":
+		// updateOptionMaps atomically publishes credentials with their auth switches.
 	case "Footer":
 		common.Footer = value
 	case "SystemName":
 		common.SystemName = value
 	case "Logo":
 		common.Logo = value
-	case "WeChatServerAddress":
-		common.WeChatServerAddress = value
-	case "WeChatServerToken":
-		common.WeChatServerToken = value
-	case "WeChatAccountQRCodeImageURL":
-		common.WeChatAccountQRCodeImageURL = value
-	case "TelegramBotToken":
-		common.TelegramBotToken = value
-	case "TelegramBotName":
-		common.TelegramBotName = value
-	case "TurnstileSiteKey":
-		common.TurnstileSiteKey = value
-	case "TurnstileSecretKey":
-		common.TurnstileSecretKey = value
 	case "QuotaForNewUser":
 		common.QuotaForNewUser, _ = strconv.Atoi(value)
 	case "QuotaForInviter":
@@ -671,14 +639,9 @@ func updateOptionMap(key string, value string) (err error) {
 		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
 	case "PreConsumedQuota":
 		common.PreConsumedQuota, _ = strconv.Atoi(value)
-	case "ModelRequestRateLimitCount":
-		setting.ModelRequestRateLimitCount, _ = strconv.Atoi(value)
-	case "ModelRequestRateLimitDurationMinutes":
-		setting.ModelRequestRateLimitDurationMinutes, _ = strconv.Atoi(value)
-	case "ModelRequestRateLimitSuccessCount":
-		setting.ModelRequestRateLimitSuccessCount, _ = strconv.Atoi(value)
-	case "ModelRequestRateLimitGroup":
-		err = setting.UpdateModelRequestRateLimitGroupByJSONString(value)
+	case "ModelRequestRateLimitCount", "ModelRequestRateLimitDurationMinutes",
+		"ModelRequestRateLimitSuccessCount", "ModelRequestRateLimitGroup":
+		// updateOptionMaps atomically publishes the complete rate-limit snapshot.
 	case "RetryTimes":
 		common.RetryTimes, _ = strconv.Atoi(value)
 	case "DataExportInterval":

@@ -16,7 +16,8 @@ import (
 )
 
 func TelegramBind(c *gin.Context) {
-	if !common.TelegramOAuthEnabled {
+	authRuntime := common.GetAuthRuntimeConfig()
+	if !authRuntime.TelegramOAuthEnabled {
 		c.JSON(200, gin.H{
 			"message": "管理员未开启通过 Telegram 登录以及注册",
 			"success": false,
@@ -24,7 +25,7 @@ func TelegramBind(c *gin.Context) {
 		return
 	}
 	params := c.Request.URL.Query()
-	if !checkTelegramAuthorization(params, common.TelegramBotToken) {
+	if !checkTelegramAuthorization(params, authRuntime.TelegramBotToken) {
 		c.JSON(200, gin.H{
 			"message": "无效的请求",
 			"success": false,
@@ -70,7 +71,8 @@ func TelegramBind(c *gin.Context) {
 }
 
 func TelegramLogin(c *gin.Context) {
-	if !common.TelegramOAuthEnabled {
+	authRuntime := common.GetAuthRuntimeConfig()
+	if !authRuntime.TelegramOAuthEnabled {
 		c.JSON(200, gin.H{
 			"message": "管理员未开启通过 Telegram 登录以及注册",
 			"success": false,
@@ -78,7 +80,7 @@ func TelegramLogin(c *gin.Context) {
 		return
 	}
 	params := c.Request.URL.Query()
-	if !checkTelegramAuthorization(params, common.TelegramBotToken) {
+	if !checkTelegramAuthorization(params, authRuntime.TelegramBotToken) {
 		c.JSON(200, gin.H{
 			"message": "无效的请求",
 			"success": false,

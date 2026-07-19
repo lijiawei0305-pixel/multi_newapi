@@ -38,7 +38,7 @@ func (p *LinuxDOProvider) GetName() string {
 }
 
 func (p *LinuxDOProvider) IsEnabled() bool {
-	return common.LinuxDOOAuthEnabled
+	return common.GetAuthRuntimeConfig().LinuxDOOAuthEnabled
 }
 
 func (p *LinuxDOProvider) ExchangeToken(ctx context.Context, code string, c *gin.Context) (*OAuthToken, error) {
@@ -50,7 +50,8 @@ func (p *LinuxDOProvider) ExchangeToken(ctx context.Context, code string, c *gin
 
 	// Get access token using Basic auth
 	tokenEndpoint := common.GetEnvOrDefaultString("LINUX_DO_TOKEN_ENDPOINT", "https://connect.linux.do/oauth2/token")
-	credentials := common.LinuxDOClientId + ":" + common.LinuxDOClientSecret
+	authRuntime := common.GetAuthRuntimeConfig()
+	credentials := authRuntime.LinuxDOClientID + ":" + authRuntime.LinuxDOClientSecret
 	basicAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(credentials))
 
 	// Get redirect URI from request
@@ -150,11 +151,12 @@ func (p *LinuxDOProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*
 		logger.PayloadMetadata([]byte(strconv.Itoa(linuxdoUser.Id))), linuxdoUser.Username != "", linuxdoUser.Name != "", linuxdoUser.TrustLevel, linuxdoUser.Active, linuxdoUser.Silenced)
 
 	// Check trust level
-	if linuxdoUser.TrustLevel < common.LinuxDOMinimumTrustLevel {
+	minimumTrustLevel := common.GetAuthRuntimeConfig().LinuxDOMinimumTrustLevel
+	if linuxdoUser.TrustLevel < minimumTrustLevel {
 		logger.LogWarn(ctx, fmt.Sprintf("[OAuth-LinuxDO] GetUserInfo: trust level too low (required=%d, current=%d)",
-			common.LinuxDOMinimumTrustLevel, linuxdoUser.TrustLevel))
+			minimumTrustLevel, linuxdoUser.TrustLevel))
 		return nil, &TrustLevelError{
-			Required: common.LinuxDOMinimumTrustLevel,
+			Required: minimumTrustLevel,
 			Current:  linuxdoUser.TrustLevel,
 		}
 	}

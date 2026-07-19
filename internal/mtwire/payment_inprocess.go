@@ -80,26 +80,27 @@ type providerManager struct {
 func newProviderManager() *providerManager { return &providerManager{} }
 
 // wxpayCredentialsComplete 报告微信凭据是否齐全（与 realpay.WxpayConfig.complete 同口径，私钥用 PEM 内容）。
-func wxpayCredentialsComplete() bool {
-	return setting.WechatPayAppID != "" && setting.WechatPayMchID != "" &&
-		setting.WechatPayAPIv3Key != "" && setting.WechatPayCertSerial != "" &&
-		setting.WechatPayPrivateKey != "" &&
-		setting.WechatPayPublicKeyID != "" && setting.WechatPayPublicKey != ""
+func wxpayCredentialsComplete(config setting.NativePaymentConfig) bool {
+	return config.WechatPayAppID != "" && config.WechatPayMchID != "" &&
+		config.WechatPayAPIv3Key != "" && config.WechatPayCertSerial != "" &&
+		config.WechatPayPrivateKey != "" &&
+		config.WechatPayPublicKeyID != "" && config.WechatPayPublicKey != ""
 }
 
 // alipayCredentialsComplete 报告支付宝凭据是否齐全（与 realpay.AlipayConfig.complete 同口径）。
-func alipayCredentialsComplete() bool {
-	return setting.AlipayAppID != "" && setting.AlipayPrivateKey != "" && setting.AlipayPublicKey != ""
+func alipayCredentialsComplete(config setting.NativePaymentConfig) bool {
+	return config.AlipayAppID != "" && config.AlipayPrivateKey != "" && config.AlipayPublicKey != ""
 }
 
 // Configured 报告某渠道是否可**对外接单**：启用开关（setting.*Enabled）为真且凭据齐全。
 // 用于下单前置校验（ensureProviderUsable）与买家可用渠道列表——禁用即不接新单、不对买家展示。
 func (m *providerManager) Configured(provider payment.Provider) bool {
+	config := setting.GetNativePaymentConfig()
 	switch provider {
 	case payment.ProviderWxpay:
-		return setting.WechatPayEnabled && wxpayCredentialsComplete()
+		return config.WechatPayEnabled && wxpayCredentialsComplete(config)
 	case payment.ProviderAlipay:
-		return setting.AlipayEnabled && alipayCredentialsComplete()
+		return config.AlipayEnabled && alipayCredentialsComplete(config)
 	default:
 		return false
 	}
@@ -109,11 +110,12 @@ func (m *providerManager) Configured(provider payment.Provider) bool {
 // 即便管理员临时禁用某渠道，只要凭据仍在就应能验签、结清在途已付订单（审计 M2）——避免「禁用即丢在途单」。
 // 只有真正**清空凭据**才使该渠道无法验签（不可避免）。
 func (m *providerManager) credsComplete(provider payment.Provider) bool {
+	config := setting.GetNativePaymentConfig()
 	switch provider {
 	case payment.ProviderWxpay:
-		return wxpayCredentialsComplete()
+		return wxpayCredentialsComplete(config)
 	case payment.ProviderAlipay:
-		return alipayCredentialsComplete()
+		return alipayCredentialsComplete(config)
 	default:
 		return false
 	}
@@ -122,27 +124,27 @@ func (m *providerManager) credsComplete(provider payment.Provider) bool {
 // buildRealpayConfig 从 setting.* 组装 realpay.Config。**按凭据齐全**（而非启用开关）纳入渠道：
 // 接单由 Configured（enabled&&creds）上游把关，但 SDK 本身对「凭据齐全」的渠道均可验签/查单，
 // 从而禁用某渠道时仍能结清其在途已付订单（审计 M2）。微信私钥用 PEM 内容注入。
-func buildRealpayConfig() realpay.Config {
+func buildRealpayConfig(config setting.NativePaymentConfig) realpay.Config {
 	cfg := realpay.Config{}
-	if wxpayCredentialsComplete() {
+	if wxpayCredentialsComplete(config) {
 		cfg.Wxpay = realpay.WxpayConfig{
-			AppID:        setting.WechatPayAppID,
-			MchID:        setting.WechatPayMchID,
-			APIv3Key:     setting.WechatPayAPIv3Key,
-			CertSerialNo: setting.WechatPayCertSerial,
-			PrivateKey:   setting.WechatPayPrivateKey, // PEM 内容，realpay 经 utils.LoadPrivateKey 解析
-			PublicKeyID:  setting.WechatPayPublicKeyID,
-			PublicKey:    setting.WechatPayPublicKey, // PEM 内容，realpay 经 utils.LoadPublicKey 解析
+			AppID:        config.WechatPayAppID,
+			MchID:        config.WechatPayMchID,
+			APIv3Key:     config.WechatPayAPIv3Key,
+			CertSerialNo: config.WechatPayCertSerial,
+			PrivateKey:   config.WechatPayPrivateKey, // PEM 内容，realpay 经 utils.LoadPrivateKey 解析
+			PublicKeyID:  config.WechatPayPublicKeyID,
+			PublicKey:    config.WechatPayPublicKey, // PEM 内容，realpay 经 utils.LoadPublicKey 解析
 		}
 	}
-	if alipayCredentialsComplete() {
+	if alipayCredentialsComplete(config) {
 		cfg.Alipay = realpay.AlipayConfig{
-			AppID:           setting.AlipayAppID,
-			PrivateKey:      setting.AlipayPrivateKey,
-			AlipayPublicKey: setting.AlipayPublicKey,
-			SellerID:        setting.AlipaySellerID,
-			ReturnURL:       setting.AlipayReturnURL,
-			IsProduction:    !setting.AlipaySandbox,
+			AppID:           config.AlipayAppID,
+			PrivateKey:      config.AlipayPrivateKey,
+			AlipayPublicKey: config.AlipayPublicKey,
+			SellerID:        config.AlipaySellerID,
+			ReturnURL:       config.AlipayReturnURL,
+			IsProduction:    !config.AlipaySandbox,
 		}
 	}
 	return cfg
@@ -151,15 +153,15 @@ func buildRealpayConfig() realpay.Config {
 // credentialFingerprint 拼接**影响 SDK 构造**的 setting 值的 SHA-256，作缓存键：任一凭据/沙箱变更
 // 即指纹变化 → 重建 SDK。不含 *Enabled 开关——SDK 现按凭据齐全构造（buildRealpayConfig），
 // 启用开关只影响接单（Configured），不影响 SDK 本身，故切换启用无需重建（审计 M2/M4）。
-func credentialFingerprint() string {
+func credentialFingerprint(config setting.NativePaymentConfig) string {
 	h := sha256.New()
 	for _, v := range []string{
-		setting.WechatPayAppID, setting.WechatPayMchID, setting.WechatPayAPIv3Key,
-		setting.WechatPayCertSerial, setting.WechatPayPrivateKey,
-		setting.WechatPayPublicKeyID, setting.WechatPayPublicKey,
-		setting.AlipayAppID, setting.AlipayPrivateKey, setting.AlipayPublicKey,
-		setting.AlipaySellerID, setting.AlipayReturnURL,
-		strconv.FormatBool(setting.AlipaySandbox),
+		config.WechatPayAppID, config.WechatPayMchID, config.WechatPayAPIv3Key,
+		config.WechatPayCertSerial, config.WechatPayPrivateKey,
+		config.WechatPayPublicKeyID, config.WechatPayPublicKey,
+		config.AlipayAppID, config.AlipayPrivateKey, config.AlipayPublicKey,
+		config.AlipaySellerID, config.AlipayReturnURL,
+		strconv.FormatBool(config.AlipaySandbox),
 	} {
 		_, _ = h.Write([]byte(v))
 		_, _ = h.Write([]byte{0}) // 分隔符，避免拼接歧义
@@ -173,7 +175,8 @@ func credentialFingerprint() string {
 // 需重建时经 buildMu 串行化：同一时刻至多一个重建在跑（避免并发重复注册证书下载器），
 // 且重建（含证书下载）期间不持 mu。等在 buildMu 上的其它调用方在拿锁后复检，命中新缓存即复用、不重复建。
 func (m *providerManager) getSDK(ctx context.Context) (realSDK, error) {
-	fp := credentialFingerprint()
+	config := setting.GetNativePaymentConfig()
+	fp := credentialFingerprint(config)
 
 	// 快路径：缓存命中直接返回（持 mu 只读，无 I/O）。
 	m.mu.Lock()
@@ -187,9 +190,10 @@ func (m *providerManager) getSDK(ctx context.Context) (realSDK, error) {
 	// 慢路径：串行化重建（含证书下载）；不持 mu，避免阻塞快路径。
 	m.buildMu.Lock()
 	defer m.buildMu.Unlock()
-	// 在 buildMu 下重算指纹：与随后 buildRealpayConfig 读到的 setting 保持一致（等锁期间凭据可能已变），
+	// 在 buildMu 下重载单个不可变快照：指纹与 buildRealpayConfig 必须来自同一版本。
 	// 令缓存键 fp 与缓存值 sdk 始终同源，避免标签错位导致的多余重建（审计复核 L-3）。
-	fp = credentialFingerprint()
+	config = setting.GetNativePaymentConfig()
+	fp = credentialFingerprint(config)
 	// 复检：等待 buildMu 期间可能已由他人用相同指纹建好。
 	m.mu.Lock()
 	if m.sdk != nil && m.fp == fp {
@@ -199,7 +203,7 @@ func (m *providerManager) getSDK(ctx context.Context) (realSDK, error) {
 	}
 	m.mu.Unlock()
 
-	sdk, err := realpayNew(ctx, buildRealpayConfig())
+	sdk, err := realpayNew(ctx, buildRealpayConfig(config))
 	if err != nil {
 		return nil, err // 不缓存失败结果：下次调用重试
 	}

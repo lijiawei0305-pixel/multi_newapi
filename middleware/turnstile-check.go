@@ -17,9 +17,9 @@ type turnstileCheckResponse struct {
 	Success bool `json:"success"`
 }
 
-func verifyTurnstile(ctx context.Context, response, remoteIP string) (bool, error) {
+func verifyTurnstile(ctx context.Context, response, remoteIP, secret string) (bool, error) {
 	form := url.Values{
-		"secret":   {common.TurnstileSecretKey},
+		"secret":   {secret},
 		"response": {response},
 		"remoteip": {remoteIP},
 	}
@@ -45,7 +45,8 @@ func verifyTurnstile(ctx context.Context, response, remoteIP string) (bool, erro
 
 func TurnstileCheck() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if common.TurnstileCheckEnabled {
+		authRuntime := common.GetAuthRuntimeConfig()
+		if authRuntime.TurnstileCheckEnabled {
 			session := sessions.Default(c)
 			turnstileChecked := session.Get("turnstile")
 			if turnstileChecked != nil {
@@ -61,7 +62,7 @@ func TurnstileCheck() gin.HandlerFunc {
 				c.Abort()
 				return
 			}
-			verified, err := verifyTurnstile(c.Request.Context(), response, c.ClientIP())
+			verified, err := verifyTurnstile(c.Request.Context(), response, c.ClientIP(), authRuntime.TurnstileSecretKey)
 			if err != nil {
 				common.SysLog(fmt.Sprintf("Turnstile request failed: error_type=%T", err))
 				c.JSON(http.StatusOK, gin.H{

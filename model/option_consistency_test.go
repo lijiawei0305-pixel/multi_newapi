@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -95,4 +96,113 @@ func TestUpdateOptionRejectsInvalidRegisteredConfigBeforePersistence(t *testing.
 	var count int64
 	require.NoError(t, testDB.Model(&Option{}).Where("key = ?", "claude.default_max_tokens").Count(&count).Error)
 	assert.Zero(t, count)
+}
+
+func TestUpdateOptionsBulkPublishesOneNativePaymentSnapshot(t *testing.T) {
+	originalDB := DB
+	testDB, err := gorm.Open(sqlite.Open("file:option-native-payment-bulk?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, testDB.AutoMigrate(&Option{}))
+	DB = testDB
+	t.Cleanup(func() { DB = originalDB })
+
+	originalConfig := setting.GetNativePaymentConfig()
+	t.Cleanup(func() { setting.SetNativePaymentConfig(originalConfig) })
+	setting.SetNativePaymentConfig(setting.NativePaymentConfig{
+		WechatPayAppID: "old-wx-app",
+		AlipayAppID:    "old-alipay-app",
+	})
+
+	values := map[string]string{
+		"WechatPayEnabled":     "true",
+		"WechatPayAppID":       "new-wx-app",
+		"WechatPayMchID":       "new-wx-merchant",
+		"WechatPayAPIv3Key":    "new-wx-api-key",
+		"WechatPayCertSerial":  "new-wx-serial",
+		"WechatPayPrivateKey":  "new-wx-private-key",
+		"WechatPayPublicKeyID": "new-wx-public-key-id",
+		"WechatPayPublicKey":   "new-wx-public-key",
+		"AlipayEnabled":        "true",
+		"AlipayAppID":          "new-alipay-app",
+		"AlipayPrivateKey":     "new-alipay-private-key",
+		"AlipayPublicKey":      "new-alipay-public-key",
+		"AlipaySellerID":       "new-alipay-seller",
+		"AlipayReturnURL":      "https://example.test/return",
+		"AlipaySandbox":        "true",
+	}
+	for key := range values {
+		setOptionMapValueForTest(t, key, "old")
+	}
+
+	require.NoError(t, UpdateOptionsBulk(values))
+	assert.Equal(t, setting.NativePaymentConfig{
+		WechatPayEnabled:     true,
+		WechatPayAppID:       "new-wx-app",
+		WechatPayMchID:       "new-wx-merchant",
+		WechatPayAPIv3Key:    "new-wx-api-key",
+		WechatPayCertSerial:  "new-wx-serial",
+		WechatPayPrivateKey:  "new-wx-private-key",
+		WechatPayPublicKeyID: "new-wx-public-key-id",
+		WechatPayPublicKey:   "new-wx-public-key",
+		AlipayEnabled:        true,
+		AlipayAppID:          "new-alipay-app",
+		AlipayPrivateKey:     "new-alipay-private-key",
+		AlipayPublicKey:      "new-alipay-public-key",
+		AlipaySellerID:       "new-alipay-seller",
+		AlipayReturnURL:      "https://example.test/return",
+		AlipaySandbox:        true,
+	}, setting.GetNativePaymentConfig())
+	for key, want := range values {
+		assert.Equal(t, want, optionMapValueForTest(key), key)
+	}
+
+	var stored []Option
+	require.NoError(t, testDB.Order("key").Find(&stored).Error)
+	assert.Len(t, stored, len(values))
+}
+
+func TestUpdateOptionsBulkPublishesOneRateLimitSnapshot(t *testing.T) {
+	originalDB := DB
+	testDB, err := gorm.Open(sqlite.Open("file:option-rate-limit-bulk?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, testDB.AutoMigrate(&Option{}))
+	DB = testDB
+	t.Cleanup(func() { DB = originalDB })
+
+	originalConfig := setting.GetModelRequestRateLimitConfig()
+	t.Cleanup(func() {
+		_, err := setting.ApplyModelRequestRateLimitOptions(map[string]string{
+			"ModelRequestRateLimitEnabled":         strconv.FormatBool(originalConfig.Enabled),
+			"ModelRequestRateLimitDurationMinutes": strconv.Itoa(originalConfig.DurationMinutes),
+			"ModelRequestRateLimitCount":           strconv.Itoa(originalConfig.Count),
+			"ModelRequestRateLimitSuccessCount":    strconv.Itoa(originalConfig.SuccessCount),
+			"ModelRequestRateLimitGroup":           originalConfig.GroupRateLimitsJSONString(),
+		})
+		require.NoError(t, err)
+	})
+
+	values := map[string]string{
+		"ModelRequestRateLimitEnabled":         "true",
+		"ModelRequestRateLimitDurationMinutes": "15",
+		"ModelRequestRateLimitCount":           "200",
+		"ModelRequestRateLimitSuccessCount":    "180",
+		"ModelRequestRateLimitGroup":           `{"vip":[400,360]}`,
+	}
+	for key := range values {
+		setOptionMapValueForTest(t, key, "old")
+	}
+
+	require.NoError(t, UpdateOptionsBulk(values))
+	config := setting.GetModelRequestRateLimitConfig()
+	assert.True(t, config.Enabled)
+	assert.Equal(t, 15, config.DurationMinutes)
+	assert.Equal(t, 200, config.Count)
+	assert.Equal(t, 180, config.SuccessCount)
+	total, success, found := config.GroupLimit("vip")
+	assert.True(t, found)
+	assert.Equal(t, 400, total)
+	assert.Equal(t, 360, success)
+	for key, want := range values {
+		assert.Equal(t, want, optionMapValueForTest(key), key)
+	}
 }

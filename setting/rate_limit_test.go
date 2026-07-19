@@ -12,7 +12,7 @@ import (
 )
 
 func TestUpdateModelRequestRateLimitGroupByJSONStringPreservesValueOnInvalidJSON(t *testing.T) {
-	restoreModelRequestRateLimitGroup(t)
+	restoreModelRequestRateLimitConfig(t)
 
 	require.NoError(t, UpdateModelRequestRateLimitGroupByJSONString(`{"existing":[100,90]}`))
 	err := UpdateModelRequestRateLimitGroupByJSONString(`{"replacement":[200,180]`)
@@ -26,8 +26,8 @@ func TestUpdateModelRequestRateLimitGroupByJSONStringPreservesValueOnInvalidJSON
 	assert.False(t, found)
 }
 
-func TestUpdateModelRequestRateLimitGroupByJSONStringConcurrentAccess(t *testing.T) {
-	restoreModelRequestRateLimitGroup(t)
+func TestModelRequestRateLimitConfigConcurrentAccessNeverMixesVersions(t *testing.T) {
+	restoreModelRequestRateLimitConfig(t)
 
 	const (
 		groupAJSON = `{"shared":[100,90],"group-a":[40,30]}`
@@ -41,7 +41,22 @@ func TestUpdateModelRequestRateLimitGroupByJSONStringConcurrentAccess(t *testing
 		"shared":  {200, 180},
 		"group-b": {60, 50},
 	}
-	require.NoError(t, UpdateModelRequestRateLimitGroupByJSONString(groupAJSON))
+	optionsA := map[string]string{
+		"ModelRequestRateLimitEnabled":         "true",
+		"ModelRequestRateLimitDurationMinutes": "10",
+		"ModelRequestRateLimitCount":           "100",
+		"ModelRequestRateLimitSuccessCount":    "90",
+		"ModelRequestRateLimitGroup":           groupAJSON,
+	}
+	optionsB := map[string]string{
+		"ModelRequestRateLimitEnabled":         "false",
+		"ModelRequestRateLimitDurationMinutes": "20",
+		"ModelRequestRateLimitCount":           "200",
+		"ModelRequestRateLimitSuccessCount":    "180",
+		"ModelRequestRateLimitGroup":           groupBJSON,
+	}
+	_, err := ApplyModelRequestRateLimitOptions(optionsA)
+	require.NoError(t, err)
 
 	start := make(chan struct{})
 	errCh := make(chan error, 16)
@@ -53,11 +68,11 @@ func TestUpdateModelRequestRateLimitGroupByJSONStringConcurrentAccess(t *testing
 			defer workers.Done()
 			<-start
 			for iteration := 0; iteration < 500; iteration++ {
-				jsonValue := groupAJSON
+				options := optionsA
 				if iteration%2 == 1 {
-					jsonValue = groupBJSON
+					options = optionsB
 				}
-				if err := UpdateModelRequestRateLimitGroupByJSONString(jsonValue); err != nil {
+				if _, err := ApplyModelRequestRateLimitOptions(options); err != nil {
 					errCh <- fmt.Errorf("update rate-limit group: %w", err)
 					return
 				}
@@ -71,18 +86,23 @@ func TestUpdateModelRequestRateLimitGroupByJSONStringConcurrentAccess(t *testing
 			defer workers.Done()
 			<-start
 			for iteration := 0; iteration < 500; iteration++ {
+				config := GetModelRequestRateLimitConfig()
 				var snapshot map[string][2]int
-				if err := common.Unmarshal([]byte(ModelRequestRateLimitGroup2JSONString()), &snapshot); err != nil {
+				if err := common.Unmarshal([]byte(config.GroupRateLimitsJSONString()), &snapshot); err != nil {
 					errCh <- fmt.Errorf("decode rate-limit snapshot: %w", err)
 					return
 				}
-				if !reflect.DeepEqual(snapshot, groupA) && !reflect.DeepEqual(snapshot, groupB) {
+				isA := config.Enabled && config.DurationMinutes == 10 && config.Count == 100 &&
+					config.SuccessCount == 90 && reflect.DeepEqual(snapshot, groupA)
+				isB := !config.Enabled && config.DurationMinutes == 20 && config.Count == 200 &&
+					config.SuccessCount == 180 && reflect.DeepEqual(snapshot, groupB)
+				if !isA && !isB {
 					errCh <- fmt.Errorf("observed partial rate-limit snapshot: %#v", snapshot)
 					return
 				}
 
-				total, success, found := GetGroupRateLimit("shared")
-				if !found || (total != 100 || success != 90) && (total != 200 || success != 180) {
+				total, success, found := config.GroupLimit("shared")
+				if !found || isA && (total != 100 || success != 90) || isB && (total != 200 || success != 180) {
 					errCh <- fmt.Errorf("observed invalid shared limit: total=%d success=%d found=%t", total, success, found)
 					return
 				}
@@ -98,19 +118,18 @@ func TestUpdateModelRequestRateLimitGroupByJSONStringConcurrentAccess(t *testing
 	}
 }
 
-func restoreModelRequestRateLimitGroup(t *testing.T) {
+func restoreModelRequestRateLimitConfig(t *testing.T) {
 	t.Helper()
-
-	ModelRequestRateLimitMutex.RLock()
-	original := make(map[string][2]int, len(ModelRequestRateLimitGroup))
-	for group, limits := range ModelRequestRateLimitGroup {
-		original[group] = limits
-	}
-	ModelRequestRateLimitMutex.RUnlock()
+	original := GetModelRequestRateLimitConfig()
 
 	t.Cleanup(func() {
-		ModelRequestRateLimitMutex.Lock()
-		ModelRequestRateLimitGroup = original
-		ModelRequestRateLimitMutex.Unlock()
+		_, err := ApplyModelRequestRateLimitOptions(map[string]string{
+			"ModelRequestRateLimitEnabled":         fmt.Sprintf("%t", original.Enabled),
+			"ModelRequestRateLimitDurationMinutes": fmt.Sprintf("%d", original.DurationMinutes),
+			"ModelRequestRateLimitCount":           fmt.Sprintf("%d", original.Count),
+			"ModelRequestRateLimitSuccessCount":    fmt.Sprintf("%d", original.SuccessCount),
+			"ModelRequestRateLimitGroup":           original.GroupRateLimitsJSONString(),
+		})
+		require.NoError(t, err)
 	})
 }

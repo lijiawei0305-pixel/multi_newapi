@@ -16,39 +16,32 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// ---- 测试夹具：保存/还原 setting.* 支付凭据（包级全局，须隔离） ----
+// ---- 测试夹具：保存/还原原生支付配置快照（须隔离） ----
 
 func saveSettings(t *testing.T) {
 	t.Helper()
-	o := struct {
-		wxEn                                          bool
-		wxApp, wxMch, wxKey, wxSerial, wxPriv         string
-		wxPubID, wxPubKey                             string
-		aliEn                                         bool
-		aliApp, aliPriv, aliPub, aliSeller, aliReturn string
-		aliSandbox                                    bool
-	}{
-		setting.WechatPayEnabled, setting.WechatPayAppID, setting.WechatPayMchID, setting.WechatPayAPIv3Key, setting.WechatPayCertSerial, setting.WechatPayPrivateKey,
-		setting.WechatPayPublicKeyID, setting.WechatPayPublicKey,
-		setting.AlipayEnabled, setting.AlipayAppID, setting.AlipayPrivateKey, setting.AlipayPublicKey, setting.AlipaySellerID, setting.AlipayReturnURL, setting.AlipaySandbox,
-	}
-	t.Cleanup(func() {
-		setting.WechatPayEnabled, setting.WechatPayAppID, setting.WechatPayMchID, setting.WechatPayAPIv3Key, setting.WechatPayCertSerial, setting.WechatPayPrivateKey = o.wxEn, o.wxApp, o.wxMch, o.wxKey, o.wxSerial, o.wxPriv
-		setting.WechatPayPublicKeyID, setting.WechatPayPublicKey = o.wxPubID, o.wxPubKey
-		setting.AlipayEnabled, setting.AlipayAppID, setting.AlipayPrivateKey, setting.AlipayPublicKey, setting.AlipaySellerID, setting.AlipayReturnURL, setting.AlipaySandbox = o.aliEn, o.aliApp, o.aliPriv, o.aliPub, o.aliSeller, o.aliReturn, o.aliSandbox
-	})
+	original := setting.GetNativePaymentConfig()
+	t.Cleanup(func() { setting.SetNativePaymentConfig(original) })
+}
+
+func mutateNativePaymentConfig(update func(*setting.NativePaymentConfig)) {
+	config := setting.GetNativePaymentConfig()
+	update(&config)
+	setting.SetNativePaymentConfig(config)
 }
 
 // setWxFull 设一组齐全的微信凭据（启用 + 7 字段全有：含微信支付公钥模式的 PublicKeyID/PublicKey）。
 func setWxFull() {
-	setting.WechatPayEnabled = true
-	setting.WechatPayAppID = "wxapp"
-	setting.WechatPayMchID = "1600000"
-	setting.WechatPayAPIv3Key = "apiv3key"
-	setting.WechatPayCertSerial = "serial"
-	setting.WechatPayPrivateKey = "-----BEGIN PRIVATE KEY-----\nXX\n-----END PRIVATE KEY-----"
-	setting.WechatPayPublicKeyID = "PUB_KEY_ID_test"
-	setting.WechatPayPublicKey = "-----BEGIN PUBLIC KEY-----\nXX\n-----END PUBLIC KEY-----"
+	mutateNativePaymentConfig(func(config *setting.NativePaymentConfig) {
+		config.WechatPayEnabled = true
+		config.WechatPayAppID = "wxapp"
+		config.WechatPayMchID = "1600000"
+		config.WechatPayAPIv3Key = "apiv3key"
+		config.WechatPayCertSerial = "serial"
+		config.WechatPayPrivateKey = "-----BEGIN PRIVATE KEY-----\nXX\n-----END PRIVATE KEY-----"
+		config.WechatPayPublicKeyID = "PUB_KEY_ID_test"
+		config.WechatPayPublicKey = "-----BEGIN PUBLIC KEY-----\nXX\n-----END PUBLIC KEY-----"
+	})
 }
 
 // TestProviderManagerConfigured 启用 + 凭据齐全才 configured；缺一字段 / enabled=false / 未知渠道 → false。
@@ -57,57 +50,45 @@ func TestProviderManagerConfigured(t *testing.T) {
 	m := newProviderManager()
 
 	// 全关 → 都不可用。
-	setting.WechatPayEnabled, setting.AlipayEnabled = false, false
-	if m.Configured(payment.ProviderWxpay) || m.Configured(payment.ProviderAlipay) {
-		t.Fatal("disabled providers must be not configured")
-	}
+	mutateNativePaymentConfig(func(config *setting.NativePaymentConfig) {
+		config.WechatPayEnabled = false
+		config.AlipayEnabled = false
+	})
+	assert.False(t, m.Configured(payment.ProviderWxpay))
+	assert.False(t, m.Configured(payment.ProviderAlipay))
 
 	// 微信启用但缺私钥 → 不可用。
 	setWxFull()
-	setting.WechatPayPrivateKey = ""
-	if m.Configured(payment.ProviderWxpay) {
-		t.Fatal("wxpay missing private key must be not configured")
-	}
+	mutateNativePaymentConfig(func(config *setting.NativePaymentConfig) { config.WechatPayPrivateKey = "" })
+	assert.False(t, m.Configured(payment.ProviderWxpay))
 	// 补齐 → 可用。
 	setWxFull()
-	if !m.Configured(payment.ProviderWxpay) {
-		t.Fatal("wxpay enabled + full credentials must be configured")
-	}
+	assert.True(t, m.Configured(payment.ProviderWxpay))
 	// 微信启用但缺微信支付公钥 ID（公钥模式必需字段）→ 不可用。
 	setWxFull()
-	setting.WechatPayPublicKeyID = ""
-	if m.Configured(payment.ProviderWxpay) {
-		t.Fatal("wxpay missing public key id must be not configured")
-	}
+	mutateNativePaymentConfig(func(config *setting.NativePaymentConfig) { config.WechatPayPublicKeyID = "" })
+	assert.False(t, m.Configured(payment.ProviderWxpay))
 	// 微信启用但缺微信支付公钥内容 → 不可用。
 	setWxFull()
-	setting.WechatPayPublicKey = ""
-	if m.Configured(payment.ProviderWxpay) {
-		t.Fatal("wxpay missing public key must be not configured")
-	}
+	mutateNativePaymentConfig(func(config *setting.NativePaymentConfig) { config.WechatPayPublicKey = "" })
+	assert.False(t, m.Configured(payment.ProviderWxpay))
 	// 凭据齐全但 enabled=false → 不可用。
-	setting.WechatPayEnabled = false
-	if m.Configured(payment.ProviderWxpay) {
-		t.Fatal("disabled wxpay must be not configured even with full credentials")
-	}
+	mutateNativePaymentConfig(func(config *setting.NativePaymentConfig) { config.WechatPayEnabled = false })
+	assert.False(t, m.Configured(payment.ProviderWxpay))
 
 	// 支付宝：启用但缺公钥 → 不可用；补齐 → 可用。
-	setting.AlipayEnabled = true
-	setting.AlipayAppID = "2021app"
-	setting.AlipayPrivateKey = "priv"
-	setting.AlipayPublicKey = ""
-	if m.Configured(payment.ProviderAlipay) {
-		t.Fatal("alipay missing public key must be not configured")
-	}
-	setting.AlipayPublicKey = "pub"
-	if !m.Configured(payment.ProviderAlipay) {
-		t.Fatal("alipay enabled + full credentials must be configured")
-	}
+	mutateNativePaymentConfig(func(config *setting.NativePaymentConfig) {
+		config.AlipayEnabled = true
+		config.AlipayAppID = "2021app"
+		config.AlipayPrivateKey = "priv"
+		config.AlipayPublicKey = ""
+	})
+	assert.False(t, m.Configured(payment.ProviderAlipay))
+	mutateNativePaymentConfig(func(config *setting.NativePaymentConfig) { config.AlipayPublicKey = "pub" })
+	assert.True(t, m.Configured(payment.ProviderAlipay))
 
 	// 未知渠道 → false。
-	if m.Configured(payment.Provider("paypal")) {
-		t.Fatal("unknown provider must be not configured")
-	}
+	assert.False(t, m.Configured(payment.Provider("paypal")))
 }
 
 // fakeRealSDK 是 realSDK 的桩（不触真实证书/网络），供指纹缓存测试注入。
@@ -149,7 +130,7 @@ func TestProviderManagerSDKCaching(t *testing.T) {
 	}
 
 	// 改一处凭据 → 指纹变化 → 重建。
-	setting.WechatPayAppID = "wxapp-changed"
+	mutateNativePaymentConfig(func(config *setting.NativePaymentConfig) { config.WechatPayAppID = "wxapp-changed" })
 	if _, err := m.getSDK(ctx); err != nil {
 		t.Fatalf("getSDK after change: %v", err)
 	}

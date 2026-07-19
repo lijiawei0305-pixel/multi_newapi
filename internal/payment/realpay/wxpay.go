@@ -30,7 +30,7 @@ type wxpayAdapter struct {
 }
 
 // loadWxPrivateKey 读取微信商户私钥：PrivateKey（PEM 内容）优先，否则回退 PrivateKeyPath（文件路径）。
-// 进程内模式由 setting.WechatPayPrivateKey 注入内容；auth-service dormant 仍可用文件路径。
+// 进程内模式由 setting.NativePaymentConfig 注入内容；auth-service dormant 仍可用文件路径。
 func loadWxPrivateKey(cfg WxpayConfig) (*rsa.PrivateKey, error) {
 	if cfg.PrivateKey != "" {
 		priv, err := utils.LoadPrivateKey(cfg.PrivateKey)

@@ -89,6 +89,7 @@ func TestStatus(c *gin.Context) {
 func GetStatus(c *gin.Context) {
 
 	cs := console_setting.GetConsoleSetting()
+	authRuntime := common.GetAuthRuntimeConfig()
 	common.OptionMapRWMutex.RLock()
 	defer common.OptionMapRWMutex.RUnlock()
 
@@ -98,25 +99,25 @@ func GetStatus(c *gin.Context) {
 	data := gin.H{
 		"version":                     common.Version,
 		"start_time":                  common.StartTime,
-		"email_verification":          common.EmailVerificationEnabled,
-		"github_oauth":                common.GitHubOAuthEnabled,
-		"github_client_id":            common.GitHubClientId,
+		"email_verification":          authRuntime.EmailVerificationEnabled,
+		"github_oauth":                authRuntime.GitHubOAuthEnabled,
+		"github_client_id":            authRuntime.GitHubClientID,
 		"discord_oauth":               system_setting.GetDiscordSettings().Enabled,
 		"discord_client_id":           system_setting.GetDiscordSettings().ClientId,
-		"linuxdo_oauth":               common.LinuxDOOAuthEnabled,
-		"linuxdo_client_id":           common.LinuxDOClientId,
-		"linuxdo_minimum_trust_level": common.LinuxDOMinimumTrustLevel,
-		"telegram_oauth":              common.TelegramOAuthEnabled,
-		"telegram_bot_name":           common.TelegramBotName,
+		"linuxdo_oauth":               authRuntime.LinuxDOOAuthEnabled,
+		"linuxdo_client_id":           authRuntime.LinuxDOClientID,
+		"linuxdo_minimum_trust_level": authRuntime.LinuxDOMinimumTrustLevel,
+		"telegram_oauth":              authRuntime.TelegramOAuthEnabled,
+		"telegram_bot_name":           authRuntime.TelegramBotName,
 		"theme":                       system_setting.GetThemeSettings().Frontend,
 		"system_name":                 common.SystemName,
 		"logo":                        common.Logo,
 		"footer_html":                 common.Footer,
-		"wechat_qrcode":               common.WeChatAccountQRCodeImageURL,
-		"wechat_login":                common.WeChatAuthEnabled,
+		"wechat_qrcode":               authRuntime.WeChatAccountQRCodeURL,
+		"wechat_login":                authRuntime.WeChatAuthEnabled,
 		"server_address":              system_setting.ServerAddress,
-		"turnstile_check":             common.TurnstileCheckEnabled,
-		"turnstile_site_key":          common.TurnstileSiteKey,
+		"turnstile_check":             authRuntime.TurnstileCheckEnabled,
+		"turnstile_site_key":          authRuntime.TurnstileSiteKey,
 		"docs_link":                   operation_setting.GetGeneralSetting().DocsLink,
 		"quota_per_unit":              common.QuotaPerUnit,
 		// 兼容旧前端：保留 display_in_currency，同时提供新的 quota_display_type
@@ -134,9 +135,9 @@ func GetStatus(c *gin.Context) {
 		"chats":                         setting.Chats,
 		"demo_site_enabled":             operation_setting.DemoSiteEnabled,
 		"self_use_mode_enabled":         operation_setting.SelfUseModeEnabled,
-		"register_enabled":              common.RegisterEnabled,
-		"password_login_enabled":        common.PasswordLoginEnabled,
-		"password_register_enabled":     common.PasswordRegisterEnabled,
+		"register_enabled":              authRuntime.RegisterEnabled,
+		"password_login_enabled":        authRuntime.PasswordLoginEnabled,
+		"password_register_enabled":     authRuntime.PasswordRegisterEnabled,
 		"default_use_auto_group":        setting.DefaultUseAutoGroup,
 
 		"usd_exchange_rate": operation_setting.USDExchangeRate,
@@ -279,6 +280,7 @@ func GetHomePageContent(c *gin.Context) {
 }
 
 func SendEmailVerification(c *gin.Context) {
+	authRuntime := common.GetAuthRuntimeConfig()
 	email := c.Query("email")
 	if err := common.Validate.Var(email, "required,email"); err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -297,15 +299,8 @@ func SendEmailVerification(c *gin.Context) {
 	}
 	localPart := parts[0]
 	domainPart := parts[1]
-	if common.EmailDomainRestrictionEnabled {
-		allowed := false
-		for _, domain := range common.EmailDomainWhitelist {
-			if domainPart == domain {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
+	if authRuntime.EmailDomainRestrictionEnabled {
+		if !authRuntime.EmailDomainAllowed(domainPart) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "The administrator has enabled the email domain name whitelist, and your email address is not allowed due to special symbols or it's not in the whitelist.",
@@ -313,7 +308,7 @@ func SendEmailVerification(c *gin.Context) {
 			return
 		}
 	}
-	if common.EmailAliasRestrictionEnabled {
+	if authRuntime.EmailAliasRestrictionEnabled {
 		containsSpecialSymbols := strings.Contains(localPart, "+") || strings.Contains(localPart, ".")
 		if containsSpecialSymbols {
 			c.JSON(http.StatusOK, gin.H{

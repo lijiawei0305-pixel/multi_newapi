@@ -57,7 +57,7 @@ type WxpayConfig struct {
 	MchID          string // 商户号
 	APIv3Key       string // APIv3 密钥（AES-256-GCM 回调解密）
 	CertSerialNo   string // 商户 API 证书序列号（用于对外请求签名，须与 PrivateKey 为同一证书）
-	PrivateKey     string // 商户私钥（PEM 内容；进程内模式由 setting.WechatPayPrivateKey 注入，优先于 PrivateKeyPath）
+	PrivateKey     string // 商户私钥（PEM 内容；进程内模式由 setting.NativePaymentConfig 注入，优先于 PrivateKeyPath）
 	PrivateKeyPath string // 商户私钥 apiclient_key.pem 路径（PrivateKey 为空时回退；auth-service 兼容）
 	PublicKeyID    string // 微信支付公钥 ID（商户平台-API安全 申请，形如 PUB_KEY_ID_...）
 	PublicKey      string // 微信支付公钥 PEM 内容（验证微信应答/回调签名）
