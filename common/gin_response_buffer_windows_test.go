@@ -64,7 +64,8 @@ func TestBufferedResponseWindowsRuntimeUsesProtectedPrivateDACLs(t *testing.T) {
 				require.NoError(t, os.Mkdir(directory, 0o700))
 				setWindowsTestDACL(t, directory, true, true, []*windows.SID{currentUser, system}, extraFlags)
 				require.Error(t, verifyBufferedResponsePathSecurity(directory, true))
-				require.NoError(t, secureBufferedResponsePath(directory, true))
+				setWindowsTestDACL(t, directory, true, true, []*windows.SID{currentUser, system}, 0)
+				require.NoError(t, os.RemoveAll(directory))
 			})
 		}
 	})
