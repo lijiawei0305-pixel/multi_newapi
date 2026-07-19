@@ -96,23 +96,48 @@ func removeLockedBufferedResponseSpoolDir(path string, lockFile *os.File) error 
 	return errors.Join(closeErr, removeErr)
 }
 
-func privateBufferedResponseSIDs() (*windows.SID, *windows.SID, error) {
-	currentUser, err := windows.GetCurrentProcessToken().GetTokenUser()
+type bufferedResponseTokenOwner struct {
+	Owner *windows.SID
+}
+
+func privateBufferedResponseSIDs() (*windows.SID, *windows.SID, *windows.SID, error) {
+	token := windows.GetCurrentProcessToken()
+	currentUser, err := token.GetTokenUser()
 	if err != nil {
-		return nil, nil, fmt.Errorf("get current process user: %w", err)
+		return nil, nil, nil, fmt.Errorf("get current process user: %w", err)
 	}
 	if currentUser == nil || currentUser.User.Sid == nil || !currentUser.User.Sid.IsValid() {
-		return nil, nil, errors.New("current process user SID is invalid")
+		return nil, nil, nil, errors.New("current process user SID is invalid")
+	}
+	var ownerSize uint32
+	err = windows.GetTokenInformation(token, windows.TokenOwner, nil, 0, &ownerSize)
+	if !errors.Is(err, windows.ERROR_INSUFFICIENT_BUFFER) {
+		return nil, nil, nil, fmt.Errorf("get current process default owner size: %w", err)
+	}
+	if ownerSize < uint32(unsafe.Sizeof(bufferedResponseTokenOwner{})) {
+		return nil, nil, nil, errors.New("current process default owner information is truncated")
+	}
+	ownerBuffer := make([]byte, ownerSize)
+	if err := windows.GetTokenInformation(token, windows.TokenOwner, &ownerBuffer[0], ownerSize, &ownerSize); err != nil {
+		return nil, nil, nil, fmt.Errorf("get current process default owner: %w", err)
+	}
+	defaultOwner := (*bufferedResponseTokenOwner)(unsafe.Pointer(&ownerBuffer[0])).Owner
+	if defaultOwner == nil || !defaultOwner.IsValid() {
+		return nil, nil, nil, errors.New("current process default owner SID is invalid")
+	}
+	defaultOwner, err = defaultOwner.Copy()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("copy current process default owner SID: %w", err)
 	}
 	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create LocalSystem SID: %w", err)
+		return nil, nil, nil, fmt.Errorf("create LocalSystem SID: %w", err)
 	}
-	return currentUser.User.Sid, system, nil
+	return currentUser.User.Sid, system, defaultOwner, nil
 }
 
 func privateBufferedResponseSecurityDescriptor(directory bool) (*windows.SECURITY_DESCRIPTOR, error) {
-	currentUser, system, err := privateBufferedResponseSIDs()
+	currentUser, system, _, err := privateBufferedResponseSIDs()
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +157,7 @@ func privateBufferedResponseSecurityDescriptor(directory bool) (*windows.SECURIT
 }
 
 func secureBufferedResponsePath(path string, directory bool) error {
-	currentUser, system, err := privateBufferedResponseSIDs()
+	currentUser, system, _, err := privateBufferedResponseSIDs()
 	if err != nil {
 		return err
 	}
@@ -179,7 +204,7 @@ func verifyBufferedResponseBaseDirSecurity(path string) error {
 	if err := verifyBufferedResponseWindowsPathType(path, true); err != nil {
 		return err
 	}
-	currentUser, system, err := privateBufferedResponseSIDs()
+	currentUser, system, defaultOwner, err := privateBufferedResponseSIDs()
 	if err != nil {
 		return err
 	}
@@ -199,8 +224,8 @@ func verifyBufferedResponseBaseDirSecurity(path string) error {
 	if err != nil {
 		return fmt.Errorf("read response spool base owner: %w", err)
 	}
-	if owner == nil || !owner.IsValid() || !owner.Equals(currentUser) {
-		return errors.New("response spool base directory is not owned by the current user")
+	if owner == nil || !owner.IsValid() || (!owner.Equals(currentUser) && !owner.Equals(defaultOwner)) {
+		return errors.New("response spool base directory owner is not trusted by the current access token")
 	}
 	dacl, defaulted, err := descriptor.DACL()
 	if err != nil {
@@ -244,7 +269,7 @@ func verifyBufferedResponsePathSecurity(path string, directory bool) error {
 	if err := verifyBufferedResponseWindowsPathType(path, directory); err != nil {
 		return err
 	}
-	currentUser, system, err := privateBufferedResponseSIDs()
+	currentUser, system, defaultOwner, err := privateBufferedResponseSIDs()
 	if err != nil {
 		return err
 	}
@@ -264,8 +289,8 @@ func verifyBufferedResponsePathSecurity(path string, directory bool) error {
 	if err != nil {
 		return fmt.Errorf("read private spool owner: %w", err)
 	}
-	if owner == nil || !owner.IsValid() || !owner.Equals(currentUser) {
-		return errors.New("private spool path is not owned by the current user")
+	if owner == nil || !owner.IsValid() || !owner.Equals(defaultOwner) {
+		return errors.New("private spool path owner does not match the current access token's default owner")
 	}
 	control, _, err := descriptor.Control()
 	if err != nil {

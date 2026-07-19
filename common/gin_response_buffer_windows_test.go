@@ -3,7 +3,6 @@
 package common
 
 import (
-	"fmt"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -74,7 +73,7 @@ func TestBufferedResponseWindowsRuntimeUsesProtectedPrivateDACLs(t *testing.T) {
 		target := filepath.Join(base, "target")
 		junction := filepath.Join(base, "junction")
 		require.NoError(t, os.Mkdir(target, 0o700))
-		output, err := exec.Command("cmd.exe", "/c", fmt.Sprintf(`mklink /J "%s" "%s"`, junction, target)).CombinedOutput()
+		output, err := exec.Command("cmd.exe", "/d", "/c", "mklink", "/J", junction, target).CombinedOutput()
 		require.NoErrorf(t, err, "create junction: %s", output)
 		require.Error(t, verifyBufferedResponsePathSecurity(junction, true))
 
@@ -113,11 +112,12 @@ func assertWindowsPrivateSpoolSecurity(t *testing.T, path string, directory bool
 	require.Equal(t, directory, info.IsDir())
 
 	currentUser, system := windowsTestPrivateSIDs(t)
+	defaultOwner := windowsTestDefaultOwnerSID(t)
 	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION)
 	require.NoError(t, err)
 	owner, _, err := descriptor.Owner()
 	require.NoError(t, err)
-	require.True(t, owner.Equals(currentUser), "owner must be the process user")
+	require.True(t, owner.Equals(defaultOwner), "owner must match the access token's default owner")
 	control, _, err := descriptor.Control()
 	require.NoError(t, err)
 	require.NotZero(t, control&windows.SE_DACL_PROTECTED)
@@ -160,6 +160,27 @@ func windowsTestPrivateSIDs(t *testing.T) (*windows.SID, *windows.SID) {
 	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
 	require.NoError(t, err)
 	return user.User.Sid, system
+}
+
+type windowsTestTokenOwner struct {
+	Owner *windows.SID
+}
+
+func windowsTestDefaultOwnerSID(t *testing.T) *windows.SID {
+	t.Helper()
+	token := windows.GetCurrentProcessToken()
+	var ownerSize uint32
+	err := windows.GetTokenInformation(token, windows.TokenOwner, nil, 0, &ownerSize)
+	require.ErrorIs(t, err, windows.ERROR_INSUFFICIENT_BUFFER)
+	require.GreaterOrEqual(t, ownerSize, uint32(unsafe.Sizeof(windowsTestTokenOwner{})))
+	ownerBuffer := make([]byte, ownerSize)
+	require.NoError(t, windows.GetTokenInformation(token, windows.TokenOwner, &ownerBuffer[0], ownerSize, &ownerSize))
+	owner := (*windowsTestTokenOwner)(unsafe.Pointer(&ownerBuffer[0])).Owner
+	require.NotNil(t, owner)
+	require.True(t, owner.IsValid())
+	ownerCopy, err := owner.Copy()
+	require.NoError(t, err)
+	return ownerCopy
 }
 
 func setWindowsTestDACL(t *testing.T, path string, directory bool, protected bool, principals []*windows.SID, extraFlags uint32) {
