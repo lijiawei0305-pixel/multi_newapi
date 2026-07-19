@@ -91,8 +91,8 @@ services:
     restart: unless-stopped
 
   redis:
-    # 固定到已验证的 Redis 7 补丁版，避免 `latest` 在发布时静默换主版本/存储格式。
-    image: redis:7.4.9-alpine # 现网 app 经 REDIS_CONN_STRING=redis://redis 访问；仅 compose 内网可达，不发布宿主端口。
+    # 固定到现网已写入 RDB v14 的 Redis 8.8 补丁版；降级到 Redis 7 无法读取既有 AOF/RDB。
+    image: redis:8.8.0 # 现网 app 经 REDIS_CONN_STRING=redis://redis 访问；仅 compose 内网可达，不发布宿主端口。
     # —— 持久化（Critical，2026-07-16 修复：限购去重键此前只活在**无卷** Redis，容器重建即全站 Trial 终身限购
     #   一次性归零、且限购在 DB 无任何后备台账 → 所有历史买家可再薅一份，无日志无告警）——
     #   ① 挂 named volume redis_test_data:/data —— RDB/AOF 落盘到卷，键跨容器重建 / `compose down` / 镜像重拉
