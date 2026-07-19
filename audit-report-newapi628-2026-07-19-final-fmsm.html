@@ -139,7 +139,7 @@
 <nav class="sidebar">
   <div class="sidebar-header">
     <h1>newapi628</h1>
-    <div class="sub">Full · 2026-07-19 · R01 remediation · Codex self-audit</div>
+    <div class="sub">Full · 2026-07-19 · R02–R08 remediation update · Codex self-audit</div>
   </div>
   <div class="sidebar-nav">
     <a href="#summary"><span class="icon">📊</span> 摘要</a>
@@ -182,11 +182,12 @@
     <h2>newapi628 全仓代码审计报告</h2>
     <div class="meta">
       <span>📅 2026-07-19</span>
-      <span>⏱ Evidence cutoff: 2026-07-19 19:55:23 +08:00</span>
+      <span>⏱ Evidence cutoff: 2026-07-19 22:14:34 +08:00</span>
       <span>🔍 Full · 25 dimensions</span>
       <span>🛠 Reviewer: Codex（自审；未调用 Claude）</span>
-      <span>🧾 Baseline: 93155552f101bfd963742e1e6c8b14c8dd17b199</span>
-      <span>🚫 No local Docker · No server deployment</span>
+      <span>🧾 Baseline: da99ecd836b80a17a2b7fadb1436e5ac16c4a913</span>
+      <span>🧩 Remediation HEAD: 565b2a61c04782c3e2b5c0d148e689a908dce47a</span>
+      <span>🚫 No local Docker · Read-only server/GitHub checks · No deployment</span>
     </div>
   </div>
 
@@ -197,26 +198,26 @@
         <div class="score-item">
     <div class="label">Security</div>
     <div class="bar-row">
-      <div class="bar-track"><div class="bar-fill a" style="width:78%"></div></div>
-      <span class="value grade-a">7.8</span>
+      <div class="bar-track"><div class="bar-fill a" style="width:85%"></div></div>
+      <span class="value grade-a">8.5</span>
       <span class="grade grade-a">A</span>
     </div>
-    <div class="small">已移除演示/弱默认凭据并补 fail-closed；仍有认证失效窗口与 Origin 纵深缺口</div>
+    <div class="small">撤权 fence/outbox、认证配置快照与 WebSocket Origin 已闭环；现网 Redis ACL/DB 最小权限尚未迁移</div>
   </div>
 <div class="score-item">
     <div class="label">Stability</div>
     <div class="bar-row">
-      <div class="bar-track"><div class="bar-fill a" style="width:72%"></div></div>
-      <span class="value grade-a">7.2</span>
+      <div class="bar-track"><div class="bar-fill a" style="width:82%"></div></div>
+      <span class="value grade-a">8.2</span>
       <span class="grade grade-a">A</span>
     </div>
-    <div class="small">全量 race 通过、流式生命周期已收口；真实灾备与配置原子发布仍欠闭环</div>
+    <div class="small">全量测试/vet 与重点 race 通过，配置原子发布、撤权故障时序已闭环；异地灾备仍是发布阻断</div>
   </div>
 <div class="score-item">
     <div class="label">Performance</div>
     <div class="bar-row">
-      <div class="bar-track"><div class="bar-fill a" style="width:77%"></div></div>
-      <span class="value grade-a">7.7</span>
+      <div class="bar-track"><div class="bar-fill a" style="width:78%"></div></div>
+      <span class="value grade-a">7.8</span>
       <span class="grade grade-a">A</span>
     </div>
     <div class="small">有界缓冲、COW 缓存与 bundle 预算已验证；未做生产负载压测</div>
@@ -224,47 +225,47 @@
 <div class="score-item">
     <div class="label">Testing</div>
     <div class="bar-row">
-      <div class="bar-track"><div class="bar-fill a" style="width:85%"></div></div>
-      <span class="value grade-a">8.5</span>
+      <div class="bar-track"><div class="bar-fill a" style="width:90%"></div></div>
+      <span class="value grade-a">9.0</span>
       <span class="grade grade-a">A</span>
     </div>
-    <div class="small">后端全量 race、四套前端与运维静态测试均通过；缺真实恢复/支付沙箱演练</div>
+    <div class="small">Go 全仓测试/vet、重点 race、ops 18/18 与远端一次性 MySQL+Redis restore drill 通过；缺异地副本恢复与支付沙箱</div>
   </div>
 <div class="score-item">
     <div class="label">Maintainability</div>
     <div class="bar-row">
-      <div class="bar-track"><div class="bar-fill b" style="width:68%"></div></div>
-      <span class="value grade-b">6.8</span>
-      <span class="grade grade-b">B</span>
+      <div class="bar-track"><div class="bar-fill a" style="width:85%"></div></div>
+      <span class="value grade-a">8.5</span>
+      <span class="grade grade-a">A</span>
     </div>
-    <div class="small">文件体积门禁与拆分有效；1781 项脏工作区和裸全局配置拉低可审查性</div>
+    <div class="small">整改拆为 4 个意图清晰提交，HEAD 与 fresh worktree 均通过 clean-checkout；高风险裸全局已收敛</div>
   </div>
 <div class="score-item">
     <div class="label">Design</div>
     <div class="bar-row">
-      <div class="bar-track"><div class="bar-fill a" style="width:76%"></div></div>
-      <span class="value grade-a">7.6</span>
+      <div class="bar-track"><div class="bar-fill a" style="width:87%"></div></div>
+      <span class="value grade-a">8.7</span>
       <span class="grade grade-a">A</span>
     </div>
-    <div class="small">原生订阅已建立不可变订单/权益快照、结构化支付事实与唯一回执；运行时配置快照仍待统一</div>
+    <div class="small">支付、认证/OAuth 与限流配置采用不可变快照；授权撤销采用 DB outbox + Redis 单调 fence</div>
   </div>
 <div class="score-item">
     <div class="label">Release</div>
     <div class="bar-row">
-      <div class="bar-track"><div class="bar-fill b" style="width:67%"></div></div>
-      <span class="value grade-b">6.7</span>
-      <span class="grade grade-b">B</span>
+      <div class="bar-track"><div class="bar-fill a" style="width:75%"></div></div>
+      <span class="value grade-a">7.5</span>
+      <span class="grade grade-a">A</span>
     </div>
-    <div class="small">R01 已完成代码级闭环；R02 仍是唯一 High，脏工作树仍降低发布可复现性</div>
+    <div class="small">干净发布边界与 fail-closed 治理已落地；R02/R03 生产迁移和 R06 GitHub Environment 仍阻断部署</div>
   </div>
         <div class="score-item overall-row">
           <div class="label">Overall</div>
           <div class="bar-row">
-            <div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:75%;background:linear-gradient(90deg,#34c759,#30d158)"></div></div>
-            <span class="value" style="color:#fff">7.5</span>
+            <div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:83%;background:linear-gradient(90deg,#34c759,#30d158)"></div></div>
+            <span class="value" style="color:#fff">8.3</span>
             <span class="grade" style="color:#34c759">A</span>
           </div>
-          <div class="small" style="color:rgba(255,255,255,.68)">仍有 1 个 High（R02）发布阻断项；R07 的干净发布边界也未闭环。</div>
+          <div class="small" style="color:rgba(255,255,255,.68)">代码级 R04/R05/R07/R08 已关闭；仍有 1 High + 2 Medium 外部/生产运行前置条件，当前禁止部署。</div>
         </div>
       </div>
     </div>
@@ -274,10 +275,10 @@
   <div class="card">
     <div class="card-header">📋 审计结论</div>
     <div class="card-body">
-      <p><strong>项目概况：</strong>这是一个 Go 1.25+、Gin、GORM 的多供应商 AI API 网关，支持 SQLite/MySQL/PostgreSQL、Redis、多租户计费与 React 管理端，同时包含 Classic、Default、Orbit 与 Electron 多个交付面。本次检查覆盖生成报告前的完整脏工作树，而非仅 HEAD diff。</p>
-      <p style="margin-top:12px"><strong>结论：</strong>整体代码健康度为 <strong>7.5 / A</strong>。当前开放发现为 <strong>1 个 High、5 个 Medium、1 个 Low</strong>。R01 已完成代码级整改；但 R02 异地灾备/真实恢复演练和 R07 干净发布边界仍未闭环，因此<strong>不建议直接发布</strong>。</p>
-      <p style="margin-top:12px"><strong>本轮亮点：</strong>原生订阅现已在远端结账前固化不可变权益/支付快照，四类 provider 回调统一收敛为已验签支付事实，并以唯一回执、逐事件证据和管理员人工核账闭环保护权益授予；同时保留此前对演示凭据、stream 生命周期、缓存 stale-fill/race、Coze 轮询、Electron 导航、前端 preflight 与 CI 制品证明的整改。</p>
-      <p style="margin-top:12px"><strong>审计边界：</strong>遵守用户要求，没有调用 Claude、没有启动本地 Docker、没有 SSH 或服务器变更。没有执行真实 MySQL/PostgreSQL 迁移、支付/provider 沙箱、异地 restore、生产压测、Linux Electron 打包或 GitHub Environment 设置核验；报告不会把静态绿色门禁描述成这些运行面已被证明。</p>
+      <p><strong>项目概况：</strong>这是一个 Go 1.25+、Gin、GORM 的多供应商 AI API 网关，支持 SQLite/MySQL/PostgreSQL、Redis、多租户计费与 React 管理端，同时包含 Classic、Default、Orbit 与 Electron 多个交付面。本次更新以已发布基线 <code>da99ecd</code> 为起点，审查并固化了 R02–R08 整改。</p>
+      <p style="margin-top:12px"><strong>结论：</strong>整体代码健康度为 <strong>8.3 / A</strong>。当前开放发现为 <strong>1 个 High、2 个 Medium、0 个 Low</strong>：R02、R03 已完成仓库侧 fail-closed 路径但现网尚未迁移，R06 经 GitHub API 证实两个 Environment 均不存在。R04、R05、R07、R08 已关闭。外部前置条件完成前，<strong>不允许部署本批改动</strong>。</p>
+      <p style="margin-top:12px"><strong>本轮亮点：</strong>支付、认证/OAuth 和模型限流配置改为一次发布的不可变快照；用户/Token 撤销在 DB commit 前建立 Redis fence，commit 后由持久 outbox 幂等释放；Realtime WebSocket 默认同源并在 TokenAuth 前拒绝未知 Origin；整改拆成 4 个清晰提交，并增加干净 checkout、异地加密复制、数据服务最小权限与 GitHub Environment 只读门禁。</p>
+      <p style="margin-top:12px"><strong>审计边界：</strong>没有调用 Claude、没有启动本地 Docker、没有部署或修改服务器/GitHub 设置。执行了服务器与 GitHub 的只读核验；远端基线 CI 和一次性 MySQL+Redis restore drill 均成功。没有执行生产凭据轮换、MySQL 8.4 升级、真实异地副本 restore、支付/provider 沙箱或生产压测。</p>
     </div>
   </div>
 
@@ -305,9 +306,13 @@
         <tr><td>High · Streaming</td><td>OpenAI realtime reader 可中断并 join；accepted 后不错误 retry；计费错误不再吞掉；Claude/Gemini 生命周期同步收口</td><td>真实本地 WebSocket 对测试 + race</td></tr>
         <tr><td>High · Cache concurrency</td><td>channel COW、pricing/rate 锁、auth generation+Lua CAS、subscription-plan version key 与 FOR UPDATE</td><td>model/middleware/controller/relay race</td></tr>
         <tr><td>High · R01 原生订阅支付一致性</td><td>远端结账前固化 v1 权益、金额、币种、产品、支付方式与模式快照；四条原生支付路径转换为结构化已验签事实，模型精确比对、唯一回执幂等完成，异常进入人工核账而不授予权益</td><td>快照漂移、事实不符、重放、重复付款、跨订单交易复用、历史订单、迁移、人工处置与四渠道事实测试 + 最终全仓 race/vet</td></tr>
+        <tr><td>Medium · R04 原子配置发布</td><td>支付凭据、登录/注册/OAuth 凭据与开关、邮箱白名单、模型限流标量与分组规则改为不可变快照；批量 DB commit 后每个配置域只原子切换一次，读路径每次操作只加载同一版本</td><td><code>4659f2a</code>；配置失败不发布、旧/新版本不混读、SDK 指纹同源；common/setting/model/middleware/mtwire race 通过</td></tr>
+        <tr><td>Medium · R05 授权撤销</td><td>User/Token auth_version + 事务 outbox；commit 前 Redis fence/generation/delete，commit 后按唯一 token 幂等释放，旧事件不能清新 fence，失败由启动同步与 1 秒后台重放</td><td><code>44d7609</code>；覆盖禁用/删除、提交前失败回滚、提交后 Redis 断开恢复、旧 hash 注入、多实例乱序与正常命中零 DB 查询</td></tr>
+        <tr><td>Medium/Low · R07/R08</td><td>四个意图提交 + HEAD/fresh worktree clean-checkout；Realtime WebSocket 默认同源、显式 allowlist、可信反代开关、空 Origin SDK 兼容，并在 TokenAuth 前 403</td><td><code>afa6bfa</code>、<code>565b2a6</code>；真实本地握手、token 不反射、代理 Host/Proto 与 clean-checkout 回归通过</td></tr>
+        <tr><td>R02/R03/R06 仓库侧缓解</td><td>age+rclone 异地加密/完整回读 receipt、专用 MySQL 用户、Redis ACL 与非 root 入口、现网 digest pin、Environment 只读 fail-closed 审计；缺外部条件时发布在触碰线上前停止</td><td>ops 18/18、Shell/YAML、远端只读核验与 GitHub API；三项仍按外部运行状态保持开放</td></tr>
         <tr><td>Security / Stability</td><td>SSRF dial-time 保护、XSS 净化、OAuth 校验、pprof 回环、CSPRNG、Coze timeout、Electron 导航与随机端口</td><td>针对性测试、vet、前端/桌面测试</td></tr>
-        <tr><td>Release / Supply chain</td><td>Actions SHA pin、SBOM/provenance/cosign、release/commit 绑定、draft release、ops 防误操作测试</td><td>actionlint、YAML、40-char pin、ops 14/14</td></tr>
-        <tr><td>F01–F31 与 R01 复核</td><td>计费/退款/事务/恢复脚本/前端/i18n/stream/strict JSON 与原生订阅支付一致性的代码层问题已关闭；R02 单独保留为真实灾备证明缺口</td><td>当前工作树源码与门禁重新取证，不以旧整改说明代替证据</td></tr>
+        <tr><td>Release / Supply chain</td><td>Actions SHA pin、SBOM/provenance/cosign、release/commit 绑定、draft release、干净 checkout 与 ops 防误操作测试</td><td>YAML、40-char pin、ops 18/18；GitHub Environment 实际缺失时门禁按预期失败</td></tr>
+        <tr><td>F01–F31 与 R01 复核</td><td>计费/退款/事务/恢复脚本/前端/i18n/stream/strict JSON 与原生订阅支付一致性的代码层问题保持关闭；本报告保留历史轨迹但只把 R02/R03/R06 计为开放</td><td>最终四个代码/运维提交与本报告单独固化，不以旧整改说明代替证据</td></tr>
       </tbody>
     </table></div></div>
   </div>
@@ -315,15 +320,20 @@
   <div class="card">
     <div class="card-header">✅ Verification Gates / 验证门禁</div>
     <div class="card-body"><div class="check-list">
-      <div class="check-item"><span class="check">✓</span>Backend preflight：deploy lint、context secret exclusion、gofmt/size、go build、go vet、go test ./... -race</div>
-      <div class="check-item"><span class="check">✓</span>R01 专项：model/controller/service race + vet；四渠道事实、核账 API、迁移、重放与异常状态回归通过</div>
+      <div class="check-item"><span class="check">✓</span>最终 Go 门禁：<code>go test ./... -count=1</code> 与 <code>go vet ./...</code> 通过</div>
+      <div class="check-item"><span class="check">✓</span>重点 race：common/setting/model/middleware/controller/oauth/mtwire/router 全通过</div>
+      <div class="check-item"><span class="check">✓</span>R04：支付、认证/OAuth、邮箱白名单与限流快照；失败批次不发布且读者不混用版本</div>
+      <div class="check-item"><span class="check">✓</span>R05：DB commit→Redis 失败→恢复→注入旧 hash 的用户/Token 禁用与删除时序全部拒绝旧授权</div>
+      <div class="check-item"><span class="check">✓</span>R08：同源、allowlist、未知/空 Origin、代理 Host/Proto、token subprotocol 真实握手</div>
       <div class="check-item"><span class="check">✓</span>Default：136 tests、typecheck/lint/format/i18n/knip/build/bundle budget</div>
       <div class="check-item"><span class="check">✓</span>Classic：13 tests + lint/format/build</div>
       <div class="check-item"><span class="check">✓</span>Orbit：31 tests + audit/typecheck/lint/build</div>
       <div class="check-item"><span class="check">✓</span>Electron：4 navigation tests + audit</div>
       <div class="check-item"><span class="check">✓</span>JS dependency audits：Default/Electron/Orbit 均 0 已知漏洞；go mod verify 通过</div>
-      <div class="check-item"><span class="check">✓</span>Ops 14/14；actionlint/YAML 通过；外部 Actions 全部固定 40 位 SHA</div>
-      <div class="check-item"><span class="cross">✗</span>未运行 Docker、服务器部署、真实 restore、支付/provider sandbox、生产压测</div>
+      <div class="check-item"><span class="check">✓</span>Ops 18/18、Shell 语法与全部 workflow/Compose YAML；密钥不进 argv，Redis 保持非 root</div>
+      <div class="check-item"><span class="check">✓</span>R07：HEAD <code>565b2a6</code> 与 fresh detached worktree 均通过 clean-checkout</div>
+      <div class="check-item"><span class="check">✓</span>远端基线 <code>da99ecd</code>：CI run 29688097488、Disposable Paired Restore Drill 29688097540 成功</div>
+      <div class="check-item"><span class="cross">✗</span>未运行本地 Docker、未部署；未做真实异地 restore、MySQL 8.4 迁移、支付/provider sandbox 或生产压测</div>
     </div></div>
   </div>
 
@@ -333,53 +343,49 @@
       <thead><tr><th>Dimension</th><th style="width:110px">Coverage</th><th>Evidence inspected</th><th>Exclusions / limits</th></tr></thead>
       <tbody><tr><td>Architecture</td><td><span class="badge badge-confirmed">High</span></td><td>Go 分层、relay/internal 边界、前端与交付目录；go list/build；1124 个 Go 文件</td><td>未对 40+ 上游做逐个运行时 trace</td></tr>
 <tr><td>Security</td><td><span class="badge badge-confirmed">High</span></td><td>认证中间件、OAuth/SSRF/XSS、缓存、seed、凭据与工作流；支付回调验签后才构造 canonical fact</td><td>无真实渗透、OAuth/provider 沙箱</td></tr>
-<tr><td>Stability</td><td><span class="badge badge-confirmed">High</span></td><td>全量 go test -race；stream/轮询/补偿/缓存并发；支付核账 ACK 与瞬时 DB 错误重试</td><td>无生产故障注入与真实灾备</td></tr>
+<tr><td>Stability</td><td><span class="badge badge-confirmed">High</span></td><td>全量测试/vet + 重点 race；stream/补偿；配置快照；授权撤销 Redis 故障时序</td><td>无生产故障注入与真实异地灾备</td></tr>
 <tr><td>Performance</td><td><span class="badge badge-suspected">Medium</span></td><td>缓冲预算、COW 缓存、bundle 预算、knip/build</td><td>无生产压测、CPU/heap profile</td></tr>
-<tr><td>Testing</td><td><span class="badge badge-confirmed">High</span></td><td>Go 全量 race；四 provider 支付事实、快照/回执/迁移/核账回归；default/classic/orbit/electron；ops 14/14</td><td>无真实支付/上游/恢复 E2E</td></tr>
-<tr><td>Maintainability</td><td><span class="badge badge-confirmed">High</span></td><td>文件体积门禁、gofmt/vet、拆分与 wrapper 规则</td><td>巨大脏工作树降低可审查性</td></tr>
-<tr><td>Design</td><td><span class="badge badge-confirmed">High</span></td><td>事务、幂等、缓存 generation、不可变 checkout snapshot、typed fact 与 unique receipt</td><td>原生订阅支付事实已统一；运行时配置快照仍未统一</td></tr>
-<tr><td>Release</td><td><span class="badge badge-confirmed">High</span></td><td>9 个 workflow、actionlint、YAML、SHA pin、SBOM/签名路径</td><td>GitHub 环境设置与真实部署未核验</td></tr>
+<tr><td>Testing</td><td><span class="badge badge-confirmed">High</span></td><td>Go 全仓 + 重点 race；支付/撤权/快照/WebSocket 回归；ops 18/18；远端基线真实 MySQL+Redis restore drill</td><td>无真实异地副本 restore、支付/上游 E2E</td></tr>
+<tr><td>Maintainability</td><td><span class="badge badge-confirmed">High</span></td><td>4 个意图提交、gofmt/vet、HEAD 与 fresh worktree clean-checkout</td><td>本报告提交后仍需推送并由远端 CI 重新证明</td></tr>
+<tr><td>Design</td><td><span class="badge badge-confirmed">High</span></td><td>事务、幂等、不可变 checkout/config snapshot、授权 outbox/fence、typed fact 与 unique receipt</td><td>仍有低风险遗留单值全局可逐步迁移</td></tr>
+<tr><td>Release</td><td><span class="badge badge-confirmed">High</span></td><td>workflows、YAML、SHA pin、SBOM/签名、clean checkout 与 fail-closed Environment audit</td><td>GitHub API 已证实 Environment 不存在；未部署</td></tr>
 <tr><td>Documentation</td><td><span class="badge badge-confirmed">High</span></td><td>高风险 runbook、env 示例、demo 文档与历史凭据清理</td><td>未逐句校验全部历史任务文档</td></tr>
-<tr><td>Configuration</td><td><span class="badge badge-confirmed">High</span></td><td>Option 校验、发布路径、Compose、secrets fail-closed</td><td>外部 GitHub 设置不可见；运行态仍逐项发布</td></tr>
+<tr><td>Configuration</td><td><span class="badge badge-confirmed">High</span></td><td>Option 校验、支付/认证/限流原子快照、Compose 凭据与发布 fail-closed</td><td>生产凭据尚未轮换；GitHub Environment 缺失</td></tr>
 <tr><td>Observability</td><td><span class="badge badge-suspected">Medium</span></td><td>health、request ID、pprof、日志与对账任务</td><td>无生产日志/指标/告警投递样本</td></tr>
-<tr><td>Data Integrity</td><td><span class="badge badge-confirmed">High</span></td><td>计费事务、FOR UPDATE、不可变订阅快照、唯一支付回执、逐事件证据与人工核账状态</td><td>无真实网关回调、MySQL/PostgreSQL migration 或 PITR 演练</td></tr>
+<tr><td>Data Integrity</td><td><span class="badge badge-confirmed">High</span></td><td>计费事务、不可变订阅快照、唯一支付回执、授权 outbox；基线 MySQL+Redis 配对 restore drill</td><td>无真实网关回调、异地 restore、MySQL 8.4/PostgreSQL migration 或 PITR</td></tr>
 <tr><td>Privacy</td><td><span class="badge badge-suspected">Medium</span></td><td>日志/响应敏感面、文档凭据、缓存键 HMAC；支付只存 canonical fact 与 payload hash</td><td>无生产数据保留审计或 DPIA</td></tr>
 <tr><td>Accessibility</td><td><span class="badge badge-suspected">Medium</span></td><td>前端 lint/test/build、i18n、组件语义检查</td><td>无人工键盘/屏幕阅读器测试</td></tr>
-<tr><td>Supply Chain</td><td><span class="badge badge-confirmed">High</span></td><td>go mod verify、三套 JS audit、Actions SHA pin、SBOM/provenance/cosign</td><td>未构建/拉取生产镜像，base digest 未锁</td></tr>
+<tr><td>Supply Chain</td><td><span class="badge badge-confirmed">High</span></td><td>go mod verify、JS audit、Actions SHA pin、SBOM/provenance/cosign；MySQL/Redis 现网 digest 已核验并锁入 Compose</td><td>未拉取新镜像或演练 MySQL 8.4 digest</td></tr>
 <tr><td>Cost</td><td><span class="badge badge-suspected">Medium</span></td><td>计费不变量、订阅 canonical decimal 金额与固定两位舍入策略、缓冲/并发预算、bundle budget</td><td>无真实流量成本或 provider 账单核对</td></tr>
 <tr><td>AI Safety</td><td><span class="badge badge-suspected">Medium</span></td><td>敏感词、请求边界、SSRF、body limit、provider adapter</td><td>无对抗 prompt/输出安全评测</td></tr>
-<tr><td>Fallback</td><td><span class="badge badge-confirmed">High</span></td><td>Redis 回源、退款/补偿、skip-retry、轮询超时、恢复脚本</td><td>未做真实 Redis/DB/主机故障演练</td></tr>
-<tr><td>Testing Authenticity</td><td><span class="badge badge-confirmed">High</span></td><td>真实 websocket 对、miniredis barrier、race、静态 ops 回归</td><td>缺 provider sandbox 与实际 restore</td></tr>
-<tr><td>Type Safety</td><td><span class="badge badge-confirmed">High</span></td><td>Go/TS typecheck、optional pointer、strict JSON；支付 adapter 收敛为 VerifiedSubscriptionPaymentFact</td><td>其他遗留动态 map/裸全局与 float64 金额仍存在</td></tr>
+<tr><td>Fallback</td><td><span class="badge badge-confirmed">High</span></td><td>Redis 回源/fence、退款/补偿、恢复脚本；基线真实一次性 MySQL+Redis 配对 restore</td><td>未做异地主机丢失或生产故障演练</td></tr>
+<tr><td>Testing Authenticity</td><td><span class="badge badge-confirmed">High</span></td><td>真实 WebSocket 对、miniredis 多实例时序、race、ops 18/18、远端 disposable restore</td><td>缺 provider sandbox 与真实异地副本 restore</td></tr>
+<tr><td>Type Safety</td><td><span class="badge badge-confirmed">High</span></td><td>Go/TS typecheck、optional pointer、strict JSON；支付 adapter 与 RuntimeConfig 快照为强类型</td><td>其他遗留动态 map 与 float64 金额仍存在</td></tr>
 <tr><td>Frontend State</td><td><span class="badge badge-confirmed">High</span></td><td>default 136、classic 13、orbit 31、electron 4；build/i18n</td><td>无浏览器人工 E2E 与视觉回归全集</td></tr>
-<tr><td>Backend API</td><td><span class="badge badge-confirmed">High</span></td><td>路由中间件、鉴权、限流、严格 JSON、四类支付完成契约与管理员核账 API</td><td>无真实上游/支付回调联调</td></tr>
-<tr><td>Dependency Weight</td><td><span class="badge badge-confirmed">High</span></td><td>go mod verify、audit、knip、bundle 预算</td><td>未测容器镜像体积；基础 tag 可变</td></tr>
-<tr><td>Code Consistency</td><td><span class="badge badge-confirmed">High</span></td><td>gofmt、vet、diff-check、Go/脚本体积与 JSON wrapper</td><td>1781 项变更尚未拆成可审查提交</td></tr>
+<tr><td>Backend API</td><td><span class="badge badge-confirmed">High</span></td><td>路由中间件、鉴权/撤权、限流、严格 JSON、WebSocket Origin 与支付核账 API</td><td>无真实上游/支付回调联调</td></tr>
+<tr><td>Dependency Weight</td><td><span class="badge badge-confirmed">High</span></td><td>go mod verify、audit、knip、bundle 预算与生产数据服务 digest pin</td><td>未测容器镜像体积或 8.4 新制品</td></tr>
+<tr><td>Code Consistency</td><td><span class="badge badge-confirmed">High</span></td><td>gofmt、vet、diff-check、4 个意图提交与 fresh worktree clean-checkout</td><td>远端 CI 需在后续 push 后对新 HEAD 重跑</td></tr>
 <tr><td>Comment Coverage</td><td><span class="badge badge-suspected">Medium</span></td><td>并发、缓存、财务、运维危险路径注释抽查</td><td>无定量注释覆盖；历史说明可能漂移</td></tr></tbody>
     </table></div></div>
   </div>
 
   <h3 class="section-title">📈 Finding Statistics / 发现统计</h3>
   <div class="stats-row">
-    <div class="stat-card"><div class="num">7</div><div class="desc">Open findings</div></div>
+    <div class="stat-card"><div class="num">3</div><div class="desc">Open findings</div></div>
     <div class="stat-card"><div class="num" style="color:var(--badge-critical)">0</div><div class="desc">Critical</div></div>
     <div class="stat-card"><div class="num" style="color:var(--badge-high)">1</div><div class="desc">High</div></div>
-    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">5</div><div class="desc">Medium</div></div>
-    <div class="stat-card"><div class="num" style="color:var(--badge-low)">1</div><div class="desc">Low</div></div>
-    <div class="stat-card"><div class="num" style="color:var(--badge-info)">0</div><div class="desc">Info</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">2</div><div class="desc">Medium</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-low)">0</div><div class="desc">Low</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-info)">4</div><div class="desc">Resolved this pass</div></div>
   </div>
-  <div class="card"><div class="card-body"><p><strong>状态：</strong>6 个代码/仓库事实已确认；R06 为 1 个外部设置核验项。R01 保留为已修复审计轨迹，不计入上述开放发现。</p></div></div>
+  <div class="card"><div class="card-body"><p><strong>状态：</strong>R04、R05、R07、R08 已由代码、测试与干净提交证据关闭；R02、R03 为“仓库侧缓解已完成、生产尚未迁移”，R06 为 GitHub API 已确认的外部管理员阻塞。R01 继续保留为历史已修复轨迹。</p></div></div>
 
   <h3 class="section-title" id="top-risks">⚠️ Top Risks / 最高风险</h3>
   <div class="card"><div class="card-body" style="padding:0"><div class="table-wrap"><table>
     <thead><tr><th style="width:55px">#</th><th>Finding</th><th style="width:95px">Severity</th><th>Category</th></tr></thead>
-    <tbody><tr><td>1</td><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Recovery / Release</td></tr>
-<tr><td>2</td><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Configuration / Least Privilege / Supply Chain</td></tr>
-<tr><td>3</td><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Configuration / Concurrency</td></tr>
-<tr><td>4</td><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Authentication / Distributed Cache</td></tr>
-<tr><td>5</td><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · 发布 job 引用了 GitHub Environment，但保护规则无法由仓库证明</a></td><td><span class="badge badge-medium">Medium</span></td><td>Release Governance</td></tr>
-<tr><td>6</td><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Maintainability / Release</td></tr>
-<tr><td>7</td><td><a href="#finding-r08" style="color:var(--accent);text-decoration:none">R08 · Realtime WebSocket 无条件接受任意 Origin</a></td><td><span class="badge badge-low">Low</span></td><td>WebSocket / Defense in Depth</td></tr></tbody>
+    <tbody><tr><td>1</td><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 异地加密复制已实现，但生产尚无远端副本/不可变保留/远端 restore 证据</a></td><td><span class="badge badge-high">High</span></td><td>Recovery / Release</td></tr>
+<tr><td>2</td><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 最小权限与 digest 迁移路径已实现，但现网仍是 DB root / 匿名 Redis</a></td><td><span class="badge badge-medium">Medium</span></td><td>Configuration / Least Privilege</td></tr>
+<tr><td>3</td><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · GitHub API 确认两个发布 Environment 均不存在</a></td><td><span class="badge badge-medium">Medium</span></td><td>Release Governance</td></tr></tbody>
   </table></div></div></div>
 
   <h3 class="section-title" id="findings">🔍 Detailed Findings / 详细发现</h3>
@@ -414,188 +420,85 @@ Stripe、Creem、Epay、Waffo Pancake 均传递签名覆盖的产品/快照/金�
     </div>
   </div>
 <div class="finding severity-high" id="finding-r02">
-    <div class="finding-header">
-      <h4>R02. 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</h4>
-      <span class="badge badge-high">High</span>
-      <span class="badge badge-confirmed">Confidence: High</span>
-    </div>
-    <div class="finding-meta">
-      <span>📁 Category: Recovery / Release</span>
-      <span>📌 Status: Confirmed in repository · External production state unknown</span>
-      <span>📍 Affected area: deploy/ops/lib.sh；deploy/ops/backup.sh；deploy/ops/README.md；deploy/ops/go-live.md</span>
-    </div>
-    <div class="problem"><strong>Problem：</strong>代码层已能生成一致的 MySQL/Redis/配置恢复集，但默认保存在同一主机；整机、磁盘、账号或勒索事件可能同时摧毁生产与备份。本轮遵守用户要求，没有启动 Docker、没有改服务器，因此也没有证明真实 RTO/RPO。</div>
+    <div class="finding-header"><h4>R02. 部分修复：异地加密复制已实现，生产灾备证据仍缺失</h4><span class="badge badge-high">High</span><span class="badge badge-confirmed">Confidence: High</span></div>
+    <div class="finding-meta"><span>📁 Category: Recovery / Release</span><span>📌 Status: Partial · Production open</span><span>📍 Affected area: deploy/ops/backup.sh；offsite-copy.sh；README/go-live</span></div>
+    <div class="problem"><strong>Remaining problem：</strong>仓库已经能把每个已校验的 MySQL/Redis/config 配对集用 age 加密，经 rclone 上传并完整下载复验 SHA-256；但生产服务器尚无工具、远端配置、receipt、Object Lock 或跨账号 restore 证据。</div>
     <div class="evidence"><strong>Evidence：</strong>
-deploy/ops/lib.sh:49-52 — BACKUP_DIR 默认 /root/backups，KEEP 默认 7。
-deploy/ops/README.md:82 — runbook 明确把这些产物定义为同机恢复点而非完整灾备。
-deploy/ops/go-live.md:134-142 — 默认 cron 是每日全量，异地/对象存储外迁仍是人工建议。
-deploy/ops/backup.sh:141-166 — 配对 manifest、SHA-256、权限与一致性校验完整，但没有自动远端复制、不可变保留或 PITR 链路。</div>
-    <div class="problem"><strong>Why it matters：</strong>备份脚本正确不等于灾备可用。没有异地、不可变副本和定期真实恢复演练，最严重故障下仍可能无法恢复或恢复时间不可预测。</div>
-    <div class="problem"><strong>Realistic failure scenario：</strong>宿主磁盘损坏或 root 账号被攻破，同机 /root/backups 与运行数据一起丢失；团队直到事故时才发现对象存储复制、密钥或恢复步骤不可用。</div>
-    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>把每个已校验 manifest 恢复集自动加密复制到独立账号/区域的对象存储，启用不可变保留与生命周期告警；在一次性隔离主机执行完整 restore + 应用验收并记录 RTO/RPO。</div></div>
-    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>为 MySQL 建立 binlog/PITR，Redis/配置保留配对版本；将恢复演练做成周期性、可审计的灾备作业，并验证密钥轮换、跨账号访问与删除保护。</div></div>
-    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
-      <strong>Regression test suggestion：</strong>每月至少一次从远端对象恢复到空环境，核验 manifest/hash、数据计数、关键财务不变量、应用 readiness 与回滚；演练失败必须告警。<br>
-      <strong>Estimated effort：</strong>1–2 天建立远端复制与首次演练；PITR 另计
-    </div>
+<code>565b2a6</code> — offsite-copy.sh、BACKUP_OFFSITE_REQUIRED=1 发布前门禁、原子 receipt 与 ops 18/18。
+GitHub run <a href="https://github.com/lijiawei0305-pixel/multi_newapi/actions/runs/29688097540">29688097540</a> 在基线 <code>da99ecd</code> 完成真实一次性 MySQL+Redis 配对 restore。
+2026-07-19 只读服务器核验：age=missing、rclone=missing、三个 BACKUP_OFFSITE_* 均 missing、offsite receipt=0。</div>
+    <div class="problem"><strong>Outcome：</strong>缺异地前置条件、上传失败或回读不一致会让 backup/deploy 非零退出，同时保留本地已验证恢复集；代码不会把同机备份冒充完整灾备，也不会在条件缺失时触碰线上。</div>
+    <div class="fix-box"><div class="fix-label">Repository mitigation · Implemented</div><div>加密、异地复制、不可覆盖上传、完整回读校验、receipt 与 fail-closed 发布门均已实现。</div></div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082"><strong>Still required：</strong>安装 age/rclone，配置独立账号/区域远端及 Object Lock，生成第一份 receipt，并从远端副本在隔离主机做 restore/readiness/reconcile，归档 RTO/RPO；PITR 仍是长期项。</div>
   </div>
 <div class="finding severity-medium" id="finding-r03">
-    <div class="finding-header">
-      <h4>R03. 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</h4>
-      <span class="badge badge-medium">Medium</span>
-      <span class="badge badge-confirmed">Confidence: High</span>
-    </div>
-    <div class="finding-meta">
-      <span>📁 Category: Configuration / Least Privilege / Supply Chain</span>
-      <span>📌 Status: Confirmed</span>
-      <span>📍 Affected area: deploy/docker-compose.test.yml</span>
-    </div>
-    <div class="problem"><strong>Problem：</strong>一旦应用容器被利用，攻击者直接获得数据库最高权限；同网络内任意受控容器可访问 Redis。基础镜像 tag 也可能在重建时指向不同制品。</div>
+    <div class="finding-header"><h4>R03. 部分修复：最小权限与不可变镜像迁移已实现，现网尚未切换</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confidence: High</span></div>
+    <div class="finding-meta"><span>📁 Category: Configuration / Least Privilege / Supply Chain</span><span>📌 Status: Partial · Production open</span><span>📍 Affected area: deploy/docker-compose.test.yml；data-services-hardening.md</span></div>
+    <div class="problem"><strong>Remaining problem：</strong>仓库 Compose 已不让 app 使用 DB root，并关闭 Redis default 用户；但服务器仍运行旧配置，直接部署会涉及凭据轮换和数据服务重建，必须在维护窗口执行。</div>
     <div class="evidence"><strong>Evidence：</strong>
-deploy/docker-compose.test.yml:23-24 — 应用 SQL_DSN 使用 MySQL root，Redis URI 没有认证信息。
-deploy/docker-compose.test.yml:74-86 — MySQL 镜像为 mysql:8.2，root 密码被强制注入，但应用权限仍是 root。
-deploy/docker-compose.test.yml:93-105 — Redis 为 redis:7.4.9-alpine、无 ACL/口令；MySQL 与 Redis 都未用 digest 锁定。
-缓解因素：两项数据服务没有发布宿主端口，位于 Compose 内网。</div>
-    <div class="problem"><strong>Why it matters：</strong>这扩大单点入侵的影响面，也让灾难恢复和发布复现依赖远端 tag 当前状态。MySQL 版本迁移涉及认证与持久化参数，不能未经演练直接替换。</div>
-    <div class="problem"><strong>Realistic failure scenario：</strong>上游解析器或管理端点被利用后，攻击者从 app 容器以 root 删除/改写全库，并篡改 Redis 风控键；之后用同一 tag 重建得到不同镜像，增加取证与恢复不确定性。</div>
-    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>创建专用应用 DB 用户并仅授予所需 schema 权限；为 Redis 配 ACL/口令并轮换；在隔离环境演练 MySQL 8.4 LTS 后固定补丁版本和镜像 digest。</div></div>
-    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>按服务拆分凭据与权限，使用密钥管理器/短期凭据，建立受控的基础镜像更新机器人、SBOM 差异审查与升级回滚演练。</div></div>
-    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
-      <strong>Regression test suggestion：</strong>Compose 配置测试断言 app 不再使用 root、Redis 必须认证、生产 image 必须含 digest；隔离环境跑迁移、备份与恢复验收。<br>
-      <strong>Estimated effort：</strong>1–2 天（含迁移演练）
-    </div>
+<code>565b2a6</code> — 一次性 MySQL bootstrap 幂等创建 schema-scoped 用户；Redis ACL、危险命令收缩、官方 entrypoint 非 root 降权；MySQL/Redis 镜像按现网 RepoDigest 锁定。
+只读服务器核验：db_user=root、Redis URI 无认证、匿名 PING=PONG，MYSQL_APP_* 与 REDIS_* 均 missing。
+锁定摘要：MySQL <code>sha256:212fe73…25da1</code>；Redis <code>sha256:234c902…13c7b</code>。</div>
+    <div class="problem"><strong>Outcome：</strong>服务器条件未准备时 deploy 在换树、构建或备份之前阻断；不会用半套凭据破坏现网。MySQL 8.4 已有隔离升级/逻辑恢复/不可复用 datadir 回滚步骤，但尚未演练。</div>
+    <div class="fix-box"><div class="fix-label">Repository mitigation · Implemented</div><div>专用 DB 用户、认证 Redis ACL、非 root 运行、digest pin、密码格式/分权检查和可回滚 runbook 已落地。</div></div>
+    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082"><strong>Still required：</strong>生成互异生产凭据，在维护窗口验证 app 非 root 会话和匿名 Redis 拒绝；另在隔离环境完成 MySQL 8.4 固定 digest 的 restore/升级/回滚演练。</div>
   </div>
-<div class="finding severity-medium" id="finding-r04">
-    <div class="finding-header">
-      <h4>R04. 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</h4>
-      <span class="badge badge-medium">Medium</span>
-      <span class="badge badge-confirmed">Confidence: High</span>
-    </div>
-    <div class="finding-meta">
-      <span>📁 Category: Configuration / Concurrency</span>
-      <span>📌 Status: Confirmed</span>
-      <span>📍 Affected area: model/option.go；common/constants.go；setting/payment_wxpay_alipay.go；internal/mtwire/payment_inprocess.go</span>
-    </div>
-    <div class="problem"><strong>Problem：</strong>配置集合在数据库中是原子事务，在内存中却按不确定 map 顺序逐字段可见。并发请求可能观察到新旧字段混合，部分读写也没有统一同步语义。</div>
+<div class="finding severity-info" id="finding-r04">
+    <div class="finding-header"><h4>R04. 已修复：耦合运行时配置以不可变快照原子发布</h4><span class="badge badge-confirmed">Resolved</span><span class="badge badge-confirmed">Historical severity: Medium</span></div>
+    <div class="finding-meta"><span>📁 Category: Configuration / Concurrency</span><span>📌 Status: Remediated · Code/race verified</span><span>📍 Commit: 4659f2a</span></div>
+    <div class="problem"><strong>Historical problem：</strong>DB 批量事务提交后，支付、认证与限流字段曾按 map 顺序逐个写入裸全局，读者可能构造新旧混合版本。</div>
     <div class="evidence"><strong>Evidence：</strong>
-model/option.go:256-294 — UpdateOptionsBulk 在一个 DB 事务提交后，遍历 map 逐项调用 updateOptionMap。
-model/option.go:383-401、549-579 — 每次发布分别写 OptionMap 和单个包级全局。
-setting/payment_wxpay_alipay.go:3-24 — 支付开关与多项凭据是可变包级全局。
-internal/mtwire/payment_inprocess.go:125-167 — 请求侧连续读取多项字段来构造 SDK 配置与指纹，没有读取同一个不可变快照。
-已修复的热路径 map/slice 使用锁或 COW，但没有覆盖全部标量与耦合配置。</div>
-    <div class="problem"><strong>Why it matters：</strong>支付、限流、权限等耦合配置如果短暂不一致，可能造成错误渠道选择、签名失败、错误放行或 race；绿色 race 测试只证明已执行路径，不证明所有运行组合。</div>
-    <div class="problem"><strong>Realistic failure scenario：</strong>管理员同时更新支付开关、商户号和证书。DB 已完整提交，但请求在线程间正好读取到新开关与旧凭据，生成不可用的支付请求或错误配置指纹。</div>
-    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>先把支付、认证、限流等耦合设置收进不可变结构，以 atomic.Value 或明确 RWMutex 一次替换；所有读路径只取一次快照。批量发布按稳定顺序并在完整快照验证后原子切换。</div></div>
-    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>建立版本化 RuntimeConfig 聚合根：DB 事务提交一个版本，后台构建并验证完整快照，然后单点原子发布；失败保留旧版本并暴露指标。</div></div>
-    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
-      <strong>Regression test suggestion：</strong>并发更新与高频读取测试在 -race 下运行，断言读者只能看到旧版本或新版本，永远看不到混合字段；覆盖失败发布与重启重载。<br>
-      <strong>Estimated effort：</strong>2–4 天
-    </div>
+setting/payment_wxpay_alipay.go — NativePaymentConfig 通过 atomic.Pointer/CAS 一次发布。
+common/auth_runtime_config.go — 登录/注册/OAuth 开关、Client/Secret、Turnstile、Telegram、微信与邮箱白名单同一快照。
+setting/rate_limit.go — enabled/window/count/success/group 同一快照；middleware 每个请求只加载一次。
+model/option.go — load/bulk 先完整验证，再按配置域一次切换；mtwire SDK 指纹与构造参数来自同一支付快照。</div>
+    <div class="problem"><strong>Outcome：</strong>高风险耦合域的读者只能看到旧版本或新版本；非法 bool/JSON 不发布，SDK 缓存不再出现“新指纹标旧配置”。遗留独立单值全局仍可长期迁移，但不再构成本发现中的耦合混读路径。</div>
+    <div class="fix-box"><div class="fix-label">Implemented &amp; verified</div><div>配置失败保持旧值、批量发布、并发旧/新版本、SDK 缓存和全套重点 race 均通过。</div></div>
   </div>
-<div class="finding severity-medium" id="finding-r05">
-    <div class="finding-header">
-      <h4>R05. 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</h4>
-      <span class="badge badge-medium">Medium</span>
-      <span class="badge badge-confirmed">Confidence: High</span>
-    </div>
-    <div class="finding-meta">
-      <span>📁 Category: Authentication / Distributed Cache</span>
-      <span>📌 Status: Confirmed bounded failure window</span>
-      <span>📍 Affected area: model/auth_cache_generation.go；model/user.go；model/user_cache.go；model/token.go；middleware/auth.go</span>
-    </div>
-    <div class="problem"><strong>Problem：</strong>短暂 Redis 故障如果发生在 DB 已禁用/删除用户或令牌之后，其他实例可能继续命中旧 hash，直到 TTL 到期；持续 Redis 故障会回源 DB，因此风险是短暂失效失败后恢复的有界窗口。</div>
+<div class="finding severity-info" id="finding-r05">
+    <div class="finding-header"><h4>R05. 已修复：授权撤销在 DB commit 前建立 Redis 单调 fence</h4><span class="badge badge-confirmed">Resolved</span><span class="badge badge-confirmed">Historical severity: Medium</span></div>
+    <div class="finding-meta"><span>📁 Category: Authentication / Distributed Cache</span><span>📌 Status: Remediated · Failure-sequence verified</span><span>📍 Commit: 44d7609</span></div>
+    <div class="problem"><strong>Historical problem：</strong>用户/Token 已在 DB 禁用或删除后，Redis 失效若失败，其他实例曾可能在 TTL 内继续接受旧 hash。</div>
     <div class="evidence"><strong>Evidence：</strong>
-model/user.go:529-549 — 用户 DB 更新先完成，随后失效 Redis；失效失败返回错误，但没有持久重试/outbox。
-model/user_cache.go:84-100 — 认证读取优先返回 Redis 命中，Redis miss/error 才回源 DB。
-model/auth_cache_generation.go:39-104 — generation + Lua CAS 已阻止健康 Redis 下的并发旧填充，但生成与 DB 提交不是分布式事务。
-common/init.go:110-114 — 默认缓存 TTL 约 60 秒。
-middleware/auth.go:426-437 — TokenAuth 使用缓存中的用户状态做放行决定。</div>
-    <div class="problem"><strong>Why it matters：</strong>禁用与撤销是安全控制，调用方收到错误并不能撤回已提交 DB 变更，也不能保证其他实例停止使用旧授权。</div>
-    <div class="problem"><strong>Realistic failure scenario：</strong>管理员禁用被盗令牌时 Redis 短暂超时，DB 更新成功但失效失败。Redis 随即恢复，另一实例在剩余 TTL 内继续接受旧缓存。</div>
-    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>为撤销敏感实体增加 DB auth_version/disabled_at 并在缓存值携带版本；失效失败写入持久 outbox 重试。高风险管理操作可在成功响应前验证全局失效或启用短期 DB 复核。</div></div>
-    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>构建可审计的授权版本/deny epoch 协议，实例按单调版本拒绝旧缓存；将缓存失效与事件发布纳入事务 outbox。</div></div>
-    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
-      <strong>Regression test suggestion：</strong>模拟 DB commit 成功、Redis invalidation 失败、Redis 恢复、另一个实例旧缓存命中的完整时序，断言旧版本立即被拒；覆盖用户、token、硬删除和额度更新。<br>
-      <strong>Estimated effort：</strong>2–3 天
-    </div>
+model/auth_cache_invalidation.go — 事务内 auth_version + durable outbox；commit 前 SET fence + INCR generation + DEL hash，失败即回滚 DB。
+common/redis_versioned_hash.go — fenced cache hit/fill 拒绝旧值；commit 后只释放匹配 token，旧 outbox 不能清除新 fence。
+main.go — 启动同步 replay，运行时每秒多实例幂等重试。</div>
+    <div class="problem"><strong>Outcome：</strong>DB commit 成功意味着旧授权已不可从 Redis 到达；Redis 故障期间回源 DB 且不回填，恢复后即使人为注入旧 hash 也被 fence 拒绝。健康 cache hit 不增加 DB 查询。</div>
+    <div class="fix-box"><div class="fix-label">Implemented &amp; verified</div><div>用户禁用/硬删、Token 禁用/删除、提交前 Redis 失败回滚、提交后断开恢复、旧 hash 注入、乱序 fence 与正常命中均在 race 下通过。</div></div>
   </div>
 <div class="finding severity-medium" id="finding-r06">
-    <div class="finding-header">
-      <h4>R06. 发布 job 引用了 GitHub Environment，但保护规则无法由仓库证明</h4>
-      <span class="badge badge-medium">Medium</span>
-      <span class="badge badge-suspected">Confidence: Medium</span>
-    </div>
-    <div class="finding-meta">
-      <span>📁 Category: Release Governance</span>
-      <span>📌 Status: External verification required</span>
-      <span>📍 Affected area: .github/workflows/docker-build.yml；release.yml；electron-build.yml；docker-image-*.yml</span>
-    </div>
-    <div class="problem"><strong>Problem：</strong>workflow 结构已经把高风险发布集中到命名 Environment，但真正的人工审批、分支限制与绕过策略存放在 GitHub 仓库设置中，本地审计无法确认其是否启用。</div>
+    <div class="finding-header"><h4>R06. GitHub API 已确认两个发布 Environment 均不存在</h4><span class="badge badge-medium">Medium</span><span class="badge badge-confirmed">Confidence: High</span></div>
+    <div class="finding-meta"><span>📁 Category: Release Governance</span><span>📌 Status: Open · External administrator action required</span><span>📍 Affected area: GitHub repository settings + publish workflows</span></div>
+    <div class="problem"><strong>Problem：</strong><code>container-publish</code> 与 <code>release-publish</code> 均返回 404；当前没有 required reviewer、branch/tag policy 或 admin bypass 保护可供发布依赖。</div>
     <div class="evidence"><strong>Evidence：</strong>
-.github/workflows/docker-build.yml:115-120、188-196 — 发布任务绑定 container-publish。
-.github/workflows/release.yml:304-312、electron-build.yml:184-192 — 正式制品绑定 release-publish。
-同类引用共 8 个 job、5 个 workflow。
-仓库文件不能显示 GitHub 端 required reviewers、deployment branch rules、wait timer 或 admin bypass 设置。</div>
-    <div class="problem"><strong>Why it matters：</strong>如果 Environment 没有保护规则，environment 字段只提供命名/密钥范围，不能独立阻止被攻陷的工作流或误操作直接发布。</div>
-    <div class="problem"><strong>Realistic failure scenario：</strong>攻击者通过可写工作流或高权限账号触发 release job；若 GitHub 环境没有 required reviewer/branch restriction，发布无需第二人确认。</div>
-    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>在 GitHub 设置中核对两个 Environment：required reviewers、受保护分支/tag、禁止管理员绕过、等待门与机密权限；截图或导出设置作为发布证据。</div></div>
-    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>用组织策略/IaC 管理环境保护，定期审计漂移，并把发布证明与审批记录归档到每次 release。</div></div>
-    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
-      <strong>Regression test suggestion：</strong>用无权限分支和测试 tag 触发 dry-run，确认 job 被环境门阻挡；审批后才可继续，管理员绕过路径按策略验证。<br>
-      <strong>Estimated effort：</strong>少于 1 小时核验；IaC 另计
-    </div>
+2026-07-19 只读 <code>gh api</code>：repository environments total_count=0；两个命名 Environment 均 missing/unreadable。
+scripts/verify-github-environments.sh — 只读检查 reviewer≥1、branch policy=true、can_admins_bypass=false；缺失或不可读即失败。
+.github/workflows/environment-governance.yml 与 5 个发布 workflow — 定时取证并在发布前 fail-closed。</div>
+    <div class="problem"><strong>Outcome：</strong>仓库现在不会把 Environment 名称当作保护证明；在管理员创建并保护两项设置前，发布工作流会主动失败。</div>
+    <div class="fix-box" style="background:#fff8e1;border-color:#ffe082"><div class="fix-label">Still required</div><div>GitHub 管理员创建两个 Environment，配置至少一名 reviewer、受限 branch/tag、禁止管理员绕过；随后运行治理 workflow 并归档 sanitized evidence。</div></div>
   </div>
-<div class="finding severity-medium" id="finding-r07">
-    <div class="finding-header">
-      <h4>R07. 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</h4>
-      <span class="badge badge-medium">Medium</span>
-      <span class="badge badge-confirmed">Confidence: High</span>
-    </div>
-    <div class="finding-meta">
-      <span>📁 Category: Maintainability / Release</span>
-      <span>📌 Status: Confirmed · Release process</span>
-      <span>📍 Affected area: 整个工作树（生成报告前取证快照）</span>
-    </div>
-    <div class="problem"><strong>Problem：</strong>大量互不分组的变更虽然能一起通过测试，但无法清晰回答每项变更的意图、所有者、回滚单元和最小审查范围。</div>
+<div class="finding severity-info" id="finding-r07">
+    <div class="finding-header"><h4>R07. 已修复：整改已拆分提交并由干净 checkout 证明</h4><span class="badge badge-confirmed">Resolved</span><span class="badge badge-confirmed">Historical severity: Medium</span></div>
+    <div class="finding-meta"><span>📁 Category: Maintainability / Release</span><span>📌 Status: Remediated · Repository verified</span><span>📍 HEAD: 565b2a61c04782c3e2b5c0d148e689a908dce47a</span></div>
+    <div class="problem"><strong>Historical problem：</strong>旧审计快照曾包含 1,781 项未分组变更，难以对应意图、回滚与测试证据。</div>
     <div class="evidence"><strong>Evidence：</strong>
-分支 main，HEAD 93155552f101bfd963742e1e6c8b14c8dd17b199。
-git status --short：1781 项，其中 1513 项 tracked 修改/删除、268 项 untracked、0 staged。
-git diff --stat：1513 files changed，46,893 insertions，36,794 deletions（未包含 untracked 内容）。
-本轮所有门禁针对这个完整工作树运行；报告自身生成后会额外增加一个审计制品，不计入上述代码快照。</div>
-    <div class="problem"><strong>Why it matters：</strong>发布事故时难以定位或撤回单一风险；后续 reviewer 也无法区分用户原有改动、审计修复与生成制品，绿色结果不可轻易映射到可合并提交。</div>
-    <div class="problem"><strong>Realistic failure scenario：</strong>上线后出现回归，需要回滚某个缓存修复，却发现它与前端、迁移、文档和运维脚本混在同一巨大差异中，只能整体回退或在线挑拣。</div>
-    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>按安全、计费、缓存、前端、CI/运维拆成有意图的提交/PR；在干净 clone 或新 worktree 重新应用并跑同一门禁，确认没有依赖本地未跟踪文件。</div></div>
-    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>建立变更预算、ownership 与分层 PR 策略；审计报告绑定不可变 commit，CI 从干净 checkout 生成可复现证据。</div></div>
-    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
-      <strong>Regression test suggestion：</strong>在干净 checkout 对候选 commit 运行 backend preflight、四套前端门禁、actionlint、ops tests 与报告 lint；禁止未跟踪源码参与发布。<br>
-      <strong>Estimated effort：</strong>0.5–1 天
-    </div>
+整改拆为 <code>4659f2a</code>（R04）、<code>44d7609</code>（R05）、<code>afa6bfa</code>（R08）、<code>565b2a6</code>（ops）四个提交。
+当前 HEAD 和新建 detached fresh worktree 均输出 <code>clean-checkout sha=565b2a61…</code>。
+deploy.sh 拒绝 tracked/staged/untracked 脏状态，并用 <code>git archive HEAD</code>；ignored runner 文件不能混入。
+基线 <code>da99ecd</code> 的远端 CI <a href="https://github.com/lijiawei0305-pixel/multi_newapi/actions/runs/29688097488">29688097488</a> 成功。</div>
+    <div class="problem"><strong>Outcome：</strong>每项整改有独立回滚单元，发布输入只来自不可变 HEAD。当前新提交尚未推送，因此远端 CI 仍应在后续 push 后重跑，不能复用旧 run 作为新 HEAD 证明。</div>
+    <div class="fix-box"><div class="fix-label">Implemented &amp; verified</div><div>本地仓库范围已闭环；push 后由新增 CI clean-checkout gate 自动生成远端证据。</div></div>
   </div>
-<div class="finding severity-low" id="finding-r08">
-    <div class="finding-header">
-      <h4>R08. Realtime WebSocket 无条件接受任意 Origin</h4>
-      <span class="badge badge-low">Low</span>
-      <span class="badge badge-confirmed">Confidence: High</span>
-    </div>
-    <div class="finding-meta">
-      <span>📁 Category: WebSocket / Defense in Depth</span>
-      <span>📌 Status: Confirmed hardening gap</span>
-      <span>📍 Affected area: controller/relay.go；router/relay-router.go；middleware/auth.go</span>
-    </div>
-    <div class="problem"><strong>Problem：</strong>任何网页 Origin 都能完成协议升级并进入令牌校验路径，系统没有提供同源/允许列表策略来减少浏览器环境的跨站滥用面。</div>
+<div class="finding severity-info" id="finding-r08">
+    <div class="finding-header"><h4>R08. 已修复：Realtime WebSocket 默认同源并在鉴权前拒绝未知 Origin</h4><span class="badge badge-confirmed">Resolved</span><span class="badge badge-confirmed">Historical severity: Low</span></div>
+    <div class="finding-meta"><span>📁 Category: WebSocket / Defense in Depth</span><span>📌 Status: Remediated · Real handshake verified</span><span>📍 Commit: afa6bfa</span></div>
+    <div class="problem"><strong>Historical problem：</strong>Upgrader 曾无条件返回 true，任何浏览器 Origin 都可进入携带 subprotocol token 的鉴权路径。</div>
     <div class="evidence"><strong>Evidence：</strong>
-controller/relay.go:414-419 — 生产 websocket.Upgrader 的 CheckOrigin 固定返回 true。
-router/relay-router.go:69-80 — /v1/realtime 仍经过 TokenAuth。
-middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API key。
-因此端点不是未认证；风险是 Origin 纵深防线缺失，而不是任意网站可无凭据劫持。</div>
-    <div class="problem"><strong>Why it matters：</strong>令牌一旦因扩展、前端存储或 XSS 暴露，Origin 检查本可阻断部分跨站利用；当前所有防线都落在令牌保密性上。</div>
-    <div class="problem"><strong>Realistic failure scenario：</strong>用户浏览器中的 API key 被恶意扩展或站点脚本读取，攻击者页面可直接从任意 Origin 建立 realtime 连接并消费额度。</div>
-    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>增加可配置 Origin allowlist/同源检查；非浏览器客户端通常没有 Origin，可明确允许空 Origin；保留专用开关支持受控跨域。</div></div>
-    <div class="fix-box" style="margin-top:6px"><div class="fix-label">Better long-term fix</div><div>集中管理 HTTP/CORS/WebSocket origin policy，按租户域名与部署域名生成规则，并记录拒绝指标。</div></div>
-    <div class="fix-box" style="margin-top:6px;background:#fff8e1;border-color:#ffe082">
-      <strong>Regression test suggestion：</strong>握手测试覆盖同源、允许列表、未知 Origin、空 Origin、代理 Host 与 token subprotocol；未知浏览器 Origin 必须 403。<br>
-      <strong>Estimated effort：</strong>约 0.5 天
-    </div>
+middleware/websocket_origin.go — 默认同源；允许无 Origin SDK/CLI；支持精确 allowlist、受控跨域和显式可信反代头。
+router/relay-router.go — Origin guard 位于 TokenAuth 前，未知网页 Origin 直接 403。
+controller/relay.go — upgrader 复用同一策略作为纵深检查。</div>
+    <div class="problem"><strong>Outcome：</strong>未知/畸形/null/多值 Origin 不会进入 token 解析且不会反射 subprotocol secret；同源、ws/wss、默认端口、IPv6、代理 Host/Proto 与空 Origin 客户端保持兼容。</div>
+    <div class="fix-box"><div class="fix-label">Implemented &amp; verified</div><div>middleware/controller 真实握手与 race 测试通过；启用可信代理头时仍要求边界覆盖/清除客户端 Forwarded 头。</div></div>
   </div>
 
   <h3 class="section-title" id="architecture">🏗 Architecture &amp; Module Boundaries / 架构与模块边界</h3>
@@ -608,10 +511,10 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed · Release process</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 已修复：耦合配置以不可变快照原子发布</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 4659f2a</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 已修复：意图提交与 clean-checkout 边界</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 565b2a6</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -628,10 +531,10 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed bounded failure window</td></tr><tr><td><a href="#finding-r08" style="color:var(--accent);text-decoration:none">R08 · Realtime WebSocket 无条件接受任意 Origin</a></td><td><span class="badge badge-low">Low</span></td><td>Confirmed hardening gap</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 部分修复：最小权限与 digest 迁移已实现，现网尚未切换</a></td><td><span class="badge badge-medium">Medium</span></td><td>Partial · production open</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 已修复：commit 前 Redis fence + durable outbox</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 44d7609</td></tr><tr><td><a href="#finding-r08" style="color:var(--accent);text-decoration:none">R08 · 已修复：Realtime WebSocket 默认同源策略</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · afa6bfa</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -648,10 +551,10 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed bounded failure window</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 部分修复：仓库已支持异地加密复制，生产灾备证据仍缺失</a></td><td><span class="badge badge-high">High</span></td><td>Partial · production open</td></tr><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 已修复：耦合配置以不可变快照原子发布</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 4659f2a</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 已修复：commit 前 Redis fence + durable outbox</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 44d7609</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -678,19 +581,19 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       <div class="card-body">
         <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
         <p style="margin-top:8px"><strong>Inspected evidence：</strong>后端全量 race、四 provider fact、不可变快照、迁移、重放、重复付款、历史订单与人工核账回归，以及 frontend default/classic/orbit/electron、ops tests、actionlint。</p>
-        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>真实支付、provider、灾备与人工可访问性没有执行。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>未执行真实支付/provider、异地灾备或人工可访问性测试；基线 disposable MySQL+Redis 配对恢复已在远端完成。</p>
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 部分修复：仓库已支持异地加密复制，生产灾备证据仍缺失</a></td><td><span class="badge badge-high">High</span></td><td>Partial · production open</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
       <div class="card-header">✅ Verified / 已验证实践</div>
-      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>R01 修复后 Go 全量 build/vet/race 重新通过</div><div class="check-item"><span class="check">✓</span>订阅测试覆盖 provider facts、快照漂移、全部关键事实不符、重放/重复付款、跨订单复用、迁移与人工处置</div><div class="check-item"><span class="check">✓</span>Default 19 文件/136 tests；Classic 13；Orbit 31；Electron navigation 4</div><div class="check-item"><span class="check">✓</span>运维脚本 14/14 静态场景通过</div><div class="check-item"><span class="check">✓</span>新增测试使用 testify 并保护真实安全/并发契约</div></div></div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Go 全仓测试、go vet 与认证/配置/WebSocket 重点 race 在最终代码提交上通过</div><div class="check-item"><span class="check">✓</span>R04 不可变快照、R05 fence/outbox 与 R08 真实 WebSocket 握手均有确定性回归</div><div class="check-item"><span class="check">✓</span>订阅测试覆盖 provider facts、快照漂移、全部关键事实不符、重放/重复付款、跨订单复用、迁移与人工处置</div><div class="check-item"><span class="check">✓</span>Default 19 文件/136 tests；Classic 13；Orbit 31；Electron navigation 4</div><div class="check-item"><span class="check">✓</span>运维脚本 18/18 场景通过；新增后端测试使用 testify 并保护真实安全/并发契约</div></div></div>
     </div>
 <h3 class="section-title" id="maintainability">📐 Maintainability / 可维护性</h3>
     <div class="card">
@@ -702,10 +605,10 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed · Release process</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 已修复：耦合配置以不可变快照原子发布</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 4659f2a</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 已修复：意图提交与 clean-checkout 边界</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 565b2a6</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -722,10 +625,10 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed bounded failure window</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 已修复：耦合配置以不可变快照原子发布</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 4659f2a</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 已修复：commit 前 Redis fence + durable outbox</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 44d7609</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -737,20 +640,20 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       <div class="card-header">🧭 Coverage Note / 覆盖说明</div>
       <div class="card-body">
         <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
-        <p style="margin-top:8px"><strong>Inspected evidence：</strong>9 个 workflow、actionlint/YAML、SHA pin、release/image job、ops runbook、dirty tree。</p>
-        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有本地 Docker、没有服务器部署；GitHub Environment 设置不可见。</p>
+        <p style="margin-top:8px"><strong>Inspected evidence：</strong>9 个 workflow、actionlint/YAML、SHA pin、release/image job、ops runbook、clean-checkout 与 <code>git archive HEAD</code> 发布边界。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有本地 Docker、没有服务器部署；GitHub API 已只读确认两个发布 Environment 均不存在，未修改设置。</p>
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 4 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · 发布 job 引用了 GitHub Environment，但保护规则无法由仓库证明</a></td><td><span class="badge badge-medium">Medium</span></td><td>External verification required</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed · Release process</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 部分修复：仓库已支持异地加密复制，生产灾备证据仍缺失</a></td><td><span class="badge badge-high">High</span></td><td>Partial · production open</td></tr><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 部分修复：最小权限与 digest 迁移已实现，现网尚未切换</a></td><td><span class="badge badge-medium">Medium</span></td><td>Partial · production open</td></tr><tr><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · GitHub API 确认两个发布 Environment 均不存在</a></td><td><span class="badge badge-medium">Medium</span></td><td>Open · administrator action required</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 已修复：意图提交与 clean-checkout 边界</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 565b2a6</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
       <div class="card-header">✅ Verified / 已验证实践</div>
-      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>外部 Actions 固定 40 位 commit SHA</div><div class="check-item"><span class="check">✓</span>制品流程包含 SBOM、provenance、cosign 与 draft release</div><div class="check-item"><span class="check">✓</span>部署/备份/恢复脚本有静态防误操作回归</div></div></div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>外部 Actions 固定 40 位 commit SHA</div><div class="check-item"><span class="check">✓</span>制品流程包含 SBOM、provenance、cosign 与 draft release</div><div class="check-item"><span class="check">✓</span>发布前 fail-closed 核验 GitHub Environment；当前缺失状态会阻断发布</div><div class="check-item"><span class="check">✓</span>部署只打包已提交的 HEAD，dirty index/worktree 与未跟踪 runner 文件不能混入</div><div class="check-item"><span class="check">✓</span>部署/备份/恢复脚本有 18/18 防误操作回归</div></div></div>
     </div>
 <h3 class="section-title" id="documentation">📚 Documentation Accuracy / 文档准确性</h3>
     <div class="card">
@@ -772,14 +675,14 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       <div class="card-body">
         <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
         <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查 Option 校验/批量更新、热 map/slice 锁、支付设置、Compose 与 workflow environment。</p>
-        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>GitHub/服务器外部设置不可读取。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>GitHub/服务器外部设置已只读核验为尚未配置；本轮未生成凭据或修改外部状态。</p>
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 3 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · 发布 job 引用了 GitHub Environment，但保护规则无法由仓库证明</a></td><td><span class="badge badge-medium">Medium</span></td><td>External verification required</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 部分修复：最小权限与 digest 迁移已实现，现网尚未切换</a></td><td><span class="badge badge-medium">Medium</span></td><td>Partial · production open</td></tr><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 已修复：耦合配置以不可变快照原子发布</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 4659f2a</td></tr><tr><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · GitHub API 确认两个发布 Environment 均不存在</a></td><td><span class="badge badge-medium">Medium</span></td><td>Open · administrator action required</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -806,14 +709,14 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       <div class="card-body">
         <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
         <p style="margin-top:8px"><strong>Inspected evidence：</strong>检查计费/订阅/充值事务、跨 DB、不可变 checkout/benefit 快照、唯一 receipt、逐事件 evidence、人工 review decision、cache invalidation、备份 manifest 与恢复校验。</p>
-        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>无真实支付回调、MySQL/PostgreSQL migration 或远端恢复。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>无真实支付回调、生产/MySQL 8.4/PostgreSQL migration、异地副本恢复或 PITR；仅基线 disposable MySQL+Redis 配对恢复已在远端完成。</p>
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed bounded failure window</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 部分修复：仓库已支持异地加密复制，生产灾备证据仍缺失</a></td><td><span class="badge badge-high">High</span></td><td>Partial · production open</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 已修复：commit 前 Redis fence + durable outbox</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 44d7609</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -830,10 +733,10 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 部分修复：最小权限与 digest 迁移已实现，现网尚未切换</a></td><td><span class="badge badge-medium">Medium</span></td><td>Partial · production open</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -860,19 +763,19 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       <div class="card-body">
         <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
         <p style="margin-top:8px"><strong>Inspected evidence：</strong>go mod verify、bun/npm audit、Actions pin、SBOM/provenance/cosign 与 license inventory。</p>
-        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有实际构建/拉取生产容器；base images 未 digest pin。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有实际构建/拉取新生产容器，也未执行 MySQL 8.4 演练；现网 MySQL/Redis digest 已只读核验并锁入生产 Compose。</p>
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · 发布 job 引用了 GitHub Environment，但保护规则无法由仓库证明</a></td><td><span class="badge badge-medium">Medium</span></td><td>External verification required</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 部分修复：最小权限与 digest 迁移已实现，现网尚未切换</a></td><td><span class="badge badge-medium">Medium</span></td><td>Partial · production open</td></tr><tr><td><a href="#finding-r06" style="color:var(--accent);text-decoration:none">R06 · GitHub API 确认两个发布 Environment 均不存在</a></td><td><span class="badge badge-medium">Medium</span></td><td>Open · administrator action required</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
       <div class="card-header">✅ Verified / 已验证实践</div>
-      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Go 模块校验通过</div><div class="check-item"><span class="check">✓</span>Default/Electron/Orbit audit 均为 0 已知漏洞</div><div class="check-item"><span class="check">✓</span>所有外部 Actions 固定 commit SHA</div><div class="check-item"><span class="check">✓</span>发布工作流生成证明并签名</div></div></div>
+      <div class="card-body"><div class="check-list"><div class="check-item"><span class="check">✓</span>Go 模块校验通过</div><div class="check-item"><span class="check">✓</span>Default/Electron/Orbit audit 均为 0 已知漏洞</div><div class="check-item"><span class="check">✓</span>所有外部 Actions 固定 commit SHA</div><div class="check-item"><span class="check">✓</span>生产 Compose 的 MySQL/Redis image 固定到已核验 digest</div><div class="check-item"><span class="check">✓</span>发布工作流生成证明并签名</div></div></div>
     </div>
 <h3 class="section-title" id="cost">💸 Cost &amp; Resource Economics / 成本与资源经济性</h3>
     <div class="card">
@@ -912,10 +815,10 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 认证缓存失效在 DB 提交后失败时，仍存在短暂旧授权窗口</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed bounded failure window</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 部分修复：仓库已支持异地加密复制，生产灾备证据仍缺失</a></td><td><span class="badge badge-high">High</span></td><td>Partial · production open</td></tr><tr><td><a href="#finding-r05" style="color:var(--accent);text-decoration:none">R05 · 已修复：commit 前 Redis fence + durable outbox</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 44d7609</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -928,14 +831,14 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       <div class="card-body">
         <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
         <p style="margin-top:8px"><strong>Inspected evidence：</strong>真实本地 WebSocket 对、miniredis 时序 barrier、race、构建和 shell 场景测试。</p>
-        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有 Docker/服务器/真实 provider，因此不把静态测试包装成上线证明。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>没有本地 Docker、没有部署或真实 provider；服务器/GitHub 仅做只读核验，因此不把静态测试包装成上线证明。</p>
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 仓库默认恢复链路仍是同机恢复点，且本轮没有真实灾备演练</a></td><td><span class="badge badge-high">High</span></td><td>Confirmed in repository · External production state unknown</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed · Release process</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r02" style="color:var(--accent);text-decoration:none">R02 · 部分修复：仓库已支持异地加密复制，生产灾备证据仍缺失</a></td><td><span class="badge badge-high">High</span></td><td>Partial · production open</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 已修复：意图提交与 clean-checkout 边界</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 565b2a6</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -980,10 +883,10 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r08" style="color:var(--accent);text-decoration:none">R08 · Realtime WebSocket 无条件接受任意 Origin</a></td><td><span class="badge badge-low">Low</span></td><td>Confirmed hardening gap</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r08" style="color:var(--accent);text-decoration:none">R08 · 已修复：Realtime WebSocket 默认同源策略</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · afa6bfa</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -1000,10 +903,10 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 1 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 生产 Compose 使用应用 DB root、无认证 Redis，并依赖可变基础镜像 tag</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r03" style="color:var(--accent);text-decoration:none">R03 · 部分修复：最小权限与 digest 迁移已实现，现网尚未切换</a></td><td><span class="badge badge-medium">Medium</span></td><td>Partial · production open</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -1016,14 +919,14 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       <div class="card-body">
         <p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span></p>
         <p style="margin-top:8px"><strong>Inspected evidence：</strong>全仓 gofmt/vet/diff-check、JSON wrapper、DB helper、shell/YAML/style gates。</p>
-        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>巨大差异尚未按意图拆分。</p>
+        <p style="margin-top:8px"><strong>Exclusions / limits：</strong>本轮整改已拆成四个意图提交；更早历史提交未在本轮重写。</p>
       </div>
     </div>
     <div class="card">
-        <div class="card-header">已确认 / 需核验 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现</span></div>
+        <div class="card-header">关联发现 / 历史轨迹 <span style="font-weight:400;font-size:13px;color:var(--text-secondary)">· 2 个关联发现（含已修复轨迹）</span></div>
         <div class="card-body" style="padding:0"><div class="table-wrap"><table>
           <thead><tr><th>发现</th><th style="width:100px">严重程度</th><th style="width:170px">状态</th></tr></thead>
-          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 批量配置只在数据库内原子，运行时仍逐字段发布裸全局</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 1781 项脏工作区让发布范围、回滚边界与审查结论难以复现</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed · Release process</td></tr></tbody>
+          <tbody><tr><td><a href="#finding-r04" style="color:var(--accent);text-decoration:none">R04 · 已修复：耦合配置以不可变快照原子发布</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 4659f2a</td></tr><tr><td><a href="#finding-r07" style="color:var(--accent);text-decoration:none">R07 · 已修复：意图提交与 clean-checkout 边界</a></td><td><span class="badge badge-confirmed">Resolved</span></td><td>Remediated · 565b2a6</td></tr></tbody>
         </table></div></div>
       </div>
     <div class="card">
@@ -1052,10 +955,8 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       <thead><tr><th>Principle</th><th style="width:80px">Count</th><th style="width:100px">Severity</th><th>Affected areas</th></tr></thead>
       <tbody>
         <tr><td>Recoverability must be proven</td><td>1</td><td><span class="badge badge-high">High</span></td><td>R02 offsite/PITR/restore drill</td></tr>
-        <tr><td>Least privilege &amp; immutable artifacts</td><td>1</td><td><span class="badge badge-medium">Medium</span></td><td>R03 Compose DB/Redis/base images</td></tr>
-        <tr><td>Atomic publication</td><td>2</td><td><span class="badge badge-medium">Medium</span></td><td>R04 runtime config；R05 auth revocation</td></tr>
-        <tr><td>Reproducible release governance</td><td>2</td><td><span class="badge badge-medium">Medium</span></td><td>R06 external environment；R07 dirty scope</td></tr>
-        <tr><td>Defense in depth</td><td>1</td><td><span class="badge badge-low">Low</span></td><td>R08 WebSocket Origin</td></tr>
+        <tr><td>Production least privilege must be observed</td><td>1</td><td><span class="badge badge-medium">Medium</span></td><td>R03 server credential/ACL migration + MySQL 8.4 drill</td></tr>
+        <tr><td>External release controls must exist</td><td>1</td><td><span class="badge badge-medium">Medium</span></td><td>R06 GitHub Environment administrator configuration</td></tr>
       </tbody>
     </table></div></div>
   </div>
@@ -1069,6 +970,10 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
       <div class="check-item"><span class="check">✓</span>Cross-database discipline — GORM/helper + SQLite/MySQL/PostgreSQL 兼容分支</div>
       <div class="check-item"><span class="check">✓</span>Immutable cache snapshots — channel/subscription/auth generation 防 stale fill</div>
       <div class="check-item"><span class="check">✓</span>Immutable checkout facts — 订单、权益、支付预期、provider 事实、回执和人工决策形成版本化边界</div>
+      <div class="check-item"><span class="check">✓</span>Atomic runtime publication — 支付、认证/OAuth 与限流配置只发布完整快照</div>
+      <div class="check-item"><span class="check">✓</span>Linearizable revocation boundary — DB commit 前 fence，durable outbox 幂等重放</div>
+      <div class="check-item"><span class="check">✓</span>Defense in depth — WebSocket Origin 在 token 解析前验证</div>
+      <div class="check-item"><span class="check">✓</span>Reproducible review — 四个意图提交、git archive HEAD、fresh worktree clean-checkout</div>
     </div></div>
   </div>
 
@@ -1078,8 +983,9 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
     <div class="card-body" style="padding:0"><div class="table-wrap"><table>
       <thead><tr><th>#</th><th>Fix</th><th>Effort</th><th>Why now</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td>R02：自动加密异地复制 + 不可变保留，并在隔离主机做首次完整 restore</td><td>1–2 天</td><td>当前无法覆盖整机/磁盘级事故</td></tr>
-        <tr><td>2</td><td>R07：把 1781 项工作树拆成意图清晰的提交，在干净 checkout 重跑门禁</td><td>0.5–1 天</td><td>为灾备闭环和回滚建立可审查边界</td></tr>
+        <tr><td>1</td><td>R02：服务器安装 age/rclone，配置跨账号远端与 Object Lock，生成 receipt 并从远端完整 restore</td><td>0.5–1 天</td><td>当前仍无法证明整机/磁盘级事故可恢复</td></tr>
+        <tr><td>2</td><td>R03：生成互异 MYSQL_APP/REDIS 凭据，在维护窗口切换并验收 app 非 root、匿名 Redis 被拒</td><td>约 0.5 天</td><td>当前现网仍保留旧权限模型</td></tr>
+        <tr><td>3</td><td>R06：创建并保护 container-publish / release-publish Environment，运行治理审计</td><td>&lt;1 小时</td><td>当前 GitHub API 返回 404，所有新发布应保持阻断</td></tr>
       </tbody>
     </table></div></div>
   </div>
@@ -1088,37 +994,29 @@ middleware/auth.go:335-351 — 浏览器 WebSocket 可通过子协议携带 API 
     <div class="card-body" style="padding:0"><div class="table-wrap"><table>
       <thead><tr><th>#</th><th>Fix</th><th>Effort</th><th>Dependency</th></tr></thead>
       <tbody>
-        <tr><td>3</td><td>R03：应用 DB 专用用户、Redis ACL、MySQL 8.4 LTS 隔离迁移与 digest pin</td><td>1–2 天</td><td>需可回滚的服务器/隔离环境</td></tr>
-        <tr><td>4</td><td>R04：把支付/认证/限流配置收进不可变 RuntimeConfig 原子快照</td><td>2–4 天</td><td>先定义配置聚合边界</td></tr>
-        <tr><td>5</td><td>R05：DB auth_version/deny epoch + transaction outbox</td><td>2–3 天</td><td>需多实例时序测试</td></tr>
-        <tr><td>6</td><td>R06：核验并归档 GitHub Environment reviewer/branch/bypass 规则</td><td>&lt;1 小时</td><td>需要 GitHub 管理权限</td></tr>
+        <tr><td>4</td><td>R03：为 MySQL 8.4 固定批准 digest，在隔离卷执行 restore→升级→写入→回滚演练</td><td>1–2 天</td><td>禁止拿生产 datadir 直接试升级</td></tr>
+        <tr><td>5</td><td>R02：建立 binlog/PITR 与周期性跨账号 restore 证据归档</td><td>另计</td><td>降低全量备份之间的 RPO</td></tr>
       </tbody>
     </table></div></div>
   </div>
-  <div class="card">
-    <div class="card-header"><span>🧰 Scheduled / 可排期强化</span><span class="badge badge-low">Low</span></div>
-    <div class="card-body" style="padding:0"><div class="table-wrap"><table>
-      <thead><tr><th>#</th><th>Fix</th><th>Effort</th></tr></thead>
-      <tbody><tr><td>7</td><td>R08：WebSocket Origin allowlist/同源策略，明确允许无 Origin 的非浏览器客户端</td><td>约 0.5 天</td></tr></tbody>
-    </table></div></div>
-  </div>
+  <div class="card"><div class="card-header">✅ Completed in this pass / 本轮已完成</div><div class="card-body"><p>R04 不可变配置快照、R05 授权撤销 fence/outbox、R07 意图提交与 clean checkout、R08 WebSocket Origin 策略均已实现并通过对应测试。</p></div></div>
   <div class="card">
     <div class="card-header">⏸ Not performed in this audit / 本轮明确未做</div>
-    <div class="card-body"><p>未擅自部署服务器、未启动本地 Docker、未更改 GitHub 设置、未用真实支付/provider 凭据、未做破坏性 restore。它们需要独立环境、授权和回滚窗口；已作为 R02/R03/R06 或 coverage limit 记录，而不是假装完成。</p></div>
+    <div class="card-body"><p>未部署或修改服务器、未启动本地 Docker、未更改 GitHub 设置、未用真实支付/provider 凭据、未做生产破坏性 restore。仅进行了服务器/GitHub 只读核验；外部缺口按 R02/R03/R06 保持开放，而不是用仓库脚本冒充生产已完成。</p></div>
   </div>
 
   <h3 class="section-title">⚡ Quick Wins / 快速收益</h3>
   <div class="win-grid">
-    <div class="win-card"><div class="win-title">核验 GitHub Environment 保护</div><div class="win-meta">R06 · &lt;1h · 高发布治理收益</div></div>
-    <div class="win-card"><div class="win-title">为已校验备份集加对象存储复制任务</div><div class="win-meta">R02 · 0.5–1d · 立即降低同机灾难风险</div></div>
-    <div class="win-card"><div class="win-title">建立干净审计分支并拆分变更</div><div class="win-meta">R07 · 0.5–1d · 提升审查与回滚能力</div></div>
-    <div class="win-card"><div class="win-title">增加 WebSocket Origin 配置开关</div><div class="win-meta">R08 · 0.5d · 浏览器纵深防护</div></div>
-    <div class="win-card"><div class="win-title">把首次 restore 验收写入发布清单</div><div class="win-meta">R02 · &lt;1h 文档工作 · 防止静态门禁冒充灾备证明</div></div>
+    <div class="win-card"><div class="win-title">创建 GitHub 发布 Environment</div><div class="win-meta">R06 · &lt;1h · 解除治理门禁</div></div>
+    <div class="win-card"><div class="win-title">配置 age/rclone 与对象锁</div><div class="win-meta">R02 · 需外部存储凭据 · 立即建立首份 receipt</div></div>
+    <div class="win-card"><div class="win-title">生成 DB/Redis 独立凭据</div><div class="win-meta">R03 · &lt;1h 准备 · 维护窗口切换</div></div>
+    <div class="win-card"><div class="win-title">从远端副本做首次隔离 restore</div><div class="win-meta">R02 · 记录 RTO/RPO/readiness/reconcile</div></div>
+    <div class="win-card"><div class="win-title">排期 MySQL 8.4 隔离演练</div><div class="win-meta">R03 · 固定 digest 后再迁移</div></div>
   </div>
 
   <div style="text-align:center;padding:40px 0 20px;color:var(--text-secondary);font-size:12px">
-    Fuck My Shit Mountain v1.0 HTML format · Codex self-audit · 2026-07-19 19:55:23 +08:00<br>
-    Scope: complete local working tree after R01 remediation and final backend gates · No Claude · No local Docker · No server mutation
+    Fuck My Shit Mountain v1.0 HTML format · Codex self-audit · 2026-07-19 22:14:34 +08:00<br>
+    Scope: R02–R08 remediation through 565b2a61 · No Claude · No local Docker · Read-only server/GitHub checks · No deployment
   </div>
 </div>
 
