@@ -88,12 +88,21 @@ func removeLockedBufferedResponseSpoolDir(path string, lockFile *os.File) error 
 		return fmt.Errorf("generate stale spool quarantine name: %w", err)
 	}
 	quarantine := filepath.Join(filepath.Dir(path), filepath.Base(path)+".deleting-"+hex.EncodeToString(random))
-	if err := os.Rename(path, quarantine); err != nil {
-		return errors.Join(fmt.Errorf("quarantine stale response spool: %w", err), lockFile.Close())
+	// Windows refuses to rename a directory while any file below it has an
+	// open handle, even when that file was opened with FILE_SHARE_DELETE. The
+	// exclusive byte-range lock already proved that this random instance
+	// directory has no live owner, and instance directories are never reused,
+	// so release the lock handle immediately before the quarantine rename.
+	if err := lockFile.Close(); err != nil {
+		return fmt.Errorf("close response spool ownership lock before quarantine: %w", err)
 	}
-	closeErr := lockFile.Close()
-	removeErr := os.RemoveAll(quarantine)
-	return errors.Join(closeErr, removeErr)
+	if err := os.Rename(path, quarantine); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("quarantine stale response spool: %w", err)
+	}
+	return os.RemoveAll(quarantine)
 }
 
 type bufferedResponseTokenOwner struct {
