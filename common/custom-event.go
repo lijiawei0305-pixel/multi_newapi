@@ -5,7 +5,6 @@
 package common
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -39,10 +38,6 @@ func checkWriter(writer io.Writer) stringWriter {
 var writeContentType = []string{"text/event-stream"}
 var noCache = []string{"no-cache"}
 
-var fieldReplacer = strings.NewReplacer(
-	"\n", "\\n",
-	"\r", "\\r")
-
 var dataReplacer = strings.NewReplacer(
 	"\n", "\n",
 	"\r", "\\r")
@@ -51,7 +46,7 @@ type CustomEvent struct {
 	Event string
 	Id    string
 	Retry uint
-	Data  interface{}
+	Data  string
 }
 
 func encode(writer io.Writer, event CustomEvent) error {
@@ -59,10 +54,13 @@ func encode(writer io.Writer, event CustomEvent) error {
 	return writeData(w, event.Data)
 }
 
-func writeData(w stringWriter, data interface{}) error {
-	dataReplacer.WriteString(w, fmt.Sprint(data))
-	if strings.HasPrefix(data.(string), "data") {
-		w.writeString("\n\n")
+func writeData(w stringWriter, data string) error {
+	if _, err := dataReplacer.WriteString(w, data); err != nil {
+		return err
+	}
+	if strings.HasPrefix(data, "data") {
+		_, err := w.writeString("\n\n")
+		return err
 	}
 	return nil
 }

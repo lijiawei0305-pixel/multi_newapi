@@ -15,13 +15,22 @@ permissions:
 
 jobs:
   paired-restore:
-    name: Real MySQL + Redis backup / destroy / restore
+    name: Real MySQL + Redis backup / destroy / restore (${{ matrix.mysql_profile }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mysql_profile: production-baseline-8.2
+            mysql_image: mysql:8.2@sha256:212fe73edca5df6ff14826d5eb975c914bfb91f82a2e923f9050568f99525da1
+          - mysql_profile: lts-candidate-8.4.10
+            mysql_image: mysql:8.4.10@sha256:c592c15aaf4a1961e15d82eb31ea5987dda862d1c4b1e93424438c0e91dc1f8d
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run authoritative disposable restore drill
         env:
           REQUIRE_DOCKER: '1'
+          MYSQL_IMAGE: ${{ matrix.mysql_image }}
         run: bash deploy/ops/tests/restore-integration.sh

@@ -34,6 +34,13 @@ install_web() {
 run_backend() {
   local failed=0
 
+  step "Repository secret scan"
+  go run github.com/zricethezav/gitleaks/v8@v8.30.1 dir \
+    --no-banner --no-color --redact . || failed=1
+
+  step "Gitee release sync unit tests"
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py' || failed=1
+
   step "deploy 脚本 helper lint"
   bash scripts/lint-deploy-helpers.sh deploy/ops || failed=1
   bash scripts/check-docker-context-secrets.sh || failed=1
@@ -52,17 +59,36 @@ run_backend() {
   step "Go 源码体积门禁"
   bash scripts/check-go-file-size.sh || failed=1
 
+  step "Go first-party package 范围门禁"
+  bash scripts/check-go-package-scope.sh || failed=1
+
+  local go_packages=()
+  while IFS= read -r package; do
+    [ -n "$package" ] && go_packages+=("$package")
+  done < <(bash scripts/list-first-party-go-packages.sh)
+  if [ "${#go_packages[@]}" -eq 0 ]; then
+    echo "Go first-party package 列表为空" >&2
+    return 1
+  fi
+
+  step "Go first-party vulnerability scan"
+  go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 "${go_packages[@]}" || failed=1
+
+  step "Go first-party correctness static analysis"
+  go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 \
+    -checks='SA*' "${go_packages[@]}" || failed=1
+
   step "准备 go:embed 前端目录"
   prepare_embed_dirs
 
-  step "Go 全仓编译"
-  go build ./... || failed=1
+  step "Go first-party 编译"
+  go build "${go_packages[@]}" || failed=1
 
-  step "Go 全仓 vet"
-  go vet ./... || failed=1
+  step "Go first-party vet"
+  go vet "${go_packages[@]}" || failed=1
 
-  step "Go 全仓测试（race）"
-  go test ./... -race -count=1 || failed=1
+  step "Go first-party 测试（race）"
+  go test "${go_packages[@]}" -race -count=1 || failed=1
 
   return "$failed"
 }
@@ -126,11 +152,17 @@ run_classic() {
   step "Classic ESLint"
   (cd web/classic && bun run eslint) || failed=1
 
+  step "Classic source file size budget"
+  (cd web/classic && node scripts/check-source-file-size.mjs) || failed=1
+
   step "Classic 安全回归测试"
   (cd web/classic && bun run test) || failed=1
 
   step "Classic 生产构建"
   (cd web/classic && bun run build) || failed=1
+
+  step "Classic initial bundle budget"
+  (cd web/classic && bun run bundle:check) || failed=1
 
   return "$failed"
 }

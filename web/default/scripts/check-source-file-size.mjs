@@ -23,16 +23,6 @@ const SOURCE_ROOT = path.resolve('src')
 const DEFAULT_MAX_LINES = 1500
 const SOURCE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx'])
 
-// These files predate the size gate. Their exact budgets prevent further
-// growth while keeping the allowlist small and making future removal obvious.
-const LEGACY_LINE_BUDGETS = new Map([
-  [
-    'src/features/system-settings/integrations/payment-settings-section.tsx',
-    2248,
-  ],
-  ['src/features/system-settings/models/tiered-pricing-editor.tsx', 1904],
-])
-
 function isGeneratedSource(fileName) {
   return (
     fileName.endsWith('.d.ts') ||
@@ -72,8 +62,6 @@ function countLines(source) {
 
 const sourceFiles = await collectSourceFiles(SOURCE_ROOT)
 const failures = []
-const seenLegacyFiles = new Set()
-
 for (const absolutePath of sourceFiles) {
   const relativePath = path
     .relative(process.cwd(), absolutePath)
@@ -81,27 +69,10 @@ for (const absolutePath of sourceFiles) {
     .join('/')
   const source = await readFile(absolutePath, 'utf8')
   const lineCount = countLines(source)
-  const legacyBudget = LEGACY_LINE_BUDGETS.get(relativePath)
-  const budget = legacyBudget ?? DEFAULT_MAX_LINES
-
-  if (legacyBudget !== undefined) {
-    seenLegacyFiles.add(relativePath)
-    if (lineCount <= DEFAULT_MAX_LINES) {
-      failures.push(
-        `${relativePath}: ${lineCount} lines; remove its stale legacy allowance`
-      )
-      continue
-    }
-  }
-
-  if (lineCount > budget) {
-    failures.push(`${relativePath}: ${lineCount} lines (budget ${budget})`)
-  }
-}
-
-for (const relativePath of LEGACY_LINE_BUDGETS.keys()) {
-  if (!seenLegacyFiles.has(relativePath)) {
-    failures.push(`${relativePath}: legacy allowance points to a missing file`)
+  if (lineCount > DEFAULT_MAX_LINES) {
+    failures.push(
+      `${relativePath}: ${lineCount} lines (budget ${DEFAULT_MAX_LINES})`
+    )
   }
 }
 
@@ -114,6 +85,6 @@ if (failures.length > 0) {
   process.exitCode = 1
 } else {
   console.log(
-    `Source file size check passed for ${sourceFiles.length} files (default budget: ${DEFAULT_MAX_LINES} lines; legacy allowances: ${LEGACY_LINE_BUDGETS.size}).`
+    `Source file size check passed for ${sourceFiles.length} files (default budget: ${DEFAULT_MAX_LINES} lines; legacy allowances: 0).`
   )
 }

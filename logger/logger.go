@@ -82,10 +82,8 @@ func LogDebug(ctx context.Context, msg string, args ...any) {
 
 func logHelper(ctx context.Context, level string, msg string) {
 	var id any = "SYSTEM"
-	if ctx != nil {
-		if requestID := ctx.Value(common.RequestIdKey); requestID != nil {
-			id = requestID
-		}
+	if requestID, ok := common.RequestIdFromContext(ctx); ok {
+		id = requestID
 	}
 	now := time.Now()
 	common.LogWriterMu.RLock()

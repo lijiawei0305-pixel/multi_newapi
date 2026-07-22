@@ -493,6 +493,9 @@ func sunoFetchRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dto.Ta
 		Code: "success",
 		Data: tasks,
 	})
+	if err != nil {
+		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
+	}
 	return
 }
 
@@ -514,6 +517,9 @@ func sunoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *dt
 		Code: "success",
 		Data: TaskModel2Dto(originTask),
 	})
+	if err != nil {
+		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
+	}
 	return
 }
 
@@ -645,7 +651,7 @@ func tryRealtimeFetch(ctx context.Context, task *model.Task, isOpenAIVideoAPI bo
 	if !snap.Equal(task.Snapshot()) {
 		isTerminal := task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure
 		if isTerminal && snap.Status != task.Status {
-			actualQuota := task.Quota
+			var actualQuota int
 			reason := ti.Reason
 			if task.Status == model.TaskStatusFailure {
 				actualQuota = 0

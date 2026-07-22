@@ -253,6 +253,8 @@ func cohereRerankHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 	}
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(resp.StatusCode)
-	_, err = c.Writer.Write(jsonResponse)
+	if _, err = c.Writer.Write(jsonResponse); err != nil {
+		return &usage, relaychannel.AcceptedResponseDeliveryError()
+	}
 	return &usage, nil
 }

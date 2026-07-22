@@ -378,9 +378,17 @@ type PasswordResetRequest struct {
 	Token string `json:"token"`
 }
 
+const passwordResetRequestBodyLimit = 4 << 10
+
 func ResetPassword(c *gin.Context) {
 	var req PasswordResetRequest
-	err := common.DecodeJson(c.Request.Body, &req)
+	if err := common.DecodeJsonWithLimit(c.Request.Body, &req, passwordResetRequestBodyLimit); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的参数",
+		})
+		return
+	}
 	if req.Email == "" || req.Token == "" {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -396,7 +404,7 @@ func ResetPassword(c *gin.Context) {
 		return
 	}
 	password := common.GenerateVerificationCode(12)
-	err = model.ResetUserPasswordByEmail(req.Email, password)
+	err := model.ResetUserPasswordByEmail(req.Email, password)
 	if err != nil {
 		common.ApiError(c, err)
 		return

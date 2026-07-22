@@ -52,6 +52,7 @@ func TestGetAccessTokenIgnoresCorruptCachedValue(t *testing.T) {
 }
 
 func TestGetAccessTokenRejectsNilContext(t *testing.T) {
+	//lint:ignore SA1012 This regression test verifies the explicit nil-context guard.
 	_, err := getAccessToken(nil, &Adaptor{}, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context is nil")

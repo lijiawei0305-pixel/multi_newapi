@@ -1199,8 +1199,10 @@ test_documented_commands_match_build_drivers() (
   set -euo pipefail
   local readme="$ROOT/electron/README.md"
   local build="$ROOT/electron/build.sh"
+  local main_image="$ROOT/Dockerfile"
   local auth_image="$ROOT/Dockerfile.authservice"
   local dev_image="$ROOT/Dockerfile.dev"
+  local go_manifest="$ROOT/go.mod"
 
   if grep -Eq '(^|[^[:alnum:]_])TODO([^[:alnum:]_]|$)|npm[[:space:]]+install|npm[[:space:]]+start' "$readme"; then
     fail "Electron README still documents a placeholder or nonexistent command"
@@ -1234,8 +1236,14 @@ test_documented_commands_match_build_drivers() (
   if grep -E '^FROM[[:space:]]+' "$auth_image" | grep -Ev '@sha256:[0-9a-f]{64}([[:space:]]|$)' >/dev/null; then
     fail "legacy/archive image contains a floating builder or runtime base"
   fi
-  grep -Fq 'golang:1.26.1-alpine@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039' "$auth_image" \
+  grep -Fq 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2' "$auth_image" \
     || fail "legacy image does not reuse the audited main Go builder digest"
+  grep -Fq 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2' "$main_image" \
+    || fail "main image does not pin the audited Go 1.26.5 builder digest"
+  grep -Fq 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2' "$dev_image" \
+    || fail "development image does not reuse the audited Go builder digest"
+  grep -Fxq 'go 1.26.5' "$go_manifest" \
+    || fail "Go manifest does not require the patched standard library toolchain"
   grep -Fq 'debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a' "$auth_image" \
     || fail "legacy image does not reuse the audited main runtime digest"
   if grep -E '^FROM[[:space:]]+' "$dev_image" | grep -Ev '@sha256:[0-9a-f]{64}([[:space:]]|$)' >/dev/null; then
@@ -1248,6 +1256,136 @@ test_documented_commands_match_build_drivers() (
 
   bash "$ROOT/scripts/lint-deploy-helpers.sh" "$ROOT/deploy/ops" \
     || fail "deploy helper visibility lint rejected the executable release scripts"
+)
+
+test_formal_electron_release_requires_verified_signatures() (
+  local workflow="$ROOT/.github/workflows/electron-build.yml"
+
+  grep -Fq 'environment: release-publish' "$workflow" \
+    || fail "Electron build does not enter the protected release Environment"
+  grep -Fq 'workflow_dispatch must select an existing version tag' "$workflow" \
+    || fail "manual Electron releases can run from an unprotected branch ref"
+  if grep -Fq 'VERSION="dev-' "$workflow"; then
+    fail "formal Electron workflow still contains an unsigned development release path"
+  fi
+  grep -Fq 'WINDOWS_CSC_LINK' "$workflow" \
+    || fail "Electron release does not require a Windows signing identity"
+  grep -Fq 'WINDOWS_CSC_KEY_PASSWORD' "$workflow" \
+    || fail "Electron release does not require the signing-key password"
+  grep -Fq 'Get-AuthenticodeSignature' "$workflow" \
+    || fail "Electron release does not verify Authenticode signatures"
+  grep -Fq "signature.Status -ne 'Valid'" "$workflow" \
+    || fail "Electron release does not fail on an invalid signature"
+  grep -Fq 'signature.TimeStamperCertificate' "$workflow" \
+    || fail "Electron release does not require a trusted timestamp"
+
+  local verify_line checksum_line upload_line
+  verify_line=$(grep -nF 'Verify Authenticode signatures' "$workflow" | cut -d: -f1)
+  checksum_line=$(grep -nF 'Generate Electron checksums' "$workflow" | cut -d: -f1)
+  upload_line=$(grep -nF 'Upload artifacts' "$workflow" | head -n 1 | cut -d: -f1)
+  [ -n "$verify_line" ] && [ -n "$checksum_line" ] && [ -n "$upload_line" ] \
+    || fail "Electron signing/checksum/upload steps are incomplete"
+  [ "$verify_line" -lt "$checksum_line" ] && [ "$checksum_line" -lt "$upload_line" ] \
+    || fail "Electron artifacts are checksummed or uploaded before signature verification"
+)
+
+test_gitee_sync_requires_governed_tag_source() (
+  local workflow="$ROOT/.github/workflows/sync-to-gitee.yml"
+
+  grep -Fq 'name: Verify governed release source' "$workflow" \
+    || fail "Gitee sync has no independent source-verification job"
+  grep -Fq '^v?[0-9]+\.[0-9]+\.[0-9]+$' "$workflow" \
+    || fail "Gitee sync does not require a strict semantic-version tag"
+  grep -Fq 'EXPECTED_REF="refs/tags/$TAG_NAME"' "$workflow" \
+    || fail "Gitee sync does not bind its input to the triggering tag ref"
+  grep -Fq 'test "$GITHUB_REF" = "$EXPECTED_REF"' "$workflow" \
+    || fail "Gitee sync does not reject a mismatched triggering ref"
+  grep -Fq 'TAG_COMMIT=$(git rev-parse "refs/tags/$TAG_NAME^{commit}")' "$workflow" \
+    || fail "Gitee sync does not resolve the requested tag commit"
+  grep -Fq 'test "$TAG_COMMIT" = "$GITHUB_SHA"' "$workflow" \
+    || fail "Gitee sync does not bind the tag commit to the workflow source"
+  grep -Fq 'git merge-base --is-ancestor "$TAG_COMMIT" refs/remotes/origin/main' "$workflow" \
+    || fail "Gitee sync does not require main-branch ancestry"
+  grep -Fq 'bash scripts/verify-github-environments.sh release-publish' "$workflow" \
+    || fail "Gitee sync does not audit the strict release Environment"
+  grep -Fq 'name: Publish governed release to Gitee' "$workflow" \
+    || fail "Gitee sync has no distinct publishing job"
+  if grep -Fq 'runs-on: sync' "$workflow"; then
+    fail "Gitee publishing depends on an unregistered self-hosted runner"
+  fi
+  grep -Fq 'runs-on: ubuntu-latest' "$workflow" \
+    || fail "Gitee publishing has no available hosted runner"
+  grep -Fq 'environment: release-publish' "$workflow" \
+    || fail "Gitee publishing does not enter the protected release Environment"
+  grep -Fq 'ref: ${{ needs.verify.outputs.commit }}' "$workflow" \
+    || fail "Gitee publishing does not check out the verified commit"
+  grep -Fq 'GITEE_TARGET_COMMITISH: ${{ needs.verify.outputs.commit }}' "$workflow" \
+    || fail "Gitee release target is not bound to the verified commit"
+  if grep -Fq 'nICEnnnnnnnLee/action-gitee-release' "$workflow"; then
+    fail "Gitee publishing still executes an external release action"
+  fi
+  grep -Fq 'GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}' "$workflow" \
+    || fail "Gitee publishing does not pass its token through the step environment"
+  grep -Fq 'run: python3 scripts/gitee_release.py' "$workflow" \
+    || fail "Gitee publishing does not use the repository-owned release client"
+  if grep -Eq 'run:.*(GITEE_TOKEN|secrets\.GITEE_TOKEN)|pip[[:space:]]+install' "$workflow"; then
+    fail "Gitee publishing exposes its token in argv or installs runtime dependencies"
+  fi
+  grep -Fq -- '--json name,body,tagName,targetCommitish,assets' "$workflow" \
+    || fail "Gitee sync does not read the authoritative GitHub asset manifest"
+  grep -Fq 'python3 scripts/gitee_release.py verify-github-assets' "$workflow" \
+    || fail "Gitee sync does not verify downloaded assets against the manifest"
+  if grep -Fq 'gh release download "$TAG_NAME" --dir ./release_assets ||' "$workflow"; then
+    fail "Gitee sync treats GitHub asset download failures as an empty release"
+  fi
+  grep -Fq "python3 -m unittest discover -s scripts/tests -p 'test_*.py'" "$ROOT/scripts/preflight.sh" \
+    || fail "Gitee release client tests are absent from the shared preflight"
+)
+
+test_restore_drill_covers_production_and_lts_candidate() (
+  local workflow="$ROOT/.github/workflows/restore-drill.yml"
+
+  grep -Fq 'mysql_image: mysql:8.2@sha256:212fe73edca5df6ff14826d5eb975c914bfb91f82a2e923f9050568f99525da1' "$workflow" \
+    || fail "restore drill does not cover the immutable production MySQL baseline"
+  grep -Fq 'mysql_image: mysql:8.4.10@sha256:c592c15aaf4a1961e15d82eb31ea5987dda862d1c4b1e93424438c0e91dc1f8d' "$workflow" \
+    || fail "restore drill does not cover the immutable MySQL 8.4 LTS candidate"
+  grep -Fq 'MYSQL_IMAGE: ${{ matrix.mysql_image }}' "$workflow" \
+    || fail "restore drill matrix does not pass its immutable MySQL image to the drill"
+  grep -Fq "REQUIRE_DOCKER: '1'" "$workflow" \
+    || fail "authoritative restore drill can silently skip without Docker"
+  if grep -Eq 'mysql_image:[[:space:]]+mysql:(latest|8|8\.4)([[:space:]#]|$)' "$workflow"; then
+    fail "restore drill contains a floating MySQL image"
+  fi
+)
+
+test_database_compatibility_images_are_immutable() (
+  local workflow="$ROOT/.github/workflows/ci.yml"
+
+  grep -Fq 'image: mysql:8.0@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b' "$workflow" \
+    || fail "database compatibility CI does not pin its MySQL image"
+  grep -Fq 'image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20' "$workflow" \
+    || fail "database compatibility CI does not pin its PostgreSQL image"
+  grep -Fq 'image: clickhouse/clickhouse-server:24.8@sha256:1ffa82edee000a42c09313bd9f1293d94c570aee74babc1b3ca9983a35fa597b' "$workflow" \
+    || fail "database compatibility CI does not pin its ClickHouse image"
+  if grep -A70 -F 'database-compatibility:' "$workflow" \
+    | grep -E '^[[:space:]]+image:[[:space:]]+' \
+    | grep -Ev '@sha256:[0-9a-f]{64}$' >/dev/null; then
+    fail "database compatibility CI contains a floating service image"
+  fi
+)
+
+test_backend_security_scanners_are_pinned() (
+  local preflight="$ROOT/scripts/preflight.sh"
+
+  grep -Fq 'github.com/zricethezav/gitleaks/v8@v8.30.1' "$preflight" \
+    || fail "backend preflight does not pin its repository secret scanner"
+  grep -Fq 'golang.org/x/vuln/cmd/govulncheck@v1.6.0' "$preflight" \
+    || fail "backend preflight does not pin its Go vulnerability scanner"
+  grep -Fq 'honnef.co/go/tools/cmd/staticcheck@v0.7.0' "$preflight" \
+    || fail "backend preflight does not pin its correctness analyzer"
+  if grep -Eq 'go run [^[:space:]]+@latest' "$preflight"; then
+    fail "backend preflight executes a floating Go tool version"
+  fi
 )
 
 test_offsite_copy_is_encrypted_verified_and_fail_closed() (
@@ -1416,6 +1554,9 @@ FAKE_GH
     GITHUB_REPOSITORY=owner/repository \
     bash "$ROOT/scripts/verify-github-environments.sh" >/dev/null \
     || fail "Environment audit rejected the strict approval-protected fixture"
+  if grep -R -Fq 'GITHUB_ENVIRONMENT_APPROVALS_REQUIRED:' "$ROOT/.github/workflows"; then
+    fail "a repository workflow weakens strict Environment approval protection"
+  fi
   if grep -Eq '(^|[[:space:]])(put|post|patch|delete)([[:space:]]|$)' "$tmp/gh.calls"; then
     fail "Environment audit attempted a mutating GitHub API method"
   fi
@@ -1457,6 +1598,11 @@ run_test "internal and database secrets stay out of process arguments" test_secr
 run_test "single-stack payment docs and demo fail closed before real funds" test_payment_topology_and_demo_safety_contract
 run_test "local and production session-security deployment modes stay explicit" test_session_security_deployment_docs_contract
 run_test "documented Electron and legacy-image commands match executable build topology" test_documented_commands_match_build_drivers
+run_test "formal Electron artifacts require valid timestamped Authenticode signatures" test_formal_electron_release_requires_verified_signatures
+run_test "Gitee sync requires a governed tag source and protected publishing job" test_gitee_sync_requires_governed_tag_source
+run_test "restore drill covers immutable production and MySQL LTS images" test_restore_drill_covers_production_and_lts_candidate
+run_test "database compatibility CI uses immutable service images" test_database_compatibility_images_are_immutable
+run_test "backend security scanners are enabled and immutable" test_backend_security_scanners_are_pinned
 run_test "offsite backup encrypts, round-trip verifies, and fails closed" test_offsite_copy_is_encrypted_verified_and_fail_closed
 run_test "GitHub Environment audit is read-only and fail-closed" test_github_environment_audit_is_read_only_and_fail_closed
 run_test "clean checkout gate rejects runner-supplied inputs" test_clean_checkout_gate_rejects_runner_inputs

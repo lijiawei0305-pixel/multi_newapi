@@ -1,7 +1,7 @@
 {
   "base": "en.json",
   "source": {
-    "sourceFileCount": 1228,
+    "sourceFileCount": 1230,
     "literalCallCount": 6984,
     "literalSourceKeyCount": 4622,
     "staticAllowlistKeyCount": 454,

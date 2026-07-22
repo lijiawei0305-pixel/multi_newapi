@@ -23,7 +23,9 @@ func GetSubscription(c *gin.Context) {
 	} else {
 		userId := c.GetInt("id")
 		remainQuota, err = model.GetUserQuota(userId, false)
-		usedQuota, err = model.GetUserUsedQuota(userId)
+		if err == nil {
+			usedQuota, err = model.GetUserUsedQuota(userId)
+		}
 	}
 	if expiredTime <= 0 {
 		expiredTime = 0

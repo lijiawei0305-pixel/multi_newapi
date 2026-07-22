@@ -357,7 +357,6 @@ func (a *App) provisionAgentFromOrder(ctx context.Context, ord *agentPlanOrderRo
 			recoverySlug := paidAgentRecoverySlug(ord, attempt)
 			t, err = a.createOrClaimAgentTenant(ctx, ord, recoverySlug, name)
 			if err == nil {
-				slug = recoverySlug
 				break
 			}
 			if !errors.Is(err, tenant.ErrSlugDuplicate) {
