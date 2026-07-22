@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { api } from '@/lib/api'
+import { api, type ApiRequestConfig } from '@/lib/api'
 
 import type {
   ApiResponse,
@@ -33,15 +33,29 @@ import type {
 // Admin Plan Management
 // ============================================================================
 
-export async function getAdminPlans(): Promise<ApiResponse<PlanRecord[]>> {
-  const res = await api.get('/api/subscription/admin/plans')
+export async function getAdminPlans(
+  config?: Pick<ApiRequestConfig, 'skipBusinessError'>
+): Promise<ApiResponse<PlanRecord[]>> {
+  const res = await api.get('/api/subscription/admin/plans', config)
   return res.data
+}
+
+export async function getAdminPlansOrThrow(
+  fallbackMessage: string
+): Promise<PlanRecord[]> {
+  const result = await getAdminPlans({ skipBusinessError: true })
+  if (!result.success) {
+    throw new Error(result.message?.trim() || fallbackMessage)
+  }
+  return result.data || []
 }
 
 export async function createPlan(
   data: PlanPayload
 ): Promise<ApiResponse<PlanRecord>> {
-  const res = await api.post('/api/subscription/admin/plans', data)
+  const res = await api.post('/api/subscription/admin/plans', data, {
+    skipBusinessError: true,
+  })
   return res.data
 }
 
@@ -49,7 +63,9 @@ export async function updatePlan(
   id: number,
   data: PlanPayload
 ): Promise<ApiResponse<PlanRecord>> {
-  const res = await api.put(`/api/subscription/admin/plans/${id}`, data)
+  const res = await api.put(`/api/subscription/admin/plans/${id}`, data, {
+    skipBusinessError: true,
+  })
   return res.data
 }
 
@@ -57,9 +73,11 @@ export async function patchPlanStatus(
   id: number,
   enabled: boolean
 ): Promise<ApiResponse> {
-  const res = await api.patch(`/api/subscription/admin/plans/${id}`, {
-    enabled,
-  })
+  const res = await api.patch(
+    `/api/subscription/admin/plans/${id}`,
+    { enabled },
+    { skipBusinessError: true }
+  )
   return res.data
 }
 

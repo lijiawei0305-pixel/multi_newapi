@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 	"github.com/QuantumNous/new-api/internal/tenant"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
+	"github.com/QuantumNous/new-api/model"
 )
 
 // ginKeyTenant 是 TenantMiddleware 注入解析结果的 gin ctx 键。
@@ -195,7 +196,7 @@ func (a *App) HandleListTokenPlans(c *gin.Context) {
 	}
 	// 批量回填 native_plan_id(一键续费深链反查用;查询失败不阻断列表,字段保持 0)。
 	if len(ids) > 0 {
-		var rows []nativePlanMapRow
+		var rows []model.TokenPlanNativeSubscriptionPlan
 		if err := a.DB.WithContext(reqCtx(c)).Where("token_plan_id IN ?", ids).Find(&rows).Error; err == nil {
 			m := make(map[int64]int64, len(rows))
 			for _, r := range rows {

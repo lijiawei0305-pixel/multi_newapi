@@ -21,7 +21,6 @@ import {
   Box,
   ChartColumnBig,
   Coins,
-  CreditCard,
   FileText,
   FlaskConical,
   Gauge,
@@ -245,13 +244,9 @@ export function useSidebarData(): SidebarData {
             icon: Ticket,
           },
           {
-            title: t('Subscriptions'),
-            url: '/subscriptions',
-            icon: CreditCard,
-          },
-          {
             title: t('Token Plans'),
             url: '/token-plans',
+            activeUrls: ['/advanced-subscription-plans'],
             icon: Package,
           },
           {

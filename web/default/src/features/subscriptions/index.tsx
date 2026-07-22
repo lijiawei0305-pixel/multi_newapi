@@ -38,7 +38,7 @@ function SubscriptionsContent() {
     <>
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>
-          {t('Subscription Management')}
+          {t('Advanced Native Subscription Plans')}
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
           <div className='flex items-center gap-2'>

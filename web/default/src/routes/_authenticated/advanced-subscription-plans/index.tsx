@@ -18,16 +18,18 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
+import { Subscriptions } from '@/features/subscriptions'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
-export const Route = createFileRoute('/_authenticated/subscriptions/')({
+export const Route = createFileRoute(
+  '/_authenticated/advanced-subscription-plans/'
+)({
   beforeLoad: () => {
     const { auth } = useAuthStore.getState()
     if (!auth.user || auth.user.role < ROLE.ADMIN) {
       throw redirect({ to: '/403' })
     }
-
-    throw redirect({ to: '/token-plans', replace: true })
   },
+  component: Subscriptions,
 })

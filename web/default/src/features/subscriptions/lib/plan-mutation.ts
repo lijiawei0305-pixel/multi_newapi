@@ -16,18 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import type { ApiResponse } from '../types'
 
-import { ROLE } from '@/lib/roles'
-import { useAuthStore } from '@/stores/auth-store'
-
-export const Route = createFileRoute('/_authenticated/subscriptions/')({
-  beforeLoad: () => {
-    const { auth } = useAuthStore.getState()
-    if (!auth.user || auth.user.role < ROLE.ADMIN) {
-      throw redirect({ to: '/403' })
-    }
-
-    throw redirect({ to: '/token-plans', replace: true })
-  },
-})
+export function getSubscriptionPlanMutationError(
+  response: Pick<ApiResponse, 'success' | 'message'>,
+  fallbackMessage: string
+): string | null {
+  if (response.success) return null
+  return response.message?.trim() || fallbackMessage
+}

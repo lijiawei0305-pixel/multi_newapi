@@ -19,7 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { API, showError, showSuccess } from '../../helpers';
+import { API } from '../../helpers/api';
+import { isSubscriptionPlanReadOnly } from '../../helpers/subscriptionPlanOwnership';
+import { showError, showSuccess } from '../../helpers/utils';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 
 export const useSubscriptionsData = () => {
@@ -77,6 +79,12 @@ export const useSubscriptionsData = () => {
 
   // Update plan enabled status (single endpoint)
   const setPlanEnabled = async (planRecordOrId, enabled) => {
+    if (
+      typeof planRecordOrId !== 'number' &&
+      isSubscriptionPlanReadOnly(planRecordOrId)
+    ) {
+      return;
+    }
     const planId =
       typeof planRecordOrId === 'number'
         ? planRecordOrId
@@ -113,6 +121,7 @@ export const useSubscriptionsData = () => {
   };
 
   const openEdit = (planRecord) => {
+    if (isSubscriptionPlanReadOnly(planRecord)) return;
     setSheetPlacement('right');
     setEditingPlan(planRecord);
     setShowEdit(true);

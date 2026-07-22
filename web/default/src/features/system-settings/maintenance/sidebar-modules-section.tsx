@@ -151,8 +151,10 @@ export function SidebarModulesSection({
         description: t('Advanced platform configuration.'),
       },
       subscription: {
-        title: t('Subscription Management'),
-        description: t('Manage subscription plans and pricing.'),
+        title: t('Token Plans'),
+        description: t(
+          'Manage plans, pricing, quotas, marketing, and agent protection prices.'
+        ),
       },
     },
   }

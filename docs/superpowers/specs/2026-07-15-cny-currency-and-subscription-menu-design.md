@@ -1,8 +1,8 @@
 # 设计:全站人民币计价切换(config-driven)+ 隐藏原生订阅菜单
 
 - **日期**:2026-07-15
-- **状态**:待用户确认
-- **范围**:两个独立诉求合并一次实现与部署(均以前端为主)
+- **状态**:已确认并实施
+- **范围**:两个独立诉求合并一次实现与部署;货币展示以 frontend 为主,套餐治理同时覆盖 frontend 导航/交互与 backend 归属保护/迁移
 
 ---
 
@@ -16,6 +16,7 @@
 2. 部分页面**绕过中枢、硬编码 `$`**(见 Part 2 清单),即使切设置也不变。
 
 **关键一致性(好消息)**:后端 `USDExchangeRate = 7.3`(`setting/operation_setting/payment_setting_old.go:18`)**同时**用于:
+
 - ① 充值实收:`internal/mtwire/recharge.go:249` → `actualPaidCNY = amountUSD × 7.3`;
 - ② 前端展示:经 `model/option.go:84` 以 `/api/status` 的 `usd_exchange_rate` 暴露。
 
@@ -23,7 +24,7 @@
 
 ### B. 隐藏原生「订阅管理」菜单
 
-原生 `subscription_plans`(New API 自带 Stripe/国际化订阅后台,在本多租户部署里由桥接层硬编码 `PriceAmount:0`)与自建 `token_plans`(套餐管理,真定价/收益源)在管理员侧栏并列,造成"重复 + 价格打架(¥ vs $0)"困惑。计费/报表/告警链路经查证均健康(用量走原生桶、报表 P2-BRK-02 已读原生桶),**无数据 bug**;唯一要动的是收起这个管道菜单。
+原生 `subscription_plans`(New API 自带 Stripe/国际化订阅后台,在本多租户部署里由桥接层硬编码 `PriceAmount:0`)与自建 `token_plans`(套餐管理,真定价/收益源)在管理员侧栏并列,造成"重复 + 价格打架(¥ vs $0)"困惑。计费/报表/告警链路经查证均健康(用量走原生桶、报表 P2-BRK-02 已读原生桶),**无数据 bug**;实现收起重复菜单,保留第三方商品 ID 的隐藏高级入口,并把 Token Plans 映射的原生套餐设为后端强制只读。
 
 ---
 
@@ -40,7 +41,7 @@
 3. 所有金额显示改走中枢 `lib/currency.ts`,**消除硬编码 `$`/`¥`**。
 4. 充值输入框改为"**按显示货币输入**"(CNY 时输 ¥),提交前换算回后端要的 USD。
 5. **红线**:`_cny` 字段(已是 ¥、走 `cny()`)**绝不**再经中枢 ×汇率(否则虚高 7 倍)。
-6. **零改动**:后端计费逻辑 / 桥接 / 额度桶 / `USDExchangeRate` 值 / `token_plans` 数据 / breakage 监控。
+6. **计费语义零改动**:后端计费、额度桶、`USDExchangeRate` 值、`token_plans` 数据和 breakage 监控保持不变;仅增加套餐归属治理与写入保护。
 
 ---
 
@@ -82,13 +83,18 @@
 
 ### Part 4 · 隐藏原生「订阅管理」菜单
 
-- `web/default/src/hooks/use-sidebar-data.ts`(约 247–250 行):移除 admin 侧栏「订阅」(`/subscriptions`)条目 + 加注释(防上游合并带回);**路由保留**,URL 仍可直达(留作按用户查/作废订阅的应急入口)。
+- `web/default/src/hooks/use-sidebar-data.ts`(约 247–250 行):移除 admin 侧栏「订阅」(`/subscriptions`)条目;`use-sidebar-config.ts` 保留旧 URL 与 `subscription` 模块的配置映射说明。
+- `/subscriptions` 保留为兼容路由,管理员访问时重定向至统一的「套餐管理」(`/token-plans`)。
+- 原生 Stripe / Creem / Waffo Pancake 第三方商品 ID 的应急配置保留在管理员限定的隐藏入口 `/advanced-subscription-plans`;该入口不加入侧栏,由相关支付设置提供明确链接。
+- 管理端原生套餐列表附加 `managed_by` / `read_only`;Default 与 Classic 对 Token Plans 映射项显示只读归属并禁用编辑、启停。
+- 原生套餐 PUT/PATCH 在同一事务内校验归属;映射项返回稳定错误码 `TOKEN_PLAN_MANAGED`,归属存储不可用时 fail-closed 并返回 `PLAN_OWNERSHIP_UNAVAILABLE`,展示消息走后端 en/zh i18n。
+- `mt_native_subscription_plans` 的 GORM 契约集中在 `model.TokenPlanNativeSubscriptionPlan`,桥接迁移、查询和测试共同复用;`native_plan_id` 索引为兼容性加法迁移,不删除或改写既有套餐/订阅数据。
 
 ---
 
 ## 明确不碰
 
-- 后端计费 / 桥接 / 额度桶 / `USDExchangeRate` 数值 / `token_plans` / breakage 监控。
+- 后端计费语义 / 额度桶 / `USDExchangeRate` 数值 / `token_plans` 数据 / breakage 监控;桥接只集中映射表契约,不改变购买、激活或扣费流程。
 - `_cny` 字段与 `cny()` 渲染(代理财务、财报、套餐售价、提现)——本就是 ¥,不得再 ×汇率。
 - Creem / EUR 国际支付(国内站不用,保留原样;如需隐藏另议)。
 - tokenplan 经济模型(维持大额度/breakage,已确认)。
@@ -102,7 +108,7 @@
 1. 主站 + 代理站金额全显 ¥;
 2. 充值输入 ¥、微信/支付宝实收同额 ¥、入账等值额度;
 3. 模型定价管理员 UI 显示 ¥ 且可按 ¥ 正确录入回存;
-4. 侧栏无「订阅管理」,`/subscriptions` URL 仍可直达;
+4. 侧栏无「订阅管理」,`/subscriptions` 重定向至 `/token-plans`,管理员可从支付设置进入 `/advanced-subscription-plans` 配置原生第三方商品 ID;
 5. 抽查代理财务/财报 ¥ 值**未**被二次放大(红线未破);
 6. **回归证明零硬编码**:临时把 `quota_display_type` 切回 `USD`,全站应自动恢复 `$`。
 
@@ -110,4 +116,6 @@
 
 ## 部署
 
-前端为主(+ 可能一个后端默认值),须服务器构建(CLAUDE.md W4;Mac 建不了前端)。注意 `deploy.sh` 打包整棵工作树的并行 WIP 风险([[deploy-scope-parallel-wip]]),隔离 scope、只带本次改动文件。
+本次同时包含前端导航/只读交互与后端套餐归属治理变更。`deploy/ops/deploy.sh` 只接受干净 Git 提交,并通过 `git archive HEAD` 生成发布归档;本地未跟踪的审计 HTML 必须留在原处,部署时改用临时 clean worktree 隔离,不得纳入提交或发布包。
+
+数据库迁移仅集中复用既有 `mt_native_subscription_plans` 表契约并为 `native_plan_id` 增加索引,属于向后兼容的加法变更,不删除、改写套餐或订阅数据。部署脚本会先生成配对备份再构建和验收新版本;旧版应用可容忍该表及新增索引,因此应用回滚无需执行逆向 schema 迁移。

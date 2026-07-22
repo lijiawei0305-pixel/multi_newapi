@@ -82,23 +82,9 @@ type subscriptionOrderRow struct {
 // TableName 固定表名（mt_ 前缀，避让原生 subscription_orders）。
 func (subscriptionOrderRow) TableName() string { return "mt_subscription_orders" }
 
-// ---- 表 2：mt_native_subscription_plans —— tokenplan 套餐 → 原生 SubscriptionPlan 映射 ----
-//
-// 一个 tokenplan 套餐对应一条稳定的原生 plan（reset=never、不升组）。原生 PreConsumeUserSubscription
-// 按 sub.PlanId 反查该 plan（须长期存在），故用映射表保证「按套餐去重、只建一条」。
-
-type nativePlanMapRow struct {
-	TokenPlanID  int64     `gorm:"column:token_plan_id;primaryKey"` // tokenplan token_plans.id
-	NativePlanID int64     `gorm:"column:native_plan_id;not null"`  // 原生 subscription_plans.id
-	CreatedAt    time.Time `gorm:"column:created_at"`
-}
-
-// TableName 固定表名（mt_ 前缀，避让原生 subscription_plans）。
-func (nativePlanMapRow) TableName() string { return "mt_native_subscription_plans" }
-
 // migrateSubscriptionBridge 建桥接两张表（由 App.Migrate 调用）。
 func migrateSubscriptionBridge(db *gorm.DB) error {
-	return db.AutoMigrate(&subscriptionOrderRow{}, &nativePlanMapRow{})
+	return db.AutoMigrate(&subscriptionOrderRow{}, &model.TokenPlanNativeSubscriptionPlan{})
 }
 
 // ---- 订单存储（最简 OrderRepo 思路：唯一插入；状态迁移在激活事务内做条件 UPDATE/CAS） ----
@@ -265,7 +251,7 @@ func (a *App) nativePlanTitle(ctx context.Context, planID int64) string {
 // 命中 mt_native_subscription_plans 映射直接返回；否则建一条原生 plan（reset=never、不升组、
 // 不允许余额购买）并落映射（OnConflict 去重，应对并发首建）。在传入 tx 内完成。
 func (a *App) ensureNativeSubscriptionPlan(ctx context.Context, tx *gorm.DB, snap *tokenplan.PendingPurchase) (int64, error) {
-	var m nativePlanMapRow
+	var m model.TokenPlanNativeSubscriptionPlan
 	err := tx.Take(&m, "token_plan_id = ?", snap.PlanID).Error
 	if err == nil {
 		return m.NativePlanID, nil
@@ -288,7 +274,7 @@ func (a *App) ensureNativeSubscriptionPlan(ctx context.Context, tx *gorm.DB, sna
 	if err := tx.Create(plan).Error; err != nil {
 		return 0, err
 	}
-	m = nativePlanMapRow{TokenPlanID: snap.PlanID, NativePlanID: int64(plan.Id), CreatedAt: time.Now()}
+	m = model.TokenPlanNativeSubscriptionPlan{TokenPlanID: snap.PlanID, NativePlanID: int64(plan.Id), CreatedAt: time.Now()}
 	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&m).Error; err != nil {
 		return 0, err
 	}

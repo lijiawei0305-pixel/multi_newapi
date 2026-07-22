@@ -21,5 +21,5 @@ relay/channel/vertex/service_account.go:private-key:79
 relay/channel/task/jimeng/adaptor.go:generic-api-key:226
 relay/channel/task/jimeng/adaptor.go:generic-api-key:418
 relay/channel/task/jimeng/adaptor.go:generic-api-key:420
-web/default/src/features/system-settings/integrations/payment-gateway-tabs.tsx:private-key:513
-web/default/src/features/system-settings/integrations/payment-gateway-tabs.tsx:private-key:746
+web/default/src/features/system-settings/integrations/payment-gateway-tabs.tsx:private-key:514
+web/default/src/features/system-settings/integrations/payment-gateway-tabs.tsx:private-key:747

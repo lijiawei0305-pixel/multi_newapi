@@ -3683,6 +3683,8 @@
     "、": ", ",
     "计费输入 Token": "Jetons d’entrée facturables",
     "计费输出 Token": "Jetons de sortie facturables",
-    "完整输入长度": "Longueur complète de l’entrée"
+    "完整输入长度": "Longueur complète de l’entrée",
+    "只读": "Lecture seule",
+    "由默认主题的套餐管理维护": "Géré dans les forfaits du thème par défaut"
   }
 }

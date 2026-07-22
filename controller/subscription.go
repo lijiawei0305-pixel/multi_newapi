@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -16,6 +19,12 @@ import (
 
 type SubscriptionPlanDTO struct {
 	Plan model.SubscriptionPlan `json:"plan"`
+}
+
+type AdminSubscriptionPlanDTO struct {
+	Plan      model.SubscriptionPlan `json:"plan"`
+	ManagedBy string                 `json:"managed_by"`
+	ReadOnly  bool                   `json:"read_only"`
 }
 
 type BillingPreferenceRequest struct {
@@ -124,14 +133,55 @@ func AdminListSubscriptionPlans(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	result := make([]SubscriptionPlanDTO, 0, len(plans))
+	planIDs := make([]int, 0, len(plans))
+	for _, plan := range plans {
+		planIDs = append(planIDs, plan.Id)
+	}
+	managedPlanIDs, err := service.GetTokenPlanManagedSubscriptionPlanIDs(c.Request.Context(), model.DB, planIDs)
+	if err != nil {
+		if respondSubscriptionPlanOwnershipError(c, err) {
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+
+	result := make([]AdminSubscriptionPlanDTO, 0, len(plans))
 	for _, p := range plans {
 		p.NormalizeDefaults()
-		result = append(result, SubscriptionPlanDTO{
-			Plan: p,
+		managedBy := model.SubscriptionPlanManagerNative
+		_, readOnly := managedPlanIDs[p.Id]
+		if readOnly {
+			managedBy = model.SubscriptionPlanManagerTokenPlan
+		}
+		result = append(result, AdminSubscriptionPlanDTO{
+			Plan:      p,
+			ManagedBy: managedBy,
+			ReadOnly:  readOnly,
 		})
 	}
 	common.ApiSuccess(c, result)
+}
+
+func respondSubscriptionPlanOwnershipError(c *gin.Context, err error) bool {
+	switch {
+	case errors.Is(err, service.ErrTokenPlanManagedSubscriptionPlan):
+		common.ApiErrorI18nWithErrorCode(
+			c,
+			i18n.MsgSubscriptionManagedByTokenPlan,
+			service.SubscriptionPlanErrorCodeManagedByTokenPlan,
+		)
+		return true
+	case errors.Is(err, service.ErrSubscriptionPlanOwnershipUnavailable):
+		common.ApiErrorI18nWithErrorCode(
+			c,
+			i18n.MsgSubscriptionOwnershipUnavailable,
+			service.SubscriptionPlanErrorCodeOwnershipUnavailable,
+		)
+		return true
+	default:
+		return false
+	}
 }
 
 type AdminUpsertSubscriptionPlanRequest struct {
@@ -283,6 +333,9 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 	}
 
 	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := service.EnsureSubscriptionPlanAdminMutable(c.Request.Context(), tx, id); err != nil {
+			return err
+		}
 		// update plan (allow zero values updates with map)
 		updateMap := map[string]interface{}{
 			"title":                      req.Plan.Title,
@@ -317,6 +370,9 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		return nil
 	})
 	if err != nil {
+		if respondSubscriptionPlanOwnershipError(c, err) {
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}
@@ -346,7 +402,16 @@ func AdminUpdateSubscriptionPlanStatus(c *gin.Context) {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
-	if err := model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Update("enabled", *req.Enabled).Error; err != nil {
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := service.EnsureSubscriptionPlanAdminMutable(c.Request.Context(), tx, id); err != nil {
+			return err
+		}
+		return tx.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Update("enabled", *req.Enabled).Error
+	})
+	if err != nil {
+		if respondSubscriptionPlanOwnershipError(c, err) {
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}

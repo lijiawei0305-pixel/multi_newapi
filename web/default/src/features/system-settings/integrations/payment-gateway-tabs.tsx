@@ -42,6 +42,7 @@ import {
   SettingsSwitchItem,
 } from '../components/settings-form-layout'
 import { safeNumberFieldProps } from '../utils/numeric-field'
+import { AdvancedSubscriptionPlansLink } from './advanced-subscription-plans-link'
 import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
 import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
 import { CreemProductsVisualEditor } from './creem-products-visual-editor'
@@ -941,6 +942,15 @@ export function PaymentGatewayTabs(props: PaymentGatewayTabsProps) {
             </ul>
           </div>
 
+          <Alert>
+            <AlertDescription className='flex flex-col gap-3'>
+              {t(
+                'Stripe/Creem requires creating products on the third-party platform and entering the ID'
+              )}
+              <AdvancedSubscriptionPlansLink />
+            </AlertDescription>
+          </Alert>
+
           <div className='grid gap-6 md:grid-cols-3'>
             <FormField
               control={form.control}
@@ -1102,6 +1112,15 @@ export function PaymentGatewayTabs(props: PaymentGatewayTabsProps) {
               <li>{t('Configure in your Creem dashboard')}</li>
             </ul>
           </div>
+
+          <Alert>
+            <AlertDescription className='flex flex-col gap-3'>
+              {t(
+                'Stripe/Creem requires creating products on the third-party platform and entering the ID'
+              )}
+              <AdvancedSubscriptionPlansLink />
+            </AlertDescription>
+          </Alert>
 
           <div className='grid gap-6 md:grid-cols-2'>
             <FormField

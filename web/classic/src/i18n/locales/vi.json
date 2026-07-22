@@ -4217,6 +4217,8 @@
     "、": ", ",
     "计费输入 Token": "Token đầu vào tính phí",
     "计费输出 Token": "Token đầu ra tính phí",
-    "完整输入长度": "Độ dài đầu vào đầy đủ"
+    "完整输入长度": "Độ dài đầu vào đầy đủ",
+    "只读": "Chỉ đọc",
+    "由默认主题的套餐管理维护": "Được quản lý trong mục Quản lý gói của giao diện mặc định"
   }
 }

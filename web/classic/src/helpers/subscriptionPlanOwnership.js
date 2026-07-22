@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2023-2026 QuantumNous
+Copyright (C) 2025 QuantumNous
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
@@ -16,18 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
 
-import { ROLE } from '@/lib/roles'
-import { useAuthStore } from '@/stores/auth-store'
+export function isSubscriptionPlanReadOnly(record) {
+  return record?.read_only === true || record?.managed_by === 'token_plan';
+}
 
-export const Route = createFileRoute('/_authenticated/subscriptions/')({
-  beforeLoad: () => {
-    const { auth } = useAuthStore.getState()
-    if (!auth.user || auth.user.role < ROLE.ADMIN) {
-      throw redirect({ to: '/403' })
-    }
-
-    throw redirect({ to: '/token-plans', replace: true })
-  },
-})
+export function getSubscriptionPlanActionState(record, complianceConfirmed) {
+  const readOnly = isSubscriptionPlanReadOnly(record);
+  return {
+    readOnly,
+    disabled: !complianceConfirmed || readOnly,
+  };
+}

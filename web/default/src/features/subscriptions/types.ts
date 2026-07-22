@@ -50,6 +50,8 @@ export type SubscriptionPlan = z.infer<typeof subscriptionPlanSchema>
 
 export interface PlanRecord {
   plan: SubscriptionPlan
+  managed_by?: 'token_plan' | 'native_subscription'
+  read_only?: boolean
 }
 
 // ============================================================================
@@ -82,6 +84,7 @@ export interface UserSubscriptionRecord {
 export interface ApiResponse<T = unknown> {
   success: boolean
   message?: string
+  error_code?: string
   data?: T
 }
 
