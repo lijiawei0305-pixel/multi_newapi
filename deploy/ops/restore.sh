@@ -83,7 +83,7 @@ docker run --rm \
 
 log "目标栈      ：$STACK（DB=$DB_NAME）"
 log "恢复 manifest：$SELECTED_MANIFEST"
-log "恢复点版本  ：$SELECTED_VERSION @ $SELECTED_TS（Redis keys=$MANIFEST_REDIS_KEYS）"
+log "恢复点版本  ：$SELECTED_VERSION @ $SELECTED_TS（Redis keys=$MANIFEST_REDIS_KEYS，persistent=${MANIFEST_REDIS_PERSISTENT_KEYS:-legacy-unknown}）"
 warn "将配对覆盖生产 MySQL + Redis；恢复点后的支付/扣费/Trial 状态会被替换。"
 confirm_typed "$STACK" "确认外部已停流，并整组覆盖生产栈 $STACK ?"
 
@@ -170,8 +170,15 @@ until [ "$(docker exec "$REDIS_BOOTSTRAP" redis-cli --raw PING 2>/dev/null | tr 
   sleep 2
 done
 LOADED_KEYS="$(redis_key_count_container "$REDIS_BOOTSTRAP")"
-[ "$LOADED_KEYS" = "$MANIFEST_REDIS_KEYS" ] \
-  || die "RDB 加载 key 数 $LOADED_KEYS ≠ manifest $MANIFEST_REDIS_KEYS，拒绝转 AOF"
+[ "$LOADED_KEYS" -le "$MANIFEST_REDIS_KEYS" ] \
+  || die "RDB 加载 key 数 $LOADED_KEYS 大于 manifest $MANIFEST_REDIS_KEYS，拒绝转 AOF"
+LOADED_PERSISTENT_KEYS="$(redis_persistent_key_count_container "$REDIS_BOOTSTRAP")"
+if [ -n "$MANIFEST_REDIS_PERSISTENT_KEYS" ]; then
+  [ "$LOADED_PERSISTENT_KEYS" = "$MANIFEST_REDIS_PERSISTENT_KEYS" ] \
+    || die "RDB 永久 key 数 $LOADED_PERSISTENT_KEYS ≠ manifest $MANIFEST_REDIS_PERSISTENT_KEYS"
+else
+  warn "旧 manifest 没有 redis_persistent_keys；仅能验证已加载总数不超过快照总数。"
+fi
 [ "$(docker exec "$REDIS_BOOTSTRAP" redis-cli --raw CONFIG SET appendonly yes | tr -d '\r')" = OK ] \
   || die "Redis CONFIG SET appendonly yes 失败"
 
@@ -188,8 +195,11 @@ while :; do
   [ "$(date +%s)" -lt "$aof_deadline" ] || die "Redis AOF rewrite 未在时限内完成或状态非 ok"
   sleep 2
 done
-[ "$(redis_key_count_container "$REDIS_BOOTSTRAP")" = "$LOADED_KEYS" ] \
-  || die "RDB -> AOF 转换期间 Redis key 数变化"
+CONVERTED_KEYS="$(redis_key_count_container "$REDIS_BOOTSTRAP")"
+[ "$CONVERTED_KEYS" -le "$LOADED_KEYS" ] \
+  || die "RDB -> AOF 转换期间 Redis key 数增加"
+[ "$(redis_persistent_key_count_container "$REDIS_BOOTSTRAP")" = "$LOADED_PERSISTENT_KEYS" ] \
+  || die "RDB -> AOF 转换期间永久 Redis key 数变化"
 docker stop -t 30 "$REDIS_BOOTSTRAP" >/dev/null
 REDIS_BOOTSTRAP=""
 
@@ -199,8 +209,11 @@ until redis_ready; do
   [ "$(date +%s)" -lt "$redis_deadline" ] || die "正式 Redis 从新 AOF 重启后 60s 仍未就绪"
   sleep 2
 done
-[ "$(redis_key_count_service)" = "$LOADED_KEYS" ] \
-  || die "正式 Redis 从 AOF 重启后 key 数与转换前不一致"
+FORMAL_KEYS="$(redis_key_count_service)"
+[ "$FORMAL_KEYS" -le "$CONVERTED_KEYS" ] \
+  || die "正式 Redis 从 AOF 重启后 key 数增加"
+[ "$(redis_persistent_key_count_service)" = "$LOADED_PERSISTENT_KEYS" ] \
+  || die "正式 Redis 从 AOF 重启后永久 key 数变化"
 [ "$(redis_persistence_value_service aof_enabled)" = 1 ] \
   && [ "$(redis_persistence_value_service aof_last_write_status)" = ok ] \
   || die "正式 Redis 未以健康 AOF 模式运行"

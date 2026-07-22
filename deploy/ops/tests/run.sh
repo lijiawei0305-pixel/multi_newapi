@@ -530,6 +530,7 @@ test_restore_requires_maintenance_before_mutation() (
     printf 'consistency=writers-stopped\n'
     printf 'app_version=release-v1\n'
     printf 'redis_keys=1\n'
+    printf 'redis_persistent_keys=1\n'
     printf 'db_file=%s\n' "$(basename "$db")"
     printf 'db_sha256=%s\n' "$(sha256sum "$db" | awk '{print $1}')"
     printf 'redis_file=%s\n' "$(basename "$redis")"
@@ -602,7 +603,10 @@ test_restore_orchestration_contract_converts_rdb_to_aof_and_reconciles() (
     printf 'db_name=new-api-test\n'
     printf 'consistency=writers-stopped\n'
     printf 'app_version=old-v1\n'
-    printf 'redis_keys=1\n'
+    # The snapshot held two TTL keys that expired before restore plus one
+    # permanent key. Loading one key is therefore the correct delayed result.
+    printf 'redis_keys=3\n'
+    printf 'redis_persistent_keys=1\n'
     printf 'db_file=%s\n' "$(basename "$db")"
     printf 'db_sha256=%s\n' "$(sha256sum "$db" | awk '{print $1}')"
     printf 'redis_file=%s\n' "$(basename "$redis")"

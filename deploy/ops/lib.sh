@@ -313,10 +313,12 @@ valid_sha256() {
 }
 
 # verify_backup_manifest <manifest>：验证格式/目标/文件名/三个内容摘要，并导出
-# MANIFEST_{DIR,TS,APP_VERSION,REDIS_KEYS,DB_FILE,REDIS_FILE,CONFIG_FILE} 供 restore 使用。
+# MANIFEST_{DIR,TS,APP_VERSION,REDIS_KEYS,REDIS_PERSISTENT_KEYS,
+# DB_FILE,REDIS_FILE,CONFIG_FILE} 供 restore 使用。旧备份没有
+# redis_persistent_keys；恢复端对这类 manifest 保持兼容，但会降低为总数上界校验。
 verify_backup_manifest() {
   local manifest="$1" format stack db_name consistency
-  local db_file redis_file config_file db_sha redis_sha config_sha
+  local db_file redis_file config_file db_sha redis_sha config_sha persistent_count
   [ -f "$manifest" ] || die "备份 manifest 不存在：$manifest"
 
   format="$(manifest_value "$manifest" format)" || die "manifest 缺失/重复 format：$manifest"
@@ -326,6 +328,12 @@ verify_backup_manifest() {
   MANIFEST_TS="$(manifest_value "$manifest" timestamp)" || die "manifest 缺失/重复 timestamp：$manifest"
   MANIFEST_APP_VERSION="$(manifest_value "$manifest" app_version)" || die "manifest 缺失/重复 app_version：$manifest"
   MANIFEST_REDIS_KEYS="$(manifest_value "$manifest" redis_keys)" || die "manifest 缺失/重复 redis_keys：$manifest"
+  persistent_count="$(grep -c '^redis_persistent_keys=' "$manifest" 2>/dev/null || true)"
+  case "$persistent_count" in
+    0) MANIFEST_REDIS_PERSISTENT_KEYS="" ;;
+    1) MANIFEST_REDIS_PERSISTENT_KEYS="$(manifest_value "$manifest" redis_persistent_keys)" ;;
+    *) die "manifest 重复 redis_persistent_keys：$manifest" ;;
+  esac
   db_file="$(manifest_value "$manifest" db_file)" || die "manifest 缺失/重复 db_file：$manifest"
   redis_file="$(manifest_value "$manifest" redis_file)" || die "manifest 缺失/重复 redis_file：$manifest"
   config_file="$(manifest_value "$manifest" config_file)" || die "manifest 缺失/重复 config_file：$manifest"
@@ -340,6 +348,12 @@ verify_backup_manifest() {
   printf '%s\n' "$MANIFEST_TS" | grep -Eq '^[0-9]{8}-[0-9]{6}$' || die "manifest timestamp 非法：$MANIFEST_TS"
   printf '%s\n' "$MANIFEST_APP_VERSION" | grep -Eq '^[A-Za-z0-9._-]+$' || die "manifest app_version 非法：$MANIFEST_APP_VERSION"
   printf '%s\n' "$MANIFEST_REDIS_KEYS" | grep -Eq '^[0-9]+$' || die "manifest redis_keys 非法：$MANIFEST_REDIS_KEYS"
+  if [ -n "$MANIFEST_REDIS_PERSISTENT_KEYS" ]; then
+    printf '%s\n' "$MANIFEST_REDIS_PERSISTENT_KEYS" | grep -Eq '^[0-9]+$' \
+      || die "manifest redis_persistent_keys 非法：$MANIFEST_REDIS_PERSISTENT_KEYS"
+    [ "$MANIFEST_REDIS_PERSISTENT_KEYS" -le "$MANIFEST_REDIS_KEYS" ] \
+      || die "manifest 永久 Redis key 数大于总数"
+  fi
   valid_manifest_file "$db_file" || die "manifest db_file 非法：$db_file"
   valid_manifest_file "$redis_file" || die "manifest redis_file 非法：$redis_file"
   valid_manifest_file "$config_file" || die "manifest config_file 非法：$config_file"
@@ -447,6 +461,22 @@ redis_key_count_service() {
 redis_key_count_container() {
   docker exec "$1" redis-cli --raw INFO keyspace 2>/dev/null \
     | tr -d '\r' | awk -F'[=,]' '/^db[0-9]+:keys=/{sum += $2} END{print sum + 0}'
+}
+
+# Redis RDB records absolute expiration timestamps. A valid delayed restore can
+# therefore load fewer expiring keys than existed at snapshot time. Permanent
+# keys are the stable recovery invariant and must remain exact.
+redis_persistent_key_count_service() {
+  redis_cli_service --raw INFO keyspace 2>/dev/null \
+    | tr -d '\r' \
+    | awk -F'[=,]' '/^db[0-9]+:keys=/{keys += $2; for (i=3; i<=NF; i+=2) if ($i == "expires") expires += $(i+1)} END{print keys - expires}'
+}
+
+redis_persistent_key_count_container() {
+  local container="$1"
+  docker exec "$container" redis-cli --raw INFO keyspace 2>/dev/null \
+    | tr -d '\r' \
+    | awk -F'[=,]' '/^db[0-9]+:keys=/{keys += $2; for (i=3; i<=NF; i+=2) if ($i == "expires") expires += $(i+1)} END{print keys - expires}'
 }
 
 redis_persistence_value_container() {
