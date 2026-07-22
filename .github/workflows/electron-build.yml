@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   deployments: read
 
@@ -60,6 +61,7 @@ jobs:
       - name: Fail closed unless release publish Environment is protected
         env:
           GH_TOKEN: ${{ secrets.ENVIRONMENT_AUDIT_TOKEN || github.token }}
+          GITHUB_ENVIRONMENT_APPROVALS_REQUIRED: 'false'
         run: bash scripts/verify-github-environments.sh release-publish
 
       - name: Set up Go

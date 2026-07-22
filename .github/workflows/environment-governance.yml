@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   deployments: read
 
@@ -24,6 +25,7 @@ jobs:
       - name: Read and verify Environment rules
         env:
           GH_TOKEN: ${{ secrets.ENVIRONMENT_AUDIT_TOKEN || github.token }}
+          GITHUB_ENVIRONMENT_APPROVALS_REQUIRED: 'false'
           GITHUB_ENVIRONMENT_EVIDENCE_OUT: artifacts/github-environments.json
         run: bash scripts/verify-github-environments.sh
       - name: Upload sanitized evidence

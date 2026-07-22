@@ -1370,11 +1370,21 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$GH_CALLS"
 [ "$1" = api ] || exit 64
 case "$*" in
-  *container-publish|*release-publish)
+  *container-publish/deployment-branch-policies)
     if [ "${GH_BAD_RULES:-0}" = 1 ]; then
-      printf '{"can_admins_bypass":true,"protection_rules":[],"deployment_branch_policy":null}\n'
+      printf '{"branch_policies":[{"name":"main","type":"branch"}]}\n'
     else
-      printf '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","reviewers":[{"type":"User","reviewer":{"login":"reviewer"}}]},{"type":"wait_timer","wait_timer":5}],"deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}\n'
+      printf '{"branch_policies":[{"name":"v*","type":"tag"},{"name":"nightly","type":"branch"},{"name":"[0-9]*","type":"tag"},{"name":"main","type":"branch"},{"name":"alpha","type":"branch"}]}\n'
+    fi
+    ;;
+  *release-publish/deployment-branch-policies)
+    printf '{"branch_policies":[{"name":"v*","type":"tag"},{"name":"[0-9]*","type":"tag"}]}\n'
+    ;;
+  *container-publish|*release-publish)
+    if [ "${GH_ENTERPRISE_RULES:-0}" = 1 ]; then
+      printf '{"can_admins_bypass":false,"protection_rules":[{"type":"required_reviewers","reviewers":[{"type":"User","reviewer":{"login":"reviewer"}}]},{"type":"wait_timer","wait_timer":5}],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}\n'
+    else
+      printf '{"can_admins_bypass":true,"protection_rules":[],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}\n'
     fi
     ;;
   *) exit 1 ;;
@@ -1383,17 +1393,29 @@ FAKE_GH
   chmod +x "$fake/gh"
 
   PATH="$fake:$PATH" GH_CALLS="$tmp/gh.calls" \
+    GITHUB_ENVIRONMENT_APPROVALS_REQUIRED=false \
     GITHUB_REPOSITORY=owner/repository GITHUB_ENVIRONMENT_EVIDENCE_OUT="$evidence" \
     bash "$ROOT/scripts/verify-github-environments.sh" >/dev/null \
-    || fail "Environment audit rejected a fully protected fixture"
+    || fail "Environment audit rejected the approved private-repository policy fixture"
   [ "$(jq 'length' "$evidence")" = 2 ] || fail "Environment audit did not emit both sanitized records"
-  [ "$(jq '[.[].required_reviewers] | min' "$evidence")" -ge 1 ] \
-    || fail "Environment audit lost required-reviewer evidence"
+  jq -e 'all(.[]; .approval_protection_required == false and .branch_policy == true)' \
+    "$evidence" >/dev/null || fail "Environment audit lost the active policy mode"
+  [ "$(jq '[.[].deployment_policies | length] | add' "$evidence")" = 7 ] \
+    || fail "Environment audit did not preserve the seven approved deployment policies"
   if PATH="$fake:$PATH" GH_CALLS="$tmp/gh.calls" GH_BAD_RULES=1 \
+    GITHUB_ENVIRONMENT_APPROVALS_REQUIRED=false GITHUB_REPOSITORY=owner/repository \
+    bash "$ROOT/scripts/verify-github-environments.sh" container-publish >/dev/null 2>&1; then
+    fail "Environment audit accepted a deployment policy outside the approved baseline"
+  fi
+  if PATH="$fake:$PATH" GH_CALLS="$tmp/gh.calls" \
     GITHUB_REPOSITORY=owner/repository \
     bash "$ROOT/scripts/verify-github-environments.sh" container-publish >/dev/null 2>&1; then
-    fail "Environment audit accepted missing reviewers/branch policy/admin bypass"
+    fail "Environment audit disabled approval protection without an explicit policy setting"
   fi
+  PATH="$fake:$PATH" GH_CALLS="$tmp/gh.calls" GH_ENTERPRISE_RULES=1 \
+    GITHUB_REPOSITORY=owner/repository \
+    bash "$ROOT/scripts/verify-github-environments.sh" >/dev/null \
+    || fail "Environment audit rejected the strict approval-protected fixture"
   if grep -Eq '(^|[[:space:]])(put|post|patch|delete)([[:space:]]|$)' "$tmp/gh.calls"; then
     fail "Environment audit attempted a mutating GitHub API method"
   fi

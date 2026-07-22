@@ -1,34 +1,55 @@
 # Release governance evidence
 
 Publish workflows fail closed through `scripts/verify-github-environments.sh`.
-The check is read-only and requires both `container-publish` and
-`release-publish` to have:
+The check is read-only and always requires both `container-publish` and
+`release-publish` to exist, use selected deployment branches and tags, and
+match the repository's exact approved policy baseline:
 
-- at least one required reviewer;
-- a protected-branch or custom deployment branch/tag policy; and
-- administrator bypass disabled.
+- `container-publish`: branches `main`, `alpha`, and `nightly`; tags `v*` and
+  `[0-9]*`;
+- `release-publish`: tags `v*` and `[0-9]*`.
+
+The publishing workflows independently validate semantic version tags and
+source ancestry before they reach these Environments. The Environment patterns
+therefore constrain the eligible ref classes, while the workflow checks enforce
+the exact release format and commit.
+
+Approval protection remains the default audit mode. Unless
+`GITHUB_ENVIRONMENT_APPROVALS_REQUIRED=false` is explicitly set, every
+Environment must also have at least one required reviewer and administrator
+bypass disabled. The repository workflows currently set that exception because
+GitHub returned HTTP 422 when required reviewers were configured for this
+private personal repository: the account's billing plan does not expose that
+protection rule. The API still reports `can_admins_bypass: true`; the audit
+records it as evidence but cannot enforce an unavailable setting. If the
+repository moves to a plan and owner type that supports private-repository
+approval protection, configure the rules and remove the exception.
 
 The daily/manual `GitHub Environment Governance Audit` workflow stores a
-sanitized JSON artifact (counts and booleans only, no secrets). If the built-in
-workflow token cannot read Environment settings, configure the repository
-secret `ENVIRONMENT_AUDIT_TOKEN` with the narrowest read-only repository
-administration/environment permission supported by the organization.
+sanitized JSON artifact containing policy names, types, counts, and booleans;
+no secrets are read. The built-in workflow token has `actions: read`, which is
+the permission GitHub requires for the Environment and deployment-policy read
+APIs. `ENVIRONMENT_AUDIT_TOKEN` remains an optional fallback for installations
+whose built-in token cannot read those settings.
 
 Configure rules in GitHub repository settings; this repository intentionally
 does not mutate them. After configuration, run:
 
 ```bash
-GITHUB_REPOSITORY=OWNER/REPO scripts/verify-github-environments.sh
+GITHUB_REPOSITORY=OWNER/REPO \
+GITHUB_ENVIRONMENT_APPROVALS_REQUIRED=false \
+scripts/verify-github-environments.sh
 ```
 
 A nonzero exit means publishing must remain blocked. Review wait-timer values
 in the emitted evidence and apply the organization's desired delay. Environment
 secret values are never read or exported by this audit.
 
-As of the read-only API check on 2026-07-19, the repository returned
-`total_count: 0`; neither named Environment existed. R06 therefore remains an
-external GitHub-settings blocker until an administrator creates and protects
-both Environments and the audit workflow succeeds.
+As of the read-only API check on 2026-07-22, both named Environments exist and
+their branch/tag policies match the baseline above. Required reviewers and the
+administrator-bypass control remain unavailable under the current private
+repository plan, and that limitation is kept explicit rather than represented
+as an enabled protection.
 
 ## Clean release source boundary
 
