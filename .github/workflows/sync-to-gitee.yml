@@ -2,6 +2,7 @@ name: Sync Release to Gitee
 
 permissions:
   contents: read
+  deployments: read
 
 on:
   workflow_dispatch:
@@ -17,79 +18,125 @@ env:
   GITEE_REPO: 'new-api'                # 修改为你的 Gitee 仓库名
 
 jobs:
-  sync-to-gitee:
-    runs-on: sync
+  verify:
+    name: Verify governed release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      commit: ${{ steps.source.outputs.commit }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Checkout requested release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Bind requested release to the triggering tag and main
+        id: source
+        env:
+          TAG_NAME: ${{ github.event.inputs.tag_name }}
+        run: |
+          if [[ ! "$TAG_NAME" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Gitee sync requires a strict vMAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH tag"
+            exit 1
+          fi
+          EXPECTED_REF="refs/tags/$TAG_NAME"
+          test "$GITHUB_REF" = "$EXPECTED_REF" || {
+            echo "::error::Run this workflow from the same tag supplied in tag_name"
+            exit 1
+          }
+          TAG_COMMIT=$(git rev-parse "refs/tags/$TAG_NAME^{commit}")
+          test "$TAG_COMMIT" = "$(git rev-parse HEAD)" || {
+            echo "::error::Checked-out commit does not match the requested release tag"
+            exit 1
+          }
+          test "$TAG_COMMIT" = "$GITHUB_SHA" || {
+            echo "::error::Workflow source does not match the requested release tag"
+            exit 1
+          }
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$TAG_COMMIT" refs/remotes/origin/main || {
+            echo "::error::Refusing to sync a tag whose commit is not on origin/main"
+            exit 1
+          }
+          printf 'tag=%s\n' "$TAG_NAME" >> "$GITHUB_OUTPUT"
+          printf 'commit=%s\n' "$TAG_COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Fail closed unless release publish Environment is protected
+        env:
+          GH_TOKEN: ${{ secrets.ENVIRONMENT_AUDIT_TOKEN || github.token }}
+        run: bash scripts/verify-github-environments.sh release-publish
+
+  sync-to-gitee:
+    name: Publish governed release to Gitee
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release-publish
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.verify.outputs.commit }}
 
       - name: Get Release Info
         id: release_info
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ github.event.inputs.tag_name }}
+          TAG_NAME: ${{ needs.verify.outputs.tag }}
+          VERIFIED_COMMIT: ${{ needs.verify.outputs.commit }}
         run: |
-          if [[ ! "$TAG_NAME" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "::error::Release tag is invalid"
-            exit 1
-          fi
+          test "$(git rev-parse HEAD)" = "$VERIFIED_COMMIT"
           # 获取 release 信息
-          RELEASE_INFO=$(gh release view "$TAG_NAME" --json name,body,tagName,targetCommitish)
-          
+          RELEASE_INFO=$(gh release view "$TAG_NAME" --json name,body,tagName,targetCommitish,assets)
+          printf '%s\n' "$RELEASE_INFO" | jq -e --arg tag "$TAG_NAME" '
+            .tagName == $tag and
+            (.name | type == "string") and
+            (.body == null or (.body | type == "string")) and
+            (.assets | type == "array")
+          ' >/dev/null
+
           RELEASE_NAME=$(echo "$RELEASE_INFO" | jq -r '.name')
-          TARGET_COMMITISH=$(echo "$RELEASE_INFO" | jq -r '.targetCommitish')
-          
           # Every release field is untrusted content. Random delimiters prevent
           # names or bodies containing workflow-command text from forging a
           # second output value.
           NAME_DELIMITER="release_name_${GITHUB_RUN_ID}_${RANDOM}_${RANDOM}"
-          COMMIT_DELIMITER="target_commit_${GITHUB_RUN_ID}_${RANDOM}_${RANDOM}"
           BODY_DELIMITER="release_body_${GITHUB_RUN_ID}_${RANDOM}_${RANDOM}"
           {
             echo "release_name<<$NAME_DELIMITER"
             printf '%s\n' "$RELEASE_NAME"
             echo "$NAME_DELIMITER"
-            echo "target_commitish<<$COMMIT_DELIMITER"
-            printf '%s\n' "$TARGET_COMMITISH"
-            echo "$COMMIT_DELIMITER"
             echo "release_body<<$BODY_DELIMITER"
-            printf '%s\n' "$RELEASE_INFO" | jq -r '.body'
+            printf '%s\n' "$RELEASE_INFO" | jq -r '.body // ""'
             echo "$BODY_DELIMITER"
           } >> "$GITHUB_OUTPUT"
           
-          # 下载 release 的所有附件
-          gh release download "$TAG_NAME" --dir ./release_assets || echo "No assets to download"
-          
-          # 列出下载的文件
-          ls -la ./release_assets/ || echo "No assets directory"
+          RELEASE_INFO_FILE="$RUNNER_TEMP/newapi-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          printf '%s\n' "$RELEASE_INFO" > "$RELEASE_INFO_FILE"
+          ASSET_COUNT=$(jq -er '.assets | length' "$RELEASE_INFO_FILE")
+          test ! -e ./release_assets || {
+            echo "::error::release_assets must not exist before download"
+            exit 1
+          }
+          mkdir ./release_assets
+          if [ "$ASSET_COUNT" -gt 0 ]; then
+            gh release download "$TAG_NAME" --dir ./release_assets
+          fi
+          GITHUB_RELEASE_INFO_FILE="$RELEASE_INFO_FILE" \
+            GITHUB_RELEASE_ASSET_DIR=./release_assets \
+            python3 scripts/gitee_release.py verify-github-assets
 
-      - name: Create Gitee Release
-        id: create_release
-        uses: nICEnnnnnnnLee/action-gitee-release@44b412edade0c837fb0ad7d73f4674ec07c8b722 # v2.0.0
-        with:
-          gitee_action: create_release
-          gitee_owner: ${{ env.GITEE_OWNER }}
-          gitee_repo: ${{ env.GITEE_REPO }}
-          gitee_token: ${{ secrets.GITEE_TOKEN }}
-          gitee_tag_name: ${{ github.event.inputs.tag_name }}
-          gitee_release_name: ${{ steps.release_info.outputs.release_name }}
-          gitee_release_body: ${{ steps.release_info.outputs.release_body }}
-          gitee_target_commitish: ${{ steps.release_info.outputs.target_commitish }}
-
-      - name: Upload Assets to Gitee
-        if: hashFiles('release_assets/*') != ''
-        uses: nICEnnnnnnnLee/action-gitee-release@44b412edade0c837fb0ad7d73f4674ec07c8b722 # v2.0.0
-        with:
-          gitee_action: upload_asset
-          gitee_owner: ${{ env.GITEE_OWNER }}
-          gitee_repo: ${{ env.GITEE_REPO }}
-          gitee_token: ${{ secrets.GITEE_TOKEN }}
-          gitee_release_id: ${{ steps.create_release.outputs.release-id }}
-          gitee_upload_retry_times: 3
-          gitee_files: |
-            release_assets/*
+      - name: Create Gitee Release and upload assets
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_TAG_NAME: ${{ needs.verify.outputs.tag }}
+          GITEE_RELEASE_NAME: ${{ steps.release_info.outputs.release_name }}
+          GITEE_RELEASE_BODY: ${{ steps.release_info.outputs.release_body }}
+          GITEE_TARGET_COMMITISH: ${{ needs.verify.outputs.commit }}
+          GITEE_FILES: release_assets/*
+          GITEE_ASSET_ROOT: release_assets
+          GITEE_UPLOAD_RETRIES: '3'
+        run: python3 scripts/gitee_release.py
 
       - name: Cleanup
         if: always()
@@ -99,7 +146,7 @@ jobs:
       - name: Summary
         if: success()
         env:
-          TAG_NAME: ${{ github.event.inputs.tag_name }}
+          TAG_NAME: ${{ needs.verify.outputs.tag }}
         run: |
           echo "✅ Successfully synced release $TAG_NAME to Gitee!"
           echo "🔗 Gitee Release URL: https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}/releases/tag/$TAG_NAME"

@@ -1,0 +1,25 @@
+# Reviewed false positives: deterministic test credentials, documentation/input
+# PEM placeholders, API-key masking regexes, fixed provider request identifiers,
+# and authorization/header field names. Values remain fake or structural; keep
+# each fingerprint narrow so new findings elsewhere still fail the scan.
+common/str.go:gcp-api-key:262
+common/session_security_test.go:generic-api-key:19
+common/session_security_test.go:generic-api-key:20
+common/session_security_test.go:generic-api-key:21
+common/session_security_test.go:generic-api-key:23
+common/session_security_test.go:generic-api-key:24
+common/session_security_test.go:generic-api-key:25
+common/session_security_test.go:generic-api-key:27
+controller/token_test.go:generic-api-key:394
+controller/token_test.go:generic-api-key:422
+controller/token_test.go:generic-api-key:449
+controller/token_test.go:generic-api-key:474
+docs/vendor/payments/alipay-sign-verify.md:private-key:186
+internal/mtwire/payment_inprocess_test.go:private-key:41
+middleware/auth.go:generic-api-key:161
+relay/channel/vertex/service_account.go:private-key:79
+relay/channel/task/jimeng/adaptor.go:generic-api-key:226
+relay/channel/task/jimeng/adaptor.go:generic-api-key:418
+relay/channel/task/jimeng/adaptor.go:generic-api-key:420
+web/default/src/features/system-settings/integrations/payment-gateway-tabs.tsx:private-key:513
+web/default/src/features/system-settings/integrations/payment-gateway-tabs.tsx:private-key:746

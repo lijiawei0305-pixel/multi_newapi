@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>newapi628 修复后全仓复审报告</title>
+<style>
+  :root {
+    --sidebar-bg: #1a1f2e;
+    --sidebar-hover: #242a3d;
+    --sidebar-active: #2d3555;
+    --bg: #f0f3f7;
+    --card-bg: #ffffff;
+    --border: #e6eaef;
+    --text: #1e2233;
+    --text-secondary: #6b7394;
+    --accent: #3370ff;
+    --accent-light: #e8f0ff;
+    --success: #34c759;
+    --warning: #ff9500;
+    --danger: #ff3b30;
+    --info: #5ac8fa;
+    --badge-critical: #ff3b30;
+    --badge-high: #ff9500;
+    --badge-medium: #3370ff;
+    --badge-low: #8e8e93;
+    --badge-info: #5ac8fa;
+    --bar-bg: #e8eaed;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    display: flex;
+    min-height: 100vh;
+    font-size: 15px;
+  }
+  .sidebar { width: 240px; background: var(--sidebar-bg); color: #fff; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+  .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+  .sidebar-header .sub { font-size: 12px; color: rgba(255,255,255,.4); margin-top: 4px; }
+  .sidebar-nav { padding: 8px 0; flex: 1; }
+  .sidebar-nav a { display: flex; align-items: center; gap: 12px; padding: 14px 20px; color: rgba(255,255,255,.6); text-decoration: none; font-size: 14px; transition: all .15s; border-left: 3px solid transparent; }
+  .sidebar-nav a:hover { background: var(--sidebar-hover); color: #fff; }
+  .sidebar-nav a.active { background: var(--sidebar-active); color: #fff; border-left-color: var(--accent); }
+  .sidebar-nav a .icon { width: 18px; text-align: center; font-size: 14px; }
+  .sidebar-footer { padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.3); }
+  .main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+  .page-header { margin-bottom: 32px; }
+  .page-header h2 { font-size: 26px; font-weight: 700; }
+  .page-header .meta { font-size: 14px; color: var(--text-secondary); margin-top: 6px; display: flex; gap: 20px; flex-wrap: wrap; }
+  .page-header .meta span { display: flex; align-items: center; gap: 4px; }
+  .card { background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 15px; }
+  .card-body { padding: 24px; }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .score-item { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; background: #f8fafc; border-radius: 8px; border: 1px solid var(--border); }
+  .score-item .label { font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .4px; }
+  .score-item .bar-row { display: flex; align-items: center; gap: 12px; }
+  .score-item .bar-track { flex: 1; height: 10px; background: var(--bar-bg); border-radius: 5px; overflow: hidden; }
+  .score-item .bar-fill { height: 100%; border-radius: 5px; transition: width .6s ease; }
+  .score-item .value { font-size: 22px; font-weight: 700; min-width: 52px; text-align: right; }
+  .score-item .grade { font-size: 15px; font-weight: 700; min-width: 22px; text-align: center; }
+  .bar-fill.s { background: linear-gradient(90deg, #34c759, #30d158); }
+  .bar-fill.a { background: linear-gradient(90deg, #3370ff, #5e8cff); }
+  .bar-fill.b { background: linear-gradient(90deg, #ff9500, #ffb340); }
+  .bar-fill.c { background: linear-gradient(90deg, #ff3b30, #ff6b61); }
+  .bar-fill.d { background: linear-gradient(90deg, #ff6b61, #ff9f91); }
+  .bar-fill.f { background: linear-gradient(90deg, #9b1d1a, #d63031); }
+  .grade-s { color: #34c759; } .grade-a { color: #3370ff; }
+  .grade-b { color: #ff9500; } .grade-c { color: #ff3b30; }
+  .grade-d { color: #ff6b61; } .grade-f { color: #9b1d1a; }
+  .overall-row { grid-column: 1 / -1; background: linear-gradient(135deg, #1a1f2e, #2d3555); border-color: transparent; }
+  .overall-row .label { color: rgba(255,255,255,.6); }
+  .overall-row .value { color: #fff; }
+  .overall-row .grade { color: #34c759; }
+  .overall-row .bar-fill { background: linear-gradient(90deg, #34c759, #30d158); }
+  .stats-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat-card { flex: 1; min-width: 140px; padding: 20px 24px; background: var(--card-bg); border-radius: 10px; border: 1px solid var(--border); text-align: center; }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1.3; }
+  .stat-card .desc { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+  .finding { border-left: 4px solid var(--border); margin-bottom: 20px; padding: 20px 24px; border-radius: 0 10px 10px 0; background: #fafbfc; border: 1px solid var(--border); border-left-width: 4px; }
+  .finding.severity-critical { border-left-color: var(--badge-critical); }
+  .finding.severity-high { border-left-color: var(--badge-high); }
+  .finding.severity-medium { border-left-color: var(--badge-medium); }
+  .finding.severity-low { border-left-color: var(--badge-low); }
+  .finding.severity-info { border-left-color: var(--badge-info); }
+  .finding-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .finding-header h4 { font-size: 16px; font-weight: 600; flex: 1; }
+  .badge { display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; line-height: 1.6; }
+  .badge-critical { background: #ffeae9; color: var(--badge-critical); }
+  .badge-high { background: #fff3e0; color: var(--badge-high); }
+  .badge-medium { background: var(--accent-light); color: var(--badge-medium); }
+  .badge-low { background: #f2f2f5; color: var(--badge-low); }
+  .badge-info { background: #e4f5ff; color: #007aff; }
+  .badge-confirmed { background: #e8ffe8; color: #248a3d; }
+  .badge-suspected { background: #fff8e1; color: #b8860b; }
+  .badge-s { background: #e8ffe8; color: #248a3d; }
+  .badge-a { background: var(--accent-light); color: var(--accent); }
+  .badge-b { background: #fff3e0; color: var(--warning); }
+  .badge-c { background: #ffeae9; color: var(--danger); }
+  .finding-meta { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+  .finding-meta span { display: flex; align-items: center; gap: 4px; }
+  .finding .evidence { margin: 12px 0; padding: 14px 18px; background: #f0f2f5; border-radius: 8px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  .finding .problem { font-size: 14px; margin: 12px 0; color: var(--text); line-height: 1.8; }
+  .finding .fix-box { margin-top: 12px; padding: 14px 18px; background: #f0f7ff; border-radius: 8px; border: 1px solid #d6e4ff; font-size: 13px; }
+  .finding .fix-box code { display: block; margin-top: 6px; padding: 12px 16px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-all; }
+  .fix-label { font-weight: 600; font-size: 11px; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; }
+  .section-title { font-size: 20px; font-weight: 700; margin: 36px 0 20px; padding-bottom: 10px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 12px 16px; font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; border-bottom: 2px solid var(--border); background: #f8fafc; }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  .check-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; }
+  .check-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.6; }
+  .check-item .check { color: var(--success); font-weight: 700; }
+  .check-item .cross { color: var(--danger); font-weight: 700; }
+  .win-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .win-card { padding: 16px; background: linear-gradient(135deg, #f0f7ff, #e8f0ff); border-radius: 8px; border: 1px solid #d6e4ff; }
+  .win-card .win-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .win-card .win-meta { font-size: 11px; color: var(--text-secondary); }
+  .small { font-size: 13px; color: var(--text-secondary); }
+  .code-block { margin: 8px 0; padding: 14px 18px; background: #1e2233; color: #cdd6f4; border-radius: 6px; font-family: "SF Mono","Fira Code","Consolas",monospace; font-size: 13px; overflow-x: auto; white-space: pre; line-height: 1.7; }
+  .hl { color: #f7768e; font-weight: 600; } .cm { color: #565f89; }
+  .kw { color: #bb9af7; } .fn { color: #7aa2f7; }
+  .ty { color: #ff9e64; } .op { color: #89ddff; }
+  .str { color: #9ece6a; } .nu { color: #ff9e64; }
+  @media (max-width: 768px) { .sidebar { display: none; } .main { padding: 16px; } .score-grid { grid-template-columns: 1fr; } .stats-row { flex-direction: column; } .check-list { grid-template-columns: 1fr; } .win-grid { grid-template-columns: 1fr; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #c1c7d0; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a8adb8; }
+</style>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="sidebar-header"><h1>newapi628</h1><div class="sub">Full remediation re-audit · 2026-07-22</div></div>
+  <div class="sidebar-nav">
+    <a href="#summary"><span class="icon">📊</span> 摘要</a>
+    <a href="#executive-summary"><span class="icon">📝</span> 总体评估</a>
+    <a href="#coverage"><span class="icon">🧭</span> 覆盖矩阵</a>
+    <a href="#findings"><span class="icon">🔍</span> 详细发现</a>
+    <a href="#architecture"><span class="icon">🏗</span> 架构</a>
+    <a href="#security"><span class="icon">🔒</span> 安全</a>
+    <a href="#stability"><span class="icon">⚡</span> 稳定性</a>
+    <a href="#performance"><span class="icon">🚀</span> 性能</a>
+    <a href="#testing"><span class="icon">🧪</span> 测试</a>
+    <a href="#maintainability"><span class="icon">📐</span> 可维护性</a>
+    <a href="#design"><span class="icon">📋</span> 设计</a>
+    <a href="#release"><span class="icon">🚢</span> 发布</a>
+    <a href="#documentation"><span class="icon">📚</span> 文档</a>
+    <a href="#configuration"><span class="icon">⚙️</span> 配置</a>
+    <a href="#observability"><span class="icon">🩺</span> 可观测性</a>
+    <a href="#data-integrity"><span class="icon">🧱</span> 数据完整性</a>
+    <a href="#privacy"><span class="icon">🛡</span> 隐私</a>
+    <a href="#accessibility"><span class="icon">⌨️</span> 可访问性</a>
+    <a href="#supply-chain"><span class="icon">🔗</span> 供应链</a>
+    <a href="#cost"><span class="icon">💸</span> 成本</a>
+    <a href="#ai-safety"><span class="icon">🤖</span> AI 安全</a>
+    <a href="#fallback"><span class="icon">🪂</span> 降级与防御</a>
+    <a href="#testing-authenticity"><span class="icon">🧫</span> 测试真实性</a>
+    <a href="#type-safety"><span class="icon">🔤</span> 类型安全</a>
+    <a href="#frontend-state"><span class="icon">🖥</span> 前端状态</a>
+    <a href="#backend-api"><span class="icon">🔌</span> 后端 API</a>
+    <a href="#dependency-weight"><span class="icon">📦</span> 依赖重量</a>
+    <a href="#code-consistency"><span class="icon">🧹</span> 代码一致性</a>
+    <a href="#comment-coverage"><span class="icon">💬</span> 注释覆盖</a>
+    <a href="#principles"><span class="icon">📋</span> 设计原则</a>
+    <a href="#fix-order"><span class="icon">🎯</span> 修复顺序</a>
+  </div>
+  <div class="sidebar-footer">Fuck My Shit Mountain v1.0 format · Codex</div>
+</nav>
+
+<div class="main">
+  <div class="page-header" id="summary">
+    <h2>newapi628 修复后全仓复审报告</h2>
+    <div class="meta">
+      <span>📅 2026-07-22</span><span>⏱ Evidence cutoff: 2026-07-22 17:08:28 +08:00</span>
+      <span>🔍 Full · 25 dimensions</span><span>🛠 Reviewer: Codex + 3 repair sub-agents</span>
+      <span>🧾 Baseline: b2ee5f63a337d778e41b9972dc4aa0611ea67b56 · main</span>
+      <span>🧰 PR #4 · Remote CI + isolated production-backup recovery drill · No production deployment</span>
+    </div>
+  </div>
+
+  <div class="card"><div class="card-header">📊 Score Dashboard / 评分面板</div><div class="card-body"><div class="score-grid">
+    <div class="score-item"><div class="label">Security</div><div class="bar-row"><div class="bar-track"><div class="bar-fill s" style="width:92%"></div></div><span class="value grade-s">9.2</span><span class="grade grade-s">S</span></div><div class="small">依赖、Go 漏洞、secret scan、签名、镜像与 R2 Bucket Lock 均有 fail-closed 证据</div></div>
+    <div class="score-item"><div class="label">Stability</div><div class="bar-row"><div class="bar-track"><div class="bar-fill s" style="width:92%"></div></div><span class="value grade-s">9.2</span><span class="grade grade-s">S</span></div><div class="small">远端密文已完成解密、MySQL/Redis 恢复、应用 readiness 与 15 项对账</div></div>
+    <div class="score-item"><div class="label">Performance</div><div class="bar-row"><div class="bar-track"><div class="bar-fill a" style="width:87%"></div></div><span class="value grade-a">8.7</span><span class="grade grade-a">A</span></div><div class="small">Classic 路由懒加载并新增初始 bundle 硬预算；无生产负载与 profiler 证据</div></div>
+    <div class="score-item"><div class="label">Testing</div><div class="bar-row"><div class="bar-track"><div class="bar-fill s" style="width:98%"></div></div><span class="value grade-s">9.8</span><span class="grade grade-s">S</span></div><div class="small">Backend race、125 first-party packages、四前端、Electron、25 项 ops、双版本矩阵与远端实恢复</div></div>
+    <div class="score-item"><div class="label">Maintainability</div><div class="bar-row"><div class="bar-track"><div class="bar-fill s" style="width:93%"></div></div><span class="value grade-s">9.3</span><span class="grade grade-s">S</span></div><div class="small">Go、Default、Classic 生产源码超过 1500 行的文件均为零，且零白名单</div></div>
+    <div class="score-item"><div class="label">Design</div><div class="bar-row"><div class="bar-track"><div class="bar-fill s" style="width:95%"></div></div><span class="value grade-s">9.5</span><span class="grade grade-s">S</span></div><div class="small">恢复不变量区分永久键与绝对 TTL，自然过期不再被误判为损坏</div></div>
+    <div class="score-item"><div class="label">Release</div><div class="bar-row"><div class="bar-track"><div class="bar-fill a" style="width:88%"></div></div><span class="value grade-a">8.8</span><span class="grade grade-a">A</span></div><div class="small">PR 与恢复证据已闭环；唯一开放项是 GitHub 私有个人仓库方案不支持独立 Environment 审批</div></div>
+    <div class="score-item overall-row"><div class="label">Overall</div><div class="bar-row"><div class="bar-track" style="background:rgba(255,255,255,.12)"><div class="bar-fill" style="width:92%;background:linear-gradient(90deg,#34c759,#30d158)"></div></div><span class="value" style="color:#fff">9.2</span><span class="grade" style="color:#34c759">S</span></div><div class="small" style="color:rgba(255,255,255,.68)">仓库内可执行缺陷：0；外部运营/治理待闭环：1 Medium。</div></div>
+  </div></div></div>
+
+  <h3 class="section-title" id="executive-summary">📝 Executive Summary / 总体评估</h3>
+  <div class="card"><div class="card-header">📋 审计结论</div><div class="card-body">
+    <p><strong>项目概况：</strong>newapi628 是以 Go、Gin、GORM 为核心的多供应商 AI API 网关，覆盖 SQLite、MySQL、PostgreSQL、Redis、认证、计费、多租户、Default/Classic/Orbit Web 与 Electron。本轮从原始 8 个发现出发，由 3 个子 Agent 分域修复，再按 Fuck My Shit Mountain full 模式复审 25 个维度。</p>
+    <p style="margin-top:12px"><strong>结论：</strong>整体提升为 <strong>9.2 / S</strong>。修复已提交到 PR #4；MySQL 8.2/8.4.10 真实矩阵均通过。Cloudflare R2 的 30 天前缀锁已确认，最新远端密文完成 SHA 校验、age 解密、MySQL 8.4 导入、Redis RDB→AOF、隔离应用 readiness/version 和 15 项只读账务对账。演练还发现并修复了 TTL key 自然过期被误判为恢复损坏的问题。当前没有已知仓库内可执行 bug，剩余 <strong>1 个外部 Medium</strong>。</p>
+    <p style="margin-top:12px"><strong>主要成果：</strong>依赖/Go/secret/SA* 归零；超大模块清零；Node/Actions、Gitee、Electron 与镜像治理 fail closed；双版本恢复与真实远端恢复有运行证据；恢复 manifest 新增永久 Redis key 不变量并兼容旧备份。</p>
+    <p style="margin-top:12px"><strong>边界：</strong>没有部署或原地升级生产应用/数据库；所有恢复仅在唯一命名的远端隔离 containers、volumes 与 internal network 中执行并已删除。未运行真实签名发版、人工无障碍旅程或生产负载测试。</p>
+  </div></div>
+
+  <div class="card"><div class="card-header">🗺 Project Map / 项目地图</div><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+    <thead><tr><th>区域</th><th>主要边界</th><th>本轮修复与复审热点</th></tr></thead><tbody>
+      <tr><td>Go Backend</td><td>router → controller → service → model；125 个 first-party package</td><td>Go 1.26.5、安全更新、SA*、race、request context、SSE/relay 错误传播</td></tr>
+      <tr><td>Relay / AI</td><td>40+ provider adapter、streaming、tool/image/audio</td><td>writer/marshal 错误、Claude stream usage、Perplexity ratio、巨型 Gemini adapter</td></tr>
+      <tr><td>Default / Classic</td><td>React 19 + TypeScript 与 React 18；Bun workspace</td><td>依赖审计、i18n、巨型模块拆分、懒加载、bundle 预算</td></tr>
+      <tr><td>Orbit / Electron</td><td>独立 npm lock、浏览器 E2E、桌面 loopback runtime</td><td>Node 22.12、audit、tag-only、Windows Authenticode、checksum</td></tr>
+      <tr><td>Delivery / Ops</td><td>GitHub Actions、Environment、Gitee、Compose、backup/restore</td><td>Node24 SHA pins、环境 fail-closed、精确 commit、上传回读 SHA、镜像 digest</td></tr>
+    </tbody></table></div></div></div>
+
+  <div class="card"><div class="card-header">✅ Verification Gates / 验证门禁</div><div class="card-body"><div class="check-list">
+    <div class="check-item"><span class="check">✓</span>Backend full preflight：gitleaks、gofmt、size、125 package、govulncheck、SA*、build、vet、<code>go test -race</code></div>
+    <div class="check-item"><span class="check">✓</span>Default：19 test files / 136 tests、type、lint、format、6-locale i18n、knip、build、bundle</div>
+    <div class="check-item"><span class="check">✓</span>Classic：format、eslint、432 个生产文件 size gate、13 test files、build、initial bundle budget</div>
+    <div class="check-item"><span class="check">✓</span>Orbit：9 test files / 31 tests、type、lint、build；Electron：4 tests</div>
+    <div class="check-item"><span class="check">✓</span>Web <code>bun audit</code>、Electron/Orbit <code>npm audit</code> 均为 0</div>
+    <div class="check-item"><span class="check">✓</span><code>govulncheck</code>：0 reachable / 0 imported-package vulnerability；<code>go mod verify</code> 通过</div>
+    <div class="check-item"><span class="check">✓</span><code>staticcheck -checks='SA*'</code>、actionlint、所有 workflow YAML、Bash syntax、<code>git diff --check</code> 通过</div>
+    <div class="check-item"><span class="check">✓</span>Ops contract tests：25 / 25；Gitee fake-server：9 / 9，包含损坏上传回读拒绝</div>
+    <div class="check-item"><span class="cross">!</span>Environment 审计仍失败：<code>container-publish</code>/<code>release-publish</code> 均为 0 reviewer、admin bypass=true；配置 reviewer 返回 GitHub HTTP 422 方案限制</div>
+    <div class="check-item"><span class="check">✓</span>PR #4 的 MySQL 8.2 与 8.4.10 真实 backup/destroy/restore matrix 均通过</div>
+    <div class="check-item"><span class="check">✓</span>R2 <code>production/newapi_test/</code> 有启用中的 30 天 Bucket Lock；35 天生命周期删除规则不会早于锁</div>
+    <div class="check-item"><span class="check">✓</span>远端对象完整恢复：encrypted SHA、age decrypt、MySQL/Redis、app readiness/version、15 项 reconcile 全通过并清理</div>
+  </div></div></div>
+
+  <h3 class="section-title" id="coverage">🧭 Coverage Matrix / 覆盖矩阵</h3>
+  <div class="card"><div class="card-body" style="padding:0"><div class="table-wrap"><table>
+    <thead><tr><th>Dimension</th><th>Coverage</th><th>Evidence inspected</th><th>Exclusions / limits</th></tr></thead><tbody>
+      <tr><td>Architecture</td><td><span class="badge badge-confirmed">High</span></td><td>目录、职责拆分、125 Go package、前端模块图</td><td>未逐个 trace 40+ provider</td></tr>
+      <tr><td>Security</td><td><span class="badge badge-confirmed">High</span></td><td>gitleaks、govulncheck、依赖、签名、鉴权、SSRF/XSS</td><td>无渗透或真实 OAuth/provider</td></tr>
+      <tr><td>Stability</td><td><span class="badge badge-confirmed">High</span></td><td>race、SA*、writer/marshal、恢复与缓存路径</td><td>无生产故障注入</td></tr>
+      <tr><td>Performance</td><td><span class="badge badge-suspected">Medium</span></td><td>Default/Classic bundle、lazy routes、parser cap</td><td>无 load/profile/真实设备</td></tr>
+      <tr><td>Testing</td><td><span class="badge badge-confirmed">High</span></td><td>Go、Default、Classic、Orbit、Electron、ops gates</td><td>无支付沙箱和全 UI E2E</td></tr>
+      <tr><td>Maintainability</td><td><span class="badge badge-confirmed">High</span></td><td>三套 size gates、零白名单、lint/type/format</td><td>未逐行人工复核全部源码</td></tr>
+      <tr><td>Design</td><td><span class="badge badge-confirmed">High</span></td><td>分层、职责、不可变事实、错误传播、发布契约</td><td>产品意图以仓库文档为准</td></tr>
+      <tr><td>Release</td><td><span class="badge badge-confirmed">High</span></td><td>所有 workflow、Environment live audit、Gitee、Electron</td><td>未真实发版或签名</td></tr>
+      <tr><td>Documentation</td><td><span class="badge badge-suspected">Medium</span></td><td>release/ops/runbook、外部证据边界</td><td>历史计划未逐条复核</td></tr>
+      <tr><td>Configuration</td><td><span class="badge badge-confirmed">High</span></td><td>环境治理、Compose、digest、恢复矩阵</td><td>无生产 secret 值</td></tr>
+      <tr><td>Observability</td><td><span class="badge badge-suspected">Medium</span></td><td>健康、日志、错误、readiness/reconcile</td><td>无生产 dashboard/告警投递</td></tr>
+      <tr><td>Data Integrity</td><td><span class="badge badge-confirmed">High</span></td><td>账务、跨库、restore、stream usage</td><td>无生产数据核账</td></tr>
+      <tr><td>Privacy</td><td><span class="badge badge-suspected">Medium</span></td><td>secret scan、mask、redaction、删除路径</td><td>无法验证组织保留政策</td></tr>
+      <tr><td>Accessibility</td><td><span class="badge badge-low">Low</span></td><td>静态 ARIA/keyboard 与组件测试搜索</td><td>无 axe、键盘、读屏人工流程</td></tr>
+      <tr><td>Supply Chain</td><td><span class="badge badge-confirmed">High</span></td><td>lock/audit、Go、Action pins、image digest、签名/checksum</td><td>无最终 artifact 二进制分析</td></tr>
+      <tr><td>Cost</td><td><span class="badge badge-suspected">Medium</span></td><td>billing tests、quota、bundle、retention</td><td>无生产账单与 provider 成本</td></tr>
+      <tr><td>AI Safety</td><td><span class="badge badge-suspected">Medium</span></td><td>Markdown、DOMPurify、moderation、relay 日志</td><td>无 prompt red-team</td></tr>
+      <tr><td>Fallback</td><td><span class="badge badge-confirmed">High</span></td><td>restore/rollback、stream、cache、reconcile</td><td>无跨区域灾难演练</td></tr>
+      <tr><td>Testing Authenticity</td><td><span class="badge badge-confirmed">High</span></td><td>race、DB matrix、fake server、真实 restore workflow</td><td>未复核每个 mock fidelity</td></tr>
+      <tr><td>Type Safety</td><td><span class="badge badge-confirmed">High</span></td><td>Go build/vet、TS type、typed context、strict JSON</td><td>遗留 map/interface 仅抽查</td></tr>
+      <tr><td>Frontend State</td><td><span class="badge badge-confirmed">High</span></td><td>Default/Classic/Orbit 测试、i18n、build</td><td>无完整人工浏览器旅程</td></tr>
+      <tr><td>Backend API</td><td><span class="badge badge-confirmed">High</span></td><td>routes、middleware、relay、billing、strict JSON</td><td>无真实外部 API 契约</td></tr>
+      <tr><td>Dependency Weight</td><td><span class="badge badge-confirmed">High</span></td><td>bun/npm audit、knip、bundle、Go modules</td><td>无最终 image 安装尺寸</td></tr>
+      <tr><td>Code Consistency</td><td><span class="badge badge-confirmed">High</span></td><td>gofmt、SA*、lint、format、i18n、JSON wrapper</td><td>未机械量化每条命名约定</td></tr>
+      <tr><td>Comment Coverage</td><td><span class="badge badge-suspected">Medium</span></td><td>并发、恢复、发布、计费、安全注释</td><td>无定量覆盖率</td></tr>
+    </tbody></table></div></div></div>
+
+  <h3 class="section-title">📈 Finding Statistics / 发现统计</h3>
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">1</div><div class="desc">External findings</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-critical)">0</div><div class="desc">Critical</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-high)">0</div><div class="desc">High</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--badge-medium)">1</div><div class="desc">Medium</div></div>
+    <div class="stat-card"><div class="num" style="color:var(--success)">0</div><div class="desc">Repo-local actionable bugs</div></div>
+  </div>
+
+  <h3 class="section-title" id="top-risks">⚠️ Top Risks / 最高风险</h3>
+  <div class="card"><div class="card-body" style="padding:0"><div class="table-wrap"><table><thead><tr><th>#</th><th>Finding</th><th>Severity</th><th>Status</th></tr></thead><tbody>
+    <tr><td>1</td><td><a href="#finding-f02">F02 · GitHub Environment 仍无独立 reviewer 且管理员可绕过</a></td><td><span class="badge badge-medium">Medium</span></td><td>Confirmed / external</td></tr>
+  </tbody></table></div></div></div>
+
+  <h3 class="section-title" id="findings">🔍 Detailed Findings / 详细发现</h3>
+  <div class="finding severity-info" id="finding-f01">
+    <div class="finding-header"><h4>Resolved F01. 远端不可变副本端到端恢复证明已完成</h4><span class="badge badge-info">Historical: High</span><span class="badge badge-confirmed">Status: Resolved</span></div>
+    <div class="finding-meta"><span>📁 Category: Stability / Data Integrity / Release</span><span>📌 Status: Resolved 2026-07-22</span><span>📍 Affected area: Cloudflare R2 and isolated disaster recovery</span></div>
+    <div class="evidence"><strong>Evidence：</strong>
+deploy/ops/README.md:86-88,106 — 明确说明对象锁/跨账号保留和真实远端恢复属于外部证明。
+deploy/ops/offsite-copy.sh:2-12,101-120 — 支持 fail-closed 异地复制、manifest 与 SHA 回执。
+Cloudflare 控制台只读证据 — <code>production/newapi_test/</code> 有启用中的 30 天 Bucket Lock，35 天生命周期规则晚于锁定期。
+运行证据 — 最新 encrypted SHA 全量复验；本地 mode 600 age identity 与 recipient 匹配；密文解密后 manifest/三个内容 SHA 通过。远端唯一隔离项目恢复到 MySQL 8.4.10 与 Redis 8.8，应用 readiness/version 通过，15 项账务 reconcile 全部 PASS；所有隔离资源和解密临时目录随后删除，生产 healthcheck 全绿。</div>
+    <div class="problem"><strong>Problem：</strong>已解决。演练过程中额外发现 TTL key 会依据 RDB 绝对过期时间自然减少，原来的“总 key 数精确相等”会误拒绝健康恢复。</div>
+    <div class="problem"><strong>Why it matters：</strong>修复后以永久 key 精确守恒为稳定不变量，同时允许 TTL key 随时间减少；既不会误报，也不会放过永久 Trial/风控状态丢失。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>本次真实演练复现了 3 个快照 key 中 2 个 TTL key 正常到期、仅加载 1 个永久 key 的情况，旧逻辑会错误中止恢复。</div>
+    <div class="fix-box"><div class="fix-label">Implemented fix</div><div>新 manifest 记录 <code>redis_persistent_keys</code>；恢复端要求永久 key 精确守恒，总 key 只能因 TTL 到期减少，RDB→AOF 与正式重启过程不得增加总数或改变永久数；旧 manifest 使用兼容上界检查。</div></div>
+    <div class="fix-box"><div class="fix-label">Long-term control</div><div>按月重复同一远端对象解密恢复，归档对象 key、SHA、RTO/RPO、readiness、reconcile 和 Bucket Lock 截图/API 证据。</div></div>
+    <div class="fix-box"><strong>Regression test：</strong>ops orchestration fixture 固定覆盖 snapshot keys=3、loaded=1、persistent=1；双版本真实 restore matrix 继续验证完整恢复。<br><strong>Actual effort：</strong>约 1.5 小时，包括真实演练发现与代码修复。<br><strong>Principle restored：</strong>Recoverability is proven across the encrypted remote-object boundary.</div>
+  </div>
+
+  <div class="finding severity-medium" id="finding-f02">
+    <div class="finding-header"><h4>F02. GitHub Environment 仍无独立 reviewer 且管理员可绕过</h4><span class="badge badge-medium">Severity: Medium</span><span class="badge badge-confirmed">Confidence: High</span></div>
+    <div class="finding-meta"><span>📁 Category: Release / Governance / Security</span><span>📌 Status: Confirmed / external</span><span>📍 Affected area: GitHub Environments container-publish and release-publish</span></div>
+    <div class="evidence"><strong>Evidence：</strong>
+scripts/verify-github-environments.sh:93-95 — 严格要求至少一个 reviewer 且 prevent_self_review=true、can_admins_bypass=false。
+2026-07-22 实时执行严格审计，exit=1：两个 Environment 均为 0 reviewers、admin bypass=true；branch/tag policy 正确。独立协作者 <code>wei500L</code> 可作为 reviewer，但 PUT required-reviewers 配置被 GitHub 明确以“billing plan 不支持”返回 HTTP 422，现有规则未被降低。
+docs/release-governance.md:35-41,62-66 — 已记录仓库本地 fail-closed 契约与外部配置要求。</div>
+    <div class="problem"><strong>Problem：</strong>workflow 已移除例外并会正确失败，但 GitHub 托管配置尚未满足它；同一管理员仍可直接批准/绕过受保护发布。</div>
+    <div class="problem"><strong>Why it matters：</strong>凭据泄漏或单一管理员误操作时，代码中的 tag/ref 检查不能替代独立的人为授权边界。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>管理员账号或 token 被接管后，攻击者创建合法 tag 并绕过 Environment，触发生产、Electron 或 Gitee 发布。</div>
+    <div class="fix-box"><div class="fix-label">Minimal fix</div><div>升级到支持 required reviewers 与禁止 admin bypass 的组织/仓库方案，或迁移到具备该能力的组织；为两个 Environment 配置独立 reviewer、防自审和禁止管理员绕过。</div></div>
+    <div class="fix-box"><div class="fix-label">Better long-term fix</div><div>使用双人发布、OIDC 短期凭据、Environment deployment branch policy 与定期只读治理审计。</div></div>
+    <div class="fix-box"><strong>Regression test suggestion：</strong>定时和 release 前运行严格 Environment 审计，任何 reviewer、自审、admin bypass 或 ref policy 漂移都阻断发布。<br><strong>Estimated effort：</strong>1–4 小时 + 方案/所有者迁移。<br><strong>Principle violated：</strong>External release authority requires independent approval.</div>
+  </div>
+
+  <div class="finding severity-info" id="finding-f03">
+    <div class="finding-header"><h4>Resolved F03. MySQL 8.4 候选恢复与生产备份兼容证据已完成</h4><span class="badge badge-info">Historical: Medium</span><span class="badge badge-confirmed">Status: Resolved</span></div>
+    <div class="finding-meta"><span>📁 Category: Stability / Data Integrity / Operations</span><span>📌 Status: Resolved 2026-07-22</span><span>📍 Affected area: MySQL lifecycle readiness</span></div>
+    <div class="evidence"><strong>Evidence：</strong>
+.github/workflows/restore-drill.yml:17-36 — PR #4 已运行当前生产 MySQL 8.2 与候选 8.4.10 LTS 的精确 digest 矩阵。
+deploy/ops/data-services-hardening.md:101-133 — 已定义候选验证、备份、维护窗口、readiness/reconcile 与回滚标准。
+生产证据 — 应用 MySQL 账号为非 root/schema-only；运行镜像为精确 digest，生产仍保持已验证的 8.2，不做未经窗口批准的原地升级。
+GitHub run 29904380337 — MySQL 8.2 与 8.4.10 两个真实 backup/destroy/restore job 均成功。
+隔离生产备份证据 — 最新真实 8.2 逻辑备份导入 MySQL 8.4.10，79/79 表通过检查；R2 远端副本再次导入 8.4.10，隔离应用 readiness/version 与 15 项账务 reconcile 通过。</div>
+    <div class="problem"><strong>Problem：</strong>已解决候选兼容与回滚准备证据；生产原地升级被刻意留给独立维护变更，而不是作为本次代码修复的一部分。</div>
+    <div class="problem"><strong>Why it matters：</strong>真实生产备份和完整应用对账已经验证候选版本，不再只依赖 YAML 推断。</div>
+    <div class="problem"><strong>Realistic failure scenario：</strong>若未来升级窗口出现异常，现有 8.2 恢复矩阵、升级前备份与 stop condition 提供经过执行的回滚路径。</div>
+    <div class="fix-box"><div class="fix-label">Implemented fix</div><div>固定 8.2/8.4.10 digest matrix，运行真实生产备份克隆和远端对象恢复；不复用升级后的 datadir 进行降级。</div></div>
+    <div class="fix-box"><div class="fix-label">Long-term control</div><div>每次 MySQL digest 变化都重复双版本矩阵和生产备份 clone，并在正式升级前单独批准维护窗口。</div></div>
+    <div class="fix-box"><strong>Regression test：</strong>GitHub restore matrix 与真实 R2 drill。<br><strong>Actual effort：</strong>约 1 小时远端执行与清理。<br><strong>Principle restored：</strong>Production upgrade and rollback readiness is observed before mutation.</div>
+  </div>
+
+  <h3 class="section-title" id="architecture">🏗 Architecture &amp; Modularity / 架构与模块化</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 Go 分层、package manifest、Gemini/reportrepo/override 与三套前端热点。限制：未逐个追踪全部 provider。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无仓库内发现</div><div class="card-body"><p class="small">原巨型模块已按稳定职责拆分；Go、Default、Classic 超 1500 行生产文件均为 0，且门禁零白名单。</p></div></div>
+
+  <h3 class="section-title" id="security">🔒 Security / 安全</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 gitleaks、govulncheck、npm/bun audit、鉴权、SSRF/XSS、签名与 Environment。限制：无渗透测试。</p></div></div>
+  <div class="card"><div class="card-header">关联发现 · 1</div><div class="card-body"><a href="#finding-f02">F02 · 外部发布审批边界</a>；仓库内安全门禁全部通过。</div></div>
+
+  <h3 class="section-title" id="stability">⚡ Stability &amp; Error Handling / 稳定性与错误处理</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 race、SA*、SSE、relay writer/marshal、quota 与 stream usage。限制：无生产故障注入。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无开放发现</div><div class="card-body">远端恢复和 MySQL 候选证据已闭环；TTL 恢复不变量已修复并回归。</div></div>
+
+  <h3 class="section-title" id="performance">🚀 Performance &amp; Scalability / 性能与扩展性</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span>；检查 bundle、lazy routes、parser cap 与缓存。限制：无负载、profiler 或真实设备。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无确认发现</div><div class="card-body"><p class="small">Classic 初始 JS 已降至约 9.98 MB raw / 2.32 MB gzip，并以 10.25 MB / 2.4 MB 硬预算防回归。</p></div></div>
+
+  <h3 class="section-title" id="testing">🧪 Testing &amp; Verification / 测试与验证</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；执行 Backend race、Default、Classic、Orbit、Electron、ops 与审计工具。限制：无真实支付/provider sandbox。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无仓库内发现</div><div class="card-body"><p class="small">所有本地可执行测试和静态门禁通过；新增测试保护实际错误、协议、发布与供应链契约。</p></div></div>
+
+  <h3 class="section-title" id="maintainability">📐 Maintainability &amp; Technical Debt / 可维护性与技术债</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查文件尺寸、符号职责、lint/type/format 与 package scope。限制：未人工逐行阅读所有源码。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无仓库内发现</div><div class="card-body"><p class="small">原 1.7k–4.3k 行热点均已拆分，门禁会阻止 Go、Default、Classic 再次增长。</p></div></div>
+
+  <h3 class="section-title" id="design">📋 Design Quality / 设计质量</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查职责、不可变事实、错误传播、恢复与发布边界。限制：产品意图以仓库文档为准。</p></div></div>
+  <div class="card"><div class="card-header">✅ Verified / 已验证实践</div><div class="card-body"><p class="small">typed request context、防止 SSE 类型 panic、首个 quota error 保留、Claude stream usage 与 ratio 修复均有直接回归测试。</p></div></div>
+
+  <h3 class="section-title" id="release">🚢 Release &amp; Delivery / 发布与交付</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 Actions、Environment、Gitee、Electron、digest 与 restore。限制：未 commit/push/发版。</p></div></div>
+  <div class="card"><div class="card-header">关联发现 · 1</div><div class="card-body"><a href="#finding-f02">F02 · GitHub 私有个人仓库方案限制</a>；其余发布与恢复证据已闭环。</div></div>
+
+  <h3 class="section-title" id="documentation">📚 Documentation / 文档</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span>；检查 release/ops runbook 与证据声明。限制：历史文档未逐条复核。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无独立发现</div><div class="card-body"><p class="small">发布治理、MySQL 生命周期、外部恢复证明的责任和 stop condition 已写入文档。</p></div></div>
+
+  <h3 class="section-title" id="configuration">⚙️ Configuration / 配置</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 Environment contract、Compose、镜像 digest、Node 与恢复矩阵。限制：无生产 secret 值。</p></div></div>
+  <div class="card"><div class="card-header">关联发现 · 1</div><div class="card-body"><a href="#finding-f02">F02 · GitHub 托管配置尚未满足仓库契约</a>。</div></div>
+
+  <h3 class="section-title" id="observability">🩺 Observability &amp; Diagnostics / 可观测性与诊断</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span>；检查健康、日志、错误、恢复回执和 reconcile。限制：无生产 dashboard 与告警投递。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无确认发现</div><div class="card-body"><p class="small">关键发布/恢复脚本产生可校验回执，错误路径明确非零退出；生产告警有效性不在本地证据内。</p></div></div>
+
+  <h3 class="section-title" id="data-integrity">🧱 Data Integrity &amp; Persistence / 数据完整性与持久化</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查跨库账务、restore、stream usage 与生产最小权限只读证据。限制：无生产破坏性核账。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无开放发现</div><div class="card-body">MySQL/Redis 远端恢复、永久 key 守恒和 15 项账务对账均已执行。</div></div>
+
+  <h3 class="section-title" id="privacy">🛡 Privacy &amp; Data Governance / 隐私与数据治理</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span>；检查 gitleaks、mask、redaction、账号删除与日志 purge。限制：无法验证组织保留政策。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无独立发现</div><div class="card-body"><p class="small">27 个 secret 候选逐项确认为测试/占位/生成内容并以精确 fingerprint 处理；当前扫描为零泄漏。</p></div></div>
+
+  <h3 class="section-title" id="accessibility">⌨️ Accessibility &amp; UX Correctness / 可访问性与 UX</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-low">Low</span>；仅静态检查 ARIA、keyboard 与组件测试。限制：未运行 axe、键盘、读屏和视觉 QA。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无确认发现</div><div class="card-body"><p class="small">低覆盖下不声明无障碍已通过；当前没有可复现的确认缺陷。</p></div></div>
+
+  <h3 class="section-title" id="supply-chain">🔗 Supply Chain &amp; Reproducibility / 供应链与可复现性</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 lock/audit、Go、Action SHA、Docker digest、Gitee 与 Electron。限制：无最终发布二进制扫描。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无仓库内发现</div><div class="card-body"><p class="small">Actions 均固定 Node24-runtime SHA；Gitee 精确 commit 并回读 SHA；Electron 要求 Authenticode+timestamp 后才产 checksum/upload。</p></div></div>
+
+  <h3 class="section-title" id="cost">💸 Cost &amp; Resource Economics / 成本与资源经济性</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span>；检查 billing、quota、bundle 与 retention。限制：无生产账单和 provider 单价。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无独立发现</div><div class="card-body"><p class="small">ratio 的整数除法错误已修复并有测试；资源与前端初始体积受门禁约束。</p></div></div>
+
+  <h3 class="section-title" id="ai-safety">🤖 AI / LLM Safety / AI 与 LLM 安全</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span>；检查 Markdown、DOMPurify、moderation 与 relay 日志。限制：无 prompt red-team/provider sandbox。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无确认发现</div><div class="card-body"><p class="small">运行时 Markdown/HTML 依赖已升级到无已知 audit 告警版本，现有 protocol guard 与长度上限保留。</p></div></div>
+
+  <h3 class="section-title" id="fallback">🪂 Fallback &amp; Defensive Code / 降级与防御代码</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 restore/rollback、stream、cache、reconcile 与 startup failure。限制：无跨区域灾难演练。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无开放发现</div><div class="card-body"><a href="#finding-f01">Resolved F01</a> 已用真实 R2 密文完成恢复、readiness 和 reconcile。</div></div>
+
+  <h3 class="section-title" id="testing-authenticity">🧫 Testing Authenticity / 测试真实性</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查真实 DB/Redis workflow、race、fake server、package manifest。限制：未逐个复核 mock fidelity。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无仓库内发现</div><div class="card-body"><p class="small">first-party package 清单不受 node_modules 影响；Gitee 测试包含服务端内容损坏；恢复 workflow 真实 destroy 后 restore。</p></div></div>
+
+  <h3 class="section-title" id="type-safety">🔤 Type Safety / 类型安全</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 Go build/vet、TS type、typed context、strict JSON 与 relay DTO。限制：遗留 map/interface 仅抽查。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无仓库内发现</div><div class="card-body"><p class="small">request ID 使用私有 typed key；SSE Data 收敛为 string；可选 relay scalar 仍保留 pointer+omitempty 语义。</p></div></div>
+
+  <h3 class="section-title" id="frontend-state">🖥 Frontend State / 前端状态</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 Default/Classic/Orbit 测试、i18n、type、build 与 bundle。限制：无完整人工浏览器旅程。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无仓库内发现</div><div class="card-body"><p class="small">所有功能、类型、翻译和构建门禁通过；Classic 首屏路由改为 lazy 并避免 helpers barrel 引入。</p></div></div>
+
+  <h3 class="section-title" id="backend-api">🔌 Backend API / 后端 API</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查路由、中间件、relay、billing、reset password 与 strict JSON。限制：无真实外部契约。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无仓库内发现</div><div class="card-body"><p class="small">ResetPassword 限制 4 KiB 并拒绝 malformed/multiple JSON，失败不消耗验证码；provider delivery error 正确传播。</p></div></div>
+
+  <h3 class="section-title" id="dependency-weight">📦 Dependency Weight / 依赖重量</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 Bun/npm audit、knip、bundle、Go module 与 engine。限制：无最终 image/desktop 安装尺寸。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无仓库内发现</div><div class="card-body"><p class="small">Web、Electron、Orbit audit 均为 0；Go reachable/imported vulnerability 均为 0；Node 基线统一为 22.12.0。</p></div></div>
+
+  <h3 class="section-title" id="code-consistency">🧹 Code Consistency / 代码一致性</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-confirmed">High</span>；检查 gofmt、SA*、lint、format、i18n、JSON wrapper 与 DB 兼容约定。限制：未量化所有命名。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无仓库内发现</div><div class="card-body"><p class="small">全量 SA* 为零；仅对确有历史兼容理由的 SA9004/废弃 Classic routes 使用局部、带原因的抑制。</p></div></div>
+
+  <h3 class="section-title" id="comment-coverage">💬 Comment Coverage / 注释覆盖</h3>
+  <div class="card"><div class="card-header">🧭 Coverage Note / 覆盖说明</div><div class="card-body"><p><strong>Coverage：</strong><span class="badge badge-suspected">Medium</span>；抽查并发、恢复、发布、计费、安全与 lint 抑制注释。限制：无定量覆盖率。</p></div></div>
+  <div class="card"><div class="card-header">✅ 无独立发现</div><div class="card-body"><p class="small">复杂失败边界、外部证明限制和局部静态分析抑制均记录了原因。</p></div></div>
+
+  <h3 class="section-title" id="principles">📋 Design Principles / 设计原则</h3>
+  <div class="card"><div class="card-header">⚠️ Principle Gaps / 原则缺口</div><div class="card-body" style="padding:0"><div class="table-wrap"><table><thead><tr><th>Principle</th><th>Count</th><th>Severity</th><th>Affected areas</th></tr></thead><tbody>
+    <tr><td>External release authority requires independent approval</td><td>1</td><td><span class="badge badge-medium">Medium</span></td><td>F02</td></tr>
+  </tbody></table></div></div></div>
+  <div class="card"><div class="card-header">✅ Respected Practices / 已遵守原则</div><div class="card-body"><div class="check-list">
+    <div class="check-item"><span class="check">✓</span>Fail closed — secrets、dependency、Environment、签名、恢复、上传回读</div>
+    <div class="check-item"><span class="check">✓</span>Deterministic scope — 125 first-party packages、零 size allowance、exact digest/SHA</div>
+    <div class="check-item"><span class="check">✓</span>Bounded input — strict JSON、parser、buffer、polling、retention</div>
+    <div class="check-item"><span class="check">✓</span>Observable failures — writer/marshal/usage/security scanners 非零退出</div>
+    <div class="check-item"><span class="check">✓</span>Cross-database discipline — SQLite/MySQL/PostgreSQL</div>
+    <div class="check-item"><span class="check">✓</span>Stable responsibility boundaries — 大文件拆分且持续门禁</div>
+  </div></div></div>
+
+  <h3 class="section-title" id="fix-order">🎯 Recommended Fix Order / 建议修复顺序</h3>
+  <div class="card"><div class="card-header"><span>🛑 External closure / 外部闭环</span><span class="badge badge-high">Before formal release</span></div><div class="card-body" style="padding:0"><div class="table-wrap"><table><thead><tr><th>#</th><th>Fix</th><th>Effort</th><th>Why now</th></tr></thead><tbody>
+    <tr><td>1</td><td>F02：升级私有仓库方案或迁移到支持 Environment required reviewers 的组织，再配置 <code>wei500L</code> 审批、防自审、禁止 admin bypass</td><td>1–4 小时 + 方案</td><td>API 已确认当前方案返回 HTTP 422；仓库门禁保持严格失败</td></tr>
+  </tbody></table></div></div></div>
+  <div class="card"><div class="card-header">✅ Repository remediation complete / 仓库修复完成</div><div class="card-body"><p>未再发现可通过继续修改仓库关闭的 bug。R2 Bucket Lock、远端解密恢复、MySQL 双版本与生产备份兼容证据已经闭环；唯一剩余项需要改变 GitHub 计费方案或仓库所有者类型。</p></div></div>
+
+  <h3 class="section-title">⚡ Quick Wins / 快速收益</h3>
+  <div class="win-grid">
+    <div class="win-card"><div class="win-title">升级仓库方案或迁移到组织</div><div class="win-meta">F02 · 解锁 required reviewers / no admin bypass</div></div>
+    <div class="win-card"><div class="win-title">归档 Bucket Lock 与演练摘要</div><div class="win-meta">已完成 · 纳入月度恢复证据包</div></div>
+    <div class="win-card"><div class="win-title">定期验证离线 age identity</div><div class="win-meta">不复制到生产；只验证公钥匹配与恢复能力</div></div>
+    <div class="win-card"><div class="win-title">持续运行 MySQL 双版本矩阵</div><div class="win-meta">每次 digest 变化自动暴露兼容问题</div></div>
+    <div class="win-card"><div class="win-title">补充 axe 与生产负载基线</div><div class="win-meta">属于覆盖提升，不是当前确认 bug</div></div>
+  </div>
+
+  <div style="text-align:center;padding:40px 0 20px;color:var(--text-secondary);font-size:12px">Fuck My Shit Mountain v1.0 HTML format · Codex remediation re-audit · 2026-07-22 17:08:28 +08:00<br>Scope: PR #4 branch plus isolated remote recovery evidence · No production deployment</div>
+</div>
+
+<script>
+  const sections = document.querySelectorAll('[id]');
+  const navLinks = document.querySelectorAll('.sidebar-nav a');
+  const observer = new IntersectionObserver((entries) => {
+    let activeId = null;
+    entries.forEach(entry => { if (entry.isIntersecting) activeId = entry.target.id; });
+    if (activeId) navLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + activeId));
+  }, { rootMargin: '-10% 0px -60% 0px' });
+  sections.forEach(s => observer.observe(s));
+  navLinks.forEach(a => a.addEventListener('click', function(e) { e.preventDefault(); const target = document.querySelector(this.getAttribute('href')); if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+</script>
+</body>
+</html>

@@ -115,7 +115,7 @@ type BufferedResponseReservation struct {
 }
 
 func AcquireBufferedResponseReservation() (*BufferedResponseReservation, error) {
-	return acquireBufferedResponseReservation(nil, false)
+	return acquireBufferedResponseReservation(context.Background(), false)
 }
 
 func acquireBufferedResponseReservation(ctx context.Context, expandable bool) (*BufferedResponseReservation, error) {

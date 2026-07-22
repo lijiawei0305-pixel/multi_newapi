@@ -111,6 +111,9 @@ dc exec -T "$REDIS_SVC" redis-check-rdb /data/dump.rdb >/dev/null \
   || die "Redis 容器内 dump.rdb 校验失败"
 REDIS_KEYS="$(redis_key_count_service)"
 printf '%s\n' "$REDIS_KEYS" | grep -Eq '^[0-9]+$' || die "无法读取 Redis key 总数"
+REDIS_PERSISTENT_KEYS="$(redis_persistent_key_count_service)"
+printf '%s\n' "$REDIS_PERSISTENT_KEYS" | grep -Eq '^[0-9]+$' || die "无法读取永久 Redis key 总数"
+[ "$REDIS_PERSISTENT_KEYS" -le "$REDIS_KEYS" ] || die "永久 Redis key 数大于总数"
 dc cp "$REDIS_SVC:/data/dump.rdb" "$REDIS_OUT" \
   || die "Redis dump.rdb 拷出失败；Trial 权威键无 DB 后备，整个备份已中止"
 [ "$(file_size "$REDIS_OUT")" -gt 0 ] || die "Redis 备份为空：$REDIS_OUT"
@@ -150,6 +153,7 @@ log "4/5 生成配对 manifest + SHA-256 → $MANIFEST_OUT"
   printf 'consistency=writers-stopped\n'
   printf 'app_version=%s\n' "$APP_VERSION"
   printf 'redis_keys=%s\n' "$REDIS_KEYS"
+  printf 'redis_persistent_keys=%s\n' "$REDIS_PERSISTENT_KEYS"
   printf 'db_file=%s\n' "$(basename "$DB_OUT")"
   printf 'db_sha256=%s\n' "$(sha256_file "$DB_OUT")"
   printf 'redis_file=%s\n' "$(basename "$REDIS_OUT")"

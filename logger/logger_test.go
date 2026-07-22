@@ -2,6 +2,7 @@ package logger
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -43,13 +44,33 @@ func TestLogJsonWritesOnlyPayloadMetadata(t *testing.T) {
 		common.LogWriterMu.Unlock()
 	})
 
-	LogJson(nil, "converted request", map[string]string{"prompt": "do-not-log-this"})
+	LogJson(context.Background(), "converted request", map[string]string{"prompt": "do-not-log-this"})
 
 	logged := output.String()
 	assert.Contains(t, logged, "converted request")
 	assert.Contains(t, logged, "size=")
 	assert.Contains(t, logged, "sha256=")
 	assert.NotContains(t, logged, "do-not-log-this")
+}
+
+func TestLogInfoReadsTypedRequestContext(t *testing.T) {
+	var output bytes.Buffer
+	common.LogWriterMu.Lock()
+	originalWriter := gin.DefaultWriter
+	gin.DefaultWriter = &output
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = originalWriter
+		common.LogWriterMu.Unlock()
+	})
+
+	ctx := common.WithRequestId(context.Background(), "typed-request-id")
+	LogInfo(ctx, "request-scoped message")
+
+	logged := output.String()
+	assert.Contains(t, logged, "typed-request-id")
+	assert.Contains(t, logged, "request-scoped message")
 }
 
 func TestRotatingFileWriterEnforcesBoundsAndPermissions(t *testing.T) {

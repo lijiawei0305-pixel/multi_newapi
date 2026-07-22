@@ -32,6 +32,7 @@ func (t TaskStatus) ToVideoStatus() string {
 }
 
 const (
+	//lint:ignore SA9004 Remaining constants stay untyped for legacy string and database API compatibility.
 	TaskStatusNotStart   TaskStatus = "NOT_START"
 	TaskStatusSubmitted             = "SUBMITTED"
 	TaskStatusQueued                = "QUEUED"

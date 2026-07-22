@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "New API - AI Model Gateway Desktop Application",
   "main": "main.js",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "test": "node --test navigation-policy.test.js",
     "start-app": "electron .",

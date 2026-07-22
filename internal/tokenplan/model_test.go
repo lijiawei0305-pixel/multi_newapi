@@ -1,6 +1,7 @@
 package tokenplan
 
 import (
+	"context"
 	"math"
 	"testing"
 
@@ -161,7 +162,7 @@ func TestSeedInto(t *testing.T) {
 	if err := SeedInto(repo); err != nil {
 		t.Fatalf("SeedInto: %v", err)
 	}
-	got, _ := repo.ListPlans(nil)
+	got, _ := repo.ListPlans(context.Background())
 	if len(got) != 6 {
 		t.Fatalf("want 6 plans persisted, got %d", len(got))
 	}

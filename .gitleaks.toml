@@ -1,0 +1,8 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated, vendored, dependency, cache, and local task artifacts"
+paths = [
+  '''(^|/)(\.git|node_modules|dist|build|coverage|\.cache|\.gocache|\.gomodcache|\.ccg|\.claude)(/|$)''',
+]

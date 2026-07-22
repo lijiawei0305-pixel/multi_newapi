@@ -178,6 +178,8 @@ func TestBufferedResponseReservationGateAndStorageProbeFailFast(t *testing.T) {
 	configureBufferedResponseTest(t, t.TempDir(), 4, 8, 16, 2)
 	first, err := AcquireBufferedResponseReservation()
 	require.NoError(t, err)
+	require.NotNil(t, first.ctx)
+	assert.NoError(t, first.ctx.Err())
 	second, err := AcquireBufferedResponseReservation()
 	require.NoError(t, err)
 	_, err = AcquireBufferedResponseReservation()

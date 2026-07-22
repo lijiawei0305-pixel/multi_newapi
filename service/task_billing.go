@@ -455,7 +455,6 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		logger.LogError(ctx, fmt.Sprintf("差额结算失败 task %s: %s", task.TaskID, err.Error()))
 		return
 	}
-	preConsumedQuota = task.Quota
 	task.Quota = actualQuota
 	if task.ID > 0 {
 		if err := model.DB.Model(&model.Task{}).Where("id = ?", task.ID).Update("quota", actualQuota).Error; err != nil {

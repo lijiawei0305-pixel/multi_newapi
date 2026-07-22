@@ -109,6 +109,12 @@ MYSQL_IMAGE='mysql:8.4.x@sha256:<approved-manifest-digest>' \
   REQUIRE_DOCKER=1 deploy/ops/tests/restore-integration.sh
 ```
 
+The authoritative GitHub workflow currently tests both the production 8.2
+baseline and the fixed `mysql:8.4.10@sha256:c592c15aaf4a1961e15d82eb31ea5987dda862d1c4b1e93424438c0e91dc1f8d`
+LTS candidate. A green candidate matrix run is repository evidence only: archive
+the run URL and digest before any production change, and still perform the
+maintenance-window checks below against the actual deployment.
+
 The isolated drill must prove startup, schema migration, writes, paired backup,
 destructive restore, readiness, and financial reconciliation. Archive its run
 URL and digest. Only then set `MYSQL_IMAGE` in the production `.env` and schedule

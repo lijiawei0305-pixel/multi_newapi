@@ -14,16 +14,31 @@ source ancestry before they reach these Environments. The Environment patterns
 therefore constrain the eligible ref classes, while the workflow checks enforce
 the exact release format and commit.
 
-Approval protection remains the default audit mode. Unless
-`GITHUB_ENVIRONMENT_APPROVALS_REQUIRED=false` is explicitly set, every
-Environment must also have at least one required reviewer and administrator
-bypass disabled. The repository workflows currently set that exception because
-GitHub returned HTTP 422 when required reviewers were configured for this
-private personal repository: the account's billing plan does not expose that
-protection rule. The API still reports `can_admins_bypass: true`; the audit
-records it as evidence but cannot enforce an unavailable setting. If the
-repository moves to a plan and owner type that supports private-repository
-approval protection, configure the rules and remove the exception.
+Formal Electron tags additionally fail before artifact upload unless the
+`release-publish` Environment provides `WINDOWS_CSC_LINK` and
+`WINDOWS_CSC_KEY_PASSWORD`. `electron-builder` signs the Windows executables,
+and the workflow verifies every release-root `.exe` with Authenticode and a
+trusted timestamp before producing checksums or uploading artifacts. A manual
+rerun must select an existing version tag; non-release package smoke stays in
+the main CI workflow, remains unsigned, and is never uploaded to a Release.
+
+Manual Gitee synchronization must likewise select the same existing version
+tag that is supplied in the `tag_name` input. The verification job binds that
+tag to the workflow ref, checked-out commit, and `origin/main` ancestry before
+the GitHub-hosted publishing job enters `release-publish` and receives the
+Gitee credential. The workflow does not depend on an unregistered self-hosted
+runner. Its repository-owned `scripts/gitee_release.py` client uses only the
+Python standard library, reads the token from the step environment, keeps it
+out of URLs and process arguments, and streams multipart asset uploads without
+runtime package installation.
+
+Every repository workflow uses the strict default: each Environment must have
+at least one required reviewer and administrator bypass must be disabled. The
+private personal repository's current billing plan returned HTTP 422 when those
+rules were configured and still reports `can_admins_bypass: true`. The
+repository no longer weakens the check to accommodate that plan limitation;
+governance and every formal publish fail closed until the repository moves to a
+plan/owner type that exposes the required protection and the rules are enabled.
 
 The daily/manual `GitHub Environment Governance Audit` workflow stores a
 sanitized JSON artifact containing policy names, types, counts, and booleans;
@@ -37,7 +52,6 @@ does not mutate them. After configuration, run:
 
 ```bash
 GITHUB_REPOSITORY=OWNER/REPO \
-GITHUB_ENVIRONMENT_APPROVALS_REQUIRED=false \
 scripts/verify-github-environments.sh
 ```
 
@@ -48,8 +62,8 @@ secret values are never read or exported by this audit.
 As of the read-only API check on 2026-07-22, both named Environments exist and
 their branch/tag policies match the baseline above. Required reviewers and the
 administrator-bypass control remain unavailable under the current private
-repository plan, and that limitation is kept explicit rather than represented
-as an enabled protection.
+repository plan, so the strict check intentionally blocks governance and formal
+publishing rather than representing the Environments as protected.
 
 ## Clean release source boundary
 

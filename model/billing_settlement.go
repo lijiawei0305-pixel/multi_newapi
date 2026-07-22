@@ -735,9 +735,6 @@ func transitionBillingSettlementTx(tx *gorm.DB, transition BillingSettlementTran
 		if !event.DeferCommission && !transition.ReleaseCommission {
 			return nil, errors.New("non-deferred billing settlement must release commission")
 		}
-		if event.DeferCommission && event.Status == BillingSettlementStatusReserved && transition.ReleaseCommission {
-			// Immediate terminal task success is valid; no intermediate deferred state is required.
-		}
 	}
 	if err := validateCommissionSnapshot(event, transition); err != nil {
 		return nil, err

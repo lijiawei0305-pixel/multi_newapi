@@ -3,6 +3,7 @@ package types
 type RelayFormat string
 
 const (
+	//lint:ignore SA9004 Remaining constants stay untyped for legacy string API compatibility.
 	RelayFormatOpenAI                    RelayFormat = "openai"
 	RelayFormatClaude                                = "claude"
 	RelayFormatGemini                                = "gemini"
