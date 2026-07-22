@@ -22,7 +22,10 @@ while IFS= read -r file; do
     echo "$file: $lines lines (budget $budget)" >&2
     failures=$((failures + 1))
   fi
-done < <(rg --files -g '*.go')
+done < <(
+  git ls-files --cached --others --exclude-standard -- '*.go' \
+    | LC_ALL=C sort -u
+)
 
 if [ "$failures" -ne 0 ]; then
   echo "Go source file size check failed; split oversized files by stable domain responsibility." >&2

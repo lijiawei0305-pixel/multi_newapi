@@ -14,7 +14,7 @@ if [ "${#packages[@]}" -eq 0 ]; then
   exit 1
 fi
 
-if printf '%s\n' "${packages[@]}" | rg -q '(^|/)node_modules(/|$)'; then
+if printf '%s\n' "${packages[@]}" | grep -Eq '(^|/)node_modules(/|$)'; then
   echo "first-party Go package list contains node_modules" >&2
   exit 1
 fi

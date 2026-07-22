@@ -1376,6 +1376,8 @@ test_database_compatibility_images_are_immutable() (
 
 test_backend_security_scanners_are_pinned() (
   local preflight="$ROOT/scripts/preflight.sh"
+  local size_gate="$ROOT/scripts/check-go-file-size.sh"
+  local package_gate="$ROOT/scripts/check-go-package-scope.sh"
 
   grep -Fq 'github.com/zricethezav/gitleaks/v8@v8.30.1' "$preflight" \
     || fail "backend preflight does not pin its repository secret scanner"
@@ -1386,6 +1388,14 @@ test_backend_security_scanners_are_pinned() (
   if grep -Eq 'go run [^[:space:]]+@latest' "$preflight"; then
     fail "backend preflight executes a floating Go tool version"
   fi
+  if grep -Eq '(^|[^[:alnum:]_])rg([[:space:]]|$)' "$size_gate" "$package_gate"; then
+    fail "backend source/package gates require optional ripgrep on clean runners"
+  fi
+  awk '
+    /step "准备 go:embed 前端目录"/ {embed = NR}
+    /step "Go first-party package 范围门禁"/ {scope = NR}
+    END {exit !(embed > 0 && scope > 0 && embed < scope)}
+  ' "$preflight" || fail "backend package analysis runs before go:embed placeholders exist"
 )
 
 test_offsite_copy_is_encrypted_verified_and_fail_closed() (

@@ -56,6 +56,12 @@ run_backend() {
     failed=1
   fi
 
+  # Package-loading tools evaluate go:embed directives even before the final
+  # build. A clean backend-only checkout has no frontend dist artifacts yet,
+  # so create the same inert placeholders before any package scope analysis.
+  step "准备 go:embed 前端目录"
+  prepare_embed_dirs
+
   step "Go 源码体积门禁"
   bash scripts/check-go-file-size.sh || failed=1
 
@@ -77,9 +83,6 @@ run_backend() {
   step "Go first-party correctness static analysis"
   go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 \
     -checks='SA*' "${go_packages[@]}" || failed=1
-
-  step "准备 go:embed 前端目录"
-  prepare_embed_dirs
 
   step "Go first-party 编译"
   go build "${go_packages[@]}" || failed=1
