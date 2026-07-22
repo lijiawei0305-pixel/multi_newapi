@@ -33,6 +33,7 @@ import (
 	tenantrepo "github.com/QuantumNous/new-api/internal/tenant/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tokenplan"
 	tprepo "github.com/QuantumNous/new-api/internal/tokenplan/gormrepo"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -520,7 +521,7 @@ func TestHandleListTokenPlans_NativePlanIDMapped(t *testing.T) {
 		t.Fatalf("EnsureListing: %v", err)
 	}
 	// 造映射:该 tokenplan 已对应原生 plan 777。
-	if err := app.DB.Create(&nativePlanMapRow{TokenPlanID: planID, NativePlanID: 777}).Error; err != nil {
+	if err := app.DB.Create(&model.TokenPlanNativeSubscriptionPlan{TokenPlanID: planID, NativePlanID: 777}).Error; err != nil {
 		t.Fatalf("seed native map: %v", err)
 	}
 

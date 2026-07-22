@@ -425,7 +425,7 @@ func TestActivatePaidTokenplanOrder_NativeIntegration(t *testing.T) {
 	// 我们的台账：恰好 1 条；套餐→原生 plan 映射：1 条。
 	var ourSubs, planMaps int64
 	db.Table("tokenplan_subscriptions").Where("source_order_id = ?", orderNo).Count(&ourSubs)
-	db.Table("mt_native_subscription_plans").Count(&planMaps)
+	db.Model(&model.TokenPlanNativeSubscriptionPlan{}).Count(&planMaps)
 	if ourSubs != 1 {
 		t.Fatalf("want 1 tokenplan_subscriptions record, got %d", ourSubs)
 	}

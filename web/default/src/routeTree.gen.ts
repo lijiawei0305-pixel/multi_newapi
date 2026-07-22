@@ -76,6 +76,7 @@ import { Route as AuthenticatedAgentTicketsIndexRouteImport } from './routes/_au
 import { Route as AuthenticatedAgentPlansIndexRouteImport } from './routes/_authenticated/agent-plans/index'
 import { Route as AuthenticatedAgentListingsIndexRouteImport } from './routes/_authenticated/agent-listings/index'
 import { Route as AuthenticatedAgentEarningsIndexRouteImport } from './routes/_authenticated/agent-earnings/index'
+import { Route as AuthenticatedAdvancedSubscriptionPlansIndexRouteImport } from './routes/_authenticated/advanced-subscription-plans/index'
 import { Route as AuthenticatedAdminTicketsIndexRouteImport } from './routes/_authenticated/admin-tickets/index'
 import { Route as AuthenticatedAdminCustomDomainsIndexRouteImport } from './routes/_authenticated/admin-custom-domains/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
@@ -470,6 +471,12 @@ const AuthenticatedAgentEarningsIndexRoute =
     path: '/agent-earnings/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedAdvancedSubscriptionPlansIndexRoute =
+  AuthenticatedAdvancedSubscriptionPlansIndexRouteImport.update({
+    id: '/advanced-subscription-plans/',
+    path: '/advanced-subscription-plans/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAdminTicketsIndexRoute =
   AuthenticatedAdminTicketsIndexRouteImport.update({
     id: '/admin-tickets/',
@@ -665,6 +672,7 @@ export interface FileRoutesByFullPath {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/admin-custom-domains/': typeof AuthenticatedAdminCustomDomainsIndexRoute
   '/admin-tickets/': typeof AuthenticatedAdminTicketsIndexRoute
+  '/advanced-subscription-plans/': typeof AuthenticatedAdvancedSubscriptionPlansIndexRoute
   '/agent-earnings/': typeof AuthenticatedAgentEarningsIndexRoute
   '/agent-listings/': typeof AuthenticatedAgentListingsIndexRoute
   '/agent-plans/': typeof AuthenticatedAgentPlansIndexRoute
@@ -757,6 +765,7 @@ export interface FileRoutesByTo {
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/admin-custom-domains': typeof AuthenticatedAdminCustomDomainsIndexRoute
   '/admin-tickets': typeof AuthenticatedAdminTicketsIndexRoute
+  '/advanced-subscription-plans': typeof AuthenticatedAdvancedSubscriptionPlansIndexRoute
   '/agent-earnings': typeof AuthenticatedAgentEarningsIndexRoute
   '/agent-listings': typeof AuthenticatedAgentListingsIndexRoute
   '/agent-plans': typeof AuthenticatedAgentPlansIndexRoute
@@ -853,6 +862,7 @@ export interface FileRoutesById {
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/admin-custom-domains/': typeof AuthenticatedAdminCustomDomainsIndexRoute
   '/_authenticated/admin-tickets/': typeof AuthenticatedAdminTicketsIndexRoute
+  '/_authenticated/advanced-subscription-plans/': typeof AuthenticatedAdvancedSubscriptionPlansIndexRoute
   '/_authenticated/agent-earnings/': typeof AuthenticatedAgentEarningsIndexRoute
   '/_authenticated/agent-listings/': typeof AuthenticatedAgentListingsIndexRoute
   '/_authenticated/agent-plans/': typeof AuthenticatedAgentPlansIndexRoute
@@ -948,6 +958,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/admin-custom-domains/'
     | '/admin-tickets/'
+    | '/advanced-subscription-plans/'
     | '/agent-earnings/'
     | '/agent-listings/'
     | '/agent-plans/'
@@ -1040,6 +1051,7 @@ export interface FileRouteTypes {
     | '/usage-logs/$section'
     | '/admin-custom-domains'
     | '/admin-tickets'
+    | '/advanced-subscription-plans'
     | '/agent-earnings'
     | '/agent-listings'
     | '/agent-plans'
@@ -1135,6 +1147,7 @@ export interface FileRouteTypes {
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/admin-custom-domains/'
     | '/_authenticated/admin-tickets/'
+    | '/_authenticated/advanced-subscription-plans/'
     | '/_authenticated/agent-earnings/'
     | '/_authenticated/agent-listings/'
     | '/_authenticated/agent-plans/'
@@ -1685,6 +1698,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAgentEarningsIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/advanced-subscription-plans/': {
+      id: '/_authenticated/advanced-subscription-plans/'
+      path: '/advanced-subscription-plans'
+      fullPath: '/advanced-subscription-plans/'
+      preLoaderRoute: typeof AuthenticatedAdvancedSubscriptionPlansIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/admin-tickets/': {
       id: '/_authenticated/admin-tickets/'
       path: '/admin-tickets'
@@ -1966,6 +1986,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedAdminCustomDomainsIndexRoute: typeof AuthenticatedAdminCustomDomainsIndexRoute
   AuthenticatedAdminTicketsIndexRoute: typeof AuthenticatedAdminTicketsIndexRoute
+  AuthenticatedAdvancedSubscriptionPlansIndexRoute: typeof AuthenticatedAdvancedSubscriptionPlansIndexRoute
   AuthenticatedAgentEarningsIndexRoute: typeof AuthenticatedAgentEarningsIndexRoute
   AuthenticatedAgentListingsIndexRoute: typeof AuthenticatedAgentListingsIndexRoute
   AuthenticatedAgentPlansIndexRoute: typeof AuthenticatedAgentPlansIndexRoute
@@ -2021,6 +2042,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminCustomDomainsIndexRoute:
     AuthenticatedAdminCustomDomainsIndexRoute,
   AuthenticatedAdminTicketsIndexRoute: AuthenticatedAdminTicketsIndexRoute,
+  AuthenticatedAdvancedSubscriptionPlansIndexRoute:
+    AuthenticatedAdvancedSubscriptionPlansIndexRoute,
   AuthenticatedAgentEarningsIndexRoute: AuthenticatedAgentEarningsIndexRoute,
   AuthenticatedAgentListingsIndexRoute: AuthenticatedAgentListingsIndexRoute,
   AuthenticatedAgentPlansIndexRoute: AuthenticatedAgentPlansIndexRoute,

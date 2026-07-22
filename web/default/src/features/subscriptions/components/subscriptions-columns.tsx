@@ -27,6 +27,7 @@ import { TableId } from '@/components/table-id'
 import { formatQuota } from '@/lib/format'
 
 import { formatDuration, formatResetPeriod } from '../lib'
+import { isSubscriptionPlanReadOnly } from '../lib/plan-ownership'
 import type { PlanRecord } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
@@ -58,6 +59,14 @@ export function useSubscriptionsColumns(): ColumnDef<PlanRecord>[] {
                   {plan.subtitle}
                 </div>
               )}
+              {isSubscriptionPlanReadOnly(row.original) ? (
+                <StatusBadge
+                  label={t('Managed in Token Plans')}
+                  variant='neutral'
+                  copyable={false}
+                  className='mt-1'
+                />
+              ) : null}
             </div>
           )
         },

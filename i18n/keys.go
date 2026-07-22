@@ -127,17 +127,19 @@ const (
 
 // Subscription related messages
 const (
-	MsgSubscriptionNotEnabled       = "subscription.not_enabled"
-	MsgSubscriptionTitleEmpty       = "subscription.title_empty"
-	MsgSubscriptionPriceNegative    = "subscription.price_negative"
-	MsgSubscriptionPriceMax         = "subscription.price_max"
-	MsgSubscriptionPurchaseLimitNeg = "subscription.purchase_limit_negative"
-	MsgSubscriptionQuotaNegative    = "subscription.quota_negative"
-	MsgSubscriptionGroupNotExists   = "subscription.group_not_exists"
-	MsgSubscriptionResetCycleGtZero = "subscription.reset_cycle_gt_zero"
-	MsgSubscriptionPurchaseMax      = "subscription.purchase_max"
-	MsgSubscriptionInvalidId        = "subscription.invalid_id"
-	MsgSubscriptionInvalidUserId    = "subscription.invalid_user_id"
+	MsgSubscriptionNotEnabled           = "subscription.not_enabled"
+	MsgSubscriptionTitleEmpty           = "subscription.title_empty"
+	MsgSubscriptionPriceNegative        = "subscription.price_negative"
+	MsgSubscriptionPriceMax             = "subscription.price_max"
+	MsgSubscriptionPurchaseLimitNeg     = "subscription.purchase_limit_negative"
+	MsgSubscriptionQuotaNegative        = "subscription.quota_negative"
+	MsgSubscriptionGroupNotExists       = "subscription.group_not_exists"
+	MsgSubscriptionResetCycleGtZero     = "subscription.reset_cycle_gt_zero"
+	MsgSubscriptionPurchaseMax          = "subscription.purchase_max"
+	MsgSubscriptionInvalidId            = "subscription.invalid_id"
+	MsgSubscriptionInvalidUserId        = "subscription.invalid_user_id"
+	MsgSubscriptionManagedByTokenPlan   = "subscription.managed_by_token_plan"
+	MsgSubscriptionOwnershipUnavailable = "subscription.ownership_unavailable"
 )
 
 // Payment related messages

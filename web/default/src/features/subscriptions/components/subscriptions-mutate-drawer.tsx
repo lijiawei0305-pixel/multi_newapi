@@ -77,6 +77,7 @@ import {
   formValuesToPlanPayload,
   type PlanFormValues,
 } from '../lib'
+import { getSubscriptionPlanMutationError } from '../lib/plan-mutation'
 import type { PlanRecord } from '../types'
 import { useSubscriptions } from './subscriptions-provider'
 
@@ -158,18 +159,30 @@ export function SubscriptionsMutateDrawer({
       const payload = formValuesToPlanPayload(values)
       if (isEdit && currentRow?.plan?.id) {
         const res = await updatePlan(currentRow.plan.id, payload)
-        if (res.success) {
-          toast.success(t('Update succeeded'))
-          onOpenChange(false)
-          triggerRefresh()
+        const mutationError = getSubscriptionPlanMutationError(
+          res,
+          t('Operation failed')
+        )
+        if (mutationError) {
+          toast.error(mutationError)
+          return
         }
+        toast.success(t('Update succeeded'))
+        onOpenChange(false)
+        triggerRefresh()
       } else {
         const res = await createPlan(payload)
-        if (res.success) {
-          toast.success(t('Create succeeded'))
-          onOpenChange(false)
-          triggerRefresh()
+        const mutationError = getSubscriptionPlanMutationError(
+          res,
+          t('Operation failed')
+        )
+        if (mutationError) {
+          toast.error(mutationError)
+          return
         }
+        toast.success(t('Create succeeded'))
+        onOpenChange(false)
+        triggerRefresh()
       }
     } catch {
       toast.error(t('Request failed'))

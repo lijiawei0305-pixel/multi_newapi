@@ -3829,6 +3829,8 @@
     "、": ", ",
     "计费输入 Token": "Billable Input Tokens",
     "计费输出 Token": "Billable Output Tokens",
-    "完整输入长度": "Full Input Length"
+    "完整输入长度": "Full Input Length",
+    "只读": "Read-only",
+    "由默认主题的套餐管理维护": "Managed in Token Plans in the default theme"
   }
 }

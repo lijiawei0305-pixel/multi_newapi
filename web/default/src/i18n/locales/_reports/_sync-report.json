@@ -1,11 +1,11 @@
 {
   "base": "en.json",
   "source": {
-    "sourceFileCount": 1230,
-    "literalCallCount": 6984,
-    "literalSourceKeyCount": 4622,
+    "sourceFileCount": 1241,
+    "literalCallCount": 6995,
+    "literalSourceKeyCount": 4623,
     "staticAllowlistKeyCount": 454,
-    "requiredKeyCount": 4778,
+    "requiredKeyCount": 4781,
     "dynamicCallCount": 327,
     "dynamicUniqueCallCount": 255,
     "dynamicAllowlistCount": 255,
@@ -14,7 +14,7 @@
   },
   "locales": {
     "en": {
-      "keyCount": 5905,
+      "keyCount": 5910,
       "unchangedValueAllowlistCount": 0,
       "missingSourceKeys": [],
       "missingBaseKeys": [],
@@ -24,7 +24,7 @@
       "staleUnchangedValueAllowlist": []
     },
     "zh": {
-      "keyCount": 5905,
+      "keyCount": 5910,
       "unchangedValueAllowlistCount": 0,
       "missingSourceKeys": [],
       "missingBaseKeys": [],
@@ -34,7 +34,7 @@
       "staleUnchangedValueAllowlist": []
     },
     "fr": {
-      "keyCount": 5905,
+      "keyCount": 5910,
       "unchangedValueAllowlistCount": 118,
       "missingSourceKeys": [],
       "missingBaseKeys": [],
@@ -44,7 +44,7 @@
       "staleUnchangedValueAllowlist": []
     },
     "ja": {
-      "keyCount": 5905,
+      "keyCount": 5910,
       "unchangedValueAllowlistCount": 0,
       "missingSourceKeys": [],
       "missingBaseKeys": [],
@@ -54,7 +54,7 @@
       "staleUnchangedValueAllowlist": []
     },
     "ru": {
-      "keyCount": 5905,
+      "keyCount": 5910,
       "unchangedValueAllowlistCount": 0,
       "missingSourceKeys": [],
       "missingBaseKeys": [],
@@ -64,7 +64,7 @@
       "staleUnchangedValueAllowlist": []
     },
     "vi": {
-      "keyCount": 5905,
+      "keyCount": 5910,
       "unchangedValueAllowlistCount": 28,
       "missingSourceKeys": [],
       "missingBaseKeys": [],

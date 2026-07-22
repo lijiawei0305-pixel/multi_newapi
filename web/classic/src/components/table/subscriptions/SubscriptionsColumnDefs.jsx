@@ -31,6 +31,8 @@ import {
 } from '@douyinfe/semi-ui';
 import { renderQuota } from '../../../helpers';
 import { convertUSDToCurrency } from '../../../helpers/render';
+import { getSubscriptionPlanActionState } from '../../../helpers/subscriptionPlanOwnership';
+import SubscriptionPlanOwnershipBadge from './SubscriptionPlanOwnershipBadge';
 
 const { Text } = Typography;
 
@@ -120,6 +122,7 @@ const renderPlanTitle = (text, record, t) => {
             {subtitle}
           </Text>
         )}
+        <SubscriptionPlanOwnershipBadge record={record} t={t} />
       </div>
     </Popover>
   );
@@ -234,6 +237,10 @@ const renderOperations = (
   { openEdit, setPlanEnabled, t, complianceConfirmed },
 ) => {
   const isEnabled = record?.plan?.enabled;
+  const actionState = getSubscriptionPlanActionState(
+    record,
+    complianceConfirmed,
+  );
 
   const handleToggle = () => {
     if (isEnabled) {
@@ -260,7 +267,7 @@ const renderOperations = (
         type='tertiary'
         size='small'
         onClick={() => openEdit(record)}
-        disabled={!complianceConfirmed}
+        disabled={actionState.disabled}
       >
         {t('编辑')}
       </Button>
@@ -270,7 +277,7 @@ const renderOperations = (
           type='danger'
           size='small'
           onClick={handleToggle}
-          disabled={!complianceConfirmed}
+          disabled={actionState.disabled}
         >
           {t('禁用')}
         </Button>
@@ -280,7 +287,7 @@ const renderOperations = (
           type='primary'
           size='small'
           onClick={handleToggle}
-          disabled={!complianceConfirmed}
+          disabled={actionState.disabled}
         >
           {t('启用')}
         </Button>

@@ -37,6 +37,7 @@ import { Form } from '@/components/ui/form'
 import { cn } from '@/lib/utils'
 
 import { confirmPaymentCompliance } from '../api'
+import { FormNavigationGuard } from '../components/form-navigation-guard'
 import { SettingsForm } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
@@ -347,7 +348,7 @@ export function PaymentSettingsSection({
     },
   })
 
-  const { isSubmitting } = form.formState
+  const { isDirty, isSubmitting } = form.formState
 
   const setPaymentValue = React.useCallback(
     (
@@ -913,9 +914,19 @@ export function PaymentSettingsSection({
     WaffoPancakePrivateKey: currentFormValues.WaffoPancakePrivateKey,
     WaffoPancakeReturnURL: currentFormValues.WaffoPancakeReturnURL,
   }
+  const waffoPayMethodsDirty =
+    normalizeJsonForComparison(JSON.stringify(waffoPayMethods)) !==
+    normalizeJsonForComparison(waffoDefaultValues.WaffoPayMethods)
+  const waffoPancakeBindingDirty =
+    waffoPancakeSelection.storeID !== waffoPancakeSavedBinding.storeID ||
+    waffoPancakeSelection.productID !== waffoPancakeSavedBinding.productID
+  const hasUnsavedPaymentChanges =
+    isDirty || waffoPayMethodsDirty || waffoPancakeBindingDirty
 
   return (
     <SettingsSection title={t('Payment Gateway')}>
+      <FormNavigationGuard when={hasUnsavedPaymentChanges} />
+
       {!complianceConfirmed ? (
         <Alert variant='destructive' className='mb-6'>
           <ShieldAlert className='h-4 w-4' />

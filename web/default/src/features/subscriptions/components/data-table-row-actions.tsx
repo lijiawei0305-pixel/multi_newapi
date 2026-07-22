@@ -27,6 +27,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
+import { isSubscriptionPlanReadOnly } from '../lib/plan-ownership'
 import type { PlanRecord } from '../types'
 import { useSubscriptions } from './subscriptions-provider'
 
@@ -38,7 +39,10 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { t } = useTranslation()
   const { setOpen, setCurrentRow, complianceConfirmed } = useSubscriptions()
   const isEnabled = row.original.plan.enabled
+  const isReadOnly = isSubscriptionPlanReadOnly(row.original)
+  const actionsDisabled = !complianceConfirmed || isReadOnly
   const toggleLabel = isEnabled ? t('Disable') : t('Enable')
+  const actionTooltip = isReadOnly ? t('Managed in Token Plans') : undefined
 
   const handleEdit = () => {
     setCurrentRow(row.original)
@@ -58,7 +62,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             <Button
               variant='ghost'
               size='icon-sm'
-              disabled={!complianceConfirmed}
+              disabled={actionsDisabled}
               onClick={handleEdit}
               aria-label={t('Edit')}
             />
@@ -66,7 +70,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         >
           <Pencil />
         </TooltipTrigger>
-        <TooltipContent>{t('Edit')}</TooltipContent>
+        <TooltipContent>{actionTooltip || t('Edit')}</TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -75,7 +79,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             <Button
               variant='ghost'
               size='icon-sm'
-              disabled={!complianceConfirmed}
+              disabled={actionsDisabled}
               onClick={handleToggleStatus}
               aria-label={toggleLabel}
               className={
@@ -88,7 +92,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         >
           {isEnabled ? <PowerOff /> : <Power />}
         </TooltipTrigger>
-        <TooltipContent>{toggleLabel}</TooltipContent>
+        <TooltipContent>{actionTooltip || toggleLabel}</TooltipContent>
       </Tooltip>
     </div>
   )

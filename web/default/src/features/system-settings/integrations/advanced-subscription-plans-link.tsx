@@ -16,25 +16,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { isSubscriptionPlanReadOnly } from '../lib/plan-ownership'
-import { ToggleStatusDialog } from './dialogs/toggle-status-dialog'
-import { SubscriptionsMutateDrawer } from './subscriptions-mutate-drawer'
-import { useSubscriptions } from './subscriptions-provider'
+import { Link } from '@tanstack/react-router'
+import { useTranslation } from 'react-i18next'
 
-export function SubscriptionsDialogs() {
-  const { open, setOpen, currentRow } = useSubscriptions()
-  const isUpdate =
-    open === 'update' &&
-    Boolean(currentRow && !isSubscriptionPlanReadOnly(currentRow))
+import { Button } from '@/components/ui/button'
+
+export function AdvancedSubscriptionPlansLink() {
+  const { t } = useTranslation()
 
   return (
-    <>
-      <SubscriptionsMutateDrawer
-        open={open === 'create' || isUpdate}
-        onOpenChange={(isOpen) => !isOpen && setOpen(null)}
-        currentRow={isUpdate ? currentRow || undefined : undefined}
-      />
-      <ToggleStatusDialog />
-    </>
+    <Button
+      type='button'
+      size='sm'
+      variant='outline'
+      className='self-start'
+      nativeButton={false}
+      render={<Link to='/advanced-subscription-plans' />}
+    >
+      {t('Open Advanced Native Subscription Plans')}
+    </Button>
   )
 }

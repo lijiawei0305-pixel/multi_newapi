@@ -21,22 +21,30 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { DataTablePage, useDataTable } from '@/components/data-table'
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 
-import { getAdminPlans } from '../api'
+import { getAdminPlansOrThrow } from '../api'
 import { useSubscriptionsColumns } from './subscriptions-columns'
 import { useSubscriptions } from './subscriptions-provider'
 
 export function SubscriptionsTable() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const columns = useSubscriptionsColumns()
   const { refreshTrigger } = useSubscriptions()
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['admin-subscription-plans', refreshTrigger],
-    queryFn: async () => {
-      const result = await getAdminPlans()
-      return result.data || []
-    },
+  const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
+    queryKey: [
+      'admin-subscription-plans',
+      refreshTrigger,
+      i18n.resolvedLanguage,
+    ],
+    queryFn: () => getAdminPlansOrThrow(t('Failed to load')),
     placeholderData: (prev) => prev,
   })
 
@@ -49,11 +57,37 @@ export function SubscriptionsTable() {
     withFacetedRowModel: false,
   })
 
+  if (isError) {
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : t('Failed to load')
+
+    return (
+      <Alert variant='destructive'>
+        <AlertTitle>{t('Failed to load')}</AlertTitle>
+        <AlertDescription>{message}</AlertDescription>
+        <AlertAction>
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            disabled={isFetching}
+            onClick={() => void refetch()}
+          >
+            {t('Retry')}
+          </Button>
+        </AlertAction>
+      </Alert>
+    )
+  }
+
   return (
     <DataTablePage
       table={table}
       columns={columns}
       isLoading={isLoading}
+      isFetching={isFetching}
       emptyTitle={t('No subscription plans yet')}
       emptyDescription={t(
         'Click "Create Plan" to create your first subscription plan'
