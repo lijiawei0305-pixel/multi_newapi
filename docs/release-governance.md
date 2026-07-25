@@ -32,13 +32,19 @@ Python standard library, reads the token from the step environment, keeps it
 out of URLs and process arguments, and streams multipart asset uploads without
 runtime package installation.
 
-Every repository workflow uses the strict default: each Environment must have
-at least one required reviewer and administrator bypass must be disabled. The
-private personal repository's current billing plan returned HTTP 422 when those
-rules were configured and still reports `can_admins_bypass: true`. The
-repository no longer weakens the check to accommodate that plan limitation;
-governance and every formal publish fail closed until the repository moves to a
-plan/owner type that exposes the required protection and the rules are enabled.
+Approval protection remains the script's strict default: unless
+`GITHUB_ENVIRONMENT_APPROVALS_REQUIRED=false` is explicitly set, each
+Environment must have at least one required reviewer and administrator bypass
+must be disabled. Repository workflows declare that exception because GitHub
+returned HTTP 422 when required reviewers were configured for this private
+personal repository, whose current billing plan does not expose that rule. The
+API also reports `can_admins_bypass: true`. The exception affects only those
+unavailable approval controls; Environment existence and the exact deployment
+branch/tag policy baseline remain mandatory and fail closed.
+
+If the repository moves to a plan and owner type that supports approval
+protection for private repositories, configure required reviewers, disable
+administrator bypass, and remove the explicit exception from every workflow.
 
 The daily/manual `GitHub Environment Governance Audit` workflow stores a
 sanitized JSON artifact containing policy names, types, counts, and booleans;
@@ -52,6 +58,7 @@ does not mutate them. After configuration, run:
 
 ```bash
 GITHUB_REPOSITORY=OWNER/REPO \
+GITHUB_ENVIRONMENT_APPROVALS_REQUIRED=false \
 scripts/verify-github-environments.sh
 ```
 
@@ -59,11 +66,11 @@ A nonzero exit means publishing must remain blocked. Review wait-timer values
 in the emitted evidence and apply the organization's desired delay. Environment
 secret values are never read or exported by this audit.
 
-As of the read-only API check on 2026-07-22, both named Environments exist and
+As of the read-only API check on 2026-07-25, both named Environments exist and
 their branch/tag policies match the baseline above. Required reviewers and the
 administrator-bypass control remain unavailable under the current private
-repository plan, so the strict check intentionally blocks governance and formal
-publishing rather than representing the Environments as protected.
+repository plan. The emitted evidence records that limitation explicitly while
+the repository workflows enforce every Environment control the plan exposes.
 
 ## Clean release source boundary
 

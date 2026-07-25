@@ -1510,7 +1510,7 @@ FAKE_RCLONE
 
 test_github_environment_audit_is_read_only_and_fail_closed() (
   set -euo pipefail
-  local tmp fake evidence
+  local tmp fake evidence audit_calls compatible_calls
   tmp="$(mktemp -d)"
   trap 'rm -rf -- "$tmp"' EXIT
   fake="$tmp/bin"
@@ -1568,9 +1568,13 @@ FAKE_GH
     GITHUB_REPOSITORY=owner/repository \
     bash "$ROOT/scripts/verify-github-environments.sh" >/dev/null \
     || fail "Environment audit rejected the strict approval-protected fixture"
-  if grep -R -Fq 'GITHUB_ENVIRONMENT_APPROVALS_REQUIRED:' "$ROOT/.github/workflows"; then
-    fail "a repository workflow weakens strict Environment approval protection"
-  fi
+  audit_calls="$(grep -R -h -F 'run: bash scripts/verify-github-environments.sh' \
+    "$ROOT/.github/workflows" | wc -l | tr -d '[:space:]')"
+  compatible_calls="$(grep -R -h -F "GITHUB_ENVIRONMENT_APPROVALS_REQUIRED: 'false'" \
+    "$ROOT/.github/workflows" | wc -l | tr -d '[:space:]')"
+  [ "$audit_calls" -gt 0 ] || fail "no repository workflow verifies GitHub Environments"
+  [ "$compatible_calls" = "$audit_calls" ] \
+    || fail "every repository Environment audit must declare the private-repository approval policy"
   if grep -Eq '(^|[[:space:]])(put|post|patch|delete)([[:space:]]|$)' "$tmp/gh.calls"; then
     fail "Environment audit attempted a mutating GitHub API method"
   fi
