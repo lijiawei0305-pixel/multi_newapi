@@ -308,7 +308,12 @@ func TestSynchronousProjectionLogFailureReplaysCompletePayloadExactlyOnce(t *tes
 	assert.Equal(t, 50, outbox.LogQuota)
 	assert.Equal(t, 40, outbox.LogPromptTokens)
 	assert.Equal(t, 10, outbox.LogCompletionTokens)
-	assert.Equal(t, 3, outbox.LogUseTime)
+	// use_time 是 Unix() 整秒截断差（text_quota.go）：夹具 StartTime 在 3s 前，夹具建库到
+	// 扣费之间一旦跨过墙钟整秒边界结果即为 4，与耗时长短无关。契约是「重放逐字保真快照」，
+	// 精确断言放在重放侧，这里只锚定快照确实源自 StartTime。
+	snapshotUseTime := outbox.LogUseTime
+	assert.GreaterOrEqual(t, snapshotUseTime, 3)
+	assert.Less(t, snapshotUseTime, 60)
 	assert.True(t, outbox.LogIsStream)
 	assert.Equal(t, 1, outbox.AttemptCount)
 
@@ -328,7 +333,7 @@ func TestSynchronousProjectionLogFailureReplaysCompletePayloadExactlyOnce(t *tes
 	require.NotNil(t, log)
 	assert.Equal(t, 40, log.PromptTokens)
 	assert.Equal(t, 10, log.CompletionTokens)
-	assert.Equal(t, 3, log.UseTime)
+	assert.Equal(t, snapshotUseTime, log.UseTime)
 	assert.True(t, log.IsStream)
 	assert.Equal(t, info.RequestId+"-upstream", log.UpstreamRequestId)
 	var quotaData model.QuotaData
