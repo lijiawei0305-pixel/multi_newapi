@@ -34,6 +34,9 @@
     "electron-builder": "^26.15.3",
     "7zip-bin": "5.2.0"
   },
+  "overrides": {
+    "jake": "^12.10.1"
+  },
   "build": {
     "appId": "com.newapi.desktop",
     "productName": "New-API-App",
