@@ -192,9 +192,11 @@
 - **解决/规避**：**`bun test`** 是唯一能同时跑通的命令——bun 内建实现 `node:test`，又会自动把 `vitest` import 别名到 `bun:test`，且原生按目录发现 `*.test.ts(x)`、原生转译 TS/TSX，无需任何配置。实测 `cd web/default && bun test` → **79 pass / 0 fail across 5 files**（含那个 `.tsx`——它是纯逻辑断言、不 render DOM，故无需 happy-dom/jsdom 环境）。已定为 CI 与 preflight 的前端测试命令。
 - **升级**：新增前端测试统一用 `bun test` 跑；写法用 `node:test` 或 `vitest` 皆可（bun 都兼容），但**别引入 `vitest` 依赖/配置**制造"看起来该用 vitest 却没装"的迷惑。
 
----
-
-## 三、业务逻辑
+### [已解决] 代码零变化、CI 三 job 一夜变红——新安全公告潮打穿裸 audit 门禁，且「有补丁」≠「能升」（2026-07-25 事故 / 07-26 修复）
+- **现象**：b85ac91（只改 workflow/docs/运维脚本）推 main 后,Default/Orbit/Electron 三个 CI job 全红;上一次推送（07-22,同一依赖状态）全绿。三处失败点全是 `bun audit`/`npm audit` 门禁;结尾只报「存在未通过门禁」,定位具体失败项要翻全量日志。
+- **根因**：GitHub 07-23~07-24 发布公告潮:brace-expansion ≤5.0.7（GHSA-mh99-v99m-4gvg,high,三树全中）、postcss ≤8.5.17（GHSA-r28c-9q8g-f849,high）、react-router 6/7 线四连（337j/wrjc/jjmj/qwww,6.x 与 7.12+ 均无补丁,唯一干净版 8.3.0）、node-tar ≤7.5.20。裸 audit 是「公告发布即红」的门,与代码推送解耦的风险从未被管理。**二级坑**:brace-expansion 唯一补丁 5.0.8 把 CJS 出口从 `module.exports=expand` 改成 `{expand}` 对象——minimatch<10 的函数式调用会运行时 TypeError(scratchpad 实测复现),而 eslint 8/9、@electron/asar 3.x、dir-compare、temp 等整条旧栈都钉 minimatch<10 → 「audit 有补丁版」根本不可安装,npm 官方建议竟是降级 eslint@4/electron-builder@22。**三级坑**:web/ 里上一轮为旧公告 pin 的 overrides（brace-expansion 2.1.2、postcss 8.5.15）本身落回新公告漏洞区——精确 pin 的豁免会腐烂。
+- **解决/规避**：**真修优先**:① postcss override 8.5.15→8.5.18;② classic 弃 react-router-dom 迁 react-router@8.3.0（24 文件改 import,9 个 API v8 全保留,react 19.2.6→19.2.8 satisfy peer,本地全门验证）;③ Orbit eslint 9→10.8.0（eslint 10 整链已在 minimatch^10/be^5.0.8,audit 清零,零豁免）;④ Electron 定向升 tar 7.5.21 + override jake ^12.10.1（jake12→filelist2→minimatch10 干净,ejs 运行时不加载 jake 零风险）。**确实无修复路径的**（web 的 eslint8 链、electron 的 asar3.4.1/universal2.0.3/dir-compare/temp 级联,同一根公告）→ 新增 `scripts/audit-gate.mjs` 统一包装 bun/npm audit:豁免必须进 `scripts/audit-allowlist.json`（ghsa+理由+到期日,到期自动重新阻断,未命中提示删除）,解析失败 fail-closed。**防复发**:`.github/workflows/dependency-audit.yml` 每日 cron 主动扫三树,公告发布当天独立变红,不再等下次功能推送陪葬;preflight.sh 结尾打印「未通过门禁列表」(gate_failed 记录步名),不用再翻全日志。
+- **升级**：三条候选纪律（待用户确认是否固化 CLAUDE.md）:① audit 豁免只进 allowlist 文件,禁止内联 `--ignore`/改门禁等级,必须带到期日;② 安全 override 优先选『上游已适配的父包升级』而非 pin 漏洞包本身（pin 会腐烂,见三级坑）;③ 升级『唯一补丁版』前先实测出口形状/API 兼容（本次 be5.0.8 与 minimatch3 的 CJS 形状差点全树炸 lint）。
 
 > 多租户识别、计费扣费、用户组倍率、成本保护、收益分润、渠道中继、认证隔离等业务 Bug。
 

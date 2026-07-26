@@ -1,0 +1,24 @@
+{
+  "$comment": "依赖审计豁免清单(scripts/audit-gate.mjs 消费)。仅收录『上游无兼容补丁可用』的公告;每条必须带 reason/added/expires,到期自动重新阻断,上游修复后立即删除条目并让真实升级过门。新增条目前先证明:① 无 in-range 修复;② override/升级会破坏运行时(写明证据)。",
+  "web": [
+    {
+      "ghsa": "GHSA-mh99-v99m-4gvg",
+      "cve": "CVE-2026-14257",
+      "package": "brace-expansion",
+      "reason": "唯一补丁 5.0.8 把 CJS 出口从函数改为 {expand} 对象,classic 的 eslint 8.57 链(minimatch^3 函数式调用)会运行时 TypeError;minimatch 3.x 线无适配版,eslint 9 仍钉 minimatch^3,classic 迁 eslint 10 flat config 是独立大工程。纯 dev 工具链暴露,不进产物。等 brace-expansion 回移植或 classic eslint 迁移后删除本条。",
+      "added": "2026-07-26",
+      "expires": "2026-08-31"
+    }
+  ],
+  "orbit": [],
+  "electron": [
+    {
+      "ghsa": "GHSA-mh99-v99m-4gvg",
+      "cve": "CVE-2026-14257",
+      "package": "brace-expansion",
+      "reason": "electron-builder 26.15.x 精确钉 @electron/asar 3.4.1 / @electron/universal 2.0.3,其 minimatch<10 链无兼容补丁(asar 下一个干净版是 4.x 大版本,无法本地验证 Linux 打包正确性,不盲升);dir-compare/temp 全版本受影响无修复。纯打包工具链暴露,不进产物。等 electron-builder 26 线换到 asar≥4/minimatch≥10 后删除本条。",
+      "added": "2026-07-26",
+      "expires": "2026-08-31"
+    }
+  ]
+}
