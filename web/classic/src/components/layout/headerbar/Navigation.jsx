@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import SkeletonWrapper from '../components/SkeletonWrapper';
 import { normalizeHttpNavigationUrl } from '../../../helpers/safeNavigation';
 

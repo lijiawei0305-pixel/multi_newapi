@@ -33,7 +33,7 @@
     "react-i18next": "^13.0.0",
     "react-icons": "catalog:",
     "react-markdown": "catalog:",
-    "react-router-dom": "^6.3.0",
+    "react-router": "^8.3.0",
     "react-telegram-login": "^1.1.2",
     "react-toastify": "^9.0.8",
     "react-turnstile": "^1.0.5",

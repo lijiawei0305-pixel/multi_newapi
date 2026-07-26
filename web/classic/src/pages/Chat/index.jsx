@@ -20,7 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import React, { useMemo } from 'react';
 import { useTokenKeys } from '../../hooks/chat/useTokenKeys';
 import { Spin } from '@douyinfe/semi-ui';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { resolveChatTemplateUrl } from '../../helpers/safeNavigation';
 

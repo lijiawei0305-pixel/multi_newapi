@@ -33,7 +33,7 @@ import { setStatusData } from '../../helpers/data';
 import { getLogo, getSystemName, showError } from '../../helpers/utils';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { normalizeLanguage } from '../../i18n/language';
 const { Sider, Content, Header } = Layout;
 
