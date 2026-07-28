@@ -1203,6 +1203,8 @@ test_session_security_deployment_docs_contract() (
     || fail "production MySQL does not durably flush every committed redo record"
   grep -Fq -- '--sync-binlog=1' "$production" \
     || fail "production MySQL does not durably flush every committed binlog record"
+  grep -Fq -- '--log-bin-trust-function-creators=1' "$production" \
+    || fail "production MySQL cannot create schema-scoped compatibility triggers while binlog is enabled"
   if grep -Eq -- '--innodb-flush-log-at-trx-commit=(0|2)|--sync-binlog=0' "$production"; then
     fail "production MySQL still permits acknowledged financial commits to vanish on host failure"
   fi

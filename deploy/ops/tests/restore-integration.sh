@@ -140,6 +140,23 @@ COMPOSE_STARTED=1
 dc --progress quiet up -d --build --quiet-pull
 printf '[restore-drill] app published at 127.0.0.1:%s\n' "$APP_PORT"
 
+# The app intentionally runs as a schema-scoped MySQL user, not root. With
+# binary logging enabled, fresh trigger creation otherwise fails with ERROR
+# 1419 unless the server trusts users that already hold TRIGGER privilege.
+# Assert the effective runtime value for every MySQL image in the CI matrix so
+# a misspelled/removed Compose option cannot degrade into a late readiness
+# timeout with an opaque app startup failure.
+trust_deadline=$(( $(date +%s) + 90 ))
+trust_value=""
+until trust_value="$(mysql_with_secret mysql -u"$DB_USER" -Nse \
+  'SELECT @@GLOBAL.log_bin_trust_function_creators' 2>/dev/null | tr -d '\r')"; do
+  [ "$(date +%s)" -lt "$trust_deadline" ] \
+    || fail "MySQL did not become queryable while checking log_bin_trust_function_creators"
+  sleep 2
+done
+[ "$trust_value" = "1" ] \
+  || fail "MySQL log_bin_trust_function_creators is $trust_value; schema-scoped trigger migration would require SUPER"
+
 expected_version="$(tr -d '\r\n' < "$ROOT/VERSION")"
 [ -n "$expected_version" ] || fail "VERSION is empty"
 wait_runtime_ready "$expected_version" "$READINESS_TIMEOUT" \
