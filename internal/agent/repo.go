@@ -2,8 +2,14 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"math"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
+
+	"github.com/shopspring/decimal"
 )
 
 // agentRecord 是代理资料的内部存储结构（按 tenantID）。payout 与 params 是同一条 profile 记录里
@@ -26,6 +32,7 @@ type MemRepo struct {
 	earnings    []EarningEntry         // 收益日志（追加）
 	seenEarning map[string]bool        // 幂等键 -> 已入账
 	withdrawals map[int64]*Withdrawal  // id -> 提现单
+	payoutRefs  map[string]int64       // exact payout_ref -> 提现单 id
 	nextWID     int64
 	now         func() time.Time
 }
@@ -37,6 +44,7 @@ func NewMemRepo() *MemRepo {
 		wallets:     make(map[int64]*AgentWallet),
 		seenEarning: make(map[string]bool),
 		withdrawals: make(map[int64]*Withdrawal),
+		payoutRefs:  make(map[string]int64),
 		now:         time.Now,
 	}
 }
@@ -138,10 +146,33 @@ func (r *MemRepo) AppendEarning(_ context.Context, e EarningEntry) (bool, error)
 }
 
 func (r *MemRepo) CreateWithdrawal(_ context.Context, wd *Withdrawal) error {
+	wd.RequestKey = strings.TrimSpace(wd.RequestKey)
+	if utf8.RuneCountInString(wd.RequestKey) > MaxWithdrawalRequestKeyLength {
+		return ErrWithdrawRequestKeyInvalid
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if wd.RequestKey != "" {
+		for _, existing := range r.withdrawals {
+			if existing.TenantID != wd.TenantID || existing.RequestKey != wd.RequestKey {
+				continue
+			}
+			if existing.UserID != wd.UserID || existing.Remark != wd.Remark ||
+				!decimal.NewFromFloat(existing.Amount).Equal(decimal.NewFromFloat(wd.Amount)) {
+				return ErrWithdrawIdempotencyConflict
+			}
+			*wd = *existing
+			return nil
+		}
+	}
 	w := r.walletRef(wd.TenantID)
-	if wd.Amount <= 0 || wd.Amount > w.WithdrawableBalance {
+	if wd.Amount <= 0 || math.IsNaN(wd.Amount) || math.IsInf(wd.Amount, 0) {
+		return ErrWithdrawInsufficient
+	}
+	if !validWithdrawalAmount(wd.Amount) {
+		return ErrWithdrawAmountInvalid
+	}
+	if wd.Amount > w.WithdrawableBalance {
 		return ErrWithdrawInsufficient
 	}
 	// 原子冻结：可提现 → 冻结（金额守恒：withdrawable + frozen 不变）。
@@ -186,11 +217,15 @@ func (r *MemRepo) ResolveWithdrawal(_ context.Context, id int64, target Withdraw
 	if !wd.Status.CanTransitionTo(target) {
 		return ErrWithdrawNotPending
 	}
+	w, walletFound := r.wallets[wd.TenantID]
+	if !walletFound || wd.Amount <= 0 || math.IsNaN(wd.Amount) || math.IsInf(wd.Amount, 0) ||
+		w.FrozenWithdrawAmount < wd.Amount {
+		return fmt.Errorf("%w: withdrawal %d frozen balance is insufficient", ErrWalletInvariant, id)
+	}
 	switch target {
 	case WithdrawApproved:
 		// 不动钱：仅记决策，钱仍在 frozen。
 	case WithdrawRejected:
-		w := r.walletRef(wd.TenantID)
 		w.FrozenWithdrawAmount -= wd.Amount
 		w.WithdrawableBalance += wd.Amount
 		w.UpdatedAt = r.now()
@@ -209,6 +244,13 @@ func (r *MemRepo) ResolveWithdrawal(_ context.Context, id int64, target Withdraw
 // （提现闭环补强 #2）。非 approved（含并发已被标记 / 仍是 pending）返回 ErrWithdrawNotApproved；
 // 不存在返回 ErrWithdrawNotFound。
 func (r *MemRepo) MarkWithdrawalPaid(_ context.Context, id int64, payoutRef string) error {
+	payoutRef = strings.TrimSpace(payoutRef)
+	if payoutRef == "" {
+		return ErrPayoutRefRequired
+	}
+	if utf8.RuneCountInString(payoutRef) > MaxPayoutRefLength {
+		return ErrPayoutRefInvalid
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	wd, ok := r.withdrawals[id]
@@ -218,12 +260,20 @@ func (r *MemRepo) MarkWithdrawalPaid(_ context.Context, id int64, payoutRef stri
 	if !wd.Status.CanTransitionTo(WithdrawPaid) {
 		return ErrWithdrawNotApproved
 	}
-	w := r.walletRef(wd.TenantID)
+	if ownerID, exists := r.payoutRefs[payoutRef]; exists && ownerID != id {
+		return ErrPayoutRefDuplicate
+	}
+	w, walletFound := r.wallets[wd.TenantID]
+	if !walletFound || wd.Amount <= 0 || math.IsNaN(wd.Amount) || math.IsInf(wd.Amount, 0) ||
+		w.FrozenWithdrawAmount < wd.Amount {
+		return fmt.Errorf("%w: withdrawal %d frozen balance is insufficient", ErrWalletInvariant, id)
+	}
 	w.FrozenWithdrawAmount -= wd.Amount
 	ts := r.now()
 	w.UpdatedAt = ts
 	wd.Status = WithdrawPaid
 	wd.PayoutRef = payoutRef
+	r.payoutRefs[payoutRef] = id
 	wd.PaidAt = ts
 	wd.UpdatedAt = ts
 	return nil

@@ -16,6 +16,12 @@ const (
 	CodeAgentTypeInvalid = "AGENT_TYPE_INVALID"
 	// CodeWithdrawInsufficient 提现金额超过可提现余额（或非正）。
 	CodeWithdrawInsufficient = "WITHDRAW_INSUFFICIENT"
+	// CodeWithdrawAmountInvalid 提现金额不是人民币“分”的整数倍。
+	CodeWithdrawAmountInvalid = "WITHDRAW_AMOUNT_INVALID"
+	// CodeWithdrawRequestKeyInvalid 提现幂等键过长。
+	CodeWithdrawRequestKeyInvalid = "WITHDRAW_REQUEST_KEY_INVALID"
+	// CodeWithdrawIdempotencyConflict 同一幂等键被复用于不同提现参数。
+	CodeWithdrawIdempotencyConflict = "WITHDRAW_IDEMPOTENCY_CONFLICT"
 	// CodeWithdrawNotPending 提现单非 pending，不可再次审核（approve/reject）。
 	CodeWithdrawNotPending = "WITHDRAW_NOT_PENDING"
 	// CodeWithdrawNotFound 提现单不存在（补充码）。
@@ -30,6 +36,14 @@ const (
 	CodePayoutAccountInvalid = "PAYOUT_ACCOUNT_INVALID"
 	// CodePayoutRefRequired 标记已打款时打款单号/凭证缺失。
 	CodePayoutRefRequired = "PAYOUT_REF_REQUIRED"
+	// CodeWithdrawalRemarkInvalid 审核备注超过持久化字段长度限制。
+	CodeWithdrawalRemarkInvalid = "WITHDRAW_REMARK_INVALID"
+	// CodePayoutRefInvalid 打款单号/凭证超过持久化字段长度限制。
+	CodePayoutRefInvalid = "PAYOUT_REF_INVALID"
+	// CodePayoutRefDuplicate 打款凭证已绑定其他提现单。
+	CodePayoutRefDuplicate = "PAYOUT_REF_DUPLICATE"
+	// CodeWalletInvariant 账务数据不满足钱包/冻结余额不变量。
+	CodeWalletInvariant = "AGENT_WALLET_INVARIANT"
 )
 
 var (
@@ -38,6 +52,12 @@ var (
 	ErrAgentParamsInvalid = apperr.New(CodeAgentTypeInvalid, "代理参数非法", http.StatusBadRequest)
 	// ErrWithdrawInsufficient 提现金额超过可提现余额。
 	ErrWithdrawInsufficient = apperr.New(CodeWithdrawInsufficient, "提现金额超过可提现余额", http.StatusBadRequest)
+	// ErrWithdrawAmountInvalid 提现金额必须精确到分，避免界面两位金额与线下打款金额不一致。
+	ErrWithdrawAmountInvalid = apperr.New(CodeWithdrawAmountInvalid, "提现金额最多保留两位小数", http.StatusBadRequest)
+	// ErrWithdrawRequestKeyInvalid 提现请求幂等键非法。
+	ErrWithdrawRequestKeyInvalid = apperr.New(CodeWithdrawRequestKeyInvalid, "提现请求幂等键非法", http.StatusBadRequest)
+	// ErrWithdrawIdempotencyConflict 同一幂等键对应的请求参数不一致。
+	ErrWithdrawIdempotencyConflict = apperr.New(CodeWithdrawIdempotencyConflict, "提现幂等键已用于另一笔请求", http.StatusConflict)
 	// ErrWithdrawNotPending 提现单非 pending，不可再次审核。
 	ErrWithdrawNotPending = apperr.New(CodeWithdrawNotPending, "提现单非待审核状态", http.StatusConflict)
 	// ErrWithdrawNotFound 提现单不存在。
@@ -52,4 +72,12 @@ var (
 	ErrPayoutAccountInvalid = apperr.New(CodePayoutAccountInvalid, "收款账户信息非法", http.StatusBadRequest)
 	// ErrPayoutRefRequired 标记已打款时打款单号/凭证缺失。
 	ErrPayoutRefRequired = apperr.New(CodePayoutRefRequired, "请填写打款单号/凭证", http.StatusBadRequest)
+	// ErrWithdrawalRemarkInvalid 审核备注过长。
+	ErrWithdrawalRemarkInvalid = apperr.New(CodeWithdrawalRemarkInvalid, "审核备注过长", http.StatusBadRequest)
+	// ErrPayoutRefInvalid 打款单号/凭证过长。
+	ErrPayoutRefInvalid = apperr.New(CodePayoutRefInvalid, "打款单号/凭证过长", http.StatusBadRequest)
+	// ErrPayoutRefDuplicate 打款单号/凭证不可跨提现单重复使用。
+	ErrPayoutRefDuplicate = apperr.New(CodePayoutRefDuplicate, "打款单号/凭证已用于其他提现单", http.StatusConflict)
+	// ErrWalletInvariant 钱包或提现账务数据已损坏；必须回滚并由运维对账处理。
+	ErrWalletInvariant = apperr.New(CodeWalletInvariant, "代理钱包账务不一致", http.StatusInternalServerError)
 )

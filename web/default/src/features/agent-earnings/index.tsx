@@ -34,6 +34,7 @@ import type {
   RangeParams,
 } from '@/features/financial-report/types'
 import { computeTimeRange } from '@/lib/time'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { getMyWithdrawals, getPayoutAccount, getTenantEarnings } from './api'
 import { EarningsSummaryCards } from './components/earnings-summary-cards'
@@ -53,29 +54,37 @@ import { parseEarnings } from './lib'
 
 export function AgentEarnings() {
   const { t } = useTranslation()
+  const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const queryClient = useQueryClient()
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [payoutOpen, setPayoutOpen] = useState(false)
+  const [withdrawalPage, setWithdrawalPage] = useState(1)
+  const withdrawalPageSize = 20
 
   const { data: earningsRes, isLoading: earningsLoading } = useQuery({
-    queryKey: ['tenant-earnings'],
+    queryKey: ['tenant-earnings', userId],
     queryFn: getTenantEarnings,
-    placeholderData: (prev) => prev,
+    enabled: userId !== null,
   })
 
   const { data: withdrawals, isLoading: wdLoading } = useQuery({
-    queryKey: ['tenant-withdrawals'],
+    queryKey: [
+      'tenant-withdrawals',
+      userId,
+      withdrawalPage,
+      withdrawalPageSize,
+    ],
     queryFn: async () => {
-      const res = await getMyWithdrawals()
-      return res.data || []
+      const res = await getMyWithdrawals(withdrawalPage, withdrawalPageSize)
+      return res.data
     },
-    placeholderData: (prev) => prev,
+    enabled: userId !== null,
   })
 
   const { data: payoutRes, isLoading: payoutLoading } = useQuery({
-    queryKey: ['tenant-payout-account'],
+    queryKey: ['tenant-payout-account', userId],
     queryFn: getPayoutAccount,
-    placeholderData: (prev) => prev,
+    enabled: userId !== null,
   })
   const payoutAccount = payoutRes?.data
 
@@ -89,10 +98,10 @@ export function AgentEarnings() {
   const [range] = useState<RangeParams>(() => computeTimeRange(30))
 
   const financeSummaryQuery = useQuery({
-    queryKey: ['tenant-finance-summary', range],
+    queryKey: ['tenant-finance-summary', userId, range],
     queryFn: () => getTenantFinanceSummary(range),
     select: (res) => res.data,
-    placeholderData: (prev) => prev,
+    enabled: userId !== null,
   })
 
   const trendParams = {
@@ -101,10 +110,10 @@ export function AgentEarnings() {
     granularity: 'day' as const,
   }
   const financeTrendQuery = useQuery({
-    queryKey: ['tenant-finance-trend', trendParams],
+    queryKey: ['tenant-finance-trend', userId, trendParams],
     queryFn: () => getTenantFinanceTrend(trendParams),
     select: (res) => res.data,
-    placeholderData: (prev) => prev,
+    enabled: userId !== null,
   })
   const trendSeries = (
     financeTrendQuery.data?.lens === 'earnings'
@@ -113,6 +122,7 @@ export function AgentEarnings() {
   ) as EarningsTrendPoint[]
 
   const refreshAll = () => {
+    setWithdrawalPage(1)
     queryClient.invalidateQueries({ queryKey: ['tenant-earnings'] })
     queryClient.invalidateQueries({ queryKey: ['tenant-withdrawals'] })
   }
@@ -178,8 +188,12 @@ export function AgentEarnings() {
             <h3 className='text-sm font-semibold'>{t('My Withdrawals')}</h3>
             <div className='overflow-hidden rounded-lg border'>
               <MyWithdrawalsTable
-                items={withdrawals || []}
+                items={withdrawals?.items || []}
                 loading={wdLoading}
+                page={withdrawalPage}
+                pageSize={withdrawalPageSize}
+                total={withdrawals?.total || 0}
+                onPageChange={setWithdrawalPage}
               />
             </div>
           </section>

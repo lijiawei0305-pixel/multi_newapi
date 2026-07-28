@@ -316,32 +316,30 @@ func (a *App) HandleAdminDeleteAgent(c *gin.Context) {
 
 		// 结算闸门必须 fail-closed：读钱包失败不得当作零余额继续删除。
 		var w *agent.AgentWallet
+		unsettled := false
 		if m.transactional {
 			var row struct {
-				TenantID             int64   `gorm:"column:tenant_id"`
-				WithdrawableBalance  float64 `gorm:"column:withdrawable_balance"`
-				FrozenWithdrawAmount float64 `gorm:"column:frozen_withdraw_amount"`
+				TenantID            int64 `gorm:"column:tenant_id"`
+				WithdrawableUnits   int64 `gorm:"column:withdrawable_balance_units"`
+				FrozenWithdrawUnits int64 `gorm:"column:frozen_withdraw_amount_units"`
 			}
 			walletErr := m.db.WithContext(ctx).Table("agent_wallets").
 				Clauses(clause.Locking{Strength: "UPDATE"}).
-				Select("tenant_id", "withdrawable_balance", "frozen_withdraw_amount").
+				Select("tenant_id", "withdrawable_balance_units", "frozen_withdraw_amount_units").
 				Where("tenant_id = ?", tenantID).Take(&row).Error
 			if walletErr != nil && !errors.Is(walletErr, gorm.ErrRecordNotFound) {
 				return walletErr
 			}
-			w = &agent.AgentWallet{
-				TenantID:             tenantID,
-				WithdrawableBalance:  row.WithdrawableBalance,
-				FrozenWithdrawAmount: row.FrozenWithdrawAmount,
-			}
+			unsettled = row.WithdrawableUnits != 0 || row.FrozenWithdrawUnits != 0
 		} else {
 			var walletErr error
 			w, walletErr = m.agentService.GetWallet(ctx, tenantID)
 			if walletErr != nil {
 				return walletErr
 			}
+			unsettled = w != nil && (w.WithdrawableBalance != 0 || w.FrozenWithdrawAmount != 0)
 		}
-		if w != nil && w.WithdrawableBalance+w.FrozenWithdrawAmount > 0 {
+		if unsettled {
 			return errAgentUnsettled
 		}
 		if err := m.tenantService.SetStatus(ctx, tenantID, tenant.StatusDeleted); err != nil {
@@ -528,19 +526,33 @@ func (a *App) HandleAdminAgentMetrics(c *gin.Context) {
 // HandleAdminListWithdrawals GET /api/admin/withdrawals —— 全部提现单（可选 ?status= 过滤）。需 AdminAuth。
 func (a *App) HandleAdminListWithdrawals(c *gin.Context) {
 	ctx := reqCtx(c)
-	rows, err := a.AgentRepo.ListWithdrawals(ctx, c.Query("status"))
+	page, pageSize := parseWithdrawalPaging(c)
+	paged := withdrawalPagingRequested(c)
+	if !paged {
+		rows, err := a.AgentRepo.ListWithdrawals(ctx, c.Query("status"))
+		if err != nil {
+			respondErr(c, err)
+			return
+		}
+		respondOK(c, a.withdrawalOuts(ctx, rows))
+		return
+	}
+	rows, total, err := a.AgentRepo.ListWithdrawalsPage(ctx, c.Query("status"), page, pageSize)
 	if err != nil {
 		respondErr(c, err)
 		return
 	}
-	out := make([]withdrawalOut, 0, len(rows))
-	for _, w := range rows {
-		out = append(out, a.toWithdrawalOut(ctx, w))
-	}
-	respondOK(c, out)
+	items := a.withdrawalOuts(ctx, rows)
+	respondOK(c, withdrawalPageOut{
+		Items:    items,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	})
 }
 
-// HandleAdminApproveWithdrawal POST /api/admin/withdrawals/:id/approve —— 通过（扣冻结，线下打款）。需 AdminAuth。
+// HandleAdminApproveWithdrawal POST /api/admin/withdrawals/:id/approve —— 审核通过；冻结保持不动，
+// 等管理员完成线下打款后再由 mark-paid 真正出账。需 AdminAuth。
 func (a *App) HandleAdminApproveWithdrawal(c *gin.Context) {
 	a.reviewWithdrawal(c, true)
 }
@@ -563,7 +575,7 @@ func (a *App) reviewWithdrawal(c *gin.Context, approve bool) {
 	var body struct {
 		Remark string `json:"remark"`
 	}
-	if err := decodeOptionalJSONObject(c, &body, purchaseRequestBodyLimit); err != nil {
+	if err := decodeOptionalJSONObject(c, &body, agentFinancialRequestBodyLimit); err != nil {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
@@ -586,12 +598,12 @@ func (a *App) HandleAdminMarkPaidWithdrawal(c *gin.Context) {
 	var body struct {
 		PayoutRef string `json:"payout_ref"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
+	if err := decodeOptionalJSONObject(c, &body, agentFinancialRequestBodyLimit); err != nil {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
 	if err := a.Withdrawals.MarkPaid(reqCtx(c), id, body.PayoutRef); err != nil {
-		respondErr(c, err) // PAYOUT_REF_REQUIRED / WITHDRAW_NOT_APPROVED / WITHDRAW_NOT_FOUND
+		respondErr(c, err) // PAYOUT_REF_REQUIRED / PAYOUT_REF_DUPLICATE / WITHDRAW_NOT_APPROVED / WITHDRAW_NOT_FOUND
 		return
 	}
 	respondOK(c, gin.H{"id": id})

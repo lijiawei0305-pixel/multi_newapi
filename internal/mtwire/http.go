@@ -867,7 +867,7 @@ func (a *App) usernamesByIDs(ctx context.Context, ids []int64) map[int64]string 
 // 主站跨租户视图标注每行所属租户/代理（见 HandleAdminListSubscriptions）。查询失败/缺失一律给空。
 func (a *App) tenantNamesByIDs(ctx context.Context, ids []int64) map[int64]string {
 	out := make(map[int64]string, len(ids))
-	if len(ids) == 0 {
+	if len(ids) == 0 || a.DB == nil {
 		return out
 	}
 	var rows []struct {

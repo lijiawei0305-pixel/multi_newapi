@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
@@ -523,27 +524,31 @@ func (a *App) handleFinanceSummary(c *gin.Context, tenantID *int64) {
 	}
 
 	// 收益 by source：仓储只返回有行的来源，handler 补齐 5 个固定枚举（缺则 0）。
-	bySrcMap := make(map[string]float64, len(srcSums))
-	var totalEarned float64
+	bySrcMap := make(map[string]decimal.Decimal, len(srcSums))
+	totalEarned := decimal.Zero
 	for _, s := range srcSums {
-		bySrcMap[s.SourceType] += s.AmountCNY
-		totalEarned += s.AmountCNY
+		amount := decimal.NewFromFloat(s.AmountCNY).Round(8)
+		bySrcMap[s.SourceType] = bySrcMap[s.SourceType].Add(amount)
+		totalEarned = totalEarned.Add(amount)
 	}
 	bySource := make([]sourceSumOut, 0, len(summarySourceOrder))
 	for _, st := range summarySourceOrder {
-		bySource = append(bySource, sourceSumOut{SourceType: st, AmountCNY: round2(bySrcMap[st])})
+		bySource = append(bySource, sourceSumOut{SourceType: st, AmountCNY: round2(bySrcMap[st].InexactFloat64())})
 	}
 
 	// 充值/订阅：跨租户 map 汇总为单值（单租户时 map 至多一条）。
-	var rechargePaid float64
+	rechargePaidTotal := decimal.Zero
 	for _, v := range rechargeMap {
-		rechargePaid += v
+		rechargePaidTotal = rechargePaidTotal.Add(decimal.NewFromFloat(v))
 	}
-	var subPaid, subCost float64
+	subPaidTotal, subCostTotal := decimal.Zero, decimal.Zero
 	for _, v := range subMap {
-		subPaid += v.PaidCNY
-		subCost += v.CostCNY
+		subPaidTotal = subPaidTotal.Add(decimal.NewFromFloat(v.PaidCNY))
+		subCostTotal = subCostTotal.Add(decimal.NewFromFloat(v.CostCNY))
 	}
+	rechargePaid := rechargePaidTotal.InexactFloat64()
+	subPaid := subPaidTotal.InexactFloat64()
+	subCost := subCostTotal.InexactFloat64()
 
 	// 财务报表 v3 总览（doc/finance-model-report-v3.md §二）：代理 4 项全部复用上面已查出的数据
 	// （不加查询）；管理端 6 项需要按租户拆分主站/代理站，另经 adminFinanceOverview 装配。
@@ -558,9 +563,9 @@ func (a *App) handleFinanceSummary(c *gin.Context, tenantID *int64) {
 		}
 		overview = agentFinanceOverviewOut{
 			TokenplanRevenueCNY:        round2(subPaid),
-			TokenplanWithdrawableCNY:   round2(bySrcMap["tokenplan_spread"]),
+			TokenplanWithdrawableCNY:   round2(bySrcMap["tokenplan_spread"].InexactFloat64()),
 			ApikeyConsumptionCNY:       round2(reportrepo.QuotaToCNY(walletQuota)),
-			ConsumptionWithdrawableCNY: round2(bySrcMap["ratio_markup"] + bySrcMap["consume_commission"]),
+			ConsumptionWithdrawableCNY: round2(bySrcMap["ratio_markup"].Add(bySrcMap["consume_commission"]).InexactFloat64()),
 		}
 	} else {
 		adminOverview, oerr := a.adminFinanceOverview(ctx, start, end)
@@ -574,7 +579,7 @@ func (a *App) handleFinanceSummary(c *gin.Context, tenantID *int64) {
 	respondOK(c, financeSummaryOut{
 		Range: financeRangeOut{StartTimestamp: start, EndTimestamp: end},
 		Earnings: earningsBlockOut{
-			TotalEarnedCNY: round2(totalEarned),
+			TotalEarnedCNY: round2(totalEarned.InexactFloat64()),
 			BySource:       bySource,
 			WalletTotal: walletTotalOut{
 				WithdrawableCNY: round2(wallet.WithdrawableCNY),
@@ -587,8 +592,8 @@ func (a *App) handleFinanceSummary(c *gin.Context, tenantID *int64) {
 			RechargePaidCNY:       round2(rechargePaid),
 			SubscriptionPaidCNY:   round2(subPaid),
 			SubscriptionCostCNY:   round2(subCost),
-			SubscriptionSpreadCNY: round2(bySrcMap["tokenplan_spread"]), // 差价回退取自收益台账
-			RechargeSpreadCNY:     0,                                    // 幻影来源：恒 0（无 writer）
+			SubscriptionSpreadCNY: round2(bySrcMap["tokenplan_spread"].InexactFloat64()), // 差价回退取自收益台账
+			RechargeSpreadCNY:     0,                                                     // 幻影来源：恒 0（无 writer）
 		},
 		Consumption: consumptionBlockOut{
 			UsedQuota:   cons.UsedQuota,
@@ -642,7 +647,8 @@ func (a *App) adminFinanceOverview(ctx context.Context, start, end int64) (admin
 	apiRebateByTenant := make(map[int64]float64, len(earn))
 	for tid, e := range earn {
 		tokenplanSpreadByTenant[tid] = e.TokenplanSpreadCNY
-		apiRebateByTenant[tid] = e.RatioMarkupCNY + e.ConsumeCommissionCNY
+		apiRebateByTenant[tid] = decimal.NewFromFloat(e.RatioMarkupCNY).
+			Add(decimal.NewFromFloat(e.ConsumeCommissionCNY)).InexactFloat64()
 	}
 	// tokenplan_rebate_cny / agent_api_rebate_cny 口径是「给*代理*的返现/需返现*代理*的消耗」（spec
 	// 原文"各代理"），只取代理站半（丢弃 mainsite 半）——平台不是代理，不给自己发返现；正常配置下
@@ -686,14 +692,15 @@ func (a *App) resolvePlatformTenantID(ctx context.Context) int64 {
 // splitByPlatform 按 tenant_id==platformID 把 per-tenant 金额 map 二分求和为 (主站合计, 代理站合计)。
 // platformID<=0（平台租户未 seed / 解析失败）时全部计入代理站合计，保守地不误判任何真实租户为主站。
 func splitByPlatform(m map[int64]float64, platformID int64) (mainsite, agentSite float64) {
+	mainsiteTotal, agentSiteTotal := decimal.Zero, decimal.Zero
 	for tid, v := range m {
 		if platformID > 0 && tid == platformID {
-			mainsite += v
+			mainsiteTotal = mainsiteTotal.Add(decimal.NewFromFloat(v))
 			continue
 		}
-		agentSite += v
+		agentSiteTotal = agentSiteTotal.Add(decimal.NewFromFloat(v))
 	}
-	return
+	return mainsiteTotal.InexactFloat64(), agentSiteTotal.InexactFloat64()
 }
 
 func (a *App) handleFinanceTrend(c *gin.Context, tenantID *int64) {

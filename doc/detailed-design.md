@@ -173,21 +173,23 @@ type EarningSink interface { // 被 Billing/Wallet/TokenPlan 调用
     AddEarning(ctx context.Context, e EarningEntry) error // source: recharge_spread|consume_commission|tokenplan_spread|tokenplan_commission
 }
 type WithdrawalService interface {
-    Request(ctx, in WithdrawInput) (*Withdrawal, error) // 冻结 withdrawable
-    Review(ctx, id int64, approve bool, remark string) error // 通过=线下打款; 拒绝=解冻
+    Request(ctx, in WithdrawInput) (*Withdrawal, error) // 金额须为人民币分的整数倍；Idempotency-Key 防重复冻结
+    Review(ctx, id int64, approve bool, remark string) error // 通过=保持冻结待打款; 拒绝=解冻
+    MarkPaid(ctx, id int64, payoutRef string) error // 线下打款后 approved→paid；全局唯一凭证；扣冻结
 }
 ```
 **依赖**：`AgentRepo`、`PricingGuard`（设倍率/成本时校验）、`txn`。
 
-**数据模型·状态机**：`agent_levels`、`agent_wallets`、`agent_earning_logs`、`agent_withdrawals`。
+**数据模型·状态机**：`agent_levels`、`agent_wallets`、`agent_earning_logs`、`agent_withdrawals`。账务金额以 1e-8 元的 `BIGINT *_units` 列为权威值，旧 decimal 列仅作滚动升级/回滚兼容镜像；提现金额另限制为整分。收益来源元组使用 `idem_key_hash`，`(tenant_id, request_key_hash)` 防止申请重试重复冻结，`agent_payout_ref_claims_v3` 以规范化原文的 SHA-256 精确哈希保证打款凭证跨提现单唯一，避免三种数据库默认排序规则不同。
 ```mermaid
 stateDiagram-v2
   [*] --> pending: 提交提现(冻结)
-  pending --> approved: 管理员通过→线下打款
+  pending --> approved: 管理员审核通过(保持冻结)
+  approved --> paid: 线下打款后标记已打款(扣冻结)
   pending --> rejected: 拒绝→解冻
 ```
 
-**错误码**：`WITHDRAW_INSUFFICIENT`、`WITHDRAW_NOT_PENDING`、`AGENT_TYPE_INVALID`。
+**错误码**：`WITHDRAW_INSUFFICIENT`、`WITHDRAW_AMOUNT_INVALID`、`WITHDRAW_REQUEST_KEY_INVALID`、`WITHDRAW_IDEMPOTENCY_CONFLICT`、`WITHDRAW_NOT_PENDING`、`WITHDRAW_NOT_APPROVED`、`PAYOUT_REF_REQUIRED`、`PAYOUT_REF_INVALID`、`PAYOUT_REF_DUPLICATE`、`AGENT_WALLET_INVARIANT`、`AGENT_TYPE_INVALID`。
 
 **单测策略**：`AddEarning` 幂等与余额累加（mock repo）；提现状态机迁移合法性；冻结/解冻金额守恒断言。
 
@@ -618,7 +620,8 @@ sequenceDiagram
   participant AG as Agent
   participant AD as Admin
   AO->>AG: Request(amount) → 冻结 withdrawable
-  AD->>AG: Review(approve=true) → 标记 approved(线下打款)
+  AD->>AG: Review(approve=true) → 标记 approved(保持冻结)
+  AD->>AG: MarkPaid(payoutRef) → 标记 paid(扣冻结、记录凭证)
   AD->>AG: Review(approve=false) → 解冻余额
 ```
 

@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQueryClient } from '@tanstack/react-query'
 import React, { useState } from 'react'
 
 import type { Withdrawal, WithdrawalAction } from '../types'
@@ -25,7 +26,6 @@ type WithdrawalsContextType = {
   currentRow: Withdrawal | null
   openAction: (row: Withdrawal, action: WithdrawalAction) => void
   closeAction: () => void
-  refreshTrigger: number
   triggerRefresh: () => void
 }
 
@@ -40,14 +40,16 @@ export function WithdrawalsProvider({
 }) {
   const [action, setAction] = useState<WithdrawalAction | null>(null)
   const [currentRow, setCurrentRow] = useState<Withdrawal | null>(null)
-  const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const queryClient = useQueryClient()
 
   const openAction = (row: Withdrawal, next: WithdrawalAction) => {
     setCurrentRow(row)
     setAction(next)
   }
   const closeAction = () => setAction(null)
-  const triggerRefresh = () => setRefreshTrigger((prev) => prev + 1)
+  const triggerRefresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['admin-withdrawals'] })
+  }
 
   return (
     <WithdrawalsContext
@@ -56,7 +58,6 @@ export function WithdrawalsProvider({
         currentRow,
         openAction,
         closeAction,
-        refreshTrigger,
         triggerRefresh,
       }}
     >

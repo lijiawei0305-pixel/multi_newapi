@@ -8,9 +8,11 @@
 //	(c) 消耗成本 via logs→users.tenant_id —— 原生 logs JOIN users（无 tenant 列，靠 user_id 连） → ¥
 //	(d) 提现 withdrawn/frozen/pending     —— agent_withdrawals / agent_wallets             → ¥
 //
-// 金额一律 float64（decimal(20,8)/(20,2) 存储，接口 float64 进出）；不在仓储侧四舍五入——由
-// handler 边界 round(2)。时间：请求区间用 epoch 秒（int64）；DATETIME 台账表用 time.Unix(s,0).UTC()
-// 比较，原生 logs.created_at 是 epoch 直接比。趋势按 UTC 日历分桶（day/week 周一/month）。
+// 代理收益/钱包/提现聚合优先读取 1e-8 BIGINT units 权威列，先按整数求和再在返回边界换成
+// float64；仅为旧 schema/隔离测试保留 decimal 镜像回退。其余既有金额仍按原表 decimal 聚合。
+// 仓储侧不做 2 位四舍五入——由 handler 边界 round(2)。时间：请求区间用 epoch 秒（int64）；
+// DATETIME 台账表用 time.Unix(s,0).UTC() 比较，原生 logs.created_at 是 epoch 直接比。趋势按 UTC
+// 日历分桶（day/week 周一/month）。
 //
 // 多租户口径（硬约束）：tenantID != nil → tenant_id = *tenantID（代理自助单租户）；
 // tenantID == nil → 管理端跨租户，统一 tenant_id <> 0（排除主站/未归属）。
@@ -24,6 +26,7 @@ package reportrepo
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -34,7 +37,8 @@ import (
 
 // Repo 是财务报表聚合仓储。db 为主库（= model.DB）；日志查询按闸门走 model.LOG_DB。
 type Repo struct {
-	db *gorm.DB
+	db               *gorm.DB
+	moneyUnitColumns sync.Map
 }
 
 // New 用已建立连接的 *gorm.DB（主库）构造仓储。
@@ -219,6 +223,35 @@ func QuotaToCNY(quota int64) float64 {
 
 // SummaryEarnings 按 source_type 汇总收益金额（¥）。代理=单租户，管理端=跨租户(<>0)。
 func (r *Repo) SummaryEarnings(ctx context.Context, tenantID *int64, start, end int64) ([]SourceSum, error) {
+	unitsColumn, hasUnits, err := r.agentMoneyUnitColumn("agent_earning_logs", "amount")
+	if err != nil {
+		return nil, err
+	}
+	if hasUnits {
+		var rows []struct {
+			SourceType string
+			Amount     int64
+			RowCount   int64
+			UnitCount  int64
+		}
+		q := r.db.WithContext(ctx).Table("agent_earning_logs").
+			Select("source_type, COALESCE(SUM("+unitsColumn+"),0) AS amount, "+
+				"COUNT(*) AS row_count, COUNT("+unitsColumn+") AS unit_count").
+			Where("created_at >= ? AND created_at <= ?", unixT(start), unixT(end))
+		q = applyTenantScope(q, "tenant_id", tenantID)
+		if err := q.Group("source_type").Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		out := make([]SourceSum, 0, len(rows))
+		for _, row := range rows {
+			if err := validateReportMoneyUnitCount("agent_earning_logs", unitsColumn, row.RowCount, row.UnitCount); err != nil {
+				return nil, err
+			}
+			out = append(out, SourceSum{SourceType: row.SourceType, AmountCNY: reportMoneyFromUnits(row.Amount)})
+		}
+		return out, nil
+	}
+
 	type sumRow struct {
 		SourceType string
 		Amount     float64
@@ -240,7 +273,48 @@ func (r *Repo) SummaryEarnings(ctx context.Context, tenantID *int64, start, end 
 
 // WalletTotals 返回钱包合计：代理=该租户单行（缺行返回零值，不报错）；管理端=跨租户 SUM(<>0)。
 func (r *Repo) WalletTotals(ctx context.Context, tenantID *int64) (WalletAgg, error) {
+	_, hasUnits, err := r.agentMoneyUnitColumn("agent_wallets", "withdrawable_balance")
+	if err != nil {
+		return WalletAgg{}, err
+	}
 	if tenantID != nil {
+		if hasUnits {
+			var row struct {
+				WithdrawableBalance  *int64
+				FrozenWithdrawAmount *int64
+				TotalEarned          *int64
+				ApiBalance           *int64
+			}
+			err := r.db.WithContext(ctx).Table("agent_wallets").
+				Select("withdrawable_balance_units AS withdrawable_balance, "+
+					"frozen_withdraw_amount_units AS frozen_withdraw_amount, "+
+					"total_earned_units AS total_earned, api_balance_units AS api_balance").
+				Where("tenant_id = ?", *tenantID).
+				Take(&row).Error
+			if err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return WalletAgg{}, nil
+				}
+				return WalletAgg{}, err
+			}
+			for column, value := range map[string]*int64{
+				"withdrawable_balance_units":   row.WithdrawableBalance,
+				"frozen_withdraw_amount_units": row.FrozenWithdrawAmount,
+				"total_earned_units":           row.TotalEarned,
+				"api_balance_units":            row.ApiBalance,
+			} {
+				if value == nil {
+					return WalletAgg{}, validateReportMoneyUnitCount("agent_wallets", column, 1, 0)
+				}
+			}
+			return WalletAgg{
+				WithdrawableCNY: reportMoneyFromUnits(*row.WithdrawableBalance),
+				FrozenCNY:       reportMoneyFromUnits(*row.FrozenWithdrawAmount),
+				TotalEarnedCNY:  reportMoneyFromUnits(*row.TotalEarned),
+				APIBalanceUSD:   reportMoneyFromUnits(*row.ApiBalance),
+			}, nil
+		}
+
 		var row struct {
 			WithdrawableBalance  float64
 			FrozenWithdrawAmount float64
@@ -264,13 +338,56 @@ func (r *Repo) WalletTotals(ctx context.Context, tenantID *int64) (WalletAgg, er
 			APIBalanceUSD:   row.ApiBalance,
 		}, nil
 	}
+	if hasUnits {
+		var row struct {
+			Withdrawable      int64
+			Frozen            int64
+			TotalEarned       int64
+			ApiBalance        int64
+			RowCount          int64
+			WithdrawableCount int64
+			FrozenCount       int64
+			TotalEarnedCount  int64
+			APIBalanceCount   int64
+		}
+		err := r.db.WithContext(ctx).Table("agent_wallets").
+			Select("COALESCE(SUM(withdrawable_balance_units),0) AS withdrawable, " +
+				"COALESCE(SUM(frozen_withdraw_amount_units),0) AS frozen, " +
+				"COALESCE(SUM(total_earned_units),0) AS total_earned, " +
+				"COALESCE(SUM(api_balance_units),0) AS api_balance, " +
+				"COUNT(*) AS row_count, COUNT(withdrawable_balance_units) AS withdrawable_count, " +
+				"COUNT(frozen_withdraw_amount_units) AS frozen_count, COUNT(total_earned_units) AS total_earned_count, " +
+				"COUNT(api_balance_units) AS api_balance_count").
+			Where("tenant_id <> 0").
+			Scan(&row).Error
+		if err != nil {
+			return WalletAgg{}, err
+		}
+		for column, count := range map[string]int64{
+			"withdrawable_balance_units":   row.WithdrawableCount,
+			"frozen_withdraw_amount_units": row.FrozenCount,
+			"total_earned_units":           row.TotalEarnedCount,
+			"api_balance_units":            row.APIBalanceCount,
+		} {
+			if err := validateReportMoneyUnitCount("agent_wallets", column, row.RowCount, count); err != nil {
+				return WalletAgg{}, err
+			}
+		}
+		return WalletAgg{
+			WithdrawableCNY: reportMoneyFromUnits(row.Withdrawable),
+			FrozenCNY:       reportMoneyFromUnits(row.Frozen),
+			TotalEarnedCNY:  reportMoneyFromUnits(row.TotalEarned),
+			APIBalanceUSD:   reportMoneyFromUnits(row.ApiBalance),
+		}, nil
+	}
+
 	var row struct {
 		Withdrawable float64
 		Frozen       float64
 		TotalEarned  float64
 		ApiBalance   float64
 	}
-	err := r.db.WithContext(ctx).Table("agent_wallets").
+	err = r.db.WithContext(ctx).Table("agent_wallets").
 		Select("COALESCE(SUM(withdrawable_balance),0) AS withdrawable, " +
 			"COALESCE(SUM(frozen_withdraw_amount),0) AS frozen, " +
 			"COALESCE(SUM(total_earned),0) AS total_earned, " +
@@ -382,6 +499,35 @@ func (r *Repo) SubscriptionPaidCost(ctx context.Context, tenantID *int64, start,
 // Withdrawals 按状态汇总提现金额（¥）：status ∈ pending/approved/paid/rejected（withdrawn 口径=paid，即真正打款出账）。
 // frozen 口径由 WalletTotals.FrozenCNY 提供（= SUM(agent_wallets.frozen_withdraw_amount)）。
 func (r *Repo) Withdrawals(ctx context.Context, tenantID *int64, start, end int64) (map[string]float64, error) {
+	unitsColumn, hasUnits, err := r.agentMoneyUnitColumn("agent_withdrawals", "amount")
+	if err != nil {
+		return nil, err
+	}
+	if hasUnits {
+		var rows []struct {
+			Status    string
+			Amount    int64
+			RowCount  int64
+			UnitCount int64
+		}
+		q := r.db.WithContext(ctx).Table("agent_withdrawals").
+			Select("status, COALESCE(SUM("+unitsColumn+"),0) AS amount, "+
+				"COUNT(*) AS row_count, COUNT("+unitsColumn+") AS unit_count").
+			Where("created_at >= ? AND created_at <= ?", unixT(start), unixT(end))
+		q = applyTenantScope(q, "tenant_id", tenantID)
+		if err := q.Group("status").Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		out := make(map[string]float64, len(rows))
+		for _, row := range rows {
+			if err := validateReportMoneyUnitCount("agent_withdrawals", unitsColumn, row.RowCount, row.UnitCount); err != nil {
+				return nil, err
+			}
+			out[row.Status] = reportMoneyFromUnits(row.Amount)
+		}
+		return out, nil
+	}
+
 	type stRow struct {
 		Status string
 		Amount float64

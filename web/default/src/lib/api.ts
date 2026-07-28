@@ -27,6 +27,7 @@ declare module 'axios' {
     skipBusinessError?: boolean
     skipErrorHandler?: boolean
     disableDuplicate?: boolean
+    authSessionGeneration?: number
   }
 }
 
@@ -56,20 +57,35 @@ export const api = axios.create({
 // Prevents multiple identical requests from being sent simultaneously
 const inFlightGet = new Map<string, Promise<unknown>>()
 const originalGet = api.get.bind(api)
+let authSessionGeneration = 0
+
+// Rotate the request scope whenever the authenticated identity changes. Old
+// requests may still finish at the transport layer, but they can no longer be
+// reused by the next session or apply a stale 401 to that session.
+export function rotateAuthRequestScope(): void {
+  authSessionGeneration += 1
+  inFlightGet.clear()
+}
 
 api.get = ((url: string, config: ApiRequestConfig = {}) => {
   const disableDuplicate = config.disableDuplicate
   if (disableDuplicate) return originalGet(url, config)
 
   const params = config.params ? JSON.stringify(config.params) : '{}'
-  const key = `${url}?${params}`
+  const userId = useAuthStore.getState().auth.user?.id ?? 'anonymous'
+  const key = `${authSessionGeneration}:${userId}:${url}?${params}`
 
   // Return existing in-flight request if available
   const inFlight = inFlightGet.get(key)
   if (inFlight) return inFlight
 
   // Create new request and clean up after completion
-  const req = originalGet(url, config).finally(() => inFlightGet.delete(key))
+  const req = originalGet(url, {
+    ...config,
+    authSessionGeneration,
+  }).finally(() => {
+    if (inFlightGet.get(key) === req) inFlightGet.delete(key)
+  })
   inFlightGet.set(key, req)
   return req
 }) as typeof api.get
@@ -81,6 +97,14 @@ api.get = ((url: string, config: ApiRequestConfig = {}) => {
 // Handle business logic errors and HTTP errors globally
 api.interceptors.response.use(
   (response) => {
+    if (
+      response.config.authSessionGeneration !== undefined &&
+      response.config.authSessionGeneration !== authSessionGeneration
+    ) {
+      return Promise.reject(
+        new axios.CanceledError('Response belongs to an expired auth session')
+      )
+    }
     const skipBusiness = response.config.skipBusinessError
 
     // Unified business response format: { success, message, data }
@@ -99,6 +123,14 @@ api.interceptors.response.use(
     return response
   },
   (error) => {
+    if (
+      error?.config?.authSessionGeneration !== undefined &&
+      error.config.authSessionGeneration !== authSessionGeneration
+    ) {
+      return Promise.reject(
+        new axios.CanceledError('Response belongs to an expired auth session')
+      )
+    }
     const skip = error?.config?.skipErrorHandler
     const status = error?.response?.status
 
@@ -183,6 +215,7 @@ export function getCommonHeaders(): Record<string, string> {
 
 // Attach user ID header for all requests
 api.interceptors.request.use((config) => {
+  config.authSessionGeneration ??= authSessionGeneration
   const uid = getUserId()
   if (uid) {
     // Custom header for user identification

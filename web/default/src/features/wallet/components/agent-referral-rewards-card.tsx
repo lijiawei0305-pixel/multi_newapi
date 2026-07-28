@@ -42,6 +42,7 @@ import {
 } from '@/features/promotion-channels/api'
 import { agentContextQueryOptions } from '@/lib/agent-context'
 import { computeTimeRange } from '@/lib/time'
+import { useAuthStore } from '@/stores/auth-store'
 
 // ============================================================================
 // 「代理邀请返现」面板(doc/l0-agent-wallet-referral.md):仅普通代理(L0,
@@ -80,19 +81,21 @@ function Stat({
 
 export function AgentReferralRewardsCard() {
   const { t } = useTranslation()
+  const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const qc = useQueryClient()
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [payoutOpen, setPayoutOpen] = useState(false)
+  const [withdrawalPage, setWithdrawalPage] = useState(1)
+  const withdrawalPageSize = 20
 
   const { data: ctx } = useQuery(agentContextQueryOptions)
   const isL0Agent = !!ctx?.is_agent_owner && ctx?.level === 0
 
   // 邀请渠道(取邀请链接 + 邀请总人数)。
   const channelsQuery = useQuery({
-    queryKey: ['tenant-promotion-channels'],
+    queryKey: ['tenant-promotion-channels', userId],
     queryFn: async () => (await getPromotionChannels()).data ?? [],
-    enabled: isL0Agent,
-    placeholderData: (p) => p,
+    enabled: isL0Agent && userId !== null,
   })
   const channels = channelsQuery.data ?? []
   const primary = channels[0]
@@ -109,11 +112,10 @@ export function AgentReferralRewardsCard() {
   // 2026-07-07 首个真实 L0 踩雷),不能用"很宽的区间"表达累计。
   const [range] = useState<RangeParams>(() => computeTimeRange(365))
   const financeQuery = useQuery({
-    queryKey: ['tenant-finance-summary', range],
+    queryKey: ['tenant-finance-summary', userId, range],
     queryFn: () => getTenantFinanceSummary(range),
     select: (res) => res.data,
-    enabled: isL0Agent,
-    placeholderData: (p) => p,
+    enabled: isL0Agent && userId !== null,
   })
   const overview = financeQuery.data?.overview
   const apiConsumption = overview?.apikey_consumption_cny ?? 0
@@ -124,10 +126,9 @@ export function AgentReferralRewardsCard() {
 
   // 可提现余额(代理钱包,消耗返现+套餐返现都入这里)。
   const { data: earningsRes } = useQuery({
-    queryKey: ['tenant-earnings'],
+    queryKey: ['tenant-earnings', userId],
     queryFn: getTenantEarnings,
-    enabled: isL0Agent,
-    placeholderData: (p) => p,
+    enabled: isL0Agent && userId !== null,
   })
   const { summary } = useMemo(
     () => parseEarnings(earningsRes?.data),
@@ -136,18 +137,22 @@ export function AgentReferralRewardsCard() {
   const withdrawable = summary.withdrawable_cny
 
   const { data: payoutRes, isLoading: payoutLoading } = useQuery({
-    queryKey: ['tenant-payout-account'],
+    queryKey: ['tenant-payout-account', userId],
     queryFn: getPayoutAccount,
-    enabled: isL0Agent,
-    placeholderData: (p) => p,
+    enabled: isL0Agent && userId !== null,
   })
   const payoutAccount = payoutRes?.data
 
   const { data: withdrawals, isLoading: wdLoading } = useQuery({
-    queryKey: ['tenant-withdrawals'],
-    queryFn: async () => (await getMyWithdrawals()).data ?? [],
-    enabled: isL0Agent,
-    placeholderData: (p) => p,
+    queryKey: [
+      'tenant-withdrawals',
+      userId,
+      withdrawalPage,
+      withdrawalPageSize,
+    ],
+    queryFn: async () =>
+      (await getMyWithdrawals(withdrawalPage, withdrawalPageSize)).data,
+    enabled: isL0Agent && userId !== null,
   })
 
   const createMut = useMutation({
@@ -288,7 +293,14 @@ export function AgentReferralRewardsCard() {
             onEdit={() => setPayoutOpen(true)}
           />
           <div className='overflow-hidden rounded-lg border'>
-            <MyWithdrawalsTable items={withdrawals || []} loading={wdLoading} />
+            <MyWithdrawalsTable
+              items={withdrawals?.items || []}
+              loading={wdLoading}
+              page={withdrawalPage}
+              pageSize={withdrawalPageSize}
+              total={withdrawals?.total || 0}
+              onPageChange={setWithdrawalPage}
+            />
           </div>
         </div>
       </div>
@@ -298,6 +310,7 @@ export function AgentReferralRewardsCard() {
         onOpenChange={setWithdrawOpen}
         max={withdrawable}
         onSuccess={() => {
+          setWithdrawalPage(1)
           qc.invalidateQueries({ queryKey: ['tenant-earnings'] })
           qc.invalidateQueries({ queryKey: ['tenant-withdrawals'] })
         }}

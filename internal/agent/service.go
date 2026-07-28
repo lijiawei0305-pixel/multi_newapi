@@ -47,6 +47,7 @@ func (s *agentService) AgentLevel(ctx context.Context, tenantID int64) (int, err
 
 // SetPayoutAccount 校验收款账户后落库（提现闭环补强 #1）；非法返回 PAYOUT_ACCOUNT_INVALID。
 func (s *agentService) SetPayoutAccount(ctx context.Context, tenantID int64, p PayoutAccount) error {
+	p = p.Normalized()
 	if err := p.Validate(); err != nil {
 		return err
 	}

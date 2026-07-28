@@ -18,18 +18,34 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import type { ApiResponse, Withdrawal } from './types'
+import type { ApiResponse, Withdrawal, WithdrawalPage } from './types'
 
 // ============================================================================
 // Admin withdrawal review. Auth is carried by new-api's shared axios instance
 // (session cookie + New-Api-User header), as on every admin page.
 // ============================================================================
 
-export async function getAdminWithdrawals(): Promise<
-  ApiResponse<Withdrawal[]>
-> {
-  const res = await api.get('/api/admin/withdrawals')
-  return res.data
+export async function getAdminWithdrawals(
+  page: number,
+  pageSize: number
+): Promise<ApiResponse<WithdrawalPage>> {
+  const res = await api.get('/api/admin/withdrawals', {
+    params: { page, page_size: pageSize },
+  })
+  const payload = res.data as ApiResponse<WithdrawalPage | Withdrawal[]>
+  if (Array.isArray(payload.data)) {
+    const start = (page - 1) * pageSize
+    return {
+      ...payload,
+      data: {
+        items: payload.data.slice(start, start + pageSize),
+        total: payload.data.length,
+        page,
+        page_size: pageSize,
+      },
+    }
+  }
+  return payload as ApiResponse<WithdrawalPage>
 }
 
 export async function approveWithdrawal(id: number): Promise<ApiResponse> {

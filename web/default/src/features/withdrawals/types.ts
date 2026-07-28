@@ -21,7 +21,7 @@ For commercial licensing, please contact support@quantumnous.com
 // Admin withdrawal review — backed by:
 //   GET  /api/admin/withdrawals
 //   POST /api/admin/withdrawals/:id/approve
-//   POST /api/admin/withdrawals/:id/reject   { reason }
+//   POST /api/admin/withdrawals/:id/reject   { remark }
 // Field contract (snake_case, aligned with backend Worker):
 //   id / tenant_id / agent_name / amount_cny / status / created_at / reviewed_at
 // ============================================================================
@@ -57,6 +57,13 @@ export interface Withdrawal {
   created_at?: number | string
   /** Review time — set once approved/rejected. */
   reviewed_at?: number | string
+}
+
+export interface WithdrawalPage {
+  items: Withdrawal[]
+  total: number
+  page: number
+  page_size: number
 }
 
 /** Unified new-api control-plane envelope: `{ success, message, data }`. */

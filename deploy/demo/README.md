@@ -55,7 +55,7 @@
 | 套餐管理 | `/token-plans` | 6 档套餐 CRUD（售价/原价/月限额/成本/保护线/排序/上下架） |
 | 子代理管理 | `/agents` | 设代理（普通/OEM/API + 成本价/折扣/分润/等级）、改代理 |
 | 订阅监控 | `/subscription-monitor` | 当前租户订阅 + 用量 + 满额预警分级（warn/critical/exhausted） |
-| 提现审核 | `/withdrawals` | 待审提现 → **通过**（扣冻结、线下打款）/ **拒绝**（解冻退回） |
+| 提现审核 | `/withdrawals` | 待审提现 → **通过**（仍保持冻结）→ 完成线下打款后 **标记已打款**（扣冻结）；或 **拒绝**（解冻退回） |
 
 ---
 
@@ -80,7 +80,7 @@ ALLOW_REAL_PAYMENT_DEMO=1 PAY_PROVIDER=wxpay ./demo.sh
 | ④ | 校验激活 + 分润 | 原生订阅 `active`、`amount_total`、代理 `tokenplan_spread ¥23.80` |
 | ⑤ | `/v1` 调用 `gpt-5.4-mini` | 模型回复、`logs.billing_source = subscription` |
 | ⑥ | `demoagent` 查收益 / 申请提现 | 可提现/冻结/累计、提现单 id |
-| ⑦ | `admin` 审核通过 | 金额守恒：`total_earned = withdrawable + frozen + Σapproved` |
+| ⑦ | `admin` 审核通过后标记已打款 | 金额守恒：`total_earned = withdrawable + frozen + Σpaid` |
 | ⑧ | 真实充值 $1 | quota Δ=500000、RCG 订单 `credited` |
 
 **可覆盖参数**（环境变量）：`PLAN_ID`(默认 2=mini)、`WITHDRAW_CNY`(默认 10)、`RECHARGE_USD`(默认 1)、
@@ -113,7 +113,8 @@ ALLOW_REAL_PAYMENT_DEMO=1 PAY_PROVIDER=alipay ./demo.sh
      billing_source           subscription
    ✓ 计费来源 = subscription（走订阅桶扣减，未动钱包余额）
 ▶ 步骤 7  …
-   ✓ 金额守恒成立：total_earned = withdrawable + frozen + Σapproved
+   ✓ 提现已审核并标记已打款
+   ✓ 金额守恒成立：total_earned = withdrawable + frozen + Σpaid
 ▶ 步骤 8  …
    ✓ quota 增量 = 500000（= $1 × 500000，符合 $1=500k quota 口径）
 ══════ 演示全部 8 步通过 ══════
