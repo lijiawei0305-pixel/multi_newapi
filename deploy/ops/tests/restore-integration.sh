@@ -140,6 +140,23 @@ COMPOSE_STARTED=1
 dc --progress quiet up -d --build --quiet-pull
 printf '[restore-drill] app published at 127.0.0.1:%s\n' "$APP_PORT"
 
+# The app intentionally runs as a schema-scoped MySQL user, not root. With
+# binary logging enabled, fresh trigger creation otherwise fails with ERROR
+# 1419 unless the server trusts users that already hold TRIGGER privilege.
+# Assert the effective runtime value for every MySQL image in the CI matrix so
+# a misspelled/removed Compose option cannot degrade into a late readiness
+# timeout with an opaque app startup failure.
+trust_deadline=$(( $(date +%s) + 90 ))
+trust_value=""
+until trust_value="$(mysql_with_secret mysql -u"$DB_USER" -Nse \
+  'SELECT @@GLOBAL.log_bin_trust_function_creators' 2>/dev/null | tr -d '\r')"; do
+  [ "$(date +%s)" -lt "$trust_deadline" ] \
+    || fail "MySQL did not become queryable while checking log_bin_trust_function_creators"
+  sleep 2
+done
+[ "$trust_value" = "1" ] \
+  || fail "MySQL log_bin_trust_function_creators is $trust_value; schema-scoped trigger migration would require SUPER"
+
 expected_version="$(tr -d '\r\n' < "$ROOT/VERSION")"
 [ -n "$expected_version" ] || fail "VERSION is empty"
 wait_runtime_ready "$expected_version" "$READINESS_TIMEOUT" \
@@ -154,6 +171,14 @@ printf '%s' "$setup_response" | grep -Eq '"success"[[:space:]]*:[[:space:]]*true
 
 mysql_scalar "CREATE TABLE ops_restore_drill_marker (id BIGINT PRIMARY KEY, marker VARCHAR(128) NOT NULL);"
 mysql_scalar "INSERT INTO ops_restore_drill_marker(id, marker) VALUES (1, 'paired-restore-point');"
+# Seed every withdrawal state with the current money-flow invariant. This makes
+# the post-restore reconcile gate prove that pending + approved remain frozen
+# while only paid withdrawals have left the wallet.
+mysql_scalar "INSERT INTO agent_profiles(tenant_id) VALUES (4242);"
+mysql_scalar "INSERT INTO agent_wallets(tenant_id, withdrawable_balance, withdrawable_balance_units, frozen_withdraw_amount, frozen_withdraw_amount_units, total_earned, total_earned_units) VALUES (4242, 20, 2000000000, 30, 3000000000, 100, 10000000000);"
+mysql_scalar "INSERT INTO agent_earning_logs(tenant_id, source_type, source_id, idem_key, idem_key_hash, amount, amount_units) VALUES (4242, 'manual_adjustment', 'restore-drill', LOWER(SHA2(CONCAT('4242',CHAR(0),'manual_adjustment',CHAR(0),'restore-drill'),256)), LOWER(SHA2(CONCAT('4242',CHAR(0),'manual_adjustment',CHAR(0),'restore-drill'),256)), 100, 10000000000);"
+mysql_scalar "INSERT INTO agent_withdrawals(tenant_id, amount, amount_units, status, payout_ref, payout_ref_hash, paid_at) VALUES (4242, 10, 1000000000, 'pending', '', NULL, NULL), (4242, 20, 2000000000, 'approved', '', NULL, NULL), (4242, 50, 5000000000, 'paid', 'restore-paid-4242', LOWER(SHA2('restore-paid-4242',256)), NOW()), (4242, 5, 500000000, 'rejected', '', NULL, NULL);"
+mysql_scalar "INSERT INTO agent_payout_ref_claims_v3(payout_ref_hash, payout_ref, withdrawal_id, created_at) SELECT payout_ref_hash, payout_ref, id, NOW() FROM agent_withdrawals WHERE tenant_id=4242 AND status='paid';"
 snapshot_login_count="$(mysql_scalar 'SELECT COUNT(*) FROM logs WHERE type=7;')"
 printf '%s\n' "$snapshot_login_count" | grep -Eq '^[0-9]+$' || fail "could not read login-log baseline"
 

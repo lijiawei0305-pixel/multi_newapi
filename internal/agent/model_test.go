@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestAgentParams_Validate(t *testing.T) {
@@ -155,6 +159,9 @@ func TestErrorCodes(t *testing.T) {
 	}{
 		{ErrAgentParamsInvalid, "AGENT_TYPE_INVALID"},
 		{ErrWithdrawInsufficient, "WITHDRAW_INSUFFICIENT"},
+		{ErrWithdrawAmountInvalid, "WITHDRAW_AMOUNT_INVALID"},
+		{ErrWithdrawRequestKeyInvalid, "WITHDRAW_REQUEST_KEY_INVALID"},
+		{ErrWithdrawIdempotencyConflict, "WITHDRAW_IDEMPOTENCY_CONFLICT"},
 		{ErrWithdrawNotPending, "WITHDRAW_NOT_PENDING"},
 		{ErrWithdrawNotFound, "WITHDRAW_NOT_FOUND"},
 		{ErrEarningInvalid, "EARNING_INVALID"},
@@ -162,6 +169,9 @@ func TestErrorCodes(t *testing.T) {
 		{ErrPayoutAccountRequired, "PAYOUT_ACCOUNT_REQUIRED"},
 		{ErrPayoutAccountInvalid, "PAYOUT_ACCOUNT_INVALID"},
 		{ErrPayoutRefRequired, "PAYOUT_REF_REQUIRED"},
+		{ErrWithdrawalRemarkInvalid, "WITHDRAW_REMARK_INVALID"},
+		{ErrPayoutRefInvalid, "PAYOUT_REF_INVALID"},
+		{ErrPayoutRefDuplicate, "PAYOUT_REF_DUPLICATE"},
 	}
 	for _, c := range cases {
 		if got := apperr.CodeOf(c.err); got != c.code {
@@ -217,6 +227,50 @@ func TestPayoutAccount_IsZero(t *testing.T) {
 	}
 	if (PayoutAccount{Method: PayoutAlipay, Account: "a", Name: "b"}).IsZero() {
 		t.Fatal("configured PayoutAccount must report IsZero() false")
+	}
+}
+
+func TestPayoutAccount_NormalizesAndEnforcesRuneLimits(t *testing.T) {
+	service := NewService(NewMemRepo(), nil)
+	ctx := context.Background()
+
+	err := service.SetPayoutAccount(ctx, 7, PayoutAccount{
+		Method:  PayoutAlipay,
+		Account: "  alice@example.com  ",
+		Name:    "  Alice  ",
+		Bank:    "ignored for alipay",
+	})
+	require.NoError(t, err)
+	got, found, err := service.GetPayoutAccount(ctx, 7)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "alice@example.com", got.Account)
+	assert.Equal(t, "Alice", got.Name)
+	assert.Empty(t, got.Bank)
+
+	tests := []struct {
+		name    string
+		account PayoutAccount
+	}{
+		{
+			name:    "account too long",
+			account: PayoutAccount{Method: PayoutAlipay, Account: strings.Repeat("账", MaxPayoutAccountLength+1), Name: "A"},
+		},
+		{
+			name:    "name too long",
+			account: PayoutAccount{Method: PayoutAlipay, Account: "a", Name: strings.Repeat("名", MaxPayoutNameLength+1)},
+		},
+		{
+			name:    "bank too long",
+			account: PayoutAccount{Method: PayoutBank, Account: "a", Name: "A", Bank: strings.Repeat("行", MaxPayoutBankLength+1)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.account.Validate()
+			require.Error(t, err)
+			assert.Equal(t, CodePayoutAccountInvalid, apperr.CodeOf(err))
+		})
 	}
 }
 

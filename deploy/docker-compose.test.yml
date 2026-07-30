@@ -79,9 +79,13 @@ services:
     # 财务状态必须以已提交事务为恢复边界：redo 与 binlog 都在每次 commit 时持久化。
     # 禁止为吞吐改成 innodb_flush_log_at_trx_commit=2 / sync_binlog=0；宿主掉电会让已确认的
     # 额度、支付或收益事务从磁盘消失。存量实例若曾 SET PERSIST 为宽松值，发布前须恢复为 1/1。
+    # 金额迁移会由 schema 专用 app 用户创建确定性的兼容触发器。binlog 开启且该变量为 0 时，
+    # MySQL 会额外要求全局 SUPER，导致首次启动/灾备恢复失败。这里显式信任已拥有 schema 级
+    # TRIGGER 权限的账号，避免把 SUPER / SYSTEM_VARIABLES_ADMIN 交给应用；触发器仍只能建在授权库内。
     command: >
       --innodb-flush-log-at-trx-commit=1
       --sync-binlog=1
+      --log-bin-trust-function-creators=1
     environment:
       # 真值只存服务器 .env（C1）；仅新数据卷首次初始化时被 mysqld 消费，存量卷改密码见 app.SQL_DSN 处注释。
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 必须在服务器 .env 提供，禁止内联默认（见 C1）}"

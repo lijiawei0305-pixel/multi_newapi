@@ -117,12 +117,30 @@ jobs:
           TEST_BILLING_DB_DIALECT: mysql
           TEST_BILLING_DB_DSN: root:test-password@tcp(127.0.0.1:3306)/newapi_billing_test?charset=utf8mb4&parseTime=True&loc=UTC
         run: go test -race -count=1 -run '^TestAtomicQuotaReserveExternalDialect$' ./model
+      - name: Verify MySQL agent fixed-point migration and rollback compatibility
+        env:
+          TEST_AGENT_DB_ALLOW_DROP: '1'
+          TEST_AGENT_DB_DIALECT: mysql
+          TEST_AGENT_DB_DSN: root:test-password@tcp(127.0.0.1:3306)/newapi_billing_test?charset=utf8mb4&parseTime=True&loc=UTC&clientFoundRows=true
+        run: go test -race -count=1 -run '^TestAgentMoneyExternalDialect$' ./internal/agent/gormrepo
+      - name: Verify MySQL agent default affected-row semantics
+        env:
+          TEST_AGENT_DB_ALLOW_DROP: '1'
+          TEST_AGENT_DB_DIALECT: mysql
+          TEST_AGENT_DB_DSN: root:test-password@tcp(127.0.0.1:3306)/newapi_billing_test?charset=utf8mb4&parseTime=True&loc=UTC
+        run: go test -race -count=1 -run '^TestAgentMoneyExternalDialect$' ./internal/agent/gormrepo
       - name: Verify PostgreSQL conditional reserve atomicity
         env:
           TEST_BILLING_DB_ALLOW_DROP: '1'
           TEST_BILLING_DB_DIALECT: postgres
           TEST_BILLING_DB_DSN: host=127.0.0.1 user=postgres password=test-password dbname=newapi_billing_test port=5432 sslmode=disable TimeZone=UTC
         run: go test -race -count=1 -run '^TestAtomicQuotaReserveExternalDialect$' ./model
+      - name: Verify PostgreSQL agent fixed-point migration and rollback compatibility
+        env:
+          TEST_AGENT_DB_ALLOW_DROP: '1'
+          TEST_AGENT_DB_DIALECT: postgres
+          TEST_AGENT_DB_DSN: host=127.0.0.1 user=postgres password=test-password dbname=newapi_billing_test port=5432 sslmode=disable TimeZone=UTC
+        run: go test -race -count=1 -run '^TestAgentMoneyExternalDialect$' ./internal/agent/gormrepo
       - name: Verify ClickHouse projection crash replay
         env:
           TEST_CLICKHOUSE_ALLOW_DROP: '1'

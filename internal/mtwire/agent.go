@@ -17,9 +17,23 @@ package mtwire
 import (
 	"context"
 	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/QuantumNous/new-api/internal/agent"
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
+)
+
+// agentFinancialRequestBodyLimit bounds the small JSON payloads used by
+// payout-account and withdrawal mutations. The global API limit must remain
+// large enough for model requests, so financial control-plane handlers apply
+// their own narrow limit before decoding attacker-controlled input.
+const agentFinancialRequestBodyLimit int64 = 4 << 10
+
+const (
+	defaultWithdrawalPageSize = 20
+	maxWithdrawalPageSize     = 100
 )
 
 // 代理端点错误码（沿用模块前缀约定）。
@@ -55,13 +69,46 @@ type withdrawalOut struct {
 	ReviewedAt    string  `json:"reviewed_at"`
 }
 
+type withdrawalPageOut struct {
+	Items    []withdrawalOut `json:"items"`
+	Total    int64           `json:"total"`
+	Page     int             `json:"page"`
+	PageSize int             `json:"page_size"`
+}
+
+func parseWithdrawalPaging(c *gin.Context) (int, int) {
+	page, pageSize := 1, defaultWithdrawalPageSize
+	if value, err := strconv.Atoi(c.Query("page")); err == nil && value > 0 {
+		page = value
+	}
+	if value, err := strconv.Atoi(c.Query("page_size")); err == nil && value > 0 {
+		pageSize = value
+		if pageSize > maxWithdrawalPageSize {
+			pageSize = maxWithdrawalPageSize
+		}
+	}
+	return page, pageSize
+}
+
+func withdrawalPagingRequested(c *gin.Context) bool {
+	_, hasPage := c.GetQuery("page")
+	_, hasPageSize := c.GetQuery("page_size")
+	return hasPage || hasPageSize
+}
+
 // toWithdrawalOut 映射提现单（agent_name 取租户名；收款快照/打款凭证/驳回理由一并带出，
 // 提现闭环补强 #1/#2/#3）。
 func (a *App) toWithdrawalOut(ctx context.Context, w agent.Withdrawal) withdrawalOut {
 	name := ""
-	if t, err := a.TenantService.Get(ctx, w.TenantID); err == nil && t != nil {
-		name = t.Name
+	if a.TenantService != nil {
+		if t, err := a.TenantService.Get(ctx, w.TenantID); err == nil && t != nil {
+			name = t.Name
+		}
 	}
+	return withdrawalOutWithAgentName(w, name)
+}
+
+func withdrawalOutWithAgentName(w agent.Withdrawal, name string) withdrawalOut {
 	return withdrawalOut{
 		ID:            w.ID,
 		TenantID:      w.TenantID,
@@ -78,6 +125,27 @@ func (a *App) toWithdrawalOut(ctx context.Context, w agent.Withdrawal) withdrawa
 		CreatedAt:     isoUTC(w.CreatedAt),
 		ReviewedAt:    isoUTC(w.ReviewedAt),
 	}
+}
+
+// withdrawalOuts resolves every agent name with one tenants IN query, then
+// maps rows in memory. This keeps both admin and self-service list endpoints
+// at a fixed query count instead of one tenant lookup per withdrawal row.
+func (a *App) withdrawalOuts(ctx context.Context, rows []agent.Withdrawal) []withdrawalOut {
+	tenantIDs := make([]int64, 0, len(rows))
+	seen := make(map[int64]struct{}, len(rows))
+	for _, row := range rows {
+		if _, exists := seen[row.TenantID]; exists {
+			continue
+		}
+		seen[row.TenantID] = struct{}{}
+		tenantIDs = append(tenantIDs, row.TenantID)
+	}
+	names := a.tenantNamesByIDs(ctx, tenantIDs)
+	out := make([]withdrawalOut, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, withdrawalOutWithAgentName(row, names[row.TenantID]))
+	}
+	return out
 }
 
 // walletField 安全取钱包字段（w 可能为 nil）。

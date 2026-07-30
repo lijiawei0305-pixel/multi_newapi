@@ -146,7 +146,7 @@ export function granularityLabel(
   }
 }
 
-/** Badge styling + i18n label for a withdrawal status (FROZEN: 3 values). */
+/** Badge styling + i18n label for a withdrawal status. Approval is non-terminal. */
 export function withdrawalStatusMeta(
   status: WithdrawalStatus | string | undefined,
   t: TFunction
@@ -155,7 +155,9 @@ export function withdrawalStatusMeta(
     case 'pending':
       return { variant: 'warning', label: t('Pending'), pulse: true }
     case 'approved':
-      return { variant: 'success', label: t('Approved') }
+      return { variant: 'info', label: t('Approved') }
+    case 'paid':
+      return { variant: 'success', label: t('Paid') }
     case 'rejected':
       return { variant: 'danger', label: t('Rejected') }
     default:

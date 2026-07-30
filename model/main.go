@@ -156,7 +156,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 		}
 		if strings.HasPrefix(dsn, "local") {
 			common.SysLog("SQL_DSN not set, using SQLite as database")
-			db, err := gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
+			db, err := gorm.Open(sqlite.Open(sqliteDSNWithSafeTransactions(common.SQLitePath)), &gorm.Config{
 				PrepareStmt: true, // precompile SQL
 			})
 			return db, common.DatabaseTypeSQLite, err
@@ -178,10 +178,46 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, common.DatabaseType, error)
 	}
 	// Use SQLite
 	common.SysLog("SQL_DSN not set, using SQLite as database")
-	db, err := gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
+	db, err := gorm.Open(sqlite.Open(sqliteDSNWithSafeTransactions(common.SQLitePath)), &gorm.Config{
 		PrepareStmt: true, // precompile SQL
 	})
 	return db, common.DatabaseTypeSQLite, err
+}
+
+// sqliteDSNWithSafeTransactions applies the actual modernc/glebarez option
+// names even when SQLITE_PATH comes from an older deployment. BEGIN IMMEDIATE
+// serializes writers before their first read, preventing the otherwise
+// un-retryable deferred read→write upgrade that can leak SQLITE_BUSY from
+// concurrent wallet/withdrawal state transitions.
+func sqliteDSNWithSafeTransactions(dsn string) string {
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		separator := "?"
+		if strings.Contains(dsn, "?") {
+			separator = "&"
+		}
+		return dsn + separator + "_pragma=busy_timeout(30000)&_txlock=immediate"
+	}
+	query := parsed.Query()
+	hasBusyTimeout := false
+	for _, pragma := range query["_pragma"] {
+		normalized := strings.ToLower(strings.TrimSpace(pragma))
+		if strings.HasPrefix(normalized, "busy_timeout(") || strings.HasPrefix(normalized, "busy_timeout=") {
+			hasBusyTimeout = true
+			break
+		}
+	}
+	if !hasBusyTimeout {
+		query.Add("_pragma", "busy_timeout(30000)")
+	}
+	// exclusive is stronger and also avoids read→write upgrades; every other
+	// value (including the unsafe default/deferred mode) is normalized.
+	lockMode := strings.ToLower(query.Get("_txlock"))
+	if lockMode != "immediate" && lockMode != "exclusive" {
+		query.Set("_txlock", "immediate")
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func InitDB() (err error) {

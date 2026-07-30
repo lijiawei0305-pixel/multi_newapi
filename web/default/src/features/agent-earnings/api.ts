@@ -21,6 +21,7 @@ import { api } from '@/lib/api'
 import type {
   ApiResponse,
   MyWithdrawal,
+  MyWithdrawalPage,
   PayoutAccount,
   PayoutAccountInput,
 } from './types'
@@ -42,9 +43,27 @@ export async function getTenantEarnings(): Promise<ApiResponse<unknown>> {
   return res.data
 }
 
-export async function getMyWithdrawals(): Promise<ApiResponse<MyWithdrawal[]>> {
-  const res = await api.get('/api/tenant/withdrawals')
-  return res.data
+export async function getMyWithdrawals(
+  page: number,
+  pageSize: number
+): Promise<ApiResponse<MyWithdrawalPage>> {
+  const res = await api.get('/api/tenant/withdrawals', {
+    params: { page, page_size: pageSize },
+  })
+  const payload = res.data as ApiResponse<MyWithdrawalPage | MyWithdrawal[]>
+  if (Array.isArray(payload.data)) {
+    const start = (page - 1) * pageSize
+    return {
+      ...payload,
+      data: {
+        items: payload.data.slice(start, start + pageSize),
+        total: payload.data.length,
+        page,
+        page_size: pageSize,
+      },
+    }
+  }
+  return payload as ApiResponse<MyWithdrawalPage>
 }
 
 /**
@@ -53,12 +72,16 @@ export async function getMyWithdrawals(): Promise<ApiResponse<MyWithdrawal[]>> {
  * instead of just toasting the raw backend message (see getApiErrorCode).
  */
 export async function requestWithdrawal(
-  amountCny: number
+  amountCny: number,
+  idempotencyKey: string
 ): Promise<ApiResponse> {
   const res = await api.post(
     '/api/tenant/withdrawals',
     { amount_cny: amountCny },
-    { skipErrorHandler: true }
+    {
+      headers: { 'Idempotency-Key': idempotencyKey },
+      skipErrorHandler: true,
+    }
   )
   return res.data
 }

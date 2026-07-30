@@ -58,12 +58,20 @@ export function WithdrawDialog({
   const { t } = useTranslation()
   const [amount, setAmount] = useState<number>(0)
   const [submitting, setSubmitting] = useState(false)
+  const [requestKey, setRequestKey] = useState('')
 
   useEffect(() => {
-    if (open) setAmount(0)
+    if (open) {
+      setAmount(0)
+      setRequestKey(window.crypto.randomUUID())
+    }
   }, [open])
 
-  const invalid = !(amount > 0) || amount > max
+  const amountInCents = amount * 100
+  const invalid =
+    !(amount > 0) ||
+    amount > max ||
+    Math.abs(amountInCents - Math.round(amountInCents)) > 1e-8
 
   const handleSubmit = async () => {
     if (invalid) {
@@ -72,7 +80,10 @@ export function WithdrawDialog({
     }
     setSubmitting(true)
     try {
-      const res = await requestWithdrawal(amount)
+      const res = await requestWithdrawal(
+        amount,
+        requestKey || window.crypto.randomUUID()
+      )
       if (res.success) {
         toast.success(t('Withdrawal request submitted'))
         onOpenChange(false)
@@ -94,6 +105,8 @@ export function WithdrawDialog({
             defaultValue: '提现金额超过可提现余额',
           })
         )
+      } else if (code === 'WITHDRAW_AMOUNT_INVALID') {
+        toast.error(t('Please enter a valid amount'))
       } else {
         toast.error(t('Request failed'))
       }

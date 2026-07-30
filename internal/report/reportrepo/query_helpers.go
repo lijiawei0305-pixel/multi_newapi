@@ -18,6 +18,14 @@ import (
 // bucketedSumDatetime 在主库 DATETIME 列上按日历桶 SUM(sumCol)，返回 label→sum。
 // MySQL 用 DATE_FORMAT 在 DB 内 GROUP BY；其余方言取行在 Go 内分桶（UTC 一致）。
 func (r *Repo) bucketedSumDatetime(ctx context.Context, table, sumCol, timeCol string, tenantID *int64, start, end int64, granularity string, extra func(*gorm.DB) *gorm.DB) (map[string]float64, error) {
+	unitsColumn, hasUnits, err := r.agentMoneyUnitColumn(table, sumCol)
+	if err != nil {
+		return nil, err
+	}
+	if hasUnits {
+		return r.bucketedMoneyUnitsDatetime(ctx, table, unitsColumn, timeCol, tenantID, start, end, granularity, extra)
+	}
+
 	res := map[string]float64{}
 	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
 		expr := mysqlBucketDatetime(timeCol, granularity)
@@ -61,8 +69,78 @@ func (r *Repo) bucketedSumDatetime(ctx context.Context, table, sumCol, timeCol s
 	return res, nil
 }
 
+func (r *Repo) bucketedMoneyUnitsDatetime(ctx context.Context, table, unitsColumn, timeCol string, tenantID *int64, start, end int64, granularity string, extra func(*gorm.DB) *gorm.DB) (map[string]float64, error) {
+	unitSums := map[string]int64{}
+	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
+		expr := mysqlBucketDatetime(timeCol, granularity)
+		var rows []struct {
+			Bucket    string
+			Val       int64
+			RowCount  int64
+			UnitCount int64
+		}
+		q := r.db.WithContext(ctx).Table(table).
+			Select(expr+" AS bucket, COALESCE(SUM("+unitsColumn+"),0) AS val, "+
+				"COUNT(*) AS row_count, COUNT("+unitsColumn+") AS unit_count").
+			Where(timeCol+" >= ? AND "+timeCol+" <= ?", unixT(start), unixT(end))
+		q = applyTenantScope(q, "tenant_id", tenantID)
+		if extra != nil {
+			q = extra(q)
+		}
+		if err := q.Group(expr).Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if err := validateReportMoneyUnitCount(table, unitsColumn, row.RowCount, row.UnitCount); err != nil {
+				return nil, err
+			}
+			unitSums[row.Bucket] = row.Val
+		}
+	} else {
+		var rows []struct {
+			CreatedAt time.Time
+			Val       *int64
+		}
+		q := r.db.WithContext(ctx).Table(table).
+			Select(timeCol+" AS created_at, "+unitsColumn+" AS val").
+			Where(timeCol+" >= ? AND "+timeCol+" <= ?", unixT(start), unixT(end))
+		q = applyTenantScope(q, "tenant_id", tenantID)
+		if extra != nil {
+			q = extra(q)
+		}
+		if err := q.Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if row.Val == nil {
+				return nil, validateReportMoneyUnitCount(table, unitsColumn, 1, 0)
+			}
+			label, _ := bucketize(granularity, row.CreatedAt.Unix())
+			total, err := addReportMoneyUnits(unitSums[label], *row.Val)
+			if err != nil {
+				return nil, err
+			}
+			unitSums[label] = total
+		}
+	}
+
+	res := make(map[string]float64, len(unitSums))
+	for label, units := range unitSums {
+		res[label] = reportMoneyFromUnits(units)
+	}
+	return res, nil
+}
+
 // bucketedStatusSum 在主库 DATETIME 列上按 (日历桶, status) SUM(amount)，返回 label→status→sum。
 func (r *Repo) bucketedStatusSum(ctx context.Context, table, timeCol string, tenantID *int64, start, end int64, granularity string) (map[string]map[string]float64, error) {
+	unitsColumn, hasUnits, err := r.agentMoneyUnitColumn(table, "amount")
+	if err != nil {
+		return nil, err
+	}
+	if hasUnits {
+		return r.bucketedStatusMoneyUnits(ctx, table, unitsColumn, timeCol, tenantID, start, end, granularity)
+	}
+
 	res := map[string]map[string]float64{}
 	add := func(label, status string, v float64) {
 		if res[label] == nil {
@@ -104,6 +182,77 @@ func (r *Repo) bucketedStatusSum(ctx context.Context, table, timeCol string, ten
 	for _, x := range rows {
 		label, _ := bucketize(granularity, x.CreatedAt.Unix())
 		add(label, x.Status, x.Amount)
+	}
+	return res, nil
+}
+
+func (r *Repo) bucketedStatusMoneyUnits(ctx context.Context, table, unitsColumn, timeCol string, tenantID *int64, start, end int64, granularity string) (map[string]map[string]float64, error) {
+	type statusUnits map[string]int64
+	unitSums := map[string]statusUnits{}
+	set := func(label, status string, units int64) {
+		if unitSums[label] == nil {
+			unitSums[label] = statusUnits{}
+		}
+		unitSums[label][status] = units
+	}
+	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
+		expr := mysqlBucketDatetime(timeCol, granularity)
+		var rows []struct {
+			Bucket    string
+			Status    string
+			Val       int64
+			RowCount  int64
+			UnitCount int64
+		}
+		q := r.db.WithContext(ctx).Table(table).
+			Select(expr+" AS bucket, status, COALESCE(SUM("+unitsColumn+"),0) AS val, "+
+				"COUNT(*) AS row_count, COUNT("+unitsColumn+") AS unit_count").
+			Where(timeCol+" >= ? AND "+timeCol+" <= ?", unixT(start), unixT(end))
+		q = applyTenantScope(q, "tenant_id", tenantID)
+		if err := q.Group(expr + ", status").Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if err := validateReportMoneyUnitCount(table, unitsColumn, row.RowCount, row.UnitCount); err != nil {
+				return nil, err
+			}
+			set(row.Bucket, row.Status, row.Val)
+		}
+	} else {
+		var rows []struct {
+			CreatedAt time.Time
+			Status    string
+			Amount    *int64
+		}
+		q := r.db.WithContext(ctx).Table(table).
+			Select(timeCol+" AS created_at, status, "+unitsColumn+" AS amount").
+			Where(timeCol+" >= ? AND "+timeCol+" <= ?", unixT(start), unixT(end))
+		q = applyTenantScope(q, "tenant_id", tenantID)
+		if err := q.Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if row.Amount == nil {
+				return nil, validateReportMoneyUnitCount(table, unitsColumn, 1, 0)
+			}
+			label, _ := bucketize(granularity, row.CreatedAt.Unix())
+			if unitSums[label] == nil {
+				unitSums[label] = statusUnits{}
+			}
+			total, err := addReportMoneyUnits(unitSums[label][row.Status], *row.Amount)
+			if err != nil {
+				return nil, err
+			}
+			unitSums[label][row.Status] = total
+		}
+	}
+
+	res := make(map[string]map[string]float64, len(unitSums))
+	for label, statuses := range unitSums {
+		res[label] = make(map[string]float64, len(statuses))
+		for status, units := range statuses {
+			res[label][status] = reportMoneyFromUnits(units)
+		}
 	}
 	return res, nil
 }

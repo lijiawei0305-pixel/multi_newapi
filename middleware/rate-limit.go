@@ -18,50 +18,49 @@ var defNext = func(c *gin.Context) {
 	c.Next()
 }
 
+// Keep the existing list-backed sliding-window representation so rate-limit
+// keys created by earlier versions remain usable during a rolling deploy. The
+// whole read/decide/write sequence must stay in one script: separate LLEN and
+// LPUSH calls let concurrent requests all observe spare capacity and pass.
+const redisRateLimitScript = `
+local max_requests = tonumber(ARGV[1])
+local now = ARGV[2]
+local cutoff = ARGV[3]
+local expiration_ms = tonumber(ARGV[4])
+
+if not max_requests or max_requests <= 0 then
+  return redis.error_reply("invalid rate limit maximum")
+end
+if not expiration_ms then
+  return redis.error_reply("invalid rate limit expiration")
+end
+
+local length = redis.call("LLEN", KEYS[1])
+if length < max_requests then
+  redis.call("LPUSH", KEYS[1], now)
+  redis.call("PEXPIRE", KEYS[1], expiration_ms)
+  return 1
+end
+
+local oldest = redis.call("LINDEX", KEYS[1], -1)
+if not oldest or not string.match(oldest, "^%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%d%.%d%d%dZ$") then
+  return redis.error_reply("invalid rate limit timestamp")
+end
+
+if oldest > cutoff then
+  redis.call("PEXPIRE", KEYS[1], expiration_ms)
+  return 0
+end
+
+redis.call("LPUSH", KEYS[1], now)
+redis.call("LTRIM", KEYS[1], 0, max_requests - 1)
+redis.call("PEXPIRE", KEYS[1], expiration_ms)
+return 1
+`
+
 func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
-	ctx := context.Background()
-	rdb := common.RDB
 	key := "rateLimit:" + mark + c.ClientIP()
-	listLength, err := rdb.LLen(ctx, key).Result()
-	if err != nil {
-		fmt.Println(err.Error())
-		c.Status(http.StatusInternalServerError)
-		c.Abort()
-		return
-	}
-	if listLength < int64(maxRequestNum) {
-		rdb.LPush(ctx, key, time.Now().Format(timeFormat))
-		rdb.Expire(ctx, key, common.RateLimitKeyExpirationDuration)
-	} else {
-		oldTimeStr, _ := rdb.LIndex(ctx, key, -1).Result()
-		oldTime, err := time.Parse(timeFormat, oldTimeStr)
-		if err != nil {
-			fmt.Println(err)
-			c.Status(http.StatusInternalServerError)
-			c.Abort()
-			return
-		}
-		nowTimeStr := time.Now().Format(timeFormat)
-		nowTime, err := time.Parse(timeFormat, nowTimeStr)
-		if err != nil {
-			fmt.Println(err)
-			c.Status(http.StatusInternalServerError)
-			c.Abort()
-			return
-		}
-		// time.Since will return negative number!
-		// See: https://stackoverflow.com/questions/50970900/why-is-time-since-returning-negative-durations-on-windows
-		if int64(nowTime.Sub(oldTime).Seconds()) < duration {
-			rdb.Expire(ctx, key, common.RateLimitKeyExpirationDuration)
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
-			return
-		} else {
-			rdb.LPush(ctx, key, time.Now().Format(timeFormat))
-			rdb.LTrim(ctx, key, 0, int64(maxRequestNum-1))
-			rdb.Expire(ctx, key, common.RateLimitKeyExpirationDuration)
-		}
-	}
+	redisSlidingWindowRateLimiter(c, maxRequestNum, duration, key)
 }
 
 func memoryRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
@@ -166,45 +165,71 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 // userRedisRateLimiter is like redisRateLimiter but accepts a pre-built key
 // (to support user-ID-based keys).
 func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key string) {
-	ctx := context.Background()
-	rdb := common.RDB
-	listLength, err := rdb.LLen(ctx, key).Result()
+	redisSlidingWindowRateLimiter(c, maxRequestNum, duration, key)
+}
+
+func redisSlidingWindowRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key string) {
+	_, allowed, err := reserveRedisSlidingWindow(c.Request.Context(), key, maxRequestNum, duration)
 	if err != nil {
 		fmt.Println(err.Error())
 		c.Status(http.StatusInternalServerError)
 		c.Abort()
 		return
 	}
-	if listLength < int64(maxRequestNum) {
-		rdb.LPush(ctx, key, time.Now().Format(timeFormat))
-		rdb.Expire(ctx, key, common.RateLimitKeyExpirationDuration)
-	} else {
-		oldTimeStr, _ := rdb.LIndex(ctx, key, -1).Result()
-		oldTime, err := time.Parse(timeFormat, oldTimeStr)
-		if err != nil {
-			fmt.Println(err)
-			c.Status(http.StatusInternalServerError)
-			c.Abort()
-			return
-		}
-		nowTimeStr := time.Now().Format(timeFormat)
-		nowTime, err := time.Parse(timeFormat, nowTimeStr)
-		if err != nil {
-			fmt.Println(err)
-			c.Status(http.StatusInternalServerError)
-			c.Abort()
-			return
-		}
-		if int64(nowTime.Sub(oldTime).Seconds()) < duration {
-			rdb.Expire(ctx, key, common.RateLimitKeyExpirationDuration)
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
-			return
-		} else {
-			rdb.LPush(ctx, key, time.Now().Format(timeFormat))
-			rdb.LTrim(ctx, key, 0, int64(maxRequestNum-1))
-			rdb.Expire(ctx, key, common.RateLimitKeyExpirationDuration)
-		}
+	if !allowed {
+		c.Status(http.StatusTooManyRequests)
+		c.Abort()
+	}
+}
+
+// reserveRedisSlidingWindow atomically consumes one list-backed slot and
+// returns the exact legacy-format timestamp stored in Redis. Callers that are
+// reserving capacity for an outcome-dependent limit may release that value if
+// the request later fails. Keeping the value as the historical timestamp
+// format preserves mixed-version compatibility with older readers.
+func reserveRedisSlidingWindow(ctx context.Context, key string, maxRequestNum int, duration int64) (string, bool, error) {
+	rdb := common.RDB
+	if rdb == nil || maxRequestNum <= 0 || duration <= 0 || common.RateLimitKeyExpirationDuration <= 0 {
+		return "", false, fmt.Errorf("Redis rate limiter configuration or client is invalid")
+	}
+	if duration > int64((time.Duration(1<<63-1))/time.Second) {
+		return "", false, fmt.Errorf("Redis rate limiter window is too large")
+	}
+	windowDuration := time.Duration(duration) * time.Second
+	keyExpiration := common.RateLimitKeyExpirationDuration
+	if keyExpiration < windowDuration {
+		// The bucket must outlive the configured sliding window. Otherwise a
+		// quiet period equal to the shorter global TTL would erase still-live
+		// requests and restore capacity earlier than the endpoint promises.
+		keyExpiration = windowDuration
+	}
+
+	// Keep the historical local-wall-clock encoding during rolling upgrades.
+	// Existing keys were written with time.Now().Format(timeFormat), whose
+	// layout contains a literal Z despite the configured Asia/Shanghai zone.
+	// Switching those keys to UTC would make old entries appear eight hours in
+	// the future and repeated 429s would continuously extend their TTL.
+	now := time.Now()
+	result, err := rdb.Eval(
+		ctx,
+		redisRateLimitScript,
+		[]string{key},
+		maxRequestNum,
+		now.Format(timeFormat),
+		now.Add(-windowDuration).Format(timeFormat),
+		keyExpiration.Milliseconds(),
+	).Int()
+	if err != nil {
+		return "", false, err
+	}
+
+	switch result {
+	case 1:
+		return now.Format(timeFormat), true, nil
+	case 0:
+		return "", false, nil
+	default:
+		return "", false, fmt.Errorf("unexpected Redis rate limiter result: %d", result)
 	}
 }
 

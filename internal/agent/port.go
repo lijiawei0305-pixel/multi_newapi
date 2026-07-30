@@ -34,7 +34,7 @@ type EarningSink interface {
 type WithdrawalService interface {
 	// Request 提交提现：先校验代理已设置收款账户（未设返回 PAYOUT_ACCOUNT_REQUIRED，不冻结），
 	// 再把当前收款账户快照进提现单，最后冻结可提现余额（→ frozen_withdraw_amount）；
-	// 金额超额返回 WITHDRAW_INSUFFICIENT。
+	// 金额超额返回 WITHDRAW_INSUFFICIENT；同一非空 RequestKey 的重试只返回原单，不重复冻结。
 	Request(ctx context.Context, in WithdrawInput) (*Withdrawal, error)
 	// Review 审核提现：approve=true 标 approved（**不动钱**，钱仍在 frozen，等 MarkPaid 才出账）；
 	// approve=false 标 rejected（解冻退回）；非 pending 再审返回 WITHDRAW_NOT_PENDING。
@@ -71,7 +71,7 @@ type AgentRepo interface {
 	// AppendEarning 幂等入账：同 (SourceType, SourceID) 已存在则 applied=false 且不重复增余额。
 	AppendEarning(ctx context.Context, e EarningEntry) (applied bool, err error)
 	// CreateWithdrawal 原子冻结可提现余额并建 pending 提现单（含调用方已填好的收款快照字段）；
-	// 金额非正或超额返回 ErrWithdrawInsufficient。
+	// 金额非正或超额返回 ErrWithdrawInsufficient；非空 RequestKey 在同一租户内强幂等。
 	CreateWithdrawal(ctx context.Context, w *Withdrawal) error
 	// GetWithdrawal 按 id 读取提现单；不存在返回 ErrWithdrawNotFound。
 	GetWithdrawal(ctx context.Context, id int64) (*Withdrawal, error)

@@ -48,8 +48,8 @@ export type SourceType =
   | 'tokenplan_commission'
   | 'manual_adjustment'
 
-/** Withdrawal lifecycle (`model.go:152-159`). NO `withdrawn`/`frozen`/`paid`. */
-export type WithdrawalStatus = 'pending' | 'approved' | 'rejected'
+/** Withdrawal lifecycle (`model.go:152-159`). `withdrawn`/`frozen` are amounts, not statuses. */
+export type WithdrawalStatus = 'pending' | 'approved' | 'paid' | 'rejected'
 
 /** The four data lenses driving trend + detail. */
 export type Lens = 'earnings' | 'recharge' | 'consumption' | 'withdrawals'

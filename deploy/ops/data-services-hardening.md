@@ -66,7 +66,11 @@ On the first hardened start:
   the one-shot bootstrap container; the application waits for successful
   completion and connects as `newapi`. The Compose file uses MySQL's supported
   default `caching_sha2_password` rather than the 8.4-removed
-  `default-authentication-plugin` switch.
+  `default-authentication-plugin` switch. Because binary logging is enabled,
+  MySQL would otherwise require global `SUPER` for the app's deterministic
+  fixed-point compatibility triggers. The server therefore starts with
+  `log_bin_trust_function_creators=1`; the app retains only schema-scoped
+  privileges and never receives `SUPER` or system-variable administration.
 - Redis writes a mode-`600` ephemeral ACL file, disables the anonymous `default`
   user, removes destructive/admin commands from the named application user, and
   then delegates to the official entrypoint so the server drops to the image's
@@ -84,8 +88,9 @@ cd /root/newapi-test/deploy/ops
 ```
 
 Then confirm, without printing credentials, that the application MySQL session
-is not `root` and Redis rejects an unauthenticated `PING` while the authenticated
-ops helper succeeds. Record only usernames, grants, image digests, and exit
+is not `root`, `@@GLOBAL.log_bin_trust_function_creators` is `1`, and Redis
+rejects an unauthenticated `PING` while the authenticated ops helper succeeds.
+Record only usernames, grants, system-variable values, image digests, and exit
 status—never secret values.
 
 ### Rollback

@@ -28,6 +28,7 @@ import { getApiErrorCode } from '@/lib/api'
 
 import { approveWithdrawal, markPaidWithdrawal, rejectWithdrawal } from '../api'
 import { cny } from '../lib'
+import { WithdrawalReviewDetails } from './withdrawal-review-details'
 import { useWithdrawals } from './withdrawals-provider'
 
 export function WithdrawalActionDialog() {
@@ -116,6 +117,10 @@ export function WithdrawalActionDialog() {
               defaultValue: '请填写打款单号/凭证',
             })
           )
+        } else if (code === 'PAYOUT_REF_DUPLICATE') {
+          toast.error(
+            t('This payout reference is already used by another withdrawal')
+          )
         } else if (code === 'WITHDRAW_NOT_APPROVED') {
           toast.error(
             t(
@@ -150,7 +155,9 @@ export function WithdrawalActionDialog() {
       confirmText={confirmText}
       destructive={isReject}
       disabled={isMarkPaid && !payoutRef.trim()}
+      className='max-h-[calc(100dvh_-_2rem)] overflow-y-auto data-[size=default]:max-w-[calc(100%_-_2rem)] data-[size=default]:sm:max-w-lg'
     >
+      <WithdrawalReviewDetails withdrawal={currentRow} />
       {isReject && (
         <div className='flex flex-col gap-2'>
           <Label htmlFor='wd-reject-reason'>{t('Reason (optional)')}</Label>
@@ -158,6 +165,7 @@ export function WithdrawalActionDialog() {
             id='wd-reject-reason'
             data-testid='wd-reject-reason'
             value={reason}
+            maxLength={255}
             onChange={(e) => setReason(e.target.value)}
             placeholder={t('Reason for rejection')}
             rows={3}
@@ -173,6 +181,7 @@ export function WithdrawalActionDialog() {
             id='wd-payout-ref'
             data-testid='wd-payout-ref'
             value={payoutRef}
+            maxLength={128}
             onChange={(e) => setPayoutRef(e.target.value)}
             placeholder={t('e.g. bank transfer serial number', {
               defaultValue: '如银行转账流水号',

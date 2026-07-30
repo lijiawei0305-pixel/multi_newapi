@@ -172,6 +172,36 @@ func TestHandleAdminDeleteAgent_WalletReadFailureFailsClosed(t *testing.T) {
 	assert.Equal(t, tenant.DomainForSlug("wallet-read"), app.TenantRepo.GetPrimaryDomain(ctx, tn.ID))
 }
 
+func TestHandleAdminDeleteAgent_UsesAuthoritativeMoneyUnits(t *testing.T) {
+	app := newAgentAdminTransactionTestApp(t)
+	ctx := context.Background()
+	tn, err := app.TenantService.Create(ctx, tenant.CreateTenantInput{
+		Slug: "unit-balance", Name: "Unit balance", TokenplanEnabled: true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, app.AgentService.SetAgentType(ctx, tn.ID, agent.AgentParams{
+		UserID: 304, PackageDiscount: 1,
+	}))
+	require.NoError(t, app.AgentRepo.EnsureWallet(ctx, tn.ID, 304))
+	// A stale compatibility mirror must not let deletion bypass a non-zero
+	// authoritative balance.
+	require.NoError(t, app.DB.Table("agent_wallets").Where("tenant_id = ?", tn.ID).
+		Updates(map[string]interface{}{
+			"withdrawable_balance":       0,
+			"withdrawable_balance_units": int64(1),
+		}).Error)
+
+	id := strconv.FormatInt(tn.ID, 10)
+	c, recorder := agentAdminMutationContext(http.MethodDelete, "/api/admin/agents/"+id, id, "")
+	app.HandleAdminDeleteAgent(c)
+
+	assert.Equal(t, http.StatusConflict, recorder.Code, recorder.Body.String())
+	assert.Contains(t, recorder.Body.String(), `"code":"AGENT_HAS_UNSETTLED_BALANCE"`)
+	gotTenant, err := app.TenantService.Get(ctx, tn.ID)
+	require.NoError(t, err)
+	assert.Equal(t, tenant.StatusActive, gotTenant.Status)
+}
+
 func TestHandleAdminUpdateAgent_LateNameFailureRollsBackPromotion(t *testing.T) {
 	app := newAgentAdminTransactionTestApp(t)
 	ctx := context.Background()

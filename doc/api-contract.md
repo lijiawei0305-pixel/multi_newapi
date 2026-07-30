@@ -217,7 +217,7 @@
 
 **Earning**：`{ source_type: recharge_spread|consume_commission|tokenplan_spread|tokenplan_commission|manual_adjustment, amount_cny, created_at }`
 
-**Withdrawal**：`{ amount_cny, fee_cny, actual_cny, status: pending|approved|rejected, payment_method, created_at }`
+**Withdrawal**：`{ id, amount_cny, status: pending|approved|paid|rejected, remark, payout_method, payout_account, payout_name, payout_bank, payout_ref, paid_at, created_at, reviewed_at }`。申请金额必须为人民币“分”的整数倍（最多两位小数），否则返回 `WITHDRAW_AMOUNT_INVALID`。`POST /api/tenant/withdrawals` 支持最长 64 字符的 `Idempotency-Key` 请求头；首尾空白会先被移除，同租户同键再按原文逐字节比较，重试返回原提现单且不重复冻结，复用同键但改变金额等请求参数返回 `WITHDRAW_IDEMPOTENCY_CONFLICT`。管理员标记已打款时，非空 `payout_ref` 也先移除首尾空白，再按原文逐字节比较并在所有提现单中唯一；重复使用返回 `PAYOUT_REF_DUPLICATE`，且目标提现单和钱包均不发生变化。
 
 **Channel**：`{ name, prefix, channel_code, signup_url, registered_count }`
 **RedemptionCode**：`{ name, code, amount_usd, status: enabled|disabled|used|expired, expires_at }`

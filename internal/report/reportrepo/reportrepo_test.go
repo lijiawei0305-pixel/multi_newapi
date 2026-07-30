@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -60,6 +61,166 @@ func seedEarning(t *testing.T, db *gorm.DB, tenantID int64, sourceType string, a
 	).Error; err != nil {
 		t.Fatalf("seed earning (tenant=%d source=%s): %v", tenantID, sourceType, err)
 	}
+}
+
+func TestAgentReportsUseAuthoritativeMoneyUnitsOnSQLite(t *testing.T) {
+	db := newFinanceTestDB(t)
+	repo := New(db)
+	_, hasUnits, err := repo.agentMoneyUnitColumn("agent_earning_logs", "amount")
+	require.NoError(t, err)
+	if hasUnits {
+		t.Fatal("legacy fixture unexpectedly started with a money units column")
+	}
+	for _, statement := range []string{
+		`ALTER TABLE agent_earning_logs ADD COLUMN amount_units INTEGER`,
+		`ALTER TABLE agent_withdrawals ADD COLUMN amount_units INTEGER`,
+		`ALTER TABLE agent_withdrawals ADD COLUMN reviewed_at DATETIME`,
+		`ALTER TABLE agent_wallets ADD COLUMN api_balance_units INTEGER`,
+		`ALTER TABLE agent_wallets ADD COLUMN withdrawable_balance_units INTEGER`,
+		`ALTER TABLE agent_wallets ADD COLUMN frozen_withdraw_amount_units INTEGER`,
+		`ALTER TABLE agent_wallets ADD COLUMN total_earned_units INTEGER`,
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatalf("add fixed-point report column: %v", err)
+		}
+	}
+
+	base := time.Unix(1_700_000_000, 0).UTC()
+	for _, row := range []struct {
+		sourceID string
+		legacy   float64
+		units    int64
+	}{
+		{sourceID: "fixed-one", legacy: 91, units: 10_000_000},
+		{sourceID: "fixed-two", legacy: 92, units: 70_000_000},
+	} {
+		if err := db.Exec(
+			`INSERT INTO agent_earning_logs (tenant_id, user_id, source_type, source_id, amount, amount_units, created_at) VALUES (?,?,?,?,?,?,?)`,
+			9, 9, "consume_commission", row.sourceID, row.legacy, row.units, base,
+		).Error; err != nil {
+			t.Fatalf("seed fixed-point earning: %v", err)
+		}
+	}
+	if err := db.Exec(
+		`INSERT INTO agent_wallets (tenant_id, api_balance, api_balance_units, withdrawable_balance, withdrawable_balance_units, frozen_withdraw_amount, frozen_withdraw_amount_units, total_earned, total_earned_units) VALUES (?,?,?,?,?,?,?,?,?)`,
+		9, 90, 80_000_000, 91, 80_000_000, 92, 20_000_000, 93, 100_000_000,
+	).Error; err != nil {
+		t.Fatalf("seed fixed-point wallet: %v", err)
+	}
+	if err := db.Exec(
+		`INSERT INTO agent_withdrawals (tenant_id, amount, amount_units, status, created_at) VALUES (?,?,?,?,?)`,
+		9, 99, 80_000_000, "paid", base,
+	).Error; err != nil {
+		t.Fatalf("seed fixed-point withdrawal: %v", err)
+	}
+
+	ctx := context.Background()
+	start, end := base.Add(-time.Hour).Unix(), base.Add(time.Hour).Unix()
+	beforeMarker, err := repo.SummaryEarnings(ctx, nil, start, end)
+	if err != nil {
+		t.Fatalf("SummaryEarnings before migration marker: %v", err)
+	}
+	if len(beforeMarker) != 1 || beforeMarker[0].AmountCNY != 183 {
+		t.Fatalf("expanded-but-uncommitted schema must keep reading complete legacy mirrors: %+v", beforeMarker)
+	}
+	if err := db.Exec(`CREATE TABLE agent_schema_migrations (key TEXT PRIMARY KEY, claim_token TEXT, completed_at DATETIME)`).Error; err != nil {
+		t.Fatalf("create migration marker table: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO agent_schema_migrations (key, claim_token, completed_at) VALUES (?,?,?)`,
+		"money_units_v1", "test-claim", base).Error; err != nil {
+		t.Fatalf("commit migration marker: %v", err)
+	}
+
+	earnings, err := repo.SummaryEarnings(ctx, nil, start, end)
+	if err != nil {
+		t.Fatalf("SummaryEarnings: %v", err)
+	}
+	if len(earnings) != 1 || earnings[0].AmountCNY != 0.8 {
+		t.Fatalf("fixed-point earnings = %+v, want one 0.8 source", earnings)
+	}
+
+	byTenant, err := repo.earningsByTenant(ctx, start, end)
+	if err != nil {
+		t.Fatalf("earningsByTenant: %v", err)
+	}
+	if byTenant[9].total != 0.8 {
+		t.Fatalf("fixed-point tenant total = %.17g, want 0.8", byTenant[9].total)
+	}
+
+	trend, err := repo.TrendEarnings(ctx, nil, start, end, "day")
+	if err != nil {
+		t.Fatalf("TrendEarnings: %v", err)
+	}
+	if len(trend) != 1 || trend[0].AmountCNY != 0.8 {
+		t.Fatalf("fixed-point trend = %+v, want one 0.8 bucket", trend)
+	}
+
+	wallet, err := repo.WalletTotals(ctx, nil)
+	if err != nil {
+		t.Fatalf("WalletTotals: %v", err)
+	}
+	if wallet.WithdrawableCNY != 0.8 || wallet.FrozenCNY != 0.2 || wallet.TotalEarnedCNY != 1 || wallet.APIBalanceUSD != 0.8 {
+		t.Fatalf("wallet used legacy mirrors instead of units: %+v", wallet)
+	}
+
+	withdrawals, err := repo.Withdrawals(ctx, nil, start, end)
+	if err != nil {
+		t.Fatalf("Withdrawals: %v", err)
+	}
+	if withdrawals["paid"] != 0.8 {
+		t.Fatalf("fixed-point paid withdrawal = %.17g, want 0.8", withdrawals["paid"])
+	}
+}
+
+func TestAgentReportsFailClosedOnNullUnitsAfterMigrationMarker(t *testing.T) {
+	db := newFinanceTestDB(t)
+	for _, statement := range []string{
+		`ALTER TABLE agent_earning_logs ADD COLUMN amount_units INTEGER`,
+		`ALTER TABLE agent_withdrawals ADD COLUMN amount_units INTEGER`,
+		`ALTER TABLE agent_withdrawals ADD COLUMN reviewed_at DATETIME`,
+		`ALTER TABLE agent_wallets ADD COLUMN api_balance_units INTEGER`,
+		`ALTER TABLE agent_wallets ADD COLUMN withdrawable_balance_units INTEGER`,
+		`ALTER TABLE agent_wallets ADD COLUMN frozen_withdraw_amount_units INTEGER`,
+		`ALTER TABLE agent_wallets ADD COLUMN total_earned_units INTEGER`,
+		`CREATE TABLE agent_schema_migrations (key TEXT PRIMARY KEY, claim_token TEXT, completed_at DATETIME)`,
+	} {
+		require.NoError(t, db.Exec(statement).Error)
+	}
+	base := time.Unix(1_700_000_000, 0).UTC()
+	require.NoError(t, db.Exec(`INSERT INTO agent_schema_migrations (key, claim_token, completed_at) VALUES (?,?,?)`,
+		"money_units_v1", "test-claim", base).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO agent_earning_logs (tenant_id, user_id, source_type, source_id, amount, amount_units, created_at) VALUES (?,?,?,?,?,?,?)`,
+		9, 9, "consume_commission", "null-units", 0.1, nil, base,
+	).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO agent_wallets (tenant_id, api_balance, withdrawable_balance, frozen_withdraw_amount, total_earned) VALUES (?,?,?,?,?)`,
+		9, 0, 0.1, 0, 0.1,
+	).Error)
+	require.NoError(t, db.Exec(
+		`INSERT INTO agent_withdrawals (tenant_id, amount, amount_units, status, created_at) VALUES (?,?,?,?,?)`,
+		9, 0.1, nil, "pending", base,
+	).Error)
+
+	repo := New(db)
+	ctx := context.Background()
+	start, end := base.Add(-time.Hour).Unix(), base.Add(time.Hour).Unix()
+	_, err := repo.SummaryEarnings(ctx, nil, start, end)
+	require.ErrorContains(t, err, "NULL authoritative money")
+	_, err = repo.TrendEarnings(ctx, nil, start, end, "day")
+	require.ErrorContains(t, err, "NULL authoritative money")
+	_, err = repo.earningsByTenant(ctx, start, end)
+	require.ErrorContains(t, err, "NULL authoritative money")
+	_, _, err = repo.DetailEarnings(ctx, nil, start, end, 1, 20)
+	require.ErrorContains(t, err, "NULL authoritative money")
+	_, err = repo.WalletTotals(ctx, nil)
+	require.ErrorContains(t, err, "NULL authoritative money")
+	_, err = repo.Withdrawals(ctx, nil, start, end)
+	require.ErrorContains(t, err, "NULL authoritative money")
+	_, err = repo.TrendWithdrawals(ctx, nil, start, end, "day")
+	require.ErrorContains(t, err, "NULL authoritative money")
+	_, _, err = repo.DetailWithdrawals(ctx, nil, start, end, 1, 20)
+	require.ErrorContains(t, err, "NULL authoritative money")
 }
 
 // TestSummaryEarnings_IncludesRatioMarkup 是回归测试（SummaryEarnings 直接 GROUP BY source_type，

@@ -25,6 +25,42 @@ func (r *Repo) DetailEarnings(ctx context.Context, tenantID *int64, start, end i
 	if err := where().Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
+	unitsColumn, hasUnits, err := r.agentMoneyUnitColumn("agent_earning_logs", "amount")
+	if err != nil {
+		return nil, 0, err
+	}
+	if hasUnits {
+		var rows []struct {
+			TenantID   int64
+			SourceType string
+			Amount     *int64
+			SourceID   string
+			CreatedAt  time.Time
+		}
+		if err := where().
+			Select("tenant_id, source_type, " + unitsColumn + " AS amount, source_id, created_at").
+			Order("created_at DESC").
+			Limit(lim(pageSize)).Offset(off(page, pageSize)).
+			Scan(&rows).Error; err != nil {
+			return nil, 0, err
+		}
+		out := make([]EarningDetailRow, 0, len(rows))
+		for _, row := range rows {
+			if row.Amount == nil {
+				return nil, 0, validateReportMoneyUnitCount("agent_earning_logs", unitsColumn, 1, 0)
+			}
+			out = append(out, EarningDetailRow{
+				TenantID:   row.TenantID,
+				SourceType: row.SourceType,
+				AmountCNY:  reportMoneyFromUnits(*row.Amount),
+				Reference:  row.SourceID,
+				CreatedAt:  row.CreatedAt,
+			})
+		}
+		r.fillEarningNames(ctx, out)
+		return out, total, nil
+	}
+
 	var rows []struct {
 		TenantID   int64
 		SourceType string
@@ -64,6 +100,48 @@ func (r *Repo) DetailWithdrawals(ctx context.Context, tenantID *int64, start, en
 	if err := where().Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
+	unitsColumn, hasUnits, err := r.agentMoneyUnitColumn("agent_withdrawals", "amount")
+	if err != nil {
+		return nil, 0, err
+	}
+	if hasUnits {
+		var rows []struct {
+			ID         int64
+			TenantID   int64
+			Amount     *int64
+			Status     string
+			CreatedAt  time.Time
+			ReviewedAt *time.Time
+		}
+		if err := where().
+			Select("id, tenant_id, " + unitsColumn + " AS amount, status, created_at, reviewed_at").
+			Order("created_at DESC").
+			Limit(lim(pageSize)).Offset(off(page, pageSize)).
+			Scan(&rows).Error; err != nil {
+			return nil, 0, err
+		}
+		out := make([]WithdrawalDetailRow, 0, len(rows))
+		for _, row := range rows {
+			if row.Amount == nil {
+				return nil, 0, validateReportMoneyUnitCount("agent_withdrawals", unitsColumn, 1, 0)
+			}
+			out = append(out, WithdrawalDetailRow{
+				ID:         row.ID,
+				TenantID:   row.TenantID,
+				AmountCNY:  reportMoneyFromUnits(*row.Amount),
+				Status:     row.Status,
+				CreatedAt:  row.CreatedAt,
+				ReviewedAt: row.ReviewedAt,
+			})
+		}
+		ids := collectTenantIDs(out, func(w WithdrawalDetailRow) int64 { return w.TenantID })
+		metas := r.tenantNames(ctx, ids)
+		for i := range out {
+			out[i].AgentName = metas[out[i].TenantID].Name
+		}
+		return out, total, nil
+	}
+
 	var rows []struct {
 		ID         int64
 		TenantID   int64

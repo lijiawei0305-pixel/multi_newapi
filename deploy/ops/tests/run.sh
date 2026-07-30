@@ -1060,6 +1060,13 @@ test_payment_topology_and_demo_safety_contract() (
   if awk '/\.\/demo\.sh/ && $0 !~ /ALLOW_REAL_PAYMENT_DEMO=1/ { bad=1 } END { exit bad ? 0 : 1 }' "$demo" "$readme"; then
     fail "a documented demo command can bypass the explicit real-payment opt-in"
   fi
+  grep -Fq '/api/admin/withdrawals/$WID/mark-paid' "$demo" \
+    || fail "withdrawal demo stops at approval instead of recording the completed payout"
+  grep -Fq "status='paid'" "$demo" \
+    || fail "withdrawal demo does not reconcile paid withdrawals"
+  if grep -Fq "status='approved'" "$demo"; then
+    fail "withdrawal demo still treats approval as completed payout"
+  fi
 
   mkdir -p "$fake"
   for command in curl docker; do
@@ -1081,6 +1088,41 @@ FAKE_EXTERNAL
 
   if grep -nH --fixed-strings './rollback.sh --git' "$ROOT/deploy/ops"/*.md >/dev/null; then
     fail "an ops runbook still presents the retired --git rollback as executable"
+  fi
+)
+
+test_reconcile_uses_exact_units_and_complete_withdrawal_invariants() (
+  set -euo pipefail
+  local reconcile="$ROOT/deploy/ops/reconcile.sh"
+
+  if awk '/\/100000000/ && $0 !~ /CAST\(CAST\(/ { bad=1 } END { exit bad ? 0 : 1 }' "$reconcile"; then
+    fail "reconcile has a units display that does not explicitly preserve 8 decimal places"
+  fi
+  if grep -Fq 'CAST(ROUND(' "$reconcile"; then
+    fail "reconcile mirror validation can overflow while coercing a corrupt value to SIGNED"
+  fi
+  grep -Fq 'amount*100000000<>amount_units' "$reconcile" \
+    || fail "reconcile does not compare withdrawal mirrors without integer overflow coercion"
+  grep -Fq 'BINARY idem_key_hash<>BINARY LOWER(SHA2(CONCAT(CAST(tenant_id AS CHAR),CHAR(0),source_type,CHAR(0),source_id),256))' "$reconcile" \
+    || fail "reconcile does not verify exact earning idempotency hashes"
+  grep -Fq 'WHERE frozen_withdraw_amount_units<0' "$reconcile" \
+    || fail "reconcile does not reject a negative frozen withdrawal balance"
+  grep -Fq 'LEFT JOIN agent_wallets w ON w.tenant_id=wd.tenant_id' "$reconcile" \
+    || fail "reconcile does not detect withdrawals whose wallet is missing"
+  grep -Fq "status='paid' AND (payout_ref='' OR paid_at IS NULL)" "$reconcile" \
+    || fail "reconcile does not reject paid withdrawals without payout evidence"
+  grep -Fq "WHERE payout_ref<>'' GROUP BY payout_ref_hash HAVING COUNT(*)>1" "$reconcile" \
+    || fail "reconcile does not detect duplicate exact payout-reference hashes"
+  grep -Fq 'BINARY payout_ref_hash<>BINARY LOWER(SHA2(payout_ref,256))' "$reconcile" \
+    || fail "reconcile does not verify exact payout-reference hashes"
+  grep -Fq 'agent_payout_ref_claims_v3' "$reconcile" \
+    || fail "reconcile does not verify payout-reference claim ownership"
+  grep -Fq "wd.status<>'paid' OR wd.paid_at IS NULL OR wd.payout_ref_hash IS NULL" "$reconcile" \
+    || fail "reconcile does not reject claims attached to non-paid or incomplete withdrawals"
+  grep -Fq "WHERE status='paid' GROUP BY tenant_id" "$reconcile" \
+    || fail "reconcile conservation does not count paid withdrawals"
+  if grep -Eq "SUM\(amount_units\).*status='approved'" "$reconcile"; then
+    fail "reconcile still counts approved withdrawals as paid out"
   fi
 )
 
@@ -1161,6 +1203,8 @@ test_session_security_deployment_docs_contract() (
     || fail "production MySQL does not durably flush every committed redo record"
   grep -Fq -- '--sync-binlog=1' "$production" \
     || fail "production MySQL does not durably flush every committed binlog record"
+  grep -Fq -- '--log-bin-trust-function-creators=1' "$production" \
+    || fail "production MySQL cannot create schema-scoped compatibility triggers while binlog is enabled"
   if grep -Eq -- '--innodb-flush-log-at-trx-commit=(0|2)|--sync-binlog=0' "$production"; then
     fail "production MySQL still permits acknowledged financial commits to vanish on host failure"
   fi
@@ -1614,6 +1658,7 @@ run_test "paired rollback swaps image and source as one verified release" test_f
 run_test "health probes and every HTTP vhost enforce the production contract" test_health_and_https_contract
 run_test "internal and database secrets stay out of process arguments" test_secrets_stay_out_of_process_arguments
 run_test "single-stack payment docs and demo fail closed before real funds" test_payment_topology_and_demo_safety_contract
+run_test "reconcile preserves fixed-point output and checks complete withdrawal invariants" test_reconcile_uses_exact_units_and_complete_withdrawal_invariants
 run_test "local and production session-security deployment modes stay explicit" test_session_security_deployment_docs_contract
 run_test "documented Electron and legacy-image commands match executable build topology" test_documented_commands_match_build_drivers
 run_test "formal Electron artifacts require valid timestamped Authenticode signatures" test_formal_electron_release_requires_verified_signatures

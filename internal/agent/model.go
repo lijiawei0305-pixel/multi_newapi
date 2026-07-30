@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ---- 代理类型与参数（detailed-design §2.3 / proposal §5.2、§7）----
@@ -190,17 +191,48 @@ type PayoutAccount struct {
 	Bank string
 }
 
+const (
+	// MaxPayoutAccountLength matches the persisted payout_account varchar limit.
+	MaxPayoutAccountLength = 128
+	// MaxPayoutNameLength matches the persisted payout_name varchar limit.
+	MaxPayoutNameLength = 64
+	// MaxPayoutBankLength matches the persisted payout_bank varchar limit.
+	MaxPayoutBankLength = 128
+	// MaxWithdrawalRemarkLength matches the persisted withdrawal remark varchar limit.
+	MaxWithdrawalRemarkLength = 255
+	// MaxPayoutRefLength matches the persisted payout_ref varchar limit.
+	MaxPayoutRefLength = 128
+	// MaxWithdrawalRequestKeyLength bounds the client-generated idempotency key.
+	MaxWithdrawalRequestKeyLength = 64
+)
+
+// Normalized trims surrounding whitespace and removes the bank field when it
+// is not applicable. Persisting one canonical representation prevents visually
+// identical accounts from producing different immutable withdrawal snapshots.
+func (p PayoutAccount) Normalized() PayoutAccount {
+	p.Account = strings.TrimSpace(p.Account)
+	p.Name = strings.TrimSpace(p.Name)
+	p.Bank = strings.TrimSpace(p.Bank)
+	if p.Method != PayoutBank {
+		p.Bank = ""
+	}
+	return p
+}
+
 // Validate 校验收款账户合法性：方式∈{alipay,bank}、账号与姓名非空、bank 方式下开户行必填。
 // 非法返回 ErrPayoutAccountInvalid（PAYOUT_ACCOUNT_INVALID）。
 func (p PayoutAccount) Validate() error {
+	p = p.Normalized()
 	switch {
 	case !p.Method.Valid():
 		return ErrPayoutAccountInvalid
-	case strings.TrimSpace(p.Account) == "":
+	case p.Account == "" || utf8.RuneCountInString(p.Account) > MaxPayoutAccountLength:
 		return ErrPayoutAccountInvalid
-	case strings.TrimSpace(p.Name) == "":
+	case p.Name == "" || utf8.RuneCountInString(p.Name) > MaxPayoutNameLength:
 		return ErrPayoutAccountInvalid
-	case p.Method == PayoutBank && strings.TrimSpace(p.Bank) == "":
+	case p.Method == PayoutBank && p.Bank == "":
+		return ErrPayoutAccountInvalid
+	case utf8.RuneCountInString(p.Bank) > MaxPayoutBankLength:
 		return ErrPayoutAccountInvalid
 	default:
 		return nil
@@ -267,8 +299,11 @@ type Withdrawal struct {
 	TenantID int64
 	UserID   int64
 	Amount   float64 // 提现金额（¥）
-	Status   WithdrawStatus
-	Remark   string // 审核备注（驳回理由等）
+	// RequestKey is an optional client-generated idempotency key. It is
+	// persisted but never used as an authorization or tenant-scoping signal.
+	RequestKey string
+	Status     WithdrawStatus
+	Remark     string // 审核备注（驳回理由等）
 
 	// PayoutMethod/PayoutAccount/PayoutName/PayoutBank 是申请提现那一刻从代理收款账户
 	// （PayoutAccount）整份快照下来的打款目标（提现闭环补强 #1）：记录不可变，日后代理修改收款账户
@@ -289,8 +324,9 @@ type Withdrawal struct {
 
 // WithdrawInput 是提现申请入参。
 type WithdrawInput struct {
-	TenantID int64
-	UserID   int64
-	Amount   float64
-	Remark   string
+	TenantID   int64
+	UserID     int64
+	Amount     float64
+	Remark     string
+	RequestKey string
 }

@@ -104,6 +104,66 @@ type earnAgg struct {
 }
 
 func (r *Repo) earningsByTenant(ctx context.Context, start, end int64) (map[int64]earnAgg, error) {
+	unitsColumn, hasUnits, err := r.agentMoneyUnitColumn("agent_earning_logs", "amount")
+	if err != nil {
+		return nil, err
+	}
+	if hasUnits {
+		var rows []struct {
+			TenantID   int64
+			SourceType string
+			Amount     int64
+			RowCount   int64
+			UnitCount  int64
+		}
+		q := r.db.WithContext(ctx).Table("agent_earning_logs").
+			Select("tenant_id, source_type, COALESCE(SUM("+unitsColumn+"),0) AS amount, "+
+				"COUNT(*) AS row_count, COUNT("+unitsColumn+") AS unit_count").
+			Where("created_at >= ? AND created_at <= ?", unixT(start), unixT(end)).
+			Where("tenant_id <> 0").
+			Group("tenant_id, source_type")
+		if err := q.Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		type earnUnits struct {
+			total, consume, ratioMarkup, tokenplanSpread, manualAdj int64
+		}
+		unitAgg := map[int64]earnUnits{}
+		for _, row := range rows {
+			if err := validateReportMoneyUnitCount("agent_earning_logs", unitsColumn, row.RowCount, row.UnitCount); err != nil {
+				return nil, err
+			}
+			a := unitAgg[row.TenantID]
+			var err error
+			a.total, err = addReportMoneyUnits(a.total, row.Amount)
+			if err != nil {
+				return nil, err
+			}
+			switch row.SourceType {
+			case "consume_commission":
+				a.consume = row.Amount
+			case "ratio_markup":
+				a.ratioMarkup = row.Amount
+			case "tokenplan_spread":
+				a.tokenplanSpread = row.Amount
+			case "manual_adjustment":
+				a.manualAdj = row.Amount
+			}
+			unitAgg[row.TenantID] = a
+		}
+		out := make(map[int64]earnAgg, len(unitAgg))
+		for tenantID, a := range unitAgg {
+			out[tenantID] = earnAgg{
+				total:           reportMoneyFromUnits(a.total),
+				consume:         reportMoneyFromUnits(a.consume),
+				ratioMarkup:     reportMoneyFromUnits(a.ratioMarkup),
+				tokenplanSpread: reportMoneyFromUnits(a.tokenplanSpread),
+				manualAdj:       reportMoneyFromUnits(a.manualAdj),
+			}
+		}
+		return out, nil
+	}
+
 	var rows []struct {
 		TenantID   int64
 		SourceType string
@@ -141,6 +201,44 @@ type wdAgg struct {
 }
 
 func (r *Repo) withdrawByTenant(ctx context.Context, start, end int64) (map[int64]wdAgg, error) {
+	unitsColumn, hasUnits, err := r.agentMoneyUnitColumn("agent_withdrawals", "amount")
+	if err != nil {
+		return nil, err
+	}
+	if hasUnits {
+		var rows []struct {
+			TenantID  int64
+			Status    string
+			Amount    int64
+			RowCount  int64
+			UnitCount int64
+		}
+		q := r.db.WithContext(ctx).Table("agent_withdrawals").
+			Select("tenant_id, status, COALESCE(SUM("+unitsColumn+"),0) AS amount, "+
+				"COUNT(*) AS row_count, COUNT("+unitsColumn+") AS unit_count").
+			Where("created_at >= ? AND created_at <= ?", unixT(start), unixT(end)).
+			Where("tenant_id <> 0").
+			Group("tenant_id, status")
+		if err := q.Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		out := map[int64]wdAgg{}
+		for _, row := range rows {
+			if err := validateReportMoneyUnitCount("agent_withdrawals", unitsColumn, row.RowCount, row.UnitCount); err != nil {
+				return nil, err
+			}
+			a := out[row.TenantID]
+			switch row.Status {
+			case "paid":
+				a.withdrawn += reportMoneyFromUnits(row.Amount)
+			case "pending":
+				a.pending += reportMoneyFromUnits(row.Amount)
+			}
+			out[row.TenantID] = a
+		}
+		return out, nil
+	}
+
 	var rows []struct {
 		TenantID int64
 		Status   string
@@ -169,6 +267,31 @@ func (r *Repo) withdrawByTenant(ctx context.Context, start, end int64) (map[int6
 }
 
 func (r *Repo) walletWithdrawableByTenant(ctx context.Context) (map[int64]float64, error) {
+	unitsColumn, hasUnits, err := r.agentMoneyUnitColumn("agent_wallets", "withdrawable_balance")
+	if err != nil {
+		return nil, err
+	}
+	if hasUnits {
+		var rows []struct {
+			TenantID            int64
+			WithdrawableBalance *int64
+		}
+		if err := r.db.WithContext(ctx).Table("agent_wallets").
+			Select("tenant_id, " + unitsColumn + " AS withdrawable_balance").
+			Where("tenant_id <> 0").
+			Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		out := make(map[int64]float64, len(rows))
+		for _, row := range rows {
+			if row.WithdrawableBalance == nil {
+				return nil, validateReportMoneyUnitCount("agent_wallets", unitsColumn, 1, 0)
+			}
+			out[row.TenantID] = reportMoneyFromUnits(*row.WithdrawableBalance)
+		}
+		return out, nil
+	}
+
 	var rows []struct {
 		TenantID            int64
 		WithdrawableBalance float64

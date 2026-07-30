@@ -13,7 +13,7 @@
 #     ④ 校验：原生订阅 active + 代理 demoagent 得 tokenplan_spread
 #     ⑤ chanuser1 用 API Key 调 /v1（gpt-5.4-mini），证明走「订阅桶」(logs.billing_source)
 #     ⑥ demoagent 查收益 / 申请提现
-#     ⑦ admin 审核通过（校验金额守恒）
+#     ⑦ admin 审核通过后标记已打款（校验金额守恒）
 #     ⑧ 真实充值 $1 → quota +500000
 #
 # 用法（服务器）：
@@ -145,7 +145,7 @@ kv "归属租户" "$(printf '%s' "$CUR" | jget data.site_name)（slug=$(printf '
 # ② 购买套餐 → 生成待支付订单
 # ════════════════════════════════════════════════════════════════════════════
 step 2 "购买套餐（plan_id=$PLAN_ID）→ 下单"
-EARNED_BEFORE="$(db "SELECT COALESCE(total_earned,0) FROM agent_wallets WHERE tenant_id=$TENANT_ID;")"
+EARNED_BEFORE="$(db "SELECT CAST(CAST(COALESCE(total_earned_units,0) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) FROM agent_wallets WHERE tenant_id=$TENANT_ID;")"
 BUY="$(capi POST "/api/tenant/token-plans/$PLAN_ID/purchase" "$JAR_BUYER" "$BUYER_ID" "{\"provider\":\"$PAY_PROVIDER\"}")"
 assert_ok "$BUY" "购买下单"
 ORDER="$(printf '%s'  "$BUY" | jget data.order_no)"
@@ -175,8 +175,8 @@ read -r NS_AMT NS_STATUS <<<"$(db "SELECT amount_total, status FROM user_subscri
 [ "$NS_STATUS" = "active" ] || die "原生订阅非 active（status=$NS_STATUS）"
 res "SUB 订单 activated → 原生订阅 id=$NATIVE_SUB_ID status=$NS_STATUS"
 kv "amount_total" "$NS_AMT quota（= \$$(python3 -c "print($NS_AMT/500000)") 额度上限）"
-SPREAD="$(db "SELECT amount FROM agent_earning_logs WHERE source_id='$ORDER' AND source_type='tokenplan_spread';")"
-EARNED_AFTER="$(db "SELECT COALESCE(total_earned,0) FROM agent_wallets WHERE tenant_id=$TENANT_ID;")"
+SPREAD="$(db "SELECT CAST(CAST(amount_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) FROM agent_earning_logs WHERE source_id='$ORDER' AND source_type='tokenplan_spread';")"
+EARNED_AFTER="$(db "SELECT CAST(CAST(COALESCE(total_earned_units,0) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) FROM agent_wallets WHERE tenant_id=$TENANT_ID;")"
 [ -n "$SPREAD" ] || die "未见 tokenplan_spread 分润"
 res "代理获得 tokenplan_spread = ¥$SPREAD（零售价 − 代理成本价）"
 kv "代理 total_earned" "¥$EARNED_BEFORE → ¥$EARNED_AFTER"
@@ -231,24 +231,31 @@ WID="$(printf '%s' "$WD" | jget data.id)"
 res "提现申请已提交：id=$WID 金额 ¥$WITHDRAW_CNY status=$(printf '%s' "$WD" | jget data.status)"
 
 # ════════════════════════════════════════════════════════════════════════════
-# ⑦ 管理员审核通过（校验金额守恒）
+# ⑦ 管理员审核通过后标记已打款（校验金额守恒）
 # ════════════════════════════════════════════════════════════════════════════
-step 7 "管理员「$ADMIN_USER」审核通过提现 id=$WID（校验金额守恒）"
+step 7 "管理员「$ADMIN_USER」审核提现 id=$WID 并确认已打款（校验金额守恒）"
 ADMIN_ID="$(login "$ADMIN_USER" "$ADMIN_PASS" "$JAR_ADMIN")"
 APPR="$(capi POST "/api/admin/withdrawals/$WID/approve" "$JAR_ADMIN" "$ADMIN_ID" '{"remark":"demo approve"}')"
 assert_ok "$APPR" "审核通过"
-read -r W_AFTER F_AFTER T_AFTER <<<"$(db "SELECT withdrawable_balance, frozen_withdraw_amount, total_earned FROM agent_wallets WHERE tenant_id=$TENANT_ID;")"
-APPROVED_SUM="$(db "SELECT COALESCE(SUM(amount),0) FROM agent_withdrawals WHERE tenant_id=$TENANT_ID AND status='approved';")"
-res "提现 id=$WID 已通过（线下打款）"
+PAYOUT_REF="demo-$WID-$(date +%s)"
+PAID="$(capi POST "/api/admin/withdrawals/$WID/mark-paid" "$JAR_ADMIN" "$ADMIN_ID" "{\"payout_ref\":\"$PAYOUT_REF\"}")"
+assert_ok "$PAID" "标记已打款"
+read -r W_AFTER F_AFTER T_AFTER <<<"$(db "SELECT
+  CAST(CAST(withdrawable_balance_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)),
+  CAST(CAST(frozen_withdraw_amount_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)),
+  CAST(CAST(total_earned_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8))
+  FROM agent_wallets WHERE tenant_id=$TENANT_ID;")"
+PAID_SUM="$(db "SELECT CAST(CAST(COALESCE(SUM(amount_units),0) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) FROM agent_withdrawals WHERE tenant_id=$TENANT_ID AND status='paid';")"
+res "提现 id=$WID 已审核并标记已打款（凭证 $PAYOUT_REF）"
 kv "可提现 withdrawable" "¥$W_BEFORE → ¥$W_AFTER"
 kv "冻结中 frozen"       "¥$F_BEFORE → ¥$F_AFTER"
 kv "累计 total_earned"   "¥$T_AFTER（不变）"
-kv "Σ已审批提现"        "¥$APPROVED_SUM"
+kv "Σ已打款提现"        "¥$PAID_SUM"
 python3 -c "
-w,f,t,a = $W_AFTER, $F_AFTER, $T_AFTER, $APPROVED_SUM
-assert abs(t-(w+f+a)) < 1e-6, f'守恒失败：total_earned={t} != withdrawable+frozen+approved={w+f+a}'
+w,f,t,p = $W_AFTER, $F_AFTER, $T_AFTER, $PAID_SUM
+assert abs(t-(w+f+p)) < 1e-6, f'守恒失败：total_earned={t} != withdrawable+frozen+paid={w+f+p}'
 " || die "金额守恒校验失败"
-res "金额守恒成立：total_earned = withdrawable + frozen + Σapproved"
+res "金额守恒成立：total_earned = withdrawable + frozen + Σpaid"
 
 # ════════════════════════════════════════════════════════════════════════════
 # ⑧ 真实充值 $1 → quota +500000
@@ -277,7 +284,7 @@ res "quota 增量 = $DELTA（= \$$RECHARGE_USD × 500000，符合 \$1=500k quota
 printf '\n\033[1;32m══════ 演示全部 8 步通过 ══════\033[0m\n'
 kv "买家"     "$BUYER_USER (id=$BUYER_ID) @ 租户 $(printf '%s' "$CUR" | jget data.slug)"
 kv "套餐订单" "$ORDER（¥$AMT_CNY）→ 原生订阅 #$NATIVE_SUB_ID active"
-kv "代理分润" "tokenplan_spread ¥$SPREAD → 提现 ¥$WITHDRAW_CNY 已审批（守恒）"
+kv "代理分润" "tokenplan_spread ¥$SPREAD → 提现 ¥$WITHDRAW_CNY 已打款（守恒）"
 kv "/v1 计费" "billing_source=subscription（log #$LOG_ID, 扣 $LOG_QUOTA quota）"
 kv "充值"     "\$$RECHARGE_USD → quota +$DELTA"
 printf '\033[1;34m提示：跑对账请执行 deploy/ops/reconcile.sh\033[0m\n'

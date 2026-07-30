@@ -73,7 +73,11 @@ export function PayoutAccountDialog({
   }, [open, account])
 
   const invalid =
-    !accountNo.trim() || !name.trim() || (method === 'bank' && !bank.trim())
+    !accountNo.trim() ||
+    accountNo.trim().length > 128 ||
+    !name.trim() ||
+    name.trim().length > 64 ||
+    (method === 'bank' && (!bank.trim() || bank.trim().length > 128))
 
   const handleSubmit = async () => {
     if (invalid) {
@@ -130,8 +134,11 @@ export function PayoutAccountDialog({
 
         <div className='flex flex-col gap-4'>
           <div className='flex flex-col gap-2'>
-            <Label>{t('Payout Method', { defaultValue: '收款方式' })}</Label>
+            <Label id='payout-method-label'>
+              {t('Payout Method', { defaultValue: '收款方式' })}
+            </Label>
             <RadioGroup
+              aria-labelledby='payout-method-label'
               value={method}
               onValueChange={(value) => setMethod(value)}
               className='flex gap-4'
@@ -169,6 +176,7 @@ export function PayoutAccountDialog({
               id='payout-account-no'
               data-testid='payout-account-no'
               value={accountNo}
+              maxLength={128}
               onChange={(e) => setAccountNo(e.target.value)}
               placeholder={
                 method === 'bank' ? '6222 0000 0000 0000' : 'alice@example.com'
@@ -184,6 +192,7 @@ export function PayoutAccountDialog({
               id='payout-account-name'
               data-testid='payout-account-name'
               value={name}
+              maxLength={64}
               onChange={(e) => setName(e.target.value)}
               placeholder={t('Payee real name', {
                 defaultValue: '收款人真实姓名',
@@ -200,6 +209,7 @@ export function PayoutAccountDialog({
                 id='payout-account-bank'
                 data-testid='payout-account-bank'
                 value={bank}
+                maxLength={128}
                 onChange={(e) => setBank(e.target.value)}
                 placeholder={t('e.g. ICBC Beijing Branch', {
                   defaultValue: '如中国工商银行北京分行',

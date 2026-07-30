@@ -17,34 +17,51 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import type { PaginationState } from '@tanstack/react-table'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { DataTablePage, useDataTable } from '@/components/data-table'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { getAdminWithdrawals } from '../api'
 import { useWithdrawalsColumns } from './withdrawals-columns'
-import { useWithdrawals } from './withdrawals-provider'
 
 export function WithdrawalsTable() {
   const { t } = useTranslation()
+  const userId = useAuthStore((state) => state.auth.user?.id ?? null)
   const columns = useWithdrawalsColumns()
-  const { refreshTrigger } = useWithdrawals()
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['admin-withdrawals', refreshTrigger],
-    queryFn: async () => {
-      const result = await getAdminWithdrawals()
-      return result.data || []
-    },
-    placeholderData: (prev) => prev,
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 20,
   })
 
-  const rows = useMemo(() => data || [], [data])
+  const { data, isLoading } = useQuery({
+    queryKey: [
+      'admin-withdrawals',
+      userId,
+      pagination.pageIndex,
+      pagination.pageSize,
+    ],
+    queryFn: async () => {
+      const result = await getAdminWithdrawals(
+        pagination.pageIndex + 1,
+        pagination.pageSize
+      )
+      return result.data
+    },
+    enabled: userId !== null,
+  })
+
+  const rows = useMemo(() => data?.items || [], [data])
 
   const { table } = useDataTable({
     data: rows,
     columns,
+    totalCount: data?.total || 0,
+    pagination,
+    onPaginationChange: setPagination,
+    manualPagination: true,
     withFilteredRowModel: false,
     withFacetedRowModel: false,
   })

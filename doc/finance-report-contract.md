@@ -48,7 +48,7 @@ Asymmetry is intentional and must be preserved: success has `data` + NO `code`; 
 | `format` | string `csv\|pdf` | detail only | absent → JSON; bad value → `REPORT_FORMAT_INVALID` |
 
 `source_type` enum (FROZEN, `internal/agent/model.go:68-81`): `recharge_spread`, `consume_commission`, `tokenplan_spread`, `tokenplan_commission`, `manual_adjustment`.
-Withdrawal `status` enum (FROZEN, `model.go:152-159`): `pending`, `approved`, `rejected` (NO `withdrawn`/`frozen`/`paid` — those are wallet amounts, not statuses).
+Withdrawal `status` enum (FROZEN, `model.go:152-159`): `pending`, `approved`, `paid`, `rejected`. `approved` means approved but still frozen and awaiting the offline transfer; only `paid` means funds have left the wallet. `withdrawn`/`frozen` are report amounts, not statuses.
 
 ---
 
@@ -85,9 +85,9 @@ Withdrawal `status` enum (FROZEN, `model.go:152-159`): `pending`, `approved`, `r
     "calls": 4567, "tokens": 9876543
   },
   "withdrawals": {
-    "pending_cny": 100.00,   // SUM(agent_withdrawals.amount) status=pending  (== wallet frozen by invariant)
-    "frozen_cny": 100.00,    // SUM(agent_wallets.frozen_withdraw_amount)
-    "withdrawn_cny": 900.00, // SUM(agent_withdrawals.amount) status=approved  (paid out, gone)
+    "pending_cny": 100.00,   // SUM(agent_withdrawals.amount) status=pending
+    "frozen_cny": 100.00,    // SUM(agent_wallets.frozen_withdraw_amount), includes pending + approved
+    "withdrawn_cny": 900.00, // SUM(agent_withdrawals.amount) status=paid  (paid out, gone)
     "rejected_cny": 50.00
   },
   "exchange": { "quota_per_unit": 500000, "usd_exchange_rate": 7.3 }
@@ -176,20 +176,20 @@ Per-lens `items[]` shapes:
 
 ## 2. Data sources per lens
 
-All money columns persist as `decimal(20,8)` and cross Go interfaces as `float64`. Aggregation queries below DO NOT EXIST yet — every `SUM`/`GROUP BY` is greenfield (earnings-ledger, withdrawals, existing-stats all confirm only flat `ORDER BY created_at desc` list methods exist).
+Agent earnings, wallets, and withdrawals use signed `BIGINT` `*_units` columns at scale `1e-8` as the accounting source of truth. The original `decimal(20,8)` columns remain compatibility mirrors for rolling rollback; reports switch to units only after the transactional `money_units_v1` marker commits, sum integers first, reject NULL units, and convert to `float64` at the response boundary.
 
 ### Lens (a) — Agent earnings/commission by source + wallet balances → **CNY**
 - **Tables:** `agent_earning_logs` (`earningRow`, `internal/agent/gormrepo/gormrepo.go:58-70`) and `agent_wallets` (`walletRow`, gormrepo.go:44-54).
 - **Keying:** `tenant_id` (indexed `idx_agent_earnings_tenant`; `agent_wallets.tenant_id` is PK).
 - **Aggregation (by source):**
   ```sql
-  SELECT source_type, SUM(amount) AS amount_cny
+  SELECT source_type, SUM(amount_units) / 100000000 AS amount_cny
   FROM agent_earning_logs
   WHERE created_at BETWEEN :start_dt AND :end_dt   -- created_at is DATETIME; convert epoch→time.Unix
     /* agent: */ AND tenant_id = :tid
   GROUP BY source_type;
   ```
-- **Wallet balances:** `AgentService.GetWallet(tenantID)` (`internal/agent/service.go`) → `withdrawable_balance`, `frozen_withdraw_amount`, `total_earned`, `api_balance` (read-only). For admin platform total, `SUM` the columns across all `agent_wallets`. `GetWallet` returns a zero-value wallet (no error) when missing → report shows 0, not 404.
+- **Wallet balances:** `AgentService.GetWallet(tenantID)` (`internal/agent/service.go`) reads the four authoritative unit columns and converts once at the boundary. Admin totals sum unit columns before conversion. A missing wallet returns a zero-value wallet; a present row with invalid NULL units fails closed.
 - **Caveats:** `recharge_spread` bucket is always 0/empty (never written). `manual_adjustment.amount` may be NEGATIVE (model.go:105) → totals are not monotonic. `agent_wallets.total_earned` is a denormalized running Σ that should reconcile with `SUM(agent_earning_logs.amount)`.
 
 ### Lens (b) — Recharge/order paid/cost/spread per tenant → **CNY** (+ credited `amount_usd`)
@@ -248,15 +248,16 @@ No single table yields paid/cost/spread (recharge-orders: "CANNOT get a clean pe
 - **Tables:** `agent_withdrawals` (`withdrawalRow`, gormrepo.go:74-86, indexed `idx_agent_withdrawals_tenant`, `idx_agent_withdrawals_status`) and `agent_wallets.frozen_withdraw_amount`.
 - **Aggregation:**
   ```sql
-  SELECT status, SUM(amount) AS amount_cny
+  SELECT status, SUM(amount_units) / 100000000 AS amount_cny
   FROM agent_withdrawals
   WHERE created_at BETWEEN :s AND :e  /* agent: */ AND tenant_id=:tid
   GROUP BY status;
   ```
-- **Mapping (FROZEN, statuses are exactly pending/approved/rejected):**
-  - `pending_cny` = SUM(status=`pending`) — in-flight; equals `agent_wallets.frozen_withdraw_amount` by money-conservation invariant.
-  - `withdrawn_cny` = SUM(status=`approved`) — paid out offline, gone from system (do NOT add back to withdrawable).
-  - `frozen_cny` = `SUM(agent_wallets.frozen_withdraw_amount)` (== `pending_cny` by invariant; both exposed for reconciliation).
+- **Mapping (FROZEN, statuses are exactly pending/approved/paid/rejected):**
+  - `pending_cny` = SUM(status=`pending`) — awaiting review and still frozen.
+  - `approved_cny` is not a response field; approved withdrawals are awaiting the offline transfer and remain included in `frozen_cny`.
+  - `withdrawn_cny` = SUM(status=`paid`) — paid out offline, gone from the wallet (do NOT add back to withdrawable).
+  - `frozen_cny` = `SUM(agent_wallets.frozen_withdraw_amount)` (== SUM of `pending` + `approved` withdrawals by invariant; exposed for reconciliation).
   - `rejected_cny` = SUM(status=`rejected`).
 - **Keying:** `tenant_id`.
 
@@ -264,7 +265,7 @@ No single table yields paid/cost/spread (recharge-orders: "CANNOT get a clean pe
 
 ## 3. Money & time representation (ONE rule, applied everywhere)
 
-**Money on the wire = plain JSON number (`float64`), currency encoded by field-name suffix.** NOT integer cents, NOT decimal string. (earnings-ledger, mtwire-handlers, api-contract-doc all converge: existing DTOs pass `withdrawable_cny`/`amount_cny`/`used_usd` as raw float64; doc examples are bare numbers like `119`, `220`.)
+**Money on the wire = plain JSON number (`float64`), currency encoded by field-name suffix.** This wire compatibility does not change the database accounting source: agent money is summed as `BIGINT` units at scale `1e-8` and converted only at the response boundary. Withdrawal requests are additionally restricted to whole CNY cents because offline payout rails and the admin UI operate at two decimals.
 - `_cny` suffix → CNY ¥ (earnings, spread, recharge paid, withdrawals, consumption cost).
 - `_usd` suffix → USD (credited quota value, optional consumption cost in USD).
 - Raw quota/token/call counts → exact integers, fields `used_quota`, `tokens`, `calls`, `quota_per_unit`.

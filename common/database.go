@@ -41,4 +41,7 @@ func UsingLogDatabase(databaseType DatabaseType) bool {
 	return logDatabaseType == databaseType
 }
 
-var SQLitePath = "one-api.db?_busy_timeout=30000"
+// modernc/glebarez recognizes busy_timeout only through _pragma and uses
+// _txlock=immediate to avoid deferred read-to-write transaction upgrades
+// failing with SQLITE_BUSY under concurrent financial mutations.
+var SQLitePath = "one-api.db?_pragma=busy_timeout(30000)&_txlock=immediate"

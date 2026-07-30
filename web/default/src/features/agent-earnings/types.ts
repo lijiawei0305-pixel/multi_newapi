@@ -60,6 +60,13 @@ export interface MyWithdrawal {
   reviewed_at?: number | string
 }
 
+export interface MyWithdrawalPage {
+  items: MyWithdrawal[]
+  total: number
+  page: number
+  page_size: number
+}
+
 /**
  * Agent's payout (收款) destination. Backed by `/api/tenant/payout-account`.
  * `configured: false` means the agent has not set one yet — the withdrawal

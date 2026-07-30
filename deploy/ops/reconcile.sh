@@ -8,8 +8,8 @@
 #                   tokenplan_subscriptions；无 SUB 单激活两次（无原生订阅复用/重复台账）。
 #     3) 分润对账   agent_earning_logs 按 tenant 求和 == agent_wallets.total_earned；
 #                   idem_key 唯一（无重复分润）。
-#     4) 提现对账   Σ(pending 提现额)==frozen_withdraw_amount；
-#                   total_earned == withdrawable + frozen + Σ(approved 已打款)（金额守恒）。
+#     4) 提现对账   Σ(pending + approved)==frozen_withdraw_amount；
+#                   total_earned == withdrawable + frozen + Σ(paid)（金额守恒）。
 #     5) 越权/孤儿  无 agent_earning_logs / wallet / withdrawal 属于无 agent_profile 的 tenant。
 #
 #   退出码 = FAIL 项数（0=全绿，可接 cron/告警）。每个 check 的 SQL 返回「违规行」，
@@ -65,9 +65,13 @@ dbt "SELECT status, COUNT(*) n, ROUND(SUM(actual_paid),2) sum_cny FROM payment_o
 info "套餐订单 mt_subscription_orders（按状态；pending=下单未付，正常）"
 dbt "SELECT status, COUNT(*) n, ROUND(SUM(amount_cny),2) sum_cny FROM mt_subscription_orders GROUP BY status;"
 info "代理分润 agent_earning_logs（按来源）"
-dbt "SELECT source_type, COUNT(*) n, ROUND(SUM(amount),4) sum_cny FROM agent_earning_logs GROUP BY source_type;"
+dbt "SELECT source_type, COUNT(*) n,
+            CAST(CAST(SUM(amount_units) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS sum_cny
+       FROM agent_earning_logs GROUP BY source_type;"
 info "提现 agent_withdrawals（按状态）"
-dbt "SELECT status, COUNT(*) n, ROUND(SUM(amount),2) sum_cny FROM agent_withdrawals GROUP BY status;"
+dbt "SELECT status, COUNT(*) n,
+            CAST(CAST(SUM(amount_units) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS sum_cny
+       FROM agent_withdrawals GROUP BY status;"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 1) 充值对账（payment_orders）
@@ -108,39 +112,103 @@ check "2.5 mt_subscription_orders order_no 唯一" \
 # 3) 分润对账（agent_earning_logs ↔ agent_wallets）
 # ════════════════════════════════════════════════════════════════════════════
 section "3) 分润对账"
-# 钱包累计收益必须等于其全部收益明细之和（每条收益增 total_earned）。decimal 精确，留 1e-8 容差。
+# 钱包累计收益必须等于其全部收益明细之和（每条收益增 total_earned）。
+# *_units 是 1e-8 元定点整数权威列；直接按整数对账，避免 SQLite/客户端浮点容差掩盖差异。
 check "3.1 Σ(agent_earning_logs.amount) == agent_wallets.total_earned（按租户）" \
-  "SELECT w.tenant_id, w.total_earned, COALESCE(e.s,0) AS log_sum
+  "SELECT w.tenant_id,
+          CAST(CAST(w.total_earned_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS total_earned,
+          CAST(CAST(COALESCE(e.s,0) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS log_sum
      FROM agent_wallets w
-     LEFT JOIN (SELECT tenant_id, SUM(amount) s FROM agent_earning_logs GROUP BY tenant_id) e
+     LEFT JOIN (SELECT tenant_id, SUM(amount_units) s FROM agent_earning_logs GROUP BY tenant_id) e
             ON e.tenant_id=w.tenant_id
-    WHERE ABS(w.total_earned - COALESCE(e.s,0)) > 0.00000001;"
+    WHERE w.total_earned_units <> COALESCE(e.s,0);"
 # 有收益明细却无钱包 = 收益落到不存在的钱包（孤儿收益）。
 check "3.2 无收益明细落在不存在的钱包（每个有收益的租户都有钱包）" \
-  "SELECT e.tenant_id, ROUND(SUM(e.amount),8) sum_cny FROM agent_earning_logs e
+  "SELECT e.tenant_id,
+          CAST(CAST(SUM(e.amount_units) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS sum_cny
+     FROM agent_earning_logs e
     WHERE e.tenant_id NOT IN (SELECT tenant_id FROM agent_wallets) GROUP BY e.tenant_id;"
-# idem_key 是分润强幂等键（tenant\0source_type\0source_id），重复=重复分润。
-check "3.3 agent_earning_logs idem_key 唯一（无重复分润）" \
-  "SELECT idem_key, COUNT(*) c FROM agent_earning_logs GROUP BY idem_key HAVING c>1;"
+# idem_key_hash 是分润强幂等键（SHA256(tenant\0source_type\0source_id)）；
+# 使用纯小写 hex 规避 MySQL 默认排序规则与 PostgreSQL/SQLite 的大小写语义差异。
+check "3.3 agent_earning_logs 精确幂等哈希唯一（无重复分润）" \
+  "SELECT idem_key_hash, COUNT(*) c FROM agent_earning_logs GROUP BY idem_key_hash HAVING COUNT(*)>1;"
+check "3.4 agent_earning_logs 精确幂等哈希完整且正确" \
+  "SELECT id, tenant_id, source_type, source_id FROM agent_earning_logs
+    WHERE idem_key_hash IS NULL
+       OR BINARY idem_key_hash<>BINARY LOWER(SHA2(CONCAT(CAST(tenant_id AS CHAR),CHAR(0),source_type,CHAR(0),source_id),256));"
+# 兼容 decimal 列供旧报表读取，但不可偏离权威整数列；偏离说明存在绕过仓储的写入或迁移异常。
+check "3.5 agent_wallets 金额镜像与权威 units 一致" \
+  "SELECT tenant_id FROM agent_wallets
+    WHERE api_balance IS NULL OR api_balance_units IS NULL
+       OR withdrawable_balance IS NULL OR withdrawable_balance_units IS NULL
+       OR frozen_withdraw_amount IS NULL OR frozen_withdraw_amount_units IS NULL
+       OR total_earned IS NULL OR total_earned_units IS NULL
+       OR api_balance*100000000<>api_balance_units
+       OR withdrawable_balance*100000000<>withdrawable_balance_units
+       OR frozen_withdraw_amount*100000000<>frozen_withdraw_amount_units
+       OR total_earned*100000000<>total_earned_units;"
+check "3.6 agent_earning_logs 金额镜像与权威 units 一致" \
+  "SELECT id, tenant_id FROM agent_earning_logs
+    WHERE amount IS NULL OR amount_units IS NULL OR amount*100000000<>amount_units;"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 4) 提现对账（agent_withdrawals ↔ agent_wallets，金额守恒）
 # ════════════════════════════════════════════════════════════════════════════
 section "4) 提现对账"
-# 申请提现冻结可提现余额；pending 单总额必须等于钱包冻结额。
-check "4.1 Σ(pending 提现额) == agent_wallets.frozen_withdraw_amount（按租户）" \
-  "SELECT w.tenant_id, w.frozen_withdraw_amount, COALESCE(p.s,0) AS pending_sum
+# 申请提现冻结可提现余额；pending 待审核与 approved 待打款都仍占用冻结额。
+check "4.1 Σ(pending + approved 提现额) == agent_wallets.frozen_withdraw_amount（按租户）" \
+  "SELECT w.tenant_id,
+          CAST(CAST(w.frozen_withdraw_amount_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS frozen,
+          CAST(CAST(COALESCE(p.s,0) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS frozen_order_sum
      FROM agent_wallets w
-     LEFT JOIN (SELECT tenant_id, SUM(amount) s FROM agent_withdrawals WHERE status='pending' GROUP BY tenant_id) p
+     LEFT JOIN (SELECT tenant_id, SUM(amount_units) s FROM agent_withdrawals WHERE status IN ('pending','approved') GROUP BY tenant_id) p
             ON p.tenant_id=w.tenant_id
-    WHERE ABS(w.frozen_withdraw_amount - COALESCE(p.s,0)) > 0.00000001;"
-# 金额守恒：累计收益 = 可提现 + 冻结中 + 已审批打款。rejected 解冻退回，不计入。
-check "4.2 金额守恒 total_earned == withdrawable + frozen + Σ(approved 已打款)（按租户）" \
-  "SELECT w.tenant_id, w.total_earned, w.withdrawable_balance, w.frozen_withdraw_amount, COALESCE(a.s,0) AS approved_paid
+    WHERE w.frozen_withdraw_amount_units <> COALESCE(p.s,0);"
+# 金额守恒：累计收益 = 可提现 + 冻结中 + 已打款。rejected 已解冻退回，approved 仍在 frozen。
+check "4.2 金额守恒 total_earned == withdrawable + frozen + Σ(paid 已打款)（按租户）" \
+  "SELECT w.tenant_id,
+          CAST(CAST(w.total_earned_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS total_earned,
+          CAST(CAST(w.withdrawable_balance_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS withdrawable,
+          CAST(CAST(w.frozen_withdraw_amount_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS frozen,
+          CAST(CAST(COALESCE(a.s,0) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS paid_out
      FROM agent_wallets w
-     LEFT JOIN (SELECT tenant_id, SUM(amount) s FROM agent_withdrawals WHERE status='approved' GROUP BY tenant_id) a
+     LEFT JOIN (SELECT tenant_id, SUM(amount_units) s FROM agent_withdrawals WHERE status='paid' GROUP BY tenant_id) a
             ON a.tenant_id=w.tenant_id
-    WHERE ABS(w.total_earned - (w.withdrawable_balance + w.frozen_withdraw_amount + COALESCE(a.s,0))) > 0.00000001;"
+    WHERE w.total_earned_units <> (w.withdrawable_balance_units + w.frozen_withdraw_amount_units + COALESCE(a.s,0));"
+check "4.3 agent_withdrawals 金额镜像与权威 units 一致" \
+  "SELECT id, tenant_id FROM agent_withdrawals
+    WHERE amount IS NULL OR amount_units IS NULL OR amount*100000000<>amount_units;"
+check "4.4 提现状态与金额合法" \
+  "SELECT id, tenant_id, status, amount_units FROM agent_withdrawals
+    WHERE status NOT IN ('pending','approved','paid','rejected') OR amount_units<=0
+       OR (status='paid' AND (payout_ref='' OR paid_at IS NULL))
+       OR (status<>'paid' AND (payout_ref<>'' OR paid_at IS NOT NULL));"
+check "4.5 钱包冻结提现余额不为负" \
+  "SELECT tenant_id, frozen_withdraw_amount_units FROM agent_wallets
+    WHERE frozen_withdraw_amount_units<0;"
+check "4.6 每笔提现都归属存在的钱包" \
+  "SELECT wd.id, wd.tenant_id FROM agent_withdrawals wd
+    LEFT JOIN agent_wallets w ON w.tenant_id=wd.tenant_id
+   WHERE w.tenant_id IS NULL;"
+check "4.7 非空打款凭证精确哈希不重复" \
+  "SELECT payout_ref_hash, COUNT(*) AS duplicate_count FROM agent_withdrawals
+    WHERE payout_ref<>'' GROUP BY payout_ref_hash HAVING COUNT(*)>1;"
+check "4.8 提现幂等键/打款凭证哈希完整且逐字节一致" \
+  "SELECT id, tenant_id FROM agent_withdrawals
+    WHERE (request_key IS NULL AND request_key_hash IS NOT NULL)
+       OR (request_key IS NOT NULL AND (BINARY request_key<>BINARY TRIM(request_key) OR request_key_hash IS NULL OR BINARY request_key_hash<>BINARY LOWER(SHA2(request_key,256))))
+       OR (payout_ref='' AND payout_ref_hash IS NOT NULL)
+       OR (payout_ref<>'' AND (BINARY payout_ref<>BINARY TRIM(payout_ref) OR payout_ref_hash IS NULL OR BINARY payout_ref_hash<>BINARY LOWER(SHA2(payout_ref,256))));"
+check "4.9 打款凭证 claim 与提现单双向一致" \
+  "SELECT wd.id, wd.payout_ref FROM agent_withdrawals wd
+     LEFT JOIN agent_payout_ref_claims_v3 c ON c.payout_ref_hash=wd.payout_ref_hash
+    WHERE wd.payout_ref<>'' AND (c.withdrawal_id IS NULL OR c.withdrawal_id<>wd.id OR BINARY c.payout_ref<>BINARY wd.payout_ref)
+    UNION ALL
+   SELECT c.withdrawal_id, c.payout_ref FROM agent_payout_ref_claims_v3 c
+     LEFT JOIN agent_withdrawals wd ON wd.id=c.withdrawal_id
+    WHERE wd.id IS NULL OR wd.status<>'paid' OR wd.paid_at IS NULL OR wd.payout_ref_hash IS NULL
+       OR BINARY wd.payout_ref_hash<>BINARY c.payout_ref_hash OR BINARY c.payout_ref<>BINARY wd.payout_ref
+       OR BINARY c.payout_ref_hash<>BINARY LOWER(SHA2(c.payout_ref,256));"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 5) 越权 / 孤儿（agent_* 行必须归属一个有 agent_profile 的租户）
@@ -158,13 +226,13 @@ check "5.3 无提现单属于无 agent_profile 的租户" \
 # ════════════════════════════════════════════════════════════════════════════
 section "代理钱包台账（守恒视图，residual 应为 0）"
 dbt "SELECT w.tenant_id,
-            w.total_earned,
-            w.withdrawable_balance      AS withdrawable,
-            w.frozen_withdraw_amount    AS frozen,
-            COALESCE(a.s,0)             AS approved_paid,
-            ROUND(w.total_earned-(w.withdrawable_balance+w.frozen_withdraw_amount+COALESCE(a.s,0)),8) AS residual
+            CAST(CAST(w.total_earned_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS total_earned,
+            CAST(CAST(w.withdrawable_balance_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS withdrawable,
+            CAST(CAST(w.frozen_withdraw_amount_units AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS frozen,
+            CAST(CAST(COALESCE(a.s,0) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS paid_out,
+            CAST(CAST(w.total_earned_units-(w.withdrawable_balance_units+w.frozen_withdraw_amount_units+COALESCE(a.s,0)) AS DECIMAL(28,8))/100000000 AS DECIMAL(28,8)) AS residual
        FROM agent_wallets w
-       LEFT JOIN (SELECT tenant_id,SUM(amount) s FROM agent_withdrawals WHERE status='approved' GROUP BY tenant_id) a
+       LEFT JOIN (SELECT tenant_id,SUM(amount_units) s FROM agent_withdrawals WHERE status='paid' GROUP BY tenant_id) a
               ON a.tenant_id=w.tenant_id;"
 
 # ── 汇总 ─────────────────────────────────────────────────────────────────────

@@ -2,9 +2,15 @@ package agent
 
 import (
 	"context"
+	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // seedWithdrawable 通过收益入账为 tenant 注入可提现余额 + 一个默认收款账户（申请提现的前置条件，
@@ -67,10 +73,72 @@ func TestRequest_InsufficientRejected(t *testing.T) {
 func TestRequest_NonPositiveRejected(t *testing.T) {
 	ctx := context.Background()
 	svc := NewWithdrawalService(seedWithdrawable(t, 1, 100))
-	for _, amt := range []float64{0, -10} {
+	for _, amt := range []float64{0, -10, math.NaN(), math.Inf(1), math.Inf(-1)} {
 		_, err := svc.Request(ctx, WithdrawInput{TenantID: 1, Amount: amt})
 		assertCode(t, err, CodeWithdrawInsufficient)
 	}
+}
+
+func TestRequest_SubCentAmountRejectedWithoutFreezing(t *testing.T) {
+	ctx := context.Background()
+	repo := seedWithdrawable(t, 1, 100)
+	svc := NewWithdrawalService(repo)
+
+	_, err := svc.Request(ctx, WithdrawInput{TenantID: 1, Amount: 10.999})
+	assertCode(t, err, CodeWithdrawAmountInvalid)
+
+	wallet, walletErr := repo.GetWallet(ctx, 1)
+	require.NoError(t, walletErr)
+	assert.Equal(t, float64(100), wallet.WithdrawableBalance)
+	assert.Zero(t, wallet.FrozenWithdrawAmount)
+
+	_, err = svc.Request(ctx, WithdrawInput{TenantID: 1, Amount: 0.1 + 0.7})
+	require.NoError(t, err, "normal binary floating-point representation of a cent amount must remain valid")
+}
+
+func TestRequest_IdempotencyKeyPreventsDuplicateFreeze(t *testing.T) {
+	ctx := context.Background()
+	repo := seedWithdrawable(t, 1, 100)
+	svc := NewWithdrawalService(repo)
+	input := WithdrawInput{
+		TenantID: 1, UserID: 5, Amount: 30, Remark: "cashout", RequestKey: "withdraw-request-1",
+	}
+
+	first, err := svc.Request(ctx, input)
+	require.NoError(t, err)
+	replay, err := svc.Request(ctx, input)
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, replay.ID)
+	assert.Equal(t, first.CreatedAt, replay.CreatedAt)
+
+	wallet, err := repo.GetWallet(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, float64(70), wallet.WithdrawableBalance)
+	assert.Equal(t, float64(30), wallet.FrozenWithdrawAmount)
+
+	conflicting := input
+	conflicting.Amount = 40
+	_, err = svc.Request(ctx, conflicting)
+	assertCode(t, err, CodeWithdrawIdempotencyConflict)
+	wallet, err = repo.GetWallet(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, float64(70), wallet.WithdrawableBalance)
+	assert.Equal(t, float64(30), wallet.FrozenWithdrawAmount)
+}
+
+func TestRequest_IdempotencyKeyLengthIsBounded(t *testing.T) {
+	ctx := context.Background()
+	repo := seedWithdrawable(t, 1, 100)
+	svc := NewWithdrawalService(repo)
+
+	_, err := svc.Request(ctx, WithdrawInput{
+		TenantID: 1, Amount: 30, RequestKey: strings.Repeat("k", MaxWithdrawalRequestKeyLength+1),
+	})
+	assertCode(t, err, CodeWithdrawRequestKeyInvalid)
+	wallet, walletErr := repo.GetWallet(ctx, 1)
+	require.NoError(t, walletErr)
+	assert.Equal(t, float64(100), wallet.WithdrawableBalance)
+	assert.Zero(t, wallet.FrozenWithdrawAmount)
 }
 
 // TestReview_ApproveMovesNoMoney 验证提现闭环补强 #2 的钱流调整：通过(approve)只翻状态记决策，
@@ -275,6 +343,114 @@ func TestMarkPaid_NotFound(t *testing.T) {
 	ctx := context.Background()
 	svc := NewWithdrawalService(NewMemRepo())
 	assertCode(t, svc.MarkPaid(ctx, 404, "ref"), CodeWithdrawNotFound)
+}
+
+func TestMemRepoWithdrawalMutationsFailClosedOnCorruptFrozenBalance(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("approve and reject", func(t *testing.T) {
+		for _, approve := range []bool{true, false} {
+			repo := seedWithdrawable(t, 1, 100)
+			svc := NewWithdrawalService(repo)
+			withdrawal, err := svc.Request(ctx, WithdrawInput{TenantID: 1, Amount: 40})
+			require.NoError(t, err)
+			repo.mu.Lock()
+			repo.wallets[1].FrozenWithdrawAmount = 10
+			repo.mu.Unlock()
+
+			err = svc.Review(ctx, withdrawal.ID, approve, "review")
+			assertCode(t, err, CodeWalletInvariant)
+			stored, getErr := repo.GetWithdrawal(ctx, withdrawal.ID)
+			require.NoError(t, getErr)
+			assert.Equal(t, WithdrawPending, stored.Status)
+			wallet, getErr := repo.GetWallet(ctx, 1)
+			require.NoError(t, getErr)
+			assert.Equal(t, float64(10), wallet.FrozenWithdrawAmount)
+		}
+	})
+
+	t.Run("mark paid", func(t *testing.T) {
+		repo := seedWithdrawable(t, 1, 100)
+		svc := NewWithdrawalService(repo)
+		withdrawal, err := svc.Request(ctx, WithdrawInput{TenantID: 1, Amount: 40})
+		require.NoError(t, err)
+		require.NoError(t, svc.Review(ctx, withdrawal.ID, true, "approved"))
+		repo.mu.Lock()
+		repo.wallets[1].FrozenWithdrawAmount = 10
+		repo.mu.Unlock()
+
+		err = svc.MarkPaid(ctx, withdrawal.ID, "receipt-corrupt")
+		assertCode(t, err, CodeWalletInvariant)
+		stored, getErr := repo.GetWithdrawal(ctx, withdrawal.ID)
+		require.NoError(t, getErr)
+		assert.Equal(t, WithdrawApproved, stored.Status)
+		assert.Empty(t, stored.PayoutRef)
+	})
+}
+
+func TestMemRepoPayoutReferenceCanBelongToOnlyOneWithdrawal(t *testing.T) {
+	ctx := context.Background()
+	repo := seedWithdrawable(t, 1, 100)
+	svc := NewWithdrawalService(repo)
+	first, err := svc.Request(ctx, WithdrawInput{TenantID: 1, Amount: 30})
+	require.NoError(t, err)
+	second, err := svc.Request(ctx, WithdrawInput{TenantID: 1, Amount: 20})
+	require.NoError(t, err)
+	require.NoError(t, svc.Review(ctx, first.ID, true, "approved"))
+	require.NoError(t, svc.Review(ctx, second.ID, true, "approved"))
+	require.NoError(t, svc.MarkPaid(ctx, first.ID, "shared-receipt"))
+	assertCode(t, svc.MarkPaid(ctx, second.ID, "shared-receipt"), CodePayoutRefDuplicate)
+
+	stored, err := repo.GetWithdrawal(ctx, second.ID)
+	require.NoError(t, err)
+	assert.Equal(t, WithdrawApproved, stored.Status)
+	assert.Empty(t, stored.PayoutRef)
+	wallet, err := repo.GetWallet(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, float64(20), wallet.FrozenWithdrawAmount)
+}
+
+func TestWithdrawalTextFieldsAreBoundedAndCanonical(t *testing.T) {
+	ctx := context.Background()
+	repo := seedWithdrawable(t, 1, 100)
+	svc := NewWithdrawalService(repo)
+
+	_, err := svc.Request(ctx, WithdrawInput{
+		TenantID: 1,
+		Amount:   10,
+		Remark:   strings.Repeat("申", MaxWithdrawalRemarkLength+1),
+	})
+	require.Error(t, err)
+	assert.Equal(t, CodeWithdrawalRemarkInvalid, apperr.CodeOf(err))
+	wallet, getErr := repo.GetWallet(ctx, 1)
+	require.NoError(t, getErr)
+	assert.Equal(t, float64(100), wallet.WithdrawableBalance)
+	assert.Zero(t, wallet.FrozenWithdrawAmount)
+
+	wd, err := svc.Request(ctx, WithdrawInput{TenantID: 1, Amount: 40})
+	require.NoError(t, err)
+	err = svc.Review(ctx, wd.ID, true, strings.Repeat("审", MaxWithdrawalRemarkLength+1))
+	require.Error(t, err)
+	assert.Equal(t, CodeWithdrawalRemarkInvalid, apperr.CodeOf(err))
+	unchanged, getErr := repo.GetWithdrawal(ctx, wd.ID)
+	require.NoError(t, getErr)
+	assert.Equal(t, WithdrawPending, unchanged.Status)
+
+	require.NoError(t, svc.Review(ctx, wd.ID, true, "  approved  "))
+	err = svc.MarkPaid(ctx, wd.ID, strings.Repeat("凭", MaxPayoutRefLength+1))
+	require.Error(t, err)
+	assert.Equal(t, CodePayoutRefInvalid, apperr.CodeOf(err))
+	unchanged, getErr = repo.GetWithdrawal(ctx, wd.ID)
+	require.NoError(t, getErr)
+	assert.Equal(t, WithdrawApproved, unchanged.Status)
+	wallet, getErr = repo.GetWallet(ctx, 1)
+	require.NoError(t, getErr)
+	assert.Equal(t, float64(40), wallet.FrozenWithdrawAmount)
+
+	require.NoError(t, svc.MarkPaid(ctx, wd.ID, "  receipt-42  "))
+	paid, getErr := repo.GetWithdrawal(ctx, wd.ID)
+	require.NoError(t, getErr)
+	assert.Equal(t, "receipt-42", paid.PayoutRef)
 }
 
 // TestRequest_ConcurrentNoOverdraw 验证 -race 下并发申请不击穿可提现余额，且金额守恒。

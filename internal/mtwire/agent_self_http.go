@@ -59,14 +59,15 @@ func (a *App) HandleAgentRequestWithdrawal(c *gin.Context) {
 	var body struct {
 		AmountCNY float64 `json:"amount_cny"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
+	if err := decodeOptionalJSONObject(c, &body, agentFinancialRequestBodyLimit); err != nil {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
 	wd, err := a.Withdrawals.Request(reqCtx(c), agent.WithdrawInput{
-		TenantID: tenantID,
-		UserID:   int64(c.GetInt("id")),
-		Amount:   body.AmountCNY,
+		TenantID:   tenantID,
+		UserID:     int64(c.GetInt("id")),
+		Amount:     body.AmountCNY,
+		RequestKey: c.GetHeader("Idempotency-Key"),
 	})
 	if err != nil {
 		respondErr(c, err) // WITHDRAW_INSUFFICIENT / PAYOUT_ACCOUNT_REQUIRED
@@ -83,16 +84,29 @@ func (a *App) HandleAgentListWithdrawals(c *gin.Context) {
 		return
 	}
 	ctx := reqCtx(c)
-	rows, err := a.AgentRepo.ListWithdrawalsByTenant(ctx, tenantID)
+	page, pageSize := parseWithdrawalPaging(c)
+	paged := withdrawalPagingRequested(c)
+	if !paged {
+		rows, err := a.AgentRepo.ListWithdrawalsByTenant(ctx, tenantID)
+		if err != nil {
+			respondErr(c, err)
+			return
+		}
+		respondOK(c, a.withdrawalOuts(ctx, rows))
+		return
+	}
+	rows, total, err := a.AgentRepo.ListWithdrawalsByTenantPage(ctx, tenantID, page, pageSize)
 	if err != nil {
 		respondErr(c, err)
 		return
 	}
-	out := make([]withdrawalOut, 0, len(rows))
-	for _, w := range rows {
-		out = append(out, a.toWithdrawalOut(ctx, w))
-	}
-	respondOK(c, out)
+	items := a.withdrawalOuts(ctx, rows)
+	respondOK(c, withdrawalPageOut{
+		Items:    items,
+		Total:    total,
+		Page:     page,
+		PageSize: pageSize,
+	})
 }
 
 // HandleAgentListEarnings GET /api/tenant/earnings —— 本代理的收益台账（按时间倒序）。
@@ -157,7 +171,7 @@ func (a *App) HandleAgentSetPayoutAccount(c *gin.Context) {
 		return
 	}
 	var in payoutAccountIn
-	if err := c.ShouldBindJSON(&in); err != nil {
+	if err := decodeOptionalJSONObject(c, &in, agentFinancialRequestBodyLimit); err != nil {
 		respondErr(c, errAgentInputInvalid)
 		return
 	}
@@ -166,7 +180,7 @@ func (a *App) HandleAgentSetPayoutAccount(c *gin.Context) {
 		Account: in.PayoutAccount,
 		Name:    in.PayoutName,
 		Bank:    in.PayoutBank,
-	}
+	}.Normalized()
 	if err := a.AgentService.SetPayoutAccount(reqCtx(c), tenantID, p); err != nil {
 		respondErr(c, err) // PAYOUT_ACCOUNT_INVALID
 		return

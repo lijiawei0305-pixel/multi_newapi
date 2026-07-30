@@ -21,7 +21,7 @@ import {
   QueryClient,
   QueryClientProvider,
 } from '@tanstack/react-query'
-import { RouterProvider, createRouter } from '@tanstack/react-router'
+import { createRouter } from '@tanstack/react-router'
 import { AxiosError } from 'axios'
 import i18next from 'i18next'
 import { StrictMode } from 'react'
@@ -29,6 +29,7 @@ import ReactDOM from 'react-dom/client'
 import { toast } from 'sonner'
 
 import { getStatus } from '@/lib/api'
+import { bindAuthQueryCacheIsolation } from '@/lib/auth-query-cache'
 import { installBuildMetadata } from '@/lib/build-metadata'
 import { applySiteBranding } from '@/lib/dom-utils'
 import '@/lib/dayjs'
@@ -36,6 +37,7 @@ import { initializeFrontendCache } from '@/lib/frontend-cache'
 import { handleServerError } from '@/lib/handle-server-error'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { AuthScopedRouter } from './components/auth-scoped-router'
 import { DirectionProvider } from './context/direction-provider'
 import { FontProvider } from './context/font-provider'
 import { ThemeProvider } from './context/theme-provider'
@@ -99,6 +101,10 @@ const queryClient = new QueryClient({
     },
   }),
 })
+
+// Bind once at app initialization. Every authenticated identity transition
+// gets a fresh query cache, including session-expiry re-login and OAuth/2FA.
+bindAuthQueryCacheIsolation(queryClient)
 
 // Create a new router instance
 const router = createRouter({
@@ -166,7 +172,7 @@ if (!rootElement.innerHTML) {
         <ThemeProvider>
           <FontProvider>
             <DirectionProvider>
-              <RouterProvider router={router} />
+              <AuthScopedRouter router={router} />
             </DirectionProvider>
           </FontProvider>
         </ThemeProvider>
