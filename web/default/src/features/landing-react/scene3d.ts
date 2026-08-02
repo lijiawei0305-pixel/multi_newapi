@@ -47,6 +47,7 @@ import i18n from '@/i18n/config'
 import { approach, makeGlowTexture } from './scene3d-assets'
 import { LOGOS, MODELS, ORBITS } from './scene3d-config'
 import { nextSelection } from './scene3d-interaction'
+import { detectRenderQuality } from './scene3d-quality'
 
 const DATA_URL = '/lp-assets/dengpao_points.bin'
 const RENDER_H = 940 // 渲染缓冲高度固定(bloom 归一化一致);宽 = 高 × 盒子宽高比
@@ -152,9 +153,18 @@ export async function initScene3d(
   const f = new Float32Array(buf)
   if (f.length !== 240000) throw new Error(`dengpao 数据长度异常: ${f.length}`)
 
+  // ---- 画质档位（肉眼难辨：DPR 分档 + half-res bloom + 中低档关 antialias）----
+  const quality = detectRenderQuality()
+
   // ---- 渲染器 / 场景 / 相机 ----
-  const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true })
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+  // 粒子加算为主，MSAA 收益有限；中低档关 antialias 几乎无观感差、省 fill-rate。
+  const renderer = new WebGLRenderer({
+    canvas,
+    antialias: quality.antialias,
+    alpha: true,
+    powerPreference: 'high-performance',
+  })
+  renderer.setPixelRatio(quality.pixelRatio)
   renderer.toneMapping = ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.0
   renderer.setClearColor(0x000000, 0)
@@ -389,10 +399,12 @@ export async function initScene3d(
   const _cw = new Vector3()
 
   // ---- 后处理 ----
+  // Bloom 初值用 half-res；layoutSize 里每次 setSize 后再压半，避免 composer 覆写全分辨率。
+  const bloomRes = Math.max(1, Math.round(RENDER_H * quality.bloomScale))
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
   const bloom = new UnrealBloomPass(
-    new Vector2(RENDER_H, RENDER_H),
+    new Vector2(bloomRes, bloomRes),
     0.45,
     0.42,
     0.9
@@ -402,6 +414,8 @@ export async function initScene3d(
   composer.addPass(new ShaderPass(AlphaFromLumaShader))
 
   document.body.classList.add('webgl3d')
+  // 调试：控制台可看当前档位（不影响画面）
+  ;(window as any).__scene3dQuality = quality
 
   // ---- 尺寸:缓冲高固定 RENDER_H,宽随盒子宽高比;CSS 用 100% 拉伸(不失真因宽高比一致)----
   function layoutSize() {
@@ -411,9 +425,15 @@ export async function initScene3d(
     const aspect = Math.min(2.2, Math.max(0.6, bw / bh))
     const H = RENDER_H,
       W = Math.round(H * aspect)
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+    renderer.setPixelRatio(quality.pixelRatio)
     renderer.setSize(W, H, false)
     composer.setSize(W, H)
+    // half-res bloom：内部模糊缓冲为画布一半，光晕形状/强度参数不变，肉眼难辨
+    if (quality.bloomScale < 1) {
+      const bwBloom = Math.max(1, Math.round(W * quality.bloomScale))
+      const bhBloom = Math.max(1, Math.round(H * quality.bloomScale))
+      bloom.setSize(bwBloom, bhBloom)
+    }
     camera.aspect = aspect
     camera.updateProjectionMatrix()
     if (PRM) renderTick(FROZEN_T, 0.016)
@@ -727,6 +747,7 @@ export async function initScene3d(
     }
     document.body.classList.remove('webgl3d')
     delete (window as any).__scene3d
+    delete (window as any).__scene3dQuality
     ;(window as any).__scene3dActive = false
   }
 }
