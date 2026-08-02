@@ -97,6 +97,21 @@ export function LandingReact() {
     }
   }, [])
 
+  // Phase 3：尽早预取粒子点云（与 scene3d fetch 同 URL，走浏览器 HTTP 缓存；零观感）
+  useEffect(() => {
+    const href = '/lp-assets/dengpao_points.bin'
+    if (document.querySelector(`link[data-wd-preload="${href}"]`)) return
+    const link = document.createElement('link')
+    link.rel = 'preload'
+    link.as = 'fetch'
+    link.href = href
+    link.setAttribute('data-wd-preload', href)
+    document.head.appendChild(link)
+    return () => {
+      link.remove()
+    }
+  }, [])
+
   return (
     <div className='wd-landing-root'>
       {/* 挂载时注入样式、卸载即移除（不永久污染全站） */}

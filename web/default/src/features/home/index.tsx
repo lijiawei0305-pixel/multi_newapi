@@ -37,6 +37,27 @@ const LandingReact = lazy(() =>
   }))
 )
 
+function MainSiteLanding({ loadingLabel }: { loadingLabel: string }) {
+  // 不套 PublicLayout：落地页自带顶栏/客服/语言，且需要整屏深空背景。
+  // 但仍挂原生 <Footer />（须在 .wd-landing-root 外 + .dark，见历史注释）。
+  return (
+    <>
+      <Suspense
+        fallback={
+          <main className='flex min-h-screen items-center justify-center bg-[#061127] text-white'>
+            {loadingLabel}
+          </main>
+        }
+      >
+        <LandingReact />
+      </Suspense>
+      <div className='dark relative z-20 bg-[#061127]'>
+        <Footer className='border-transparent' />
+      </div>
+    </>
+  )
+}
+
 export function Home() {
   const { t } = useTranslation()
   const { auth } = useAuthStore()
@@ -51,53 +72,21 @@ export function Home() {
     retry: false,
   })
 
-  if (!isLoaded || isTenantLoading) {
+  // Phase 4：租户解析完成后，主站且无自定义首页内容时可立即挂落地页，
+  // 不必再等 HomePageContent 网络往返（content 已同步读 localStorage；空=默认落地页）。
+  if (isTenantLoading) {
     return (
-      <PublicLayout showMainContainer={false}>
-        <main className='flex min-h-screen items-center justify-center'>
-          <div className='text-muted-foreground'>{t('Loading...')}</div>
-        </main>
-      </PublicLayout>
+      <main className='flex min-h-screen items-center justify-center bg-[#061127] text-white/80'>
+        {t('Loading...')}
+      </main>
     )
   }
 
   // 主站默认首页 = WeDream 落地页（React 组件，见 features/landing-react）。
-  // 曾是 iframe 内嵌 nginx 静态的 /landing/index.html（2MB 单文件），2026-07-13 换成 React：
-  // 文案接官方 i18n、与平台同一套构建、可走路由跳转。nginx 的 /landing/ 暂留作回滚兜底。
-  // 管理员显式配置的自定义首页(HomePageContent)仍优先；代理站(kind==='tenant')跳过此块，
-  // 走下方原生 React 段落，保留其原有首页。
+  // 管理员显式配置的自定义首页(HomePageContent)仍优先；代理站(kind==='tenant')跳过此块。
   const isMainSite = resolution?.kind !== 'tenant'
-  if (isMainSite && !content) {
-    // 不套 PublicLayout：落地页自带顶栏/客服/语言，且需要整屏深空背景。
-    // 但仍挂原生 <Footer />，以保留后台「系统设置 → 站点与品牌」配的页脚 HTML、
-    // 隐私政策 / 用户协议链接（Footer 自己读 useSystemConfig()/useStatus()）。
-    // 两个约束：
-    //  1) Footer 必须放在 .wd-landing-root **外面** —— 落地页的 <style> 是无 layer 注入的，
-    //     其中 `.wd-landing-root * { margin:0; padding:0 }` 会盖过 Tailwind 的 @layer utilities，
-    //     放进去会把 Footer 的 px-6/py-5 全清零。
-    //  2) 强制 .dark —— 落地页恒为深空黑底，而 Footer 用平台主题色；浅色主题下
-    //     text-muted-foreground 是深灰，在黑底上看不见。z-20 是为了压过落地页的 #vignette(z:12)。
-    return (
-      <>
-        <Suspense
-          fallback={
-            <main className='flex min-h-screen items-center justify-center bg-[#061127] text-white'>
-              {t('Loading...')}
-            </main>
-          }
-        >
-          <LandingReact />
-        </Suspense>
-        {/* 页脚接在落地页深空渐变之后：给 wrapper 填渐变的收尾色 #061127，与上方场景同色无缝衔接，
-            同时盖住浅色主题下透出的白色 body 背景（否则页面最底部会出现一条白带）。
-            Footer 自带的 border-t 是一道微弱白线，在纯色底上会成接缝，故传 border-transparent 消除。 */}
-        <div className='dark relative z-20 bg-[#061127]'>
-          <Footer className='border-transparent' />
-        </div>
-      </>
-    )
-  }
 
+  // 有缓存/已加载的自定义内容：优先渲染（不必等网络 isLoaded）
   if (content) {
     if (contentUrl) {
       return (
@@ -122,6 +111,22 @@ export function Home() {
             className='custom-home-content'
           />
         </div>
+      </PublicLayout>
+    )
+  }
+
+  // 主站且无自定义内容：立即落地页（不等 HomePageContent 网络）
+  if (isMainSite) {
+    return <MainSiteLanding loadingLabel={t('Loading...')} />
+  }
+
+  // 代理站：等首页配置拉取完成后再画原生段落，避免空内容闪一下
+  if (!isLoaded) {
+    return (
+      <PublicLayout showMainContainer={false}>
+        <main className='flex min-h-screen items-center justify-center'>
+          <div className='text-muted-foreground'>{t('Loading...')}</div>
+        </main>
       </PublicLayout>
     )
   }

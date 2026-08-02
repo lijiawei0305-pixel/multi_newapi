@@ -74,6 +74,14 @@ export const LANDING_CSS = `
   @keyframes stardustTwinkle { 0%,100%{opacity:.5;} 50%{opacity:.3;} }
   @media (prefers-reduced-motion: reduce){ #stardust, #stardust2 { animation:none; } }
 
+  /* Phase 2 零观感：滚出 Hero / 后台 tab 时仅暂停动画，不改 keyframes / 透明度 / 模糊 */
+  .wd-landing-root.wd-landing-bg-paused #aurora,
+  .wd-landing-root.wd-landing-bg-paused #stardust,
+  .wd-landing-root.wd-landing-bg-paused #stardust2,
+  .wd-landing-root.wd-landing-bg-paused .p {
+    animation-play-state: paused !important;
+  }
+
   .p {
     position:absolute; z-index:1; pointer-events:none; border-radius:50%;
     will-change:transform,opacity; opacity:var(--o1);

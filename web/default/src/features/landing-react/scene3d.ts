@@ -533,20 +533,66 @@ export async function initScene3d(
   }
 
   // ---- 动画 ----
+  // Phase 1 零观感性能：不可见 / 后台 tab 时真正 cancelAnimationFrame，禁止空转 rAF。
+  // Phase 2：同步给 .wd-landing-root 打 wd-landing-bg-paused，暂停 CSS 背景动画。
   let last = 0,
     heroVisible = true,
+    pageVisible = typeof document !== 'undefined' ? !document.hidden : true,
     rafId = 0
+  const landingRoot = document.querySelector('.wd-landing-root')
   const stageEl = document.querySelector('.hero-stage')
+
+  function shouldRunLoop() {
+    return !PRM && heroVisible && pageVisible
+  }
+
+  function updateBgPauseClass() {
+    if (!landingRoot) return
+    // 首屏外或后台：暂停 aurora/stardust 等 CSS 动画（play-state only，不改 keyframes）
+    landingRoot.classList.toggle(
+      'wd-landing-bg-paused',
+      !heroVisible || !pageVisible
+    )
+  }
+
+  function stopLoop() {
+    if (rafId) {
+      cancelAnimationFrame(rafId)
+      rafId = 0
+    }
+  }
+
+  function startLoop() {
+    if (!shouldRunLoop() || rafId) return
+    // 避免暂停后首帧 dt 爆炸
+    last = performance.now() / 1000
+    rafId = requestAnimationFrame(loop)
+  }
+
+  function syncLoop() {
+    updateBgPauseClass()
+    if (shouldRunLoop()) startLoop()
+    else stopLoop()
+  }
+
   let io: IntersectionObserver | null = null
   if (stageEl && 'IntersectionObserver' in window) {
     io = new IntersectionObserver(
       (es) => {
-        heroVisible = es[0].isIntersecting
+        heroVisible = es[0]?.isIntersecting ?? false
+        syncLoop()
       },
       { threshold: 0 }
     )
     io.observe(stageEl)
   }
+
+  function onVisibilityChange() {
+    pageVisible = !document.hidden
+    syncLoop()
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange)
+
   function renderTick(t: number, dt: number) {
     const u = particleMaterial.uniforms
     u.uTime.value = t
@@ -638,8 +684,9 @@ export async function initScene3d(
     speedFactor = approach(speedFactor, selected ? 0 : 1, 3, dt)
   }
   function loop(nowMs: number) {
+    rafId = 0
+    if (!shouldRunLoop()) return
     rafId = requestAnimationFrame(loop)
-    if (!heroVisible) return
     const t = nowMs / 1000
     renderTick(t, Math.min(Math.max(t - last, 0.001), 0.05))
     last = t
@@ -658,17 +705,20 @@ export async function initScene3d(
   }
 
   layoutSize()
+  updateBgPauseClass()
   if (PRM) renderTick(FROZEN_T, 0.016)
-  else rafId = requestAnimationFrame(loop)
+  else startLoop()
 
   return () => {
-    cancelAnimationFrame(rafId)
+    stopLoop()
+    document.removeEventListener('visibilitychange', onVisibilityChange)
     removeEventListener('mousemove', onMouseMove)
     document.removeEventListener('mouseleave', onMouseLeave)
     removeEventListener('pointerdown', onPointerDown, true)
     removeEventListener('resize', layoutSize)
     ro?.disconnect()
     io?.disconnect()
+    landingRoot?.classList.remove('wd-landing-bg-paused')
     addedChips.forEach((e) => e.remove())
     try {
       renderer.dispose()
