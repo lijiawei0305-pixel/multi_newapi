@@ -27,7 +27,9 @@ export type RenderQualityInput = {
  * - mid：手机高 DPR 或 中等核数 → DPR≤1.5，关 antialias，bloom 半分辨率
  * - low：省流 / 低内存 / 双核及以下 → DPR≤1.25，关 antialias，bloom 半分辨率
  */
-export function pickRenderQuality(input: RenderQualityInput = {}): RenderQuality {
+export function pickRenderQuality(
+  input: RenderQualityInput = {}
+): RenderQuality {
   const dpr =
     input.dpr ??
     (typeof devicePixelRatio === 'number' && devicePixelRatio > 0
@@ -50,7 +52,13 @@ export function pickRenderQuality(input: RenderQualityInput = {}): RenderQuality
         (navigator as any).deviceMemory
       : undefined)
 
-  if (saveData || (typeof deviceMemory === 'number' && deviceMemory > 0 && deviceMemory <= 2) || cores <= 2) {
+  if (
+    saveData ||
+    (typeof deviceMemory === 'number' &&
+      deviceMemory > 0 &&
+      deviceMemory <= 2) ||
+    cores <= 2
+  ) {
     return {
       tier: 'low',
       pixelRatio: Math.min(dpr, 1.25),
