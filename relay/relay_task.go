@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	agenthook "github.com/QuantumNous/new-api/internal/platform/agenthook"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	agenthook "github.com/QuantumNous/new-api/internal/platform/agenthook"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"

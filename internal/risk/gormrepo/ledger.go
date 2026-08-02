@@ -26,7 +26,7 @@ type claimRow struct {
 	Scope       string `gorm:"column:scope;type:varchar(32);not null;uniqueIndex:uk_risk_purchase_claim,priority:1"`
 	ClaimKey    string `gorm:"column:claim_key;type:varchar(191);not null;uniqueIndex:uk_risk_purchase_claim,priority:2"`
 	OwnerUserID int64  `gorm:"column:owner_user_id;not null;index"`
-	Count       int    `gorm:"column:count;not null;default:1"` // Trial 恒 1；plan 为累计次数
+	Count       int    `gorm:"column:count;not null;default:1"`      // Trial 恒 1；plan 为累计次数
 	ExpiresAt   int64  `gorm:"column:expires_at;not null;default:0"` // unix 秒；0=永不过期
 	CreatedAt   int64  `gorm:"column:created_at;not null;default:0"`
 	UpdatedAt   int64  `gorm:"column:updated_at;not null;default:0"`

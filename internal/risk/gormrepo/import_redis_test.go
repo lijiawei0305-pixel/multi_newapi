@@ -19,6 +19,7 @@ func TestParseRiskKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, risk.ScopeTrialDevice, scope)
 	require.Equal(t, "ip-1.2.3.4", ck)
+	require.False(t, isPlan)
 
 	scope, ck, isPlan, err = parseRiskKey("risk:purchase:9:user:7")
 	require.NoError(t, err)
