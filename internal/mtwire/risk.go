@@ -2,6 +2,7 @@ package mtwire
 
 import (
 	"context"
+	"errors"
 
 	"gorm.io/gorm"
 
@@ -14,7 +15,8 @@ import (
 
 // tenantStatusChecker 实现 risk.StatusChecker：按租户 status 把关。
 // new-api 原生已校验用户/Token 状态；这里补「整租户被禁用(suspended/deleted)」这一多租户维度。
-// tenant_id<=0（主站/无租户）或查不到 → 放行（旁路安全，绝不误杀正常请求）。
+// tenant_id<=0（主站/无租户）→ 放行。已知 tenant_id 但行不存在 → 视为非 active（fail-closed）。
+// 基础设施错误（DB 抖动）→ 返回 error，由 checkCallHook fail-open 放行并记日志（不误杀正常流量）。
 type tenantStatusChecker struct{ db *gorm.DB }
 
 func (s tenantStatusChecker) Active(ctx context.Context, p *appctx.Principal) (bool, error) {
@@ -24,7 +26,12 @@ func (s tenantStatusChecker) Active(ctx context.Context, p *appctx.Principal) (b
 	var row struct{ Status string }
 	if err := s.db.WithContext(ctx).Table("tenants").
 		Select("status").Where("id = ?", p.TenantID).Take(&row).Error; err != nil {
-		return true, nil // 查不到不阻断
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// 请求带了明确 tenant_id，但库中无此租户 → 不放行（防止已删租户继续打 /v1）
+			return false, nil
+		}
+		// 基础设施错误：交上层 fail-open，绝不因 DB 抖动误杀
+		return true, err
 	}
 	return row.Status == "active", nil // tenant.StatusActive
 }
@@ -46,7 +53,10 @@ func (a *App) checkCallHook(ctx context.Context, userID, tokenID int64, model, c
 	p := &appctx.Principal{UserID: userID, TenantID: a.userTenantID(ctx, userID), Role: appctx.RoleUser}
 	// 1) 租户状态：DB-only，Redis 无关 → 恒强制。Active 在查不到/出错时返回 true（旁路，绝不误杀），
 	//    仅确切 status != active 才返回 false → 复用 risk.ErrStatusForbidden（403）透传给 relay。
-	if active, err := (tenantStatusChecker{db: a.DB}).Active(ctx, p); err == nil && !active {
+	if active, err := (tenantStatusChecker{db: a.DB}).Active(ctx, p); err != nil {
+		// DB 等基础设施错误：fail-open 放行，但必须留痕（便于区分「租户停用」与「查状态失败」）。
+		common.SysError("mtwire: tenant status check error (fail-open): " + err.Error())
+	} else if !active {
 		return types.NewErrorWithStatusCode(risk.ErrStatusForbidden, types.ErrorCodeAccessDenied, apperr.HTTPStatusOf(risk.ErrStatusForbidden))
 	}
 	// 2) RPM 限流：需共享计数 → 仅 Redis 装配时运行；未装配即到此为止（状态已在上方恒强制）。

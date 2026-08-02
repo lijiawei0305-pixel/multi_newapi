@@ -69,10 +69,9 @@ func newBreakageTestDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE mt_subscription_orders (order_no TEXT PRIMARY KEY, native_sub_id INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE user_subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, amount_used INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE token_plans (id INTEGER PRIMARY KEY, code TEXT NOT NULL DEFAULT '')`,
-		`CREATE TABLE user_balances (tenant_id INTEGER NOT NULL, user_id INTEGER NOT NULL, balance_usd REAL NOT NULL DEFAULT 0)`,
 		`CREATE TABLE payment_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 0, status TEXT, created_at DATETIME, updated_at DATETIME)`,
 		`CREATE TABLE tenants (id INTEGER PRIMARY KEY, name TEXT, owner_user_id INTEGER)`,
-		`CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0, username TEXT, deleted_at DATETIME)`,
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0, username TEXT, quota INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME)`,
 	}
 	for _, s := range stmts {
 		if err := db.Exec(s).Error; err != nil {
@@ -132,11 +131,14 @@ func seedPlan(t *testing.T, db *gorm.DB, id int64, code string) {
 	}
 }
 
-func seedBalance(t *testing.T, db *gorm.DB, tenantID, userID int64, balance float64) {
+func seedBalance(t *testing.T, db *gorm.DB, tenantID, userID int64, balanceUSD float64) {
 	t.Helper()
-	if err := db.Exec(`INSERT INTO user_balances (tenant_id, user_id, balance_usd) VALUES (?,?,?)`,
-		tenantID, userID, balance).Error; err != nil {
-		t.Fatalf("seed balance: %v", err)
+	// 生产权威：users.quota（quota 单位）；测试用 USD*QuotaPerUnit 写回。
+	quota := int64(balanceUSD * common.QuotaPerUnit)
+	_ = db.Exec(`DELETE FROM users WHERE id = ?`, userID).Error
+	if err := db.Exec(`INSERT INTO users (id, tenant_id, username, quota) VALUES (?,?,?,?)`,
+		userID, tenantID, fmt.Sprintf("u%d", userID), quota).Error; err != nil {
+		t.Fatalf("seed user quota: %v", err)
 	}
 }
 

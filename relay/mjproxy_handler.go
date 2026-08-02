@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	agenthook "github.com/QuantumNous/new-api/internal/platform/agenthook"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -561,6 +562,21 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	err := common.UnmarshalBodyReusable(c, &midjRequest)
 	if err != nil {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "bind_request_body_failed")
+	}
+
+	// 违禁词：MJ 不走主 Relay()，需在此扫描 prompt/content（与 /v1 chat 对齐）。
+	if agenthook.ScanUserInput != nil {
+		scanReq := &dto.GeneralOpenAIRequest{Prompt: midjRequest.Prompt}
+		if midjRequest.Content != "" {
+			if scanReq.Prompt == nil || scanReq.Prompt == "" {
+				scanReq.Prompt = midjRequest.Content
+			} else {
+				scanReq.Prompt = fmt.Sprintf("%v\n%s", scanReq.Prompt, midjRequest.Content)
+			}
+		}
+		if e := agenthook.ScanUserInput(c.Request.Context(), int64(c.GetInt("id")), int64(c.GetInt("token_id")), "midjourney", scanReq); e != nil {
+			return service.MidjourneyErrorWrapper(constant.MjRequestError, e.Error())
+		}
 	}
 
 	relayInfo.InitChannelMeta(c)

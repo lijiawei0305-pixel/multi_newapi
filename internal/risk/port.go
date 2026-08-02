@@ -136,6 +136,8 @@ type KVCache interface {
 // 用途：补偿「Purchase 在下单前即 SetNX 写永久去重键、KVCache 无 Del → 犹豫关单即永久消耗、
 // 后台无手段可解」的误占用（RETRO 2026-07-16 · Critical）。经带鉴权 + 审计日志的后台端点调用，
 // 替代客服直连无密码/无卷/无审计的 Redis 删键。
+//
+// 有 PurchaseLedger 时：先删 DB 台账（权威），再 Del Redis 镜像键。
 type PurchaseLimitAdmin interface {
 	// ReleaseTrialLimit 释放某用户的 Trial 三维去重键（用户维度 + 传入的实名/设备维度），
 	// 使其可重新购买 Trial。实名/设备为空则只释放用户维度（与 checkTrialLimit 建键口径对称）。
@@ -146,6 +148,28 @@ type PurchaseLimitAdmin interface {
 	ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity, force bool) (TrialReleaseResult, error)
 	// ReleasePurchaseLimit 释放某用户对某非 Trial 套餐的每用户限购计数键。
 	ReleasePurchaseLimit(ctx context.Context, planID, userID int64) error
+}
+
+// PurchaseLedger 是限购的**持久权威台账**（MySQL/SQLite/PostgreSQL），解决 C4 残余：
+// Redis 卷丢失 / 无 AOF / compose down -v 后终身限购归零、历史买家可再薅。
+// Redis/MemKV 仅作多副本加速镜像；裁决以本接口为准。
+//
+// 实现：internal/risk/gormrepo（生产）、MemPurchaseLedger（单测）。nil 时引擎退回纯 KV 路径
+// （兼容既有单测；生产 wire 必须注入 DB 实现）。
+type PurchaseLedger interface {
+	// ClaimTrial 在同一事务内占用 Trial 维度（user 必有；realname/device 非空才占）。
+	// 任一维度已被占用 → ErrPurchaseLimitExceeded；事务回滚不留部分占用。
+	// deviceTTL>0 时 device 维写入 expires_at=now+deviceTTL；user/realname 永不过期。
+	// now 由引擎时钟注入，便于单测推进过期。
+	ClaimTrial(ctx context.Context, userID int64, pi PurchaseIdentity, deviceTTL time.Duration, now time.Time) error
+	// ReleaseTrial 释放 Trial 台账行（归属校验与 force 语义对齐 PurchaseLimitAdmin）。
+	ReleaseTrial(ctx context.Context, userID int64, pi PurchaseIdentity, force bool) (TrialReleaseResult, error)
+	// ClaimPlan 非 Trial 每用户限购计数 +1；超过 limit → ErrPurchaseLimitExceeded。
+	ClaimPlan(ctx context.Context, planID, userID int64, limit int) error
+	// RollbackPlan 非 Trial 限购计数 -1（幂等：不存在或已 0 不报错）。
+	RollbackPlan(ctx context.Context, planID, userID int64) error
+	// ReleasePlan 删除某用户对某套餐的限购计数行（后台整键清零）。
+	ReleasePlan(ctx context.Context, planID, userID int64) error
 }
 
 // PurchaseLimitCompensator 只归还本次非 Trial CheckPurchaseLimit 成功占用的一次计数。

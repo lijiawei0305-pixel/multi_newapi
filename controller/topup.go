@@ -358,16 +358,10 @@ func EpayNotify(c *gin.Context) {
 		return
 	}
 	verifyInfo, err := client.Verify(params)
-	if err == nil && verifyInfo.VerifyStatus {
-		logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 webhook 验签成功 verification=true trade_no=%s callback_type=%s trade_status=%s params_%s", verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.TradeStatus, paramsMetadata))
-		_, err := c.Writer.Write([]byte("success"))
-		if err != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 webhook 响应写入失败 trade_no=%s error_type=%T", verifyInfo.ServiceTradeNo, err))
-		}
-	} else {
-		_, err := c.Writer.Write([]byte("fail"))
-		if err != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 webhook 响应写入失败 error_type=%T", err))
+	if err != nil || !verifyInfo.VerifyStatus {
+		_, writeErr := c.Writer.Write([]byte("fail"))
+		if writeErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 webhook 响应写入失败 error_type=%T", writeErr))
 		}
 		if err != nil {
 			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 webhook 验签失败 verification=false error_type=%T params_%s", err, paramsMetadata))
@@ -377,44 +371,24 @@ func EpayNotify(c *gin.Context) {
 		return
 	}
 
-	if verifyInfo.TradeStatus == epay.StatusTradeSuccess {
-		LockOrder(verifyInfo.ServiceTradeNo)
-		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-		topUp := model.GetTopUpByTradeNo(verifyInfo.ServiceTradeNo)
-		if topUp == nil {
-			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 回调订单不存在 trade_no=%s callback_type=%s", verifyInfo.ServiceTradeNo, verifyInfo.Type))
-			return
-		}
-		if topUp.PaymentProvider != model.PaymentProviderEpay {
-			logger.LogWarn(c.Request.Context(), fmt.Sprintf("易支付 订单支付网关不匹配 trade_no=%s order_provider=%s callback_type=%s", verifyInfo.ServiceTradeNo, topUp.PaymentProvider, verifyInfo.Type))
-			return
-		}
-		if topUp.Status == common.TopUpStatusPending {
-			if topUp.PaymentMethod != verifyInfo.Type {
-				logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 实际支付方式与订单不同 trade_no=%s order_payment_method=%s actual_type=%s", verifyInfo.ServiceTradeNo, topUp.PaymentMethod, verifyInfo.Type))
-				topUp.PaymentMethod = verifyInfo.Type
-			}
-			topUp.Status = common.TopUpStatusSuccess
-			err := topUp.Update()
-			if err != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 更新充值订单失败 trade_no=%s user_id=%d error_type=%T", topUp.TradeNo, topUp.UserId, err))
-				return
-			}
-			//user, _ := model.GetUserById(topUp.UserId, false)
-			//user.Quota += topUp.Amount * 500000
-			dAmount := decimal.NewFromInt(int64(topUp.Amount))
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd := int(dAmount.Mul(dQuotaPerUnit).IntPart())
-			err = model.IncreaseUserQuota(topUp.UserId, quotaToAdd, true)
-			if err != nil {
-				logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 更新用户额度失败 trade_no=%s user_id=%d quota_to_add=%d error_type=%T", topUp.TradeNo, topUp.UserId, quotaToAdd, err))
-				return
-			}
-			logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值成功 trade_no=%s user_id=%d quota_to_add=%d money=%.2f", topUp.TradeNo, topUp.UserId, quotaToAdd, topUp.Money))
-			model.RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money), c.ClientIP(), topUp.PaymentMethod, "epay")
-		}
-	} else {
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 webhook 验签成功 verification=true trade_no=%s callback_type=%s trade_status=%s params_%s", verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.TradeStatus, paramsMetadata))
+
+	if verifyInfo.TradeStatus != epay.StatusTradeSuccess {
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 webhook 忽略事件 trade_no=%s callback_type=%s trade_status=%s", verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.TradeStatus))
+		_, _ = c.Writer.Write([]byte("fail"))
+		return
+	}
+
+	// 先入账（DB 事务 CAS + 行锁），成功后再 ACK "success"。
+	// 禁止先 ACK 再入账：进程崩溃会让网关停止重试，造成已付未到账。
+	if err := model.RechargeEpay(verifyInfo.ServiceTradeNo, verifyInfo.Money, verifyInfo.Type, c.ClientIP()); err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 入账失败 trade_no=%s error=%v", verifyInfo.ServiceTradeNo, err))
+		_, _ = c.Writer.Write([]byte("fail"))
+		return
+	}
+	logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值成功 trade_no=%s money=%s", verifyInfo.ServiceTradeNo, verifyInfo.Money))
+	if _, err := c.Writer.Write([]byte("success")); err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 webhook 响应写入失败 trade_no=%s error_type=%T", verifyInfo.ServiceTradeNo, err))
 	}
 }
 

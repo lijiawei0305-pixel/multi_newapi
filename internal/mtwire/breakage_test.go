@@ -67,10 +67,10 @@ func newBreakageTestApp(t *testing.T) *App {
 		`CREATE TABLE mt_subscription_orders (order_no TEXT PRIMARY KEY, native_sub_id INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE user_subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, amount_used INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE token_plans (id INTEGER PRIMARY KEY, code TEXT)`,
-		`CREATE TABLE user_balances (user_id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0, balance_usd REAL NOT NULL DEFAULT 0)`,
 		`CREATE TABLE payment_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL DEFAULT 0, status TEXT, created_at DATETIME, updated_at DATETIME)`,
 		`CREATE TABLE tenants (id INTEGER PRIMARY KEY, name TEXT)`,
-		`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)`,
+		// 钱包未消耗权威：users.quota（/QuotaPerUnit → USD）；user_balances 为死台账不再 seed。
+		`CREATE TABLE users (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL DEFAULT 0, username TEXT, quota INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME)`,
 	}
 	for _, s := range stmts {
 		if err := db.Exec(s).Error; err != nil {
@@ -124,8 +124,11 @@ func brk_seedPlan(t *testing.T, app *App, id int64, code string) {
 
 func brk_seedBalance(t *testing.T, app *App, userID, tenantID int64, balanceUSD float64) {
 	t.Helper()
-	if err := app.DB.Exec(`INSERT INTO user_balances (user_id, tenant_id, balance_usd) VALUES (?,?,?)`, userID, tenantID, balanceUSD).Error; err != nil {
-		t.Fatalf("seed balance: %v", err)
+	quota := int64(balanceUSD * common.QuotaPerUnit)
+	_ = app.DB.Exec(`DELETE FROM users WHERE id = ?`, userID).Error
+	if err := app.DB.Exec(`INSERT INTO users (id, tenant_id, username, quota) VALUES (?,?,?,?)`,
+		userID, tenantID, fmt.Sprintf("u%d", userID), quota).Error; err != nil {
+		t.Fatalf("seed user quota: %v", err)
 	}
 }
 
@@ -138,8 +141,17 @@ func brk_seedTenantName(t *testing.T, app *App, id int64, name string) {
 
 func brk_seedUsername(t *testing.T, app *App, id int64, name string) {
 	t.Helper()
-	if err := app.DB.Exec(`INSERT INTO users (id, username) VALUES (?,?)`, id, name).Error; err != nil {
-		t.Fatalf("seed user: %v", err)
+	// Upsert 用户名；保留已有 tenant_id/quota（可能由 brk_seedBalance 写入）。
+	var n int64
+	_ = app.DB.Raw(`SELECT COUNT(1) FROM users WHERE id = ?`, id).Scan(&n)
+	if n == 0 {
+		if err := app.DB.Exec(`INSERT INTO users (id, tenant_id, username, quota) VALUES (?,?,?,0)`, id, 0, name).Error; err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+		return
+	}
+	if err := app.DB.Exec(`UPDATE users SET username = ? WHERE id = ?`, name, id).Error; err != nil {
+		t.Fatalf("seed user name: %v", err)
 	}
 }
 

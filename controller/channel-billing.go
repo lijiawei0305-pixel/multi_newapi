@@ -145,6 +145,11 @@ func GetResponseBodyWithContext(ctx context.Context, method, url string, channel
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Control-plane fetches (balance/test) must not hit private/link-local targets
+	// unless FetchSetting explicitly allows them — same policy as ratio_sync / FetchModels.
+	if err := validateControlPlaneURL(url); err != nil {
+		return nil, fmt.Errorf("channel control-plane URL blocked: %w", err)
+	}
 	requestCtx, cancel := context.WithTimeout(ctx, channelControlPlaneRequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(requestCtx, method, url, nil)
@@ -154,7 +159,7 @@ func GetResponseBodyWithContext(ctx context.Context, method, url string, channel
 	for k := range headers {
 		req.Header.Add(k, headers.Get(k))
 	}
-	client, err := service.NewProxyHttpClient(channel.GetSetting().Proxy)
+	client, err := service.GetSSRFProtectedHttpClientWithProxy(channel.GetSetting().Proxy)
 	if err != nil {
 		return nil, errors.New("channel control-plane HTTP client is unavailable")
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -17,8 +18,13 @@ import (
 // scanUserInputHook 是 agenthook.ScanUserInput 的实现：/v1 转发前扫描用户输入。
 // 命中即记录违规（remind+block 都记，管理员可见）；block 级返回错误拦截，remind 级放行。
 // best-effort：抽取/扫描/记录出错绝不阻断请求——仅在确切命中 block 级时返回错误。
+// 扫描失败与 panic 必须记日志（此前静默 recover 会让违禁词在故障时「隐形关闭」）。
 func (a *App) scanUserInputHook(ctx context.Context, userID, tokenID int64, model string, request dto.Request) *types.NewAPIError {
-	defer func() { _ = recover() }()
+	defer func() {
+		if r := recover(); r != nil {
+			common.SysError("mtwire: scanUserInputHook panic recovered: " + fmt.Sprint(r))
+		}
+	}()
 	if a.Moderator == nil {
 		return nil
 	}
@@ -28,7 +34,11 @@ func (a *App) scanUserInputHook(ctx context.Context, userID, tokenID int64, mode
 	}
 	p := appctx.Principal{UserID: userID, TenantID: a.moderationTenantID(ctx, userID), Role: appctx.RoleUser}
 	res, err := a.Moderator.ScanUserMessages(ctx, &p, msgs)
-	if err != nil || res == nil || !res.Hit {
+	if err != nil {
+		common.SysError("mtwire: moderation scan error (fail-open): " + err.Error())
+		return nil
+	}
+	if res == nil || !res.Hit {
 		return nil
 	}
 	if a.ModerationRepo != nil {

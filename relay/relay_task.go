@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	agenthook "github.com/QuantumNous/new-api/internal/platform/agenthook"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
@@ -162,6 +163,27 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	adaptor.Init(info)
 	if taskErr := adaptor.ValidateRequestAndSetAction(c, info); taskErr != nil {
 		return nil, taskErr
+	}
+
+	// 违禁词：Task/Video/Suno 不走主 Relay()，在此扫描 body 中的 prompt 类字段。
+	if agenthook.ScanUserInput != nil {
+		var raw map[string]any
+		if err := common.UnmarshalBodyReusable(c, &raw); err == nil {
+			var texts []string
+			for _, key := range []string{"prompt", "negative_prompt", "negativePrompt", "input", "text", "gpt_description_prompt"} {
+				if v, ok := raw[key]; ok {
+					if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+						texts = append(texts, s)
+					}
+				}
+			}
+			if len(texts) > 0 {
+				scanReq := &dto.GeneralOpenAIRequest{Prompt: strings.Join(texts, "\n")}
+				if e := agenthook.ScanUserInput(c.Request.Context(), int64(c.GetInt("id")), int64(c.GetInt("token_id")), info.OriginModelName, scanReq); e != nil {
+					return nil, service.TaskErrorWrapperLocal(e, "sensitive_words_detected", http.StatusBadRequest)
+				}
+			}
+		}
 	}
 
 	// 2. 确定模型名称

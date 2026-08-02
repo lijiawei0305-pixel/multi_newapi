@@ -10,7 +10,7 @@ import (
 // tokenplanRiskAdapter 把 tokenplan 的限购契约桥接到真实 risk.Engine：
 // 翻译 PurchaseLimitCheck → risk.Plan，并把实名/设备维度经 context 注入
 // （risk.WithPurchaseIdentity），供引擎做 Trial 三维去重（用户∪实名∪设备各 1 次）。
-// eng 为 nil（Redis 关闭、未装配风控）时放行，保持无风控时的既有行为、不回归。
+// 生产 wire 始终注入带 PurchaseLedger 的 Engine（DB 权威）；eng 为 nil 仅测试桩。
 type tokenplanRiskAdapter struct {
 	eng risk.RiskEngine
 }
@@ -20,7 +20,7 @@ var _ tokenplan.RiskEngine = tokenplanRiskAdapter{}
 
 func (a tokenplanRiskAdapter) CheckPurchaseLimit(ctx context.Context, in tokenplan.PurchaseLimitCheck) error {
 	if a.eng == nil {
-		return nil // 无风控引擎（Redis 关）→ 放行，不回归
+		return nil // 测试桩未注入引擎 → 放行
 	}
 	// 实名/设备维度经请求级 context 传入（引擎 CheckPurchaseLimit 签名仅含 userID）。
 	ctx = risk.WithPurchaseIdentity(ctx, risk.PurchaseIdentity{

@@ -9,10 +9,11 @@ import (
 	"github.com/QuantumNous/new-api/internal/platform/appctx"
 )
 
-// Engine 是 RiskEngine 的实现。KVCache 为必需依赖（限流/限购计数）；
-// StatusChecker / IPAllowlist / RPMResolver / AlertSink 为可选（nil 即跳过对应校验/告警）。
+// Engine 是 RiskEngine 的实现。KVCache 为必需依赖（限流/限购镜像计数）；
+// PurchaseLedger 为可选但生产必须注入（限购持久权威）；其余依赖可选。
 type Engine struct {
 	kv     KVCache
+	ledger PurchaseLedger // nil = 纯 KV 路径（仅单测兼容）；非 nil 时 DB 权威 + KV 镜像
 	clock  Clock
 	status StatusChecker
 	ips    IPAllowlist
@@ -44,6 +45,9 @@ func WithAlertSink(a AlertSink) Option { return func(e *Engine) { e.alerts = a }
 
 // WithConfig 覆盖默认配置（自动 normalize 非法字段）。
 func WithConfig(cfg Config) Option { return func(e *Engine) { e.cfg = cfg.normalize() } }
+
+// WithPurchaseLedger 注入限购持久台账（DB 权威）。生产必装；单测可省略以走纯 KV。
+func WithPurchaseLedger(l PurchaseLedger) Option { return func(e *Engine) { e.ledger = l } }
 
 // NewEngine 构造风控引擎。kv 必需；其余依赖经 Option 注入，未注入则跳过/用默认。
 func NewEngine(kv KVCache, opts ...Option) *Engine {
@@ -126,6 +130,7 @@ func (e *Engine) checkRPM(ctx context.Context, p *appctx.Principal) error {
 }
 
 // CheckPurchaseLimit Trial 三维去重（用户∪实名∪设备各 1 次，并发单赢家）；其它档按 PerUserLimit 限购。
+// 有 PurchaseLedger 时：先落 DB 台账（权威，跨 Redis 重建仍生效），再 best-effort 镜像 KV。
 func (e *Engine) CheckPurchaseLimit(ctx context.Context, userID int64, plan Plan) error {
 	if plan.Trial {
 		return e.checkTrialLimit(ctx, userID)
@@ -133,7 +138,19 @@ func (e *Engine) CheckPurchaseLimit(ctx context.Context, userID int64, plan Plan
 	if plan.PerUserLimit <= 0 {
 		return nil // 不限购
 	}
-	key := purchaseKey(plan.ID, userID)
+	if e.ledger != nil {
+		if err := e.ledger.ClaimPlan(ctx, plan.ID, userID, plan.PerUserLimit); err != nil {
+			return err
+		}
+		// KV 镜像 best-effort：失败不影响已落库的权威计数
+		e.mirrorPlanKV(ctx, plan.ID, userID)
+		return nil
+	}
+	return e.claimPlanKV(ctx, plan.ID, userID, plan.PerUserLimit)
+}
+
+func (e *Engine) claimPlanKV(ctx context.Context, planID, userID int64, limit int) error {
+	key := purchaseKey(planID, userID)
 	n, err := e.kv.Incr(ctx, key)
 	if err != nil {
 		return err
@@ -141,13 +158,25 @@ func (e *Engine) CheckPurchaseLimit(ctx context.Context, userID int64, plan Plan
 	if n == 1 && e.cfg.PurchaseDedupTTL > 0 {
 		_ = e.kv.Expire(ctx, key, e.cfg.PurchaseDedupTTL)
 	}
-	if n > int64(plan.PerUserLimit) {
+	if n > int64(limit) {
 		if _, rollbackErr := e.kv.Decr(context.WithoutCancel(ctx), key); rollbackErr != nil {
 			return fmt.Errorf("%w: rollback rejected purchase counter: %v", ErrPurchaseLimitExceeded, rollbackErr)
 		}
 		return ErrPurchaseLimitExceeded
 	}
 	return nil
+}
+
+// mirrorPlanKV 在 DB 已成功 +1 后同步 KV 计数（仅镜像，不裁决）。
+func (e *Engine) mirrorPlanKV(ctx context.Context, planID, userID int64) {
+	key := purchaseKey(planID, userID)
+	n, err := e.kv.Incr(ctx, key)
+	if err != nil {
+		return
+	}
+	if n == 1 && e.cfg.PurchaseDedupTTL > 0 {
+		_ = e.kv.Expire(ctx, key, e.cfg.PurchaseDedupTTL)
+	}
 }
 
 // checkTrialLimit 实现 Trial 的用户∪实名∪设备三维去重（并发单赢家）：
@@ -180,9 +209,56 @@ func (e *Engine) CheckPurchaseLimit(ctx context.Context, userID int64, plan Plan
 // 操作恰挤进微秒级间隙）。
 //
 // 实名/设备从 context 读取（请求级，经 WithPurchaseIdentity 注入），缺省维度跳过。
+//
+// 有 ledger 时流程：
+//  1. DB ClaimTrial（权威、事务多维、设备维带 expires_at）—— Redis 抹掉后仍拒历史买家
+//  2. KV SetNX 镜像（best-effort：失败/冲突不回滚 DB；DB 已占用即资格已消耗）
+//
+// 无 ledger 时保持历史纯 KV 路径（单测兼容）。
 func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 	pi, _ := purchaseIdentityFrom(ctx)
 
+	if e.ledger != nil {
+		// 迁移兼容：上线前仅 Redis 占过的终身键，在 DB 空窗期仍应拦截（否则历史买家可再领一次）。
+		if err := e.trialRedisOccupied(ctx, userID, pi); err != nil {
+			return err
+		}
+		if err := e.ledger.ClaimTrial(ctx, userID, pi, e.cfg.DeviceDedupTTL, e.clock.Now()); err != nil {
+			return err
+		}
+		// DB 已成功：镜像 KV。失败仅影响加速层，不回滚台账（权威在 DB）。
+		_ = e.claimTrialRedis(ctx, userID, pi, true /* mirrorOnly */)
+		return nil
+	}
+	return e.claimTrialRedis(ctx, userID, pi, false)
+}
+
+// trialRedisOccupied 只读探测三维 KV 是否已被占用（不写键）。任一存在 → 限购。
+// 用于「DB 台账 + 历史 Redis 键」双轨期间的 fail-closed 预检。
+func (e *Engine) trialRedisOccupied(ctx context.Context, userID int64, pi PurchaseIdentity) error {
+	keys := []string{trialKey("user", strconv.FormatInt(userID, 10))}
+	if pi.RealNameID != "" {
+		keys = append(keys, trialKey("realname", pi.RealNameID))
+	}
+	if pi.DeviceID != "" {
+		keys = append(keys, trialKey("device", pi.DeviceID))
+	}
+	for _, k := range keys {
+		_, found, err := e.kv.Get(ctx, k)
+		if err != nil {
+			// KV 读失败：不据此放行（DB 仍会裁决）；读错不抬升为限购，让 DB 路径继续
+			continue
+		}
+		if found {
+			return ErrPurchaseLimitExceeded
+		}
+	}
+	return nil
+}
+
+// claimTrialRedis 三维 SetNX。mirrorOnly=true 时：SetNX 失败（含已占用）不返回业务错误
+// （DB 已裁决），仅尽力对齐镜像；mirrorOnly=false 时：SetNX 失败按限购/错误返回，并补偿 Del。
+func (e *Engine) claimTrialRedis(ctx context.Context, userID int64, pi PurchaseIdentity, mirrorOnly bool) error {
 	userK := trialKey("user", strconv.FormatInt(userID, 10))
 	var realK, devK string
 	if pi.RealNameID != "" {
@@ -192,18 +268,10 @@ func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 		devK = trialKey("device", pi.DeviceID)
 	}
 
-	// 逐维 SetNX 决胜：任一维度 SetNX 返回 false（已被占用）即拒。
+	// 逐维 SetNX 决胜：任一维度 SetNX 返回 false（已被占用）即拒（非 mirror 模式）。
 	// userK 置首：同用户并发重复请求在此即判负，不会在实名/设备维度留痕。
-	// 键值写占用者 userID（非无意义的 "1"）：realname/device 维度跨用户共享，
-	// 后台释放（ReleaseTrialLimit）必须能校验「这把键真是该用户占的」，否则
-	// 客服按 B 自报的 device_id 释放会误删 A 合法占用的键 → 新账号可从已消耗
-	// 设备再领 Trial，反刷维度被客服通道洗掉。
-	//
-	// 每维度各带 TTL（audit R1）：user/realname 用 PurchaseDedupTTL 终身键（同账号 / 同实名不该
-	// 无限领）；device 用 DeviceDedupTTL 有界 TTL——device 维基于粗粒度、跨真人共享的 ClientIP
-	// 派生，终身键会令同 IP / CGNAT 首个买家占键后其余真人被永久连坐拒绝 Trial（曾 live 生产）。
-	// 键顺序仍严格保持 [user, realname, device]（单赢家性质 + 同用户并发在 userK 首步判负 +
-	// 败者/出错补偿都依赖此顺序，不得改）。
+	// 键值写占用者 userID：realname/device 跨用户共享，后台释放须校验归属。
+	// 每维度 TTL（audit R1）：user/realname→PurchaseDedupTTL；device→DeviceDedupTTL。
 	owner := strconv.FormatInt(userID, 10)
 	dims := []struct {
 		key string
@@ -213,17 +281,24 @@ func (e *Engine) checkTrialLimit(ctx context.Context, userID int64) error {
 		{realK, e.cfg.PurchaseDedupTTL},
 		{devK, e.cfg.DeviceDedupTTL},
 	}
-	var claimed []string // 本次已抢占成功的键：判负/出错时补偿删除（Del 空列表为 no-op）
+	var claimed []string
 	for _, d := range dims {
 		if d.key == "" {
 			continue
 		}
 		ok, err := e.kv.SetNX(ctx, d.key, owner, d.ttl)
 		if err != nil {
+			if mirrorOnly {
+				return nil // 镜像层错误不抬升
+			}
 			_ = e.kv.Del(ctx, claimed...)
 			return err
 		}
 		if !ok {
+			if mirrorOnly {
+				// 可能是同身份重复镜像或残留键：不回滚 DB
+				return nil
+			}
 			_ = e.kv.Del(ctx, claimed...)
 			return ErrPurchaseLimitExceeded
 		}
@@ -267,10 +342,22 @@ func forceReleasable(val string) bool {
 // 「两个管理员并发释放同一键 + 恰有购买挤进微秒级间隙」时存在，且本端点为人工低频
 // 客服操作，接受此竞态；热路径决胜（checkTrialLimit）仍完全建立在 SetNX 原子返回值上。
 func (e *Engine) ReleaseTrialLimit(ctx context.Context, userID int64, pi PurchaseIdentity, force bool) (TrialReleaseResult, error) {
+	var res TrialReleaseResult
+	// 1) DB 台账优先（权威）：无 ledger 时 res 由 KV 路径填充
+	if e.ledger != nil {
+		dbRes, err := e.ledger.ReleaseTrial(ctx, userID, pi, force)
+		if err != nil {
+			return TrialReleaseResult{}, err
+		}
+		res = dbRes
+	}
+
+	// 2) KV 镜像释放（与历史语义一致；无 ledger 时这是唯一路径）
 	owner := strconv.FormatInt(userID, 10)
-	res := TrialReleaseResult{}
 	keys := []string{trialKey("user", owner)}
-	res.Released = append(res.Released, "user")
+	if e.ledger == nil {
+		res.Released = append(res.Released, "user")
+	}
 
 	shared := []struct{ dim, id string }{
 		{"realname", pi.RealNameID},
@@ -286,34 +373,62 @@ func (e *Engine) ReleaseTrialLimit(ctx context.Context, userID int64, pi Purchas
 			return TrialReleaseResult{}, err
 		}
 		if !found {
-			continue // 键不存在：无需释放（幂等），不计入任何列表
+			continue
 		}
 		if val != owner {
 			if !force || !forceReleasable(val) {
-				// 非 force：一律拒删归属不符的键；force：仅放行归属不可考的遗留/脏值键，
-				// 「另一真实用户的有效占用」即便 force 也拒（force 不是偷别人反刷键的后门）。
-				res.Skipped = append(res.Skipped, s.dim)
+				if e.ledger == nil {
+					res.Skipped = append(res.Skipped, s.dim)
+				}
+				// 有 ledger 时 skipped 已由 DB 路径给出；KV 侧仍拒删他人键
 				continue
 			}
-			// 至此：force && 归属不可考（遗留 "1" / 脏值）→ 允许释放
 		}
 		keys = append(keys, k)
-		res.Released = append(res.Released, s.dim)
+		if e.ledger == nil {
+			res.Released = append(res.Released, s.dim)
+		}
 	}
 	if err := e.kv.Del(ctx, keys...); err != nil {
 		return TrialReleaseResult{}, err
 	}
+	// 有 ledger 时：即便 DB 已删，也务必清 KV 镜像（含 user 维），避免镜像挡住合法重购
+	if e.ledger != nil {
+		// res 已是 DB 结果；确保 user 在 released 列表（KV 恒尝试删 user 键）
+		if !containsStr(res.Released, "user") {
+			res.Released = append([]string{"user"}, res.Released...)
+		}
+	}
 	return res, nil
+}
+
+func containsStr(ss []string, x string) bool {
+	for _, s := range ss {
+		if s == x {
+			return true
+		}
+	}
+	return false
 }
 
 // ReleasePurchaseLimit 释放某用户对某非 Trial 套餐的每用户限购计数键（purchaseKey）。
 func (e *Engine) ReleasePurchaseLimit(ctx context.Context, planID, userID int64) error {
+	if e.ledger != nil {
+		if err := e.ledger.ReleasePlan(ctx, planID, userID); err != nil {
+			return err
+		}
+	}
 	return e.kv.Del(ctx, purchaseKey(planID, userID))
 }
 
 // RollbackPurchaseLimit 原子归还本次非 Trial 购买占用的一次计数。不存在或已归零均幂等返回 nil；
 // 与后台整键释放分开，防止 CreatePay/SavePending 失败误清同用户其它成功购买的计数。
 func (e *Engine) RollbackPurchaseLimit(ctx context.Context, planID, userID int64) error {
+	if e.ledger != nil {
+		if err := e.ledger.RollbackPlan(ctx, planID, userID); err != nil {
+			return err
+		}
+	}
 	_, err := e.kv.Decr(ctx, purchaseKey(planID, userID))
 	return err
 }

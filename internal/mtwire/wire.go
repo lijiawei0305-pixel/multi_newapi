@@ -37,6 +37,7 @@ import (
 	promotionrepo "github.com/QuantumNous/new-api/internal/promotion/gormrepo"
 	"github.com/QuantumNous/new-api/internal/report/reportrepo"
 	"github.com/QuantumNous/new-api/internal/risk"
+	riskrepo "github.com/QuantumNous/new-api/internal/risk/gormrepo"
 	"github.com/QuantumNous/new-api/internal/siteconfig"
 	siteconfigrepo "github.com/QuantumNous/new-api/internal/siteconfig/gormrepo"
 	"github.com/QuantumNous/new-api/internal/tenant"
@@ -190,23 +191,28 @@ func New(db *gorm.DB) *App {
 	ticketRepo := ticketrepo.New(db)
 	ticketSvc := ticket.NewService(ticketRepo)
 
-	// risk（7c）：调用前 RPM 固定窗口限流引擎。限流需 Redis 共享计数 → 仅 Redis 启用时装配；
-	// 否则置 nil（checkCallHook 只跳过 RPM）。RPM 默认阈值来自 env RISK_DEFAULT_RPM（0=不限）。
-	// 注：租户状态（suspended/deleted）拦截**不再**作为 StatusChecker 注入此引擎——它是纯 DB 判定，
-	// 不应随 Redis 开关 fail-open，改由 checkCallHook 直接经 DB 恒强制（见 risk.go tenantStatusChecker）。
-	var riskEngine risk.RiskEngine
-	if common.RedisEnabled && common.RDB != nil {
-		riskEngine = risk.NewEngine(
-			risk.NewRedisKVCache(common.RDB),
-			risk.WithConfig(risk.Config{
-				DefaultRPM: common.GetEnvOrDefault("RISK_DEFAULT_RPM", 0),
-				// Trial 设备维度去重 TTL（小时）：device 维基于粗粒度共享 ClientIP 派生，绝不用终身键，
-				// 否则同出口 IP 首个买家后其余真人被永久连坐拒绝 Trial（audit R1）。env<=0 时 normalize
-				// 仍回落 24h，绝不终身。user/realname 维度仍走 PurchaseDedupTTL 终身。
-				DeviceDedupTTL: time.Duration(common.GetEnvOrDefault("RISK_DEVICE_DEDUP_TTL_HOURS", 24)) * time.Hour,
-			}),
-		)
+	// risk（7c）：
+	//  - 限购台账 risk_purchase_claims（DB 权威，C4 根治）：无论 Redis 是否启用都注入，
+	//    避免 Redis 抹掉后终身 Trial 归零、历史买家可再薅。
+	//  - RPM 限流需 Redis 共享计数：有 Redis 用 RedisKV；无 Redis 用 MemKV（单进程，DefaultRPM 可仍 0）。
+	//  - 租户状态拦截不经本引擎（见 risk.go tenantStatusChecker / checkCallHook）。
+	purchaseLedger := riskrepo.New(db)
+	riskCfg := risk.Config{
+		DefaultRPM: common.GetEnvOrDefault("RISK_DEFAULT_RPM", 0),
+		// Trial 设备维度去重 TTL（小时）：device 维基于粗粒度共享 ClientIP 派生，绝不用终身键。
+		DeviceDedupTTL: time.Duration(common.GetEnvOrDefault("RISK_DEVICE_DEDUP_TTL_HOURS", 24)) * time.Hour,
 	}
+	var riskKV risk.KVCache
+	if common.RedisEnabled && common.RDB != nil {
+		riskKV = risk.NewRedisKVCache(common.RDB)
+	} else {
+		riskKV = risk.NewMemKVCache(nil)
+	}
+	riskEngine := risk.NewEngine(
+		riskKV,
+		risk.WithPurchaseLedger(purchaseLedger),
+		risk.WithConfig(riskCfg),
+	)
 
 	// tokenplan：GORM 仓储（同时满足 PlanRepo + SubscriptionRepo）+ 纯函数成本守卫。
 	tp := tprepo.New(db)
@@ -214,8 +220,7 @@ func New(db *gorm.DB) *App {
 	retail := tokenplan.NewRetailService(tp, guard)
 	// Purchase 经 subPayment 落一条真实 pending 订单（前缀 SUB），可被支付回调用
 	// App.ActivatePaidTokenplanOrder 激活（见 subscription_bridge.go）。限购经 tokenplanRiskAdapter 桥接
-	// 真实 risk 引擎（Trial 用户∪实名∪设备三维去重；riskEngine 为 nil 即 Redis 关时放行不回归）；
-	// agent 套餐差价收益经 tokenplanEarningAdapter 真实落到 agent 钱包（ActivateFromPayment 激活事务内、按 source_order_id 幂等）。
+	// 真实 risk 引擎（Trial 三维 + DB 台账权威）；agent 套餐差价收益经 tokenplanEarningAdapter 落地。
 	subs := tokenplan.NewSubscriptionService(tp, tp, newSubPayment(newSubOrderStore(db), tp), tokenplanRiskAdapter{eng: riskEngine}, newTokenplanEarningAdapter(agentEarnings), nil)
 
 	// agentplan：GORM 仓储（agent_plans）+ 管理员 CRUD 目录。购买/激活在 P3（AGT 订单 → SetAgentType）。
@@ -335,6 +340,19 @@ func (a *App) Migrate() error {
 	}
 	if err := walletrepo.AutoMigrate(a.DB); err != nil { // user_balances/agent_redemption_codes（兑换码原生 quota 口径）
 		return err
+	}
+	if err := riskrepo.AutoMigrate(a.DB); err != nil { // risk_purchase_claims（Trial/限购 DB 台账 · C4）
+		return err
+	}
+	// C4：把现网 Redis 限购键幂等导入 DB 台账（不删 Redis）。无 Redis 则跳过。
+	if common.RedisEnabled && common.RDB != nil {
+		res, ierr := riskrepo.ImportFromRedisIfConfigured(context.Background(), a.DB, common.RDB)
+		if ierr != nil {
+			return fmt.Errorf("risk purchase ledger redis import: %w", ierr)
+		}
+		common.SysLog(fmt.Sprintf(
+			"risk purchase ledger import: scanned=%d imported=%d skipped=%d errors=%d",
+			res.Scanned, res.Imported, res.Skipped, res.Errors))
 	}
 	if err := paymentrepo.AutoMigrate(a.DB); err != nil { // payment_orders（Track 2 充值订单）
 		return err

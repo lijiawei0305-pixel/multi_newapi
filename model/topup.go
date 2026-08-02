@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -314,6 +315,97 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 		return nil, 0, err
 	}
 	return topups, total, nil
+}
+
+// RechargeEpay 易支付充值回调入账：在同一事务内 FOR UPDATE 加锁、CAS pending→success、原子增加额度。
+// 幂等：已 success 直接返回 nil。验签后的金额（callbackMoney）必须与订单 Money 一致（分位比较）。
+// ACK 网关必须在本函数成功返回之后再写 "success"，避免先 ACK 后崩溃导致永不重试、用户已付未到账。
+func RechargeEpay(tradeNo string, callbackMoney string, callbackType string, callerIp string) error {
+	if tradeNo == "" {
+		return errors.New("未提供支付单号")
+	}
+
+	refCol := "`trade_no`"
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		refCol = `"trade_no"`
+	}
+
+	var userId int
+	var quotaToAdd int
+	var payMoney float64
+	var paymentMethod string
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		topUp := &TopUp{}
+		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if topUp.PaymentProvider != PaymentProviderEpay {
+			return ErrPaymentMethodMismatch
+		}
+		// 幂等：已成功则不再加额度
+		if topUp.Status == common.TopUpStatusSuccess {
+			return nil
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+
+		// 金额防篡改：回调 money 与下单金额必须一致（按分比较）
+		if strings.TrimSpace(callbackMoney) != "" {
+			cb, err := decimal.NewFromString(strings.TrimSpace(callbackMoney))
+			if err != nil {
+				return errors.New("回调金额非法")
+			}
+			orderMoney := decimal.NewFromFloat(topUp.Money).Round(2)
+			if !cb.Round(2).Equal(orderMoney) {
+				return errors.New("回调金额与订单金额不一致")
+			}
+		}
+
+		if callbackType != "" && topUp.PaymentMethod != callbackType {
+			topUp.PaymentMethod = callbackType
+		}
+
+		dAmount := decimal.NewFromInt(topUp.Amount)
+		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+		quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
+		if quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
+
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
+		}
+
+		// Unscoped：软删用户仍应入账（钱已付）；0 行则 fail-loud 回滚，避免 success 无额度
+		res := tx.Unscoped().Model(&User{}).Where("id = ?", topUp.UserId).
+			Update("quota", gorm.Expr("quota + ?", quotaToAdd))
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errors.New("用户不存在，无法入账")
+		}
+
+		userId = topUp.UserId
+		payMoney = topUp.Money
+		paymentMethod = topUp.PaymentMethod
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if quotaToAdd > 0 {
+		// 缓存侧 best-effort；权威在 DB
+		if cacheErr := cacheIncrUserQuota(userId, int64(quotaToAdd)); cacheErr != nil {
+			common.SysLog("failed to increase user quota cache after epay: " + cacheErr.Error())
+		}
+		RecordTopupLog(userId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, PaymentProviderEpay)
+	}
+	return nil
 }
 
 // ManualCompleteTopUp 管理员手动完成订单并给用户充值

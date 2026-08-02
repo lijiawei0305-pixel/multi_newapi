@@ -29,7 +29,7 @@ For commercial licensing, please contact support@quantumnous.com
 //   - mt_subscription_orders   桥接订单（order_no ← source_order_id，native_sub_id → 原生订阅）—— JOIN 关联真源。
 //   - user_subscriptions       原生订阅桶（amount_used 为 quota 单位真实用量）—— 真实已用 = amount_used/QuotaPerUnit。
 //   - token_plans              套餐定义（id → code）—— JOIN 回填 plan_code（订阅表无 plan_code 列）。
-//   - user_balances            钱包余额（balance_usd 已是 USD，decimal(20,8)）—— 钱包未消耗。
+//   - users                    用户额度（quota 为权威余额，/QuotaPerUnit → USD）—— 钱包未消耗。
 //   - payment_orders           支付订单（status/updated_at）—— 系统异常卡单计数（对齐对账 updated_at 口径）。
 //
 // 新表 breakage_snapshots（本包 AutoMigrate 建）：订阅维历史快照，唯一键
@@ -210,13 +210,17 @@ func (r *Repo) Overview(ctx context.Context, tenantID *int64, now int64) (breaka
 		out.ExpiredUnusedUSD = row.Unused
 	}
 
-	// (3) 钱包未消耗 = Σ(balance_usd) FROM user_balances WHERE scope。balance_usd 已是 USD，不换算。
+	// (3) 钱包未消耗 = Σ(users.quota)/QuotaPerUnit。
+	// 生产入账/消耗权威在 users.quota（兑换码、充值、relay 扣费）；user_balances 表无非测试
+	// 写入路径（C7 死台账），读它会导致「钱包未消耗」恒 ~0 的假绿指标。
 	{
 		var row struct {
 			Balance float64
 		}
-		q := r.db.WithContext(ctx).Table("user_balances").
-			Select("COALESCE(SUM(balance_usd),0) AS balance")
+		quotaUSD := "COALESCE(SUM(quota),0) / " + strconv.FormatFloat(common.QuotaPerUnit, 'f', 1, 64)
+		q := r.db.WithContext(ctx).Table("users").
+			Select(quotaUSD + " AS balance").
+			Where("deleted_at IS NULL")
 		q = applyTenantScope(q, "tenant_id", tenantID)
 		if err := q.Scan(&row).Error; err != nil {
 			return breakage.Overview{}, err

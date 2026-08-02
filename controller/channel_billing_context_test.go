@@ -9,11 +9,15 @@ import (
 
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGetResponseBodyWithContextCancelsChannelControlPlaneRequest(t *testing.T) {
 	t.Setenv("NO_PROXY", "*")
+	// Local httptest server binds 127.0.0.1; disable SSRF for cancellation semantics under test.
+	// Production still validates via validateControlPlaneURL + SSRF-protected client.
+	useFetchPolicyForTest(t, system_setting.FetchSetting{EnableSSRFProtection: false})
 	service.InitHttpClient()
 	started := make(chan struct{})
 	serverCanceled := make(chan struct{})

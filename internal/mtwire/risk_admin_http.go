@@ -15,8 +15,8 @@ import (
 
 // 后台风控运维错误码。
 var (
-	// errRiskEngineOff：风控引擎未装配（Redis 关）→ 无限购键存在，无从释放。
-	errRiskEngineOff = apperr.New("RISK_ENGINE_UNAVAILABLE", "风控引擎未启用（Redis 未装配），无限购键可释放", http.StatusServiceUnavailable)
+	// errRiskEngineOff：风控引擎未装配（测试/异常装配）→ 无从释放。生产始终注入带 DB 台账的 Engine。
+	errRiskEngineOff = apperr.New("RISK_ENGINE_UNAVAILABLE", "风控引擎未启用，无限购台账可释放", http.StatusServiceUnavailable)
 	// errRiskReleaseInput：释放限购入参非法（user_id 缺失/<=0）。
 	errRiskReleaseInput = apperr.New("RISK_RELEASE_INPUT_INVALID", "释放限购入参非法：user_id 必填且需 >0", http.StatusBadRequest)
 	// errRiskForceReasonRequired：force 绕过归属校验属敏感操作（防线与绕过开关同握一手），

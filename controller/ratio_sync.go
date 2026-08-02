@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -156,8 +155,19 @@ func FetchUpstreamRatios(c *gin.Context) {
 	if len(req.Upstreams) > 0 {
 		for _, u := range req.Upstreams {
 			if strings.HasPrefix(u.BaseURL, "http") {
+				if err := validateControlPlaneURL(u.BaseURL); err != nil {
+					logger.LogWarn(c.Request.Context(), fmt.Sprintf("ratio_sync reject upstream base_url: %v", err))
+					continue
+				}
 				if u.Endpoint == "" {
 					u.Endpoint = defaultEndpoint
+				}
+				// Absolute endpoint is itself a server-side fetch target — apply the same SSRF policy.
+				if strings.HasPrefix(u.Endpoint, "http://") || strings.HasPrefix(u.Endpoint, "https://") {
+					if err := validateControlPlaneURL(u.Endpoint); err != nil {
+						logger.LogWarn(c.Request.Context(), fmt.Sprintf("ratio_sync reject upstream endpoint: %v", err))
+						continue
+					}
 				}
 				u.BaseURL = strings.TrimRight(u.BaseURL, "/")
 				upstreams = append(upstreams, u)
@@ -176,6 +186,10 @@ func FetchUpstreamRatios(c *gin.Context) {
 		}
 		for _, ch := range dbChannels {
 			if base := ch.GetBaseURL(); strings.HasPrefix(base, "http") {
+				if err := validateControlPlaneURL(base); err != nil {
+					logger.LogWarn(c.Request.Context(), fmt.Sprintf("ratio_sync reject channel base_url id=%d: %v", ch.Id, err))
+					continue
+				}
 				upstreams = append(upstreams, dto.UpstreamDTO{
 					ID:       ch.Id,
 					Name:     ch.Name,
@@ -196,26 +210,13 @@ func FetchUpstreamRatios(c *gin.Context) {
 
 	sem := make(chan struct{}, maxConcurrentFetches)
 
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
-	transport := &http.Transport{MaxIdleConns: 100, IdleConnTimeout: 90 * time.Second, TLSHandshakeTimeout: 10 * time.Second, ExpectContinueTimeout: 1 * time.Second, ResponseHeaderTimeout: 10 * time.Second}
-	if common.TLSInsecureSkipVerify {
-		transport.TLSClientConfig = common.InsecureTLSConfig
+	// SSRF-protected client (same control-plane policy as FetchModels / validateControlPlaneURL).
+	client, clientErr := newControlPlaneHTTPClient(time.Duration(req.Timeout) * time.Second)
+	if clientErr != nil || client == nil {
+		logger.LogError(c.Request.Context(), "ratio_sync control-plane HTTP client unavailable")
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "HTTP 客户端不可用"})
+		return
 	}
-	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, _, err := net.SplitHostPort(addr)
-		if err != nil {
-			host = addr
-		}
-		// 对 github.io 优先尝试 IPv4，失败则回退 IPv6
-		if strings.HasSuffix(host, "github.io") {
-			if conn, err := dialer.DialContext(ctx, "tcp4", addr); err == nil {
-				return conn, nil
-			}
-			return dialer.DialContext(ctx, "tcp6", addr)
-		}
-		return dialer.DialContext(ctx, network, addr)
-	}
-	client := &http.Client{Transport: transport}
 
 	for _, chn := range upstreams {
 		wg.Add(1)
