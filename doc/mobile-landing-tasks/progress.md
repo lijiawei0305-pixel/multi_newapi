@@ -13,8 +13,8 @@
 | --- | --- | --- | --- | --- |
 | **1** | T01 `viewport-mode` | 无 | ✅ 与 T04 | ✅ |
 | **1** | T04 桌面侧等价改写 | 无 | ✅ 与 T01 | ✅ |
-| **2** | T02 `selection-machine` | T01（仅类型） | ✅ 与 T03 | ⬜ |
-| **2** | T03 `landing-mobile-css` | T01（常量） | ✅ 与 T02 | ⬜ |
+| **2** | T02 `selection-machine` | T01（仅类型） | ✅ 与 T03 | ✅ |
+| **2** | T03 `landing-mobile-css` | T01（常量） | ✅ 与 T02 | ✅ |
 | **3** | T05 `scene3d.ts` 宿主接线 | T01, T02 | ✅ 与 T06 | ⬜ |
 | **3** | T06 React 外壳接线 | T03, T04 | ✅ 与 T05 | ⬜ |
 | **4** | T07 全量门禁与自检 | T01–T06 | — | ⬜ |
@@ -36,10 +36,10 @@
 
 ### Wave 2 — 纯核与样式（可并行）
 
-- [ ] **T02** [`selection-machine` 选中状态机](T02-selection-machine.md)
+- [x] **T02** [`selection-machine` 选中状态机](T02-selection-machine.md)
   - 交付：`selection-machine.ts` + `selection-machine.test.ts`（14 条用例）
   - 关键：**根治 R7**；迁移表必须完备；**本任务不删旧文件**（会断 typecheck）
-- [ ] **T03** [`landing-mobile-css` 移动端样式表](T03-landing-mobile-css.md)
+- [x] **T03** [`landing-mobile-css` 移动端样式表](T03-landing-mobile-css.md)
   - 交付：`landing-mobile-css.ts` + `landing-mobile-css.test.ts`（6 条用例）
   - 关键：「零裸规则」用例把硬约束 M1 变成 CI 门禁
 
@@ -84,3 +84,4 @@
 | --- | --- |
 | 2026-08-03 | 初始化。按 detailed-design §7 的实施顺序切分为 7 个任务、4 个 Wave。 |
 | 2026-08-03 | Wave 1 完成：T01 + T04。五道门全绿（lint/typecheck/test 179/source-size/format）。 |
+| 2026-08-03 | Wave 2 完成：T02 + T03。五道门全绿（test 199，含 selection 14 + mobile-css 6）。 |
