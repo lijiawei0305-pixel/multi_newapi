@@ -15,9 +15,9 @@
 | **1** | T04 桌面侧等价改写 | 无 | ✅ 与 T01 | ✅ |
 | **2** | T02 `selection-machine` | T01（仅类型） | ✅ 与 T03 | ✅ |
 | **2** | T03 `landing-mobile-css` | T01（常量） | ✅ 与 T02 | ✅ |
-| **3** | T05 `scene3d.ts` 宿主接线 | T01, T02 | ✅ 与 T06 | ⬜ |
-| **3** | T06 React 外壳接线 | T03, T04 | ✅ 与 T05 | ⬜ |
-| **4** | T07 全量门禁与自检 | T01–T06 | — | ⬜ |
+| **3** | T05 `scene3d.ts` 宿主接线 | T01, T02 | ✅ 与 T06 | ✅ |
+| **3** | T06 React 外壳接线 | T03, T04 | ✅ 与 T05 | ✅ |
+| **4** | T07 全量门禁与自检 | T01–T06 | — | ✅ |
 
 > Wave 1、2 的四个任务**全部是零依赖或仅取常量的纯模块**，落地后即可独立全绿——这是模块划分的收益兑现处。
 
@@ -45,26 +45,27 @@
 
 ### Wave 3 — 接线（可并行）
 
-- [ ] **T05** [`scene3d.ts` 宿主接线](T05-scene3d-host-wiring.md)
+- [x] **T05** [`scene3d.ts` 宿主接线](T05-scene3d-host-wiring.md)
   - 交付：`scene3d.ts` 9 处；删除 `scene3d-interaction.ts` 及其测试
   - 关键：**新增监听器只许 1 个**；芯片无条件双绑、不写条件分支
-- [ ] **T06** [React 外壳接线](T06-react-shell-wiring.md)
+- [x] **T06** [React 外壳接线](T06-react-shell-wiring.md)
   - 交付：`index.tsx` 2 处 + `features/home/index.tsx` 1 处
   - 关键：唯一 DOM 新增（关闭按钮）；`MOBILE_CSS` 必须拼在最后
 
 ### Wave 4 — 收口
 
-- [ ] **T07** [全量门禁与交付自检](T07-gates-and-selfcheck.md)
+- [x] **T07** [全量门禁与交付自检](T07-gates-and-selfcheck.md)
   - 关键：M4 反证试验——证明「门禁真的有效」而非「代码碰巧对」
+  - 交付报告：[`T07-delivery-report.md`](T07-delivery-report.md)
 
 ---
 
 ## 完成定义（本阶段 Done）
 
-- [ ] T01–T07 全部 `- [x]`
-- [ ] 五道门全绿：`lint` / `typecheck` / `test` / `source-size:check` / `format:check`
-- [ ] 改动面与设计 §5 对账一致：新增 6 / 修改 5 / 删除 2；`locales` 与 `package.json` 零改动
-- [ ] 交付报告已输出（T07 模板）
+- [x] T01–T07 全部 `- [x]`
+- [x] 五道门全绿：`lint` / `typecheck` / `test` / `source-size:check` / `format:check`
+- [x] 改动面与设计 §5 对账一致：新增 6 / 修改 5 / 删除 2；`locales` 与 `package.json` 零改动
+- [x] 交付报告已输出（T07 模板）
 
 ## ⚠️ 明确不在自动化范围（人工 gated）
 
@@ -85,3 +86,5 @@
 | 2026-08-03 | 初始化。按 detailed-design §7 的实施顺序切分为 7 个任务、4 个 Wave。 |
 | 2026-08-03 | Wave 1 完成：T01 + T04。五道门全绿（lint/typecheck/test 179/source-size/format）。 |
 | 2026-08-03 | Wave 2 完成：T02 + T03。五道门全绿（test 199，含 selection 14 + mobile-css 6）。 |
+| 2026-08-03 | Wave 3 完成：T05 + T06。删除 scene3d-interaction；test 196（-3 旧交互测）；死引用 grep 清。 |
+| 2026-08-03 | Wave 4 / T07 完成。五道门绿；M4 反证（裸规则→红→撤销→绿）；交付报告已输出。**阶段 Done。** |
