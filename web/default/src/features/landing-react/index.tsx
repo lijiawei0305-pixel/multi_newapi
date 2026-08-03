@@ -18,6 +18,7 @@ import { useSystemConfig } from '@/hooks/use-system-config'
 
 import { KefuModal } from './kefu-modal'
 import { LANDING_CSS } from './landing-css'
+import { MOBILE_CSS } from './landing-mobile-css'
 import { initScene3d } from './scene3d'
 import { JoinSection, ServicesSection, StudioSection } from './sections'
 import { SECTIONS_CSS } from './sections-css'
@@ -115,7 +116,7 @@ export function LandingReact() {
   return (
     <div className='wd-landing-root'>
       {/* 挂载时注入样式、卸载即移除（不永久污染全站） */}
-      <style>{LANDING_CSS + SECTIONS_CSS}</style>
+      <style>{LANDING_CSS + SECTIONS_CSS + MOBILE_CSS}</style>
 
       <div id='bg' />
       <div id='aurora' />
@@ -277,6 +278,16 @@ export function LandingReact() {
             </div>
             {/* HUD 默认态；点击卫星后由 orbit.ts 用 i18n.t() 覆写为该模型的信息。 */}
             <aside id='hud'>
+              <button
+                type='button'
+                className='hud-close'
+                aria-label={t('Close')}
+                onClick={() =>
+                  window.dispatchEvent(new CustomEvent('wd-hud-close'))
+                }
+              >
+                ×
+              </button>
               <div className='hud-prov'>
                 <span className='hud-dot' />
                 <span id='hud-prov'>{t('System Running')}</span>

@@ -46,8 +46,13 @@ import i18n from '@/i18n/config'
 
 import { approach, makeGlowTexture } from './scene3d-assets'
 import { LOGOS, MODELS, ORBITS } from './scene3d-config'
-import { nextSelection } from './scene3d-interaction'
 import { detectRenderQuality } from './scene3d-quality'
+import {
+  INITIAL_SELECTION,
+  reduce,
+  type SelectionEvent,
+} from './selection-machine'
+import { detectPointerMode, pointerModeFromEvent } from './viewport-mode'
 
 const DATA_URL = '/lp-assets/dengpao_points.bin'
 const RENDER_H = 940 // 渲染缓冲高度固定(bloom 归一化一致);宽 = 高 × 盒子宽高比
@@ -384,6 +389,10 @@ export async function initScene3d(
       el.addEventListener('mouseleave', () => {
         hoverKey = null
       })
+      el.addEventListener('click', (e) => {
+        e.stopPropagation()
+        dispatch({ type: 'tap-chip', key })
+      })
       stage.appendChild(el)
       addedChips.push(el)
       chips.push({
@@ -463,10 +472,19 @@ export async function initScene3d(
   }
   const onPointerDown = (e: PointerEvent) => {
     if (!(window as any).__scene3dActive) return
+    // ① 运行时校正指针模式 —— 必须最先执行，后续 dispatch 才用得上新值
+    const corrected = pointerModeFromEvent(e.pointerType)
+    if (corrected) pointerMode = corrected
+    // ② 既有 surge 逻辑
     const r = canvas.getBoundingClientRect()
     const nx = ((e.clientX - r.left) / r.width) * 2 - 1
     const ny = -((e.clientY - r.top) / r.height) * 2 + 1
     if (nx * nx + ny * ny < 0.5 * 0.5) surge()
+    // ③ 点在卫星与抽屉之外 → 关闭（hover 模式下被 reduce 吞掉，无害）
+    const t = e.target as HTMLElement | null
+    if (!t?.closest('.chip') && !t?.closest('#hud')) {
+      dispatch({ type: 'tap-outside' })
+    }
   }
   function surge() {
     if (!PRM && (window as any).__scene3dActive) {
@@ -509,7 +527,15 @@ export async function initScene3d(
   raycaster.params.Points.threshold = 0.02
   let orbitPhase = 0,
     speedFactor = 1
-  let selected: string | null = null
+  let pointerMode = detectPointerMode()
+  let selection = INITIAL_SELECTION
+
+  function dispatch(event: SelectionEvent) {
+    const next = reduce(selection, event, pointerMode)
+    if (next === selection) return
+    selection = next
+    onSelectChange(selection.selected)
+  }
 
   // HUD 文案走现有中文 i18n(key=英文原句;W5)。DOM 结构在 index.tsx 的 #hud。
   function setHud(m: any) {
@@ -523,7 +549,7 @@ export async function initScene3d(
     set('hud-scene', m.scene ? i18n.t(m.scene) : '')
     set('hud-tele', i18n.t(m.telemetry))
     const box = document.querySelector('#hud')
-    if (box) (box as HTMLElement).style.borderLeftColor = m.color
+    if (box) (box as HTMLElement).style.setProperty('--hud-accent', m.color)
     const dot = document.querySelector('#hud .hud-dot') as HTMLElement | null
     if (dot) dot.style.background = m.color
   }
@@ -541,6 +567,7 @@ export async function initScene3d(
       varsEl.style.setProperty('--wd-g1', col)
       varsEl.style.setProperty('--wd-g2', lightenHex(col, 0.5))
       document.body.style.cursor = 'pointer'
+      varsEl.classList.add('wd-hud-open')
     } else {
       hudBox?.classList.remove('show')
       heroRight?.classList.remove('card-open')
@@ -549,6 +576,7 @@ export async function initScene3d(
       varsEl.style.removeProperty('--wd-g1')
       varsEl.style.removeProperty('--wd-g2')
       document.body.style.cursor = ''
+      varsEl.classList.remove('wd-hud-open')
     }
   }
 
@@ -600,6 +628,7 @@ export async function initScene3d(
     io = new IntersectionObserver(
       (es) => {
         heroVisible = es[0]?.isIntersecting ?? false
+        if (!heroVisible) dispatch({ type: 'close' })
         syncLoop()
       },
       { threshold: 0 }
@@ -698,10 +727,8 @@ export async function initScene3d(
     }
 
     // 悬停(DOM 芯片 mouseenter 设 hoverKey)→ 吸附锁定 → 缓停/恢复
-    const prevSel = selected
-    selected = nextSelection(selected, hoverKey, pointerInCanvas)
-    if (selected !== prevSel) onSelectChange(selected)
-    speedFactor = approach(speedFactor, selected ? 0 : 1, 3, dt)
+    dispatch({ type: 'hover-tick', hoverKey, pointerInside: pointerInCanvas })
+    speedFactor = approach(speedFactor, selection.selected ? 0 : 1, 3, dt)
   }
   function loop(nowMs: number) {
     rafId = 0
@@ -720,9 +747,12 @@ export async function initScene3d(
       return bulbPoints.geometry.attributes.position.count
     },
     get selected() {
-      return selected
+      return selection.selected
     },
   }
+
+  const onHudClose = () => dispatch({ type: 'close' })
+  window.addEventListener('wd-hud-close', onHudClose)
 
   layoutSize()
   updateBgPauseClass()
@@ -735,6 +765,7 @@ export async function initScene3d(
     removeEventListener('mousemove', onMouseMove)
     document.removeEventListener('mouseleave', onMouseLeave)
     removeEventListener('pointerdown', onPointerDown, true)
+    window.removeEventListener('wd-hud-close', onHudClose)
     removeEventListener('resize', layoutSize)
     ro?.disconnect()
     io?.disconnect()

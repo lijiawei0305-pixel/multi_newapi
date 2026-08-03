@@ -20,10 +20,10 @@ export type SelectionEvent =
 export const INITIAL_SELECTION: SelectionState = { selected: null }
 
 /**
- * 悬停选中的吸附/锁定(hysteresis) —— 自 scene3d-interaction.nextSelection 原样搬迁。
+ * 悬停选中的吸附/锁定(hysteresis) —— 自改造前 hover 迟滞语义原样搬迁。
  * 规则：离开视觉区即关闭；命中某图标即锁定（含切换）；命中空处保持当前锁定不松手。
  */
-function nextSelection(
+function hoverSelect(
   current: string | null,
   hitKey: string | null,
   pointerInside: boolean
@@ -47,7 +47,7 @@ export function reduce(
 
   if (mode === 'hover') {
     if (event.type === 'hover-tick') {
-      nextSelected = nextSelection(
+      nextSelected = hoverSelect(
         state.selected,
         event.hoverKey,
         event.pointerInside

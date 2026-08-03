@@ -8,7 +8,7 @@ import {
   type SelectionState,
 } from './selection-machine'
 
-// ── hover 迁移（自 scene3d-interaction.nextSelection 等价搬迁）────────
+// ── hover 迁移（改造前 hover 迟滞语义等价搬迁）────────────────────
 
 test('hover：命中即锁定', () => {
   const next = reduce(

@@ -51,7 +51,7 @@ function MainSiteLanding({ loadingLabel }: { loadingLabel: string }) {
       >
         <LandingReact />
       </Suspense>
-      <div className='dark relative z-20 bg-[#061127]'>
+      <div className='dark relative z-20 bg-[#061127] pb-20 md:pb-0'>
         <Footer className='border-transparent' />
       </div>
     </>
