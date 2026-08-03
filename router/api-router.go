@@ -334,9 +334,14 @@ func SetApiRouter(router *gin.Engine) {
 		mjRoute.GET("/self", middleware.UserAuth(), controller.GetUserMidjourney)
 		mjRoute.GET("/", middleware.AdminAuth(), controller.GetAllMidjourney)
 
+		// Task list registers both "" and "/". Gin cannot 301 /api/task → /api/task/
+		// when BOTH /api/task-submission-recovery and /:mode/mj/task/:id (relay) are
+		// registered: RedirectTrailingSlash returns tsr=false, request falls through
+		// to web NoRoute → RelayNotFound 404. Frontend calls GET /api/task (no slash).
 		taskRoute := apiRouter.Group("/task")
 		{
 			taskRoute.GET("/self", middleware.UserAuth(), controller.GetUserTask)
+			taskRoute.GET("", middleware.AdminAuth(), controller.GetAllTask)
 			taskRoute.GET("/", middleware.AdminAuth(), controller.GetAllTask)
 		}
 
