@@ -251,11 +251,12 @@ export const LANDING_CSS = `
     width:min(84%,320px); pointer-events:none;
     padding:18px 20px 16px; border-radius:16px;
     background:rgba(9,17,36,.74); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
-    border:1px solid rgba(120,180,255,.22); border-left:3px solid #00f0ff;
+    border:1px solid rgba(120,180,255,.22); border-left:3px solid var(--hud-accent,#00f0ff);
     box-shadow:0 10px 44px rgba(0,8,32,.55), inset 0 0 20px rgba(80,170,255,.05);
     opacity:0; visibility:hidden; transform:translate(20px,-50%);
     transition:opacity .35s ease, transform .45s cubic-bezier(.22,.7,.25,1), visibility 0s linear .45s;
   }
+  .hud-close { display:none; }
   #hud.show { opacity:1; visibility:visible; transform:translate(0,-50%);
     transition:opacity .35s ease, transform .45s cubic-bezier(.22,.7,.25,1); }
   #hud .hud-prov { display:flex; align-items:center; gap:8px; color:#9fd8ff; font-size:12.5px; letter-spacing:.12em; }

@@ -95,6 +95,7 @@ export const SECTIONS_CSS = `
   }
   @media (max-width:560px){
     .svc-bento { grid-template-columns:1fr; }
+    .svc-bento { grid-auto-rows:auto; }
     .svc-card,.svc-wide,.svc-flagship { grid-column:span 1; }
     .svc-strip { grid-template-columns:1fr; }
     .svc-feat { border-left:none; }
