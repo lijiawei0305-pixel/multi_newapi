@@ -13,6 +13,7 @@ import (
 // Production has both:
 //   - GET /api/task-submission-recovery
 //   - GET /:mode/mj/task/:id/fetch  (relay midjourney mode prefix)
+//
 // Together they prevent Gin's RedirectTrailingSlash from turning
 // GET /api/task into GET /api/task/. Only registering GET "/" then yields
 // web NoRoute → RelayNotFound 404 (task log page toast).
