@@ -59,7 +59,8 @@ func TelegramBind(c *gin.Context) {
 		return
 	}
 	user.TelegramId = telegramId
-	if err := user.Update(false); err != nil {
+	// Column-level write: full-row Update races concurrent billing counters.
+	if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("telegram_id", telegramId).Error; err != nil {
 		c.JSON(200, gin.H{
 			"message": err.Error(),
 			"success": false,

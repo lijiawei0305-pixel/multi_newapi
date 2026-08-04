@@ -100,6 +100,50 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 	user.Setting = string(settingBytes)
 }
 
+// MaxUserSettingBytes bounds free-text user.setting payloads (sidebar JSON, notify config, etc.).
+// Prevents oversized writes used as DoS amplifiers while remaining well above normal UI configs.
+const MaxUserSettingBytes = 8192
+
+// UpdateUserSettingColumn writes only the setting column and refreshes user cache.
+// Callers that only change profile/settings MUST use this (or other single-column helpers)
+// instead of User.Update(), which historically full-row-wrote quota/used_quota snapshots
+// and caused lost-update billing races under concurrent API usage.
+func UpdateUserSettingColumn(userId int, setting string) error {
+	if len(setting) > MaxUserSettingBytes {
+		return fmt.Errorf("setting too large")
+	}
+	if err := DB.Model(&User{}).Where("id = ?", userId).Update("setting", setting).Error; err != nil {
+		return err
+	}
+	return invalidateUserCache(userId)
+}
+
+// UpdateUserAccessTokenColumn writes only the access_token column.
+// Avoids full-row Updates that could overwrite concurrent billing counters.
+func UpdateUserAccessTokenColumn(userId int, accessToken string) error {
+	if err := DB.Model(&User{}).Where("id = ?", userId).Update("access_token", accessToken).Error; err != nil {
+		return err
+	}
+	// Access token is not part of UserBase cache; no user-hash fill required.
+	return nil
+}
+
+// UpdateUserAffCodeColumn writes only the aff_code column.
+func UpdateUserAffCodeColumn(userId int, affCode string) error {
+	if err := DB.Model(&User{}).Where("id = ?", userId).Update("aff_code", affCode).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// UpdateUserEmailColumn writes only the email column and invalidates cache.
+func UpdateUserEmailColumn(userId int, email string) error {
+	if err := DB.Model(&User{}).Where("id = ?", userId).Update("email", email).Error; err != nil {
+		return err
+	}
+	return invalidateUserCache(userId)
+}
+
 // 根据用户角色生成默认的边栏配置
 func generateDefaultSidebarConfigForRole(userRole int) string {
 	defaultConfig := map[string]interface{}{}
@@ -361,14 +405,15 @@ func HardDeleteUserById(id int) error {
 }
 
 func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
+	// Atomic column updates only — never Save full row (would race billing counters).
+	if err := DB.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
+		"aff_count":   gorm.Expr("aff_count + ?", 1),
+		"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
+		"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
+	}).Error; err != nil {
 		return err
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+	return nil
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
@@ -395,17 +440,25 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 		return errors.New("邀请额度不足！")
 	}
 
-	// 更新用户额度
-	user.AffQuota -= quota
-	user.Quota += quota
-
-	// 保存用户状态
-	if err := tx.Save(user).Error; err != nil {
+	// Explicit column updates only — full-row Save would roll back concurrent used_quota.
+	if err := tx.Model(&User{}).Where("id = ? AND aff_quota >= ?", user.Id, quota).Updates(map[string]interface{}{
+		"aff_quota": gorm.Expr("aff_quota - ?", quota),
+		"quota":     gorm.Expr("quota + ?", quota),
+	}).Error; err != nil {
 		return err
 	}
 
+	user.AffQuota -= quota
+	user.Quota += quota
+
 	// 提交事务
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	if cacheErr := cacheIncrUserQuota(user.Id, int64(quota)); cacheErr != nil {
+		common.SysLog("failed to increase user quota cache after aff transfer: " + cacheErr.Error())
+	}
+	return nil
 }
 
 func (user *User) Insert(inviterId int) error {
@@ -447,7 +500,7 @@ func (user *User) finishInsert(inviterId int) {
 			currentSetting := createdUser.GetSetting()
 			currentSetting.SidebarModules = defaultSidebarConfig
 			createdUser.SetSetting(currentSetting)
-			createdUser.Update(false)
+			_ = UpdateUserSettingColumn(createdUser.Id, createdUser.Setting)
 			common.SysLog(fmt.Sprintf("为新用户 %s (角色: %d) 初始化边栏配置", createdUser.Username, createdUser.Role))
 		}
 	}
@@ -511,7 +564,7 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 			currentSetting := createdUser.GetSetting()
 			currentSetting.SidebarModules = defaultSidebarConfig
 			createdUser.SetSetting(currentSetting)
-			createdUser.Update(false)
+			_ = UpdateUserSettingColumn(createdUser.Id, createdUser.Setting)
 			common.SysLog(fmt.Sprintf("为新用户 %s (角色: %d) 初始化边栏配置", createdUser.Username, createdUser.Role))
 		}
 	}
@@ -553,7 +606,18 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 	if err = tx.First(&stored, user.Id).Error; err != nil {
 		return err
 	}
-	if err = tx.Model(&stored).Omit("auth_version").Updates(newUser).Error; err != nil {
+	// Never full-row-write billing/aff counters: GORM struct Updates writes every non-zero
+	// field from the in-memory snapshot, which races with atomic used_quota/quota increments
+	// and causes lost updates (billing bypass). Those counters have dedicated atomic paths.
+	if err = tx.Model(&stored).Omit(
+		"auth_version",
+		"quota",
+		"used_quota",
+		"request_count",
+		"aff_quota",
+		"aff_history",
+		"aff_count",
+	).Updates(newUser).Error; err != nil {
 		return err
 	}
 	return prepareUserAuthCacheInvalidationTx(tx, user.Id)

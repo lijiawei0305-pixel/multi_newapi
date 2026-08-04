@@ -388,7 +388,8 @@ func GenerateAccessToken(c *gin.Context) {
 		return
 	}
 
-	if err := user.Update(false); err != nil {
+	// Single-column write: full-row Update races concurrent used_quota increments.
+	if err := model.UpdateUserAccessTokenColumn(user.Id, user.GetAccessToken()); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -438,7 +439,7 @@ func GetAffCode(c *gin.Context) {
 	}
 	if user.AffCode == "" {
 		user.AffCode = common.GetRandomString(4)
-		if err := user.Update(false); err != nil {
+		if err := model.UpdateUserAffCodeColumn(user.Id, user.AffCode); err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": err.Error(),
@@ -760,6 +761,7 @@ func UpdateSelf(c *gin.Context) {
 	}
 
 	// 检查是否是用户设置更新请求 (sidebar_modules 或 language)
+	// 仅写 setting 单列，禁止 User.Update 全行写回（会覆盖并发计费的 used_quota/quota）。
 	if sidebarModules, sidebarExists := requestData["sidebar_modules"]; sidebarExists {
 		userId := c.GetInt("id")
 		user, err := model.GetUserById(userId, false)
@@ -773,12 +775,16 @@ func UpdateSelf(c *gin.Context) {
 
 		// 更新sidebar_modules字段
 		if sidebarModulesStr, ok := sidebarModules.(string); ok {
+			if len(sidebarModulesStr) > model.MaxUserSettingBytes {
+				common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+				return
+			}
 			currentSetting.SidebarModules = sidebarModulesStr
 		}
 
-		// 保存更新后的设置
+		// 保存更新后的设置（单列）
 		user.SetSetting(currentSetting)
-		if err := user.Update(false); err != nil {
+		if err := model.UpdateUserSettingColumn(user.Id, user.Setting); err != nil {
 			common.ApiErrorI18n(c, i18n.MsgUpdateFailed)
 			return
 		}
@@ -804,9 +810,9 @@ func UpdateSelf(c *gin.Context) {
 			currentSetting.Language = langStr
 		}
 
-		// 保存更新后的设置
+		// 保存更新后的设置（单列）
 		user.SetSetting(currentSetting)
-		if err := user.Update(false); err != nil {
+		if err := model.UpdateUserSettingColumn(user.Id, user.Setting); err != nil {
 			common.ApiErrorI18n(c, i18n.MsgUpdateFailed)
 			return
 		}
@@ -1215,7 +1221,8 @@ func EmailBind(c *gin.Context) {
 	}
 	user.Email = email
 	// no need to check if this email already taken, because we have used verification code to check it
-	err = user.Update(false)
+	// Single-column write to avoid overwriting concurrent billing counters.
+	err = model.UpdateUserEmailColumn(user.Id, email)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -1454,9 +1461,15 @@ func UpdateUserSetting(c *gin.Context) {
 		}
 	}
 
-	// 更新用户设置
+	// Preserve language / sidebar / billing preference that live in the same JSON blob
+	// but are not part of this notification-settings form.
+	settings.Language = existingSettings.Language
+	settings.SidebarModules = existingSettings.SidebarModules
+	settings.BillingPreference = existingSettings.BillingPreference
+
+	// 仅写 setting 列，避免全行写回计费字段（used_quota/quota 丢失更新）
 	user.SetSetting(settings)
-	if err := user.Update(false); err != nil {
+	if err := model.UpdateUserSettingColumn(user.Id, user.Setting); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUpdateFailed)
 		return
 	}

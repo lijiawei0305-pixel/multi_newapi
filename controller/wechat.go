@@ -174,7 +174,8 @@ func WeChatBind(c *gin.Context) {
 		return
 	}
 	user.WeChatId = wechatId
-	err = user.Update(false)
+	// Column-level write: full-row Update races concurrent billing counters.
+	err = model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("wechat_id", wechatId).Error
 	if err != nil {
 		common.ApiError(c, err)
 		return
