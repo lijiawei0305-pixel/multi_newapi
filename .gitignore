@@ -89,3 +89,7 @@ __pycache__/
 .ccg/tasks/homepage-header-nav/
 .ccg/tasks/fix-breakage-used-usd-projection/
 .ccg/tasks/batch-billing-writes/
+
+# Local agent/debug screenshots (do not commit)
+.ccg/*.png
+/*.png
