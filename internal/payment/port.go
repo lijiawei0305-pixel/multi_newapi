@@ -77,7 +77,8 @@ type OrderRepo interface {
 	ScheduleNextQuery(ctx context.Context, orderNo string, nextAt time.Time, attempts int) error
 	// ClaimForQuery 查单租约：排除 prepay_inflight 与有效 operation lease。
 	ClaimForQuery(ctx context.Context, orderNo string, now, leaseUntil time.Time) (token string, ok bool, err error)
-	// ClaimForPrepay 认领唯一 Prepay 操作：local_created|prepay_unknown → prepay_inflight + token。
+	// ClaimForPrepay 认领唯一 Prepay 操作：仅 local_created|empty → prepay_inflight + token。
+	// prepay_unknown 不得直接再 Prepay；崩溃后须先 Query，仅 ORDER_NOT_EXIST 重置为 local_created。
 	// 同时把 next_query_at 推到 leaseUntil（≥ Prepay budget+grace），禁止 5s 内 Query 抢跑。
 	ClaimForPrepay(ctx context.Context, orderNo string, now, leaseUntil time.Time) (token string, ok bool, err error)
 	// FinishPrepayFenced token 持有者写回 create_state / pay_url 调度；返回 applied。
