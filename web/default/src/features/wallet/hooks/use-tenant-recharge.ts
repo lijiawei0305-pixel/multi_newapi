@@ -443,31 +443,8 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
             qrFromStatus ||
             (activeOrderRef.current?.provider === 'alipay' && aliFromStatus)
           )
-          // 无 QR 且平台无单 / 等码超时：结束转圈，提示重试（清意图防刷新复现）
-          if (
-            !hasQr &&
-            shouldAbandonCreateWait({
-              hasQr: false,
-              startedAt: activeOrderRef.current?.startedAt || pollStartedAt,
-              providerTradeState: data.provider_trade_state,
-              status: data.status,
-            })
-          ) {
-            stopPolling()
-            clearRechargeIntent()
-            setPhase('creating_error')
-            setDialogOpen(true)
-            const msg = i18next.t(
-              'Payment order was not created by the provider, please retry',
-              {
-                defaultValue: '支付渠道未能创建订单，请关闭后重新下单',
-              }
-            )
-            setErrorMessage(msg)
-            toast.error(msg)
-            return
-          }
 
+          // 先处理终态/入账，避免 failed 被误判为 creating_error
           const interp = interpretRechargeStatus(data)
           if (interp === 'credited') {
             stopPolling()
@@ -495,6 +472,31 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
             )
             return
           }
+
+          // 无 QR 且平台无单 / 等码超时：结束转圈，提示重试（清意图防刷新复现）
+          if (
+            !hasQr &&
+            shouldAbandonCreateWait({
+              hasQr: false,
+              startedAt: activeOrderRef.current?.startedAt || pollStartedAt,
+              providerTradeState: data.provider_trade_state,
+              status: data.status,
+            })
+          ) {
+            stopPolling()
+            clearRechargeIntent()
+            setPhase('creating_error')
+            setDialogOpen(true)
+            const msg = i18next.t(
+              'Payment order was not created by the provider, please retry',
+              {
+                defaultValue: '支付渠道未能创建订单，请关闭后重新下单',
+              }
+            )
+            setErrorMessage(msg)
+            toast.error(msg)
+            return
+          }
           if (interp === 'paid_processing') {
             markTiming('recharge_provider_paid_seen')
             setPhase('paid_processing')
@@ -514,11 +516,33 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           }
         }
       } catch (err) {
-        // abort / 瞬时网络错误：继续轮询
+        // abort / 瞬时网络错误：继续轮询（但无 QR 超时仍放弃）
         if (ac.signal.aborted || cancelled) return
         void err
       } finally {
         pollInFlightRef.current = false
+      }
+      // status 失败/空 body 时也要按等码窗口放弃，避免 2h 死转圈
+      if (
+        !cancelled &&
+        !activeOrderRef.current?.qr &&
+        shouldAbandonCreateWait({
+          hasQr: false,
+          startedAt: activeOrderRef.current?.startedAt || pollStartedAt,
+        })
+      ) {
+        stopPolling()
+        clearRechargeIntent()
+        setPhase('creating_error')
+        setDialogOpen(true)
+        const msg = i18next.t(
+          'Payment order was not created by the provider, please retry',
+          {
+            defaultValue: '支付渠道未能创建订单，请关闭后重新下单',
+          }
+        )
+        setErrorMessage(msg)
+        return
       }
       schedule(STATUS_POLL_INTERVAL_MS)
     }
@@ -648,6 +672,10 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           code === 'PAY_URL_MISSING'
         if ((!isApiSuccess(res) || !data) && !(isUnknown && data?.order_no)) {
           const msg = res.message || i18next.t('Payment request failed')
+          // 无 order_no 的半截意图清掉，避免刷新再弹 creating_error 死循环感
+          if (!data?.order_no) {
+            clearRechargeIntent()
+          }
           setErrorMessage(msg)
           setPhase('creating_error')
           toast.error(msg)
@@ -655,6 +683,7 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
         }
         if (!data) {
           const msg = res.message || i18next.t('Payment request failed')
+          clearRechargeIntent()
           setErrorMessage(msg)
           setPhase('creating_error')
           toast.error(msg)
@@ -756,6 +785,9 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
         const msg = i18next.t('Payment service busy, please retry', {
           defaultValue: '支付服务网络繁忙，请稍后重试',
         })
+        if (!activeOrderRef.current?.orderNo) {
+          clearRechargeIntent()
+        }
         setErrorMessage(msg)
         setPhase('creating_error')
         toast.error(msg)
