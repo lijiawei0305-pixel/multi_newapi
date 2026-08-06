@@ -25,3 +25,4 @@ web/default/src/features/system-settings/integrations/payment-gateway-tabs.tsx:p
 web/default/src/features/system-settings/integrations/payment-gateway-tabs.tsx:private-key:747
 web/default/src/features/wallet/hooks/use-tenant-recharge.ts:generic-api-key:44
 internal/mtwire/payment_inprocess_test.go:private-key:41
+web/default/src/features/wallet/hooks/use-tenant-recharge.ts:generic-api-key:47
