@@ -13,9 +13,28 @@ func seedPaidOrder(t *testing.T, repo *MemRepo, no string, typ OrderType, paidAt
 	t.Helper()
 	if err := repo.Create(context.Background(), &PayOrder{
 		OrderNo: no, Type: typ, TenantID: 1, UserID: 42, Provider: ProviderWxpay,
-		AmountUSD: 10, ActualPaid: 73, Status: OrderPaid, UpdatedAt: paidAt,
+		AmountUSD: 10, ActualPaid: 73, ActualPaidFen: 7300,
+		ProviderTransactionID: "txn-" + no,
+		Status:                OrderPaid, UpdatedAt: paidAt,
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
+	}
+}
+
+// paidQueryResult builds a strict QueryResult for tests.
+func paidQueryResult(orderNo string, fen int64) *QueryResult {
+	return &QueryResult{
+		Provider: ProviderWxpay, OrderNo: orderNo, Paid: true,
+		TransactionID: "txn-" + orderNo, PaidAmountFen: fen, TradeState: "SUCCESS",
+		NormalizedState: TradeStateSuccess, Currency: "CNY",
+		MchID: "m", AppID: "a", ExpectedMchID: "m", ExpectedAppID: "a",
+	}
+}
+
+func unpaidQueryResult(orderNo string) *QueryResult {
+	return &QueryResult{
+		Provider: ProviderWxpay, OrderNo: orderNo, Paid: false, TradeState: "NOTPAY",
+		NormalizedState: TradeStateNotPay, MchID: "m", AppID: "a", ExpectedMchID: "m", ExpectedAppID: "a",
 	}
 }
 
@@ -64,8 +83,11 @@ func TestReconcileStuckCreated(t *testing.T) {
 	seedCreatedOrder(t, repo, "RCG-paid", OrderTypeRecharge)
 	seedCreatedOrder(t, repo, "RCG-unpaid", OrderTypeRecharge)
 
-	query := func(_ context.Context, orderNo, _ string) (bool, error) {
-		return orderNo == "RCG-paid", nil // 仅 RCG-paid 平台已收款
+	query := func(_ context.Context, orderNo, _ string) (*QueryResult, error) {
+		if orderNo == "RCG-paid" {
+			return paidQueryResult(orderNo, 7300), nil
+		}
+		return unpaidQueryResult(orderNo), nil
 	}
 	// before 取极大值确保两单都被扫到（seed 的 UpdatedAt 为零值）。
 	res, err := g.ReconcileStuckCreated(context.Background(), time.Unix(1<<40, 0), 0, 0, query)
@@ -89,17 +111,19 @@ func TestReconcileStuckCreated(t *testing.T) {
 	}
 }
 
-// TestReconcileStuckCreatedExpire 未付且已超过 expireAge 的 created 单 → 自动置 failed（未付超时/过期）；
-// 已付的仍正常补入账 credited（过期逻辑不误伤真付款）。
+// TestReconcileStuckCreatedExpire Phase E：本地过期不得在 NOTPAY 时直接 failed（微信默认最长 7 天）。
+// 已付仍补入账；未付无 QR → close_pending。
 func TestReconcileStuckCreatedExpire(t *testing.T) {
 	g, repo, _, _ := newGateway()
 	seedCreatedOrder(t, repo, "RCG-paid", OrderTypeRecharge)
 	seedCreatedOrder(t, repo, "RCG-stale", OrderTypeRecharge)
 
-	query := func(_ context.Context, orderNo, _ string) (bool, error) {
-		return orderNo == "RCG-paid", nil // 仅 RCG-paid 平台已收款
+	query := func(_ context.Context, orderNo, _ string) (*QueryResult, error) {
+		if orderNo == "RCG-paid" {
+			return paidQueryResult(orderNo, 7300), nil
+		}
+		return unpaidQueryResult(orderNo), nil
 	}
-	// expireAge=1h：seed 的 CreatedAt 为零值（远古），未付者均早于 now-1h → 过期置 failed。before 取极大值扫全部。
 	res, err := g.ReconcileStuckCreated(context.Background(), time.Unix(1<<40, 0), time.Hour, 0, query)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -107,14 +131,17 @@ func TestReconcileStuckCreatedExpire(t *testing.T) {
 	if len(res.Reconciled) != 1 || res.Reconciled[0] != "RCG-paid" {
 		t.Fatalf("reconciled=%v, want [RCG-paid]", res.Reconciled)
 	}
-	if len(res.Expired) != 1 || res.Expired[0] != "RCG-stale" {
-		t.Fatalf("expired=%v, want [RCG-stale]", res.Expired)
+	if len(res.Expired) != 0 {
+		t.Fatalf("expired=%v, want [] (Phase E: no local-expire→failed on NOTPAY)", res.Expired)
 	}
 	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-paid"); got.Status != OrderCredited {
 		t.Fatalf("RCG-paid status=%q, want credited", got.Status)
 	}
-	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-stale"); got.Status != OrderFailed {
-		t.Fatalf("RCG-stale status=%q, want failed (expired)", got.Status)
+	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-stale"); got.Status != OrderCreated {
+		t.Fatalf("RCG-stale status=%q, want created (close_pending path)", got.Status)
+	}
+	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-stale"); got.CreateState != CreateStateClosePending {
+		t.Fatalf("RCG-stale create_state=%q, want close_pending", got.CreateState)
 	}
 }
 
@@ -154,7 +181,7 @@ func seedCreatedOrderAt(t *testing.T, repo *MemRepo, no string, createdAt time.T
 	t.Helper()
 	if err := repo.Create(context.Background(), &PayOrder{
 		OrderNo: no, Type: OrderTypeRecharge, TenantID: 1, UserID: 42, Provider: ProviderWxpay,
-		AmountUSD: 10, ActualPaid: 73, Status: OrderCreated, CreatedAt: createdAt,
+		AmountUSD: 10, ActualPaid: 73, ActualPaidFen: 7300, Status: OrderCreated, CreatedAt: createdAt,
 	}); err != nil {
 		t.Fatalf("seed order %s: %v", no, err)
 	}
@@ -167,7 +194,9 @@ func TestReconcileStuckCreatedAncientPaidStillCredited(t *testing.T) {
 	g, repo, recharge, _ := newGateway(WithClock(func() time.Time { return now }))
 	seedCreatedOrderAt(t, repo, "RCG-ancient-paid", now.Add(-30*time.Hour))
 
-	query := func(context.Context, string, string) (bool, error) { return true, nil }
+	query := func(_ context.Context, orderNo, _ string) (*QueryResult, error) {
+		return paidQueryResult(orderNo, 7300), nil
+	}
 	res, err := g.ReconcileStuckCreated(context.Background(), now, 2*time.Hour, 0, query)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -193,8 +222,8 @@ func TestReconcileStuckCreatedAncientQueryErrorStaysScannable(t *testing.T) {
 	g, repo, _, _ := newGateway(WithClock(func() time.Time { return now }))
 	seedCreatedOrderAt(t, repo, "RCG-ancient-err", now.Add(-30*time.Hour))
 
-	query := func(context.Context, string, string) (bool, error) {
-		return false, errors.New("context deadline exceeded")
+	query := func(context.Context, string, string) (*QueryResult, error) {
+		return nil, errors.New("context deadline exceeded")
 	}
 	res, err := g.ReconcileStuckCreated(context.Background(), now, 2*time.Hour, 0, query)
 	if err != nil {
@@ -209,28 +238,31 @@ func TestReconcileStuckCreatedAncientQueryErrorStaysScannable(t *testing.T) {
 	}
 }
 
-// 网关明确「查无此单」＝确定性答复：超二维码窗口 → 过期清理（对齐 AGT/SUB）；窗口内 → 仍 Failed 不误杀。
+// Phase F：ORDER_NOT_EXIST → local_created（允许同 out_trade_no 再 Prepay），不因本地 2h 直接 failed。
 func TestReconcileStuckCreatedNotExistExpiresAfterWindow(t *testing.T) {
 	now := time.Unix(200_000_000, 0)
 	g, repo, _, _ := newGateway(WithClock(func() time.Time { return now }))
-	seedCreatedOrderAt(t, repo, "RCG-gone-old", now.Add(-3*time.Hour))       // 超 2h 窗口 → 过期
-	seedCreatedOrderAt(t, repo, "RCG-gone-recent", now.Add(-30*time.Minute)) // 窗口内 → Failed
+	seedCreatedOrderAt(t, repo, "RCG-gone-old", now.Add(-3*time.Hour))
+	seedCreatedOrderAt(t, repo, "RCG-gone-recent", now.Add(-30*time.Minute))
 
-	query := func(_ context.Context, orderNo, _ string) (bool, error) {
-		return false, fmt.Errorf("wxpay query: %w", ErrOrderNotExist)
+	query := func(_ context.Context, orderNo, _ string) (*QueryResult, error) {
+		return &QueryResult{Provider: ProviderWxpay, NotExist: true, NormalizedState: TradeStateOrderNotExist},
+			fmt.Errorf("wxpay query: %w", ErrOrderNotExist)
 	}
 	res, err := g.ReconcileStuckCreated(context.Background(), now, 2*time.Hour, 0, query)
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
-	if len(res.Expired) != 1 || res.Expired[0] != "RCG-gone-old" {
-		t.Fatalf("expired=%v, want [RCG-gone-old]（确定性『查无此单』超窗即清）", res.Expired)
+	if len(res.Expired) != 0 {
+		t.Fatalf("expired=%v, want [] (ORDER_NOT_EXIST → re-prepay allowed, not failed)", res.Expired)
 	}
-	if _, ok := res.Failed["RCG-gone-recent"]; !ok {
-		t.Fatalf("Failed=%v, want 含 RCG-gone-recent（窗口内不误杀）", res.Failed)
-	}
-	gone, _ := repo.GetByOrderNo(context.Background(), "RCG-gone-old")
-	if gone.Status != OrderFailed {
-		t.Fatalf("RCG-gone-old status=%q, want failed", gone.Status)
+	for _, no := range []string{"RCG-gone-old", "RCG-gone-recent"} {
+		got, _ := repo.GetByOrderNo(context.Background(), no)
+		if got.Status != OrderCreated {
+			t.Fatalf("%s status=%q, want created", no, got.Status)
+		}
+		if got.CreateState != CreateStateLocalCreated {
+			t.Fatalf("%s create_state=%q, want local_created (re-prepay after NOT_EXIST)", no, got.CreateState)
+		}
 	}
 }

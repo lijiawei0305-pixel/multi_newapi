@@ -245,6 +245,8 @@ export interface TenantRechargeRequest {
   /** 人民币充值口径（所见即所付）。>0 时后端优先按此下单，实付精确到分。 */
   amount_cny?: number
   provider: 'wxpay' | 'alipay'
+  /** 客户端支付意图幂等键；网络重试保持同一 key（PAY-IDEM-01）。 */
+  idempotency_key?: string
 }
 
 export type TenantRechargeResponse = ApiResponse<{
@@ -252,6 +254,10 @@ export type TenantRechargeResponse = ApiResponse<{
   amount_usd: number
   amount_cny: number
   provider: string
+  status?: string
+  idempotency_key?: string
+  expires_at?: string
+  poll_path?: string
   pay: {
     wxpay_qr?: string
     alipay_url?: string
@@ -264,14 +270,17 @@ export type TenantRechargeResponse = ApiResponse<{
  * Credits native quota ($1 = 500k) on payment. WeChat returns a QR payload,
  * Alipay returns a redirect URL. Settlement is handled in-process by the real
  * WeChat/Alipay SDK via the async notify callback (verify) + active query.
+ *
+ * PAY_CREATE_UNKNOWN (HTTP 202) still returns order_no in data — frontend must
+ * keep the same idempotency_key and poll status until QR appears or terminal.
  */
 export async function createTenantRecharge(
   request: TenantRechargeRequest
 ): Promise<TenantRechargeResponse> {
   const res = await api.post('/api/tenant/wallet/recharge', request, {
     skipBusinessError: true,
-    // 后端对跨境微信下单已做短超时重试(最多 ~25s)；前端给 30s 上限，避免网络卡顿时无限等待。
-    timeout: 30000,
+    // 后端同步 Prepay 预算约 12s；前端 18s 上限，禁止再按 25s/30s 掩盖链路问题。
+    timeout: 18000,
   } as Record<string, unknown>)
   return res.data
 }

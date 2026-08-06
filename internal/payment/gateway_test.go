@@ -96,31 +96,107 @@ func TestCreateOrderPropagatesSDKError(t *testing.T) {
 	_, err := g.CreateOrder(context.Background(), OrderInput{
 		Type: OrderTypeRecharge, TenantID: 1, UserID: 1, Provider: ProviderWxpay, AmountUSD: 10,
 	})
-	if err == nil || err.Error() != "sdk down" {
-		t.Fatalf("expected SDK error to propagate, got %v", err)
+	// 未知错误对外归一为 PAY_CREATE_UNKNOWN（不泄露内部、不标 failed）
+	if got := apperr.CodeOf(err); got != CodeCreateOutcomeUnknown {
+		t.Fatalf("code = %q, want %q (err=%v)", got, CodeCreateOutcomeUnknown, err)
 	}
 }
 
-// TestCreateOrderMarksFailedOnSDKError 锁定审计 M3：改为「先落 created 订单、再向平台下单」后，
-// 平台下单失败 → 本地订单落库并置 failed（终态），非孤儿、不被 ReconcileStuckCreated 反复查单。
-func TestCreateOrderMarksFailedOnSDKError(t *testing.T) {
+// TestCreateOrderUnknownKeepsCreated PAY-LAT-02：网络/未知错误不得 created→failed。
+func TestCreateOrderUnknownKeepsCreated(t *testing.T) {
 	repo := NewMemRepo()
 	sdk := &fakeSDK{createErr: errors.New("sdk down"), verifyFn: okVerify()}
 	g := NewGateway(repo, sdk, map[OrderType]OrderSink{OrderTypeRecharge: newFakeSink()},
-		WithOrderNoFunc(func() string { return "RCG-FAILED" }))
+		WithOrderNoFunc(func() string { return "RCG-UNKNOWN" }))
 
-	if _, err := g.CreateOrder(context.Background(), OrderInput{
+	_, err := g.CreateOrder(context.Background(), OrderInput{
 		Type: OrderTypeRecharge, TenantID: 1, UserID: 1, Provider: ProviderWxpay, AmountUSD: 10,
-	}); err == nil {
-		t.Fatal("expected SDK error")
+	})
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	got, err := repo.GetByOrderNo(context.Background(), "RCG-FAILED")
+	if got := apperr.CodeOf(err); got != CodeCreateOutcomeUnknown {
+		t.Fatalf("code = %q, want %q", got, CodeCreateOutcomeUnknown)
+	}
+	got, err := repo.GetByOrderNo(context.Background(), "RCG-UNKNOWN")
 	if err != nil {
-		t.Fatalf("order must be persisted (created-then-failed), got: %v", err)
+		t.Fatalf("order must be persisted: %v", err)
+	}
+	if got.Status != OrderCreated {
+		t.Fatalf("status = %q, want created (not failed)", got.Status)
+	}
+}
+
+// TestCreateOrderDefinitiveRejectMarksFailed 确定性平台拒绝 → failed。
+func TestCreateOrderDefinitiveRejectMarksFailed(t *testing.T) {
+	repo := NewMemRepo()
+	sdk := &fakeSDK{
+		createErr: NewOutcomeError(CreateOutcomeDefinitiveReject, "param_error", "response", errors.New("PARAM_ERROR")),
+		verifyFn:  okVerify(),
+	}
+	g := NewGateway(repo, sdk, map[OrderType]OrderSink{OrderTypeRecharge: newFakeSink()},
+		WithOrderNoFunc(func() string { return "RCG-REJECT" }))
+
+	_, err := g.CreateOrder(context.Background(), OrderInput{
+		Type: OrderTypeRecharge, TenantID: 1, UserID: 1, Provider: ProviderWxpay, AmountUSD: 10,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	got, err := repo.GetByOrderNo(context.Background(), "RCG-REJECT")
+	if err != nil {
+		t.Fatalf("order: %v", err)
 	}
 	if got.Status != OrderFailed {
 		t.Fatalf("status = %q, want failed", got.Status)
 	}
+}
+
+// TestCreateOrderPayURLPersistFails 平台成功但落库失败 → 不得返回空 QR 成功。
+func TestCreateOrderPayURLPersistFails(t *testing.T) {
+	repo := &failSetPayURLRepo{MemRepo: NewMemRepo()}
+	sdk := NewStubPaySDK("s")
+	g := NewGateway(repo, sdk, map[OrderType]OrderSink{OrderTypeRecharge: newFakeSink()},
+		WithOrderNoFunc(func() string { return "RCG-NOPAYURL" }))
+
+	o, err := g.CreateOrder(context.Background(), OrderInput{
+		Type: OrderTypeRecharge, TenantID: 1, UserID: 1, Provider: ProviderWxpay, AmountUSD: 10, ActualPaid: 73,
+	})
+	// P0-4：返回 order（无 PayURL）+ 错误，供前端持有 order_no 轮询
+	if err == nil || o == nil {
+		t.Fatalf("want persist error and non-nil order, got o=%v err=%v", o, err)
+	}
+	if got := apperr.CodeOf(err); got != CodePayURLPersist {
+		t.Fatalf("code = %q, want %q", got, CodePayURLPersist)
+	}
+	if o.PayURL != "" {
+		t.Fatalf("must not return in-memory pay_url on persist failure")
+	}
+	// 订单仍 created，pay_url 空
+	got, _ := repo.GetByOrderNo(context.Background(), "RCG-NOPAYURL")
+	if got.Status != OrderCreated || got.PayURL != "" {
+		t.Fatalf("want created empty pay_url, got status=%s pay_url=%q", got.Status, got.PayURL)
+	}
+}
+
+// failSetPayURLRepo SetPayURL/Fenced 恒失败。
+type failSetPayURLRepo struct {
+	*MemRepo
+}
+
+func (r *failSetPayURLRepo) SetPayURL(ctx context.Context, orderNo, payURL string) error {
+	return errors.New("db write failed")
+}
+
+func (r *failSetPayURLRepo) SetPayURLFenced(ctx context.Context, orderNo, payURL, claimToken string, allowedStates []CreateState) error {
+	return errors.New("db write failed")
+}
+
+func (r *failSetPayURLRepo) FinishPrepayFenced(ctx context.Context, orderNo, token string, to CreateState, payURL string, nextQueryAt time.Time, errorClass, stage string, createAttempts int) (bool, error) {
+	if payURL != "" {
+		return false, errors.New("db write failed")
+	}
+	return r.MemRepo.FinishPrepayFenced(ctx, orderNo, token, to, payURL, nextQueryAt, errorClass, stage, createAttempts)
 }
 
 func TestCreateOrderUsesInjectedClock(t *testing.T) {

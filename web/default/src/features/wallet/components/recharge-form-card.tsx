@@ -38,7 +38,10 @@ import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
 import { cn } from '@/lib/utils'
 
 import { useRechargeMethods } from '../hooks/use-recharge-methods'
-import type { RechargeProvider } from '../hooks/use-tenant-recharge'
+import type {
+  RechargeCreditInfo,
+  RechargeProvider,
+} from '../hooks/use-tenant-recharge'
 import {
   formatCurrency,
   getDiscountLabel,
@@ -96,6 +99,8 @@ interface RechargeFormCardProps {
   waffoMinTopup?: number
   onWaffoMethodSelect?: (method: WaffoPayMethod, index: number) => void
   enableWaffoPancakeTopup?: boolean
+  /** 官方微信/支付宝 credited 后回调（权威余额同步）。 */
+  onTenantRechargeCredited?: (info: RechargeCreditInfo) => void
 }
 
 export function RechargeFormCard({
@@ -126,6 +131,7 @@ export function RechargeFormCard({
   waffoMinTopup,
   onWaffoMethodSelect,
   enableWaffoPancakeTopup,
+  onTenantRechargeCredited,
 }: RechargeFormCardProps) {
   const { t } = useTranslation()
   const [localAmount, setLocalAmount] = useState(topupAmount.toString())
@@ -257,7 +263,10 @@ export function RechargeFormCard({
       {/* Official WeChat / Alipay (in-process real SDK) — credits native quota.
           Single-gate: shown for every channel that is enabled && configured
           under the WeChat/Alipay tabs (no PayMethods entry needed). */}
-      <TenantRechargeCard providers={officialProviders} />
+      <TenantRechargeCard
+        providers={officialProviders}
+        onCredited={onTenantRechargeCredited}
+      />
 
       {/* Online Topup Section */}
       {hasAnyTopup ? (

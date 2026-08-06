@@ -75,7 +75,12 @@ export function useWaffoPancakePayment() {
               toast.error(i18next.t('Invalid payment redirect URL'))
               return false
             }
-            toast.success(i18next.t('Redirecting to payment page...'))
+            // PAY-EXT-01：打开收银台 ≠ 付款成功
+            toast.info(
+              i18next.t('Checkout opened — return here after payment', {
+                defaultValue: '收银台已打开，付款完成后请返回本页刷新余额',
+              })
+            )
             window.location.href = safeCheckoutUrl
             return true
           }

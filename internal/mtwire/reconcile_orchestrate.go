@@ -25,10 +25,21 @@ var reconcileCreatedFn = func(a *App, ctx context.Context, before time.Time) (pa
 	if a.RechargeGateway == nil || a.providerMgr == nil {
 		return payment.ReconcileResult{}, nil
 	}
-	query := func(ctx context.Context, orderNo, provider string) (bool, error) {
+	query := func(ctx context.Context, orderNo, provider string) (*payment.QueryResult, error) {
 		return a.providerMgr.QueryOrder(ctx, payment.Provider(provider), orderNo)
 	}
 	return a.RechargeGateway.ReconcileStuckCreated(ctx, before, reconcileCreatedExpireAge, reconcileCreatedLimit, query)
+}
+
+// reconcileDueQueryFn 5s/30s/60s 持久化 next_query_at 到期查单（PAY-REC-01）。
+var reconcileDueQueryFn = func(a *App, ctx context.Context) (payment.ReconcileResult, error) {
+	if a.RechargeGateway == nil || a.providerMgr == nil {
+		return payment.ReconcileResult{}, nil
+	}
+	query := func(ctx context.Context, orderNo, provider string) (*payment.QueryResult, error) {
+		return a.providerMgr.QueryOrder(ctx, payment.Provider(provider), orderNo)
+	}
+	return a.RechargeGateway.ReconcileDueQueries(ctx, reconcileCreatedLimit, query)
 }
 
 var reconcileSubFn = func(a *App, ctx context.Context, before time.Time) (ReconcileSubResult, error) {
@@ -43,8 +54,43 @@ var reconcileAgtFn = func(a *App, ctx context.Context, before time.Time) (Reconc
 // AGT ④ 四条路径，聚合结果 → 每轮 upsert 心跳 → 手动总记 or 有实事时落一条历史（均 best-effort，绝不
 // 影响对账）。手动经此入口自动补上过去漏跑的 ②（修 drift）。日志保留原 cron 逐路径格式，错误折进
 // Failed["_error"]。AGT ④ 为全站最贵 SKU 的对账兜底，此前唯一缺失，2026-07-16 补齐至与 SUB 对等。
-func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger string) (paid, created payment.ReconcileResult, sub ReconcileSubResult, agt ReconcileAgtResult) {
+//
+// 各路径使用独立 min-age（PAY-REC-01）：paid 30s、created 60s、SUB/AGT 仍 5min。
+func (a *App) runReconcileAll(ctx context.Context, trigger string) (paid, created payment.ReconcileResult, sub ReconcileSubResult, agt ReconcileAgtResult) {
+	a.runBillingReconcileSideJobs(ctx)
+	now := time.Now()
+	// 先跑 next_query_at 到期快查（5s/30s/60s），再跑 stuck-paid 与全量 created 扫尾。
+	a.runReconcileDueQueryPath(ctx)
+	paid = a.runReconcilePaidPath(ctx, now.Add(-reconcilePaidMinAge))
+	created, sub, agt = a.runReconcileNonPaidPaths(ctx, now)
+	a.finishReconcileRun(ctx, trigger, paid, created, sub, agt)
+	return paid, created, sub, agt
+}
+
+// runReconcileAllExceptPaid 在 stuck-paid 快路径占用时由全量轮调用：跳过 paid，只扫其余路径。
+func (a *App) runReconcileAllExceptPaid(ctx context.Context, trigger string) {
+	a.runBillingReconcileSideJobs(ctx)
+	a.runReconcileDueQueryPath(ctx)
+	var paid payment.ReconcileResult
+	created, sub, agt := a.runReconcileNonPaidPaths(ctx, time.Now())
+	a.finishReconcileRun(ctx, trigger, paid, created, sub, agt)
+}
+
+func (a *App) runReconcileDueQueryPath(ctx context.Context) {
+	due, err := reconcileDueQueryFn(a, ctx)
+	if err != nil {
+		logger.LogWarn(ctx, "reconcile RCG(due-query) failed: "+err.Error())
+		return
+	}
+	if len(due.Reconciled) > 0 || len(due.Expired) > 0 || len(due.Failed) > 0 {
+		logger.LogInfo(ctx, fmt.Sprintf("reconcile RCG(due-query): scanned=%d credited=%d expired=%d failed=%d",
+			due.Scanned, len(due.Reconciled), len(due.Expired), len(due.Failed)))
+	}
+}
+
+func (a *App) runBillingReconcileSideJobs(ctx context.Context) {
 	if model.DB != nil {
+		processCacheInvalidationOutbox(ctx, model.DB, 100)
 		if _, err := model.ReconcilePendingBillingAdjustments(200); err != nil {
 			logger.LogWarn(ctx, "reconcile billing adjustment intents failed: "+err.Error())
 		}
@@ -66,6 +112,9 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 		logger.LogInfo(ctx, fmt.Sprintf("reconcile payable earnings: scanned=%d applied=%d failed=%d pending=%d",
 			earnings.Scanned, earnings.Applied, earnings.Failed, earnings.Pending))
 	}
+}
+
+func (a *App) runReconcilePaidPath(ctx context.Context, before time.Time) payment.ReconcileResult {
 	paid, perr := reconcilePaidFn(a, ctx, before)
 	if perr != nil {
 		logger.LogWarn(ctx, "reconcile RCG(paid) failed: "+perr.Error())
@@ -74,8 +123,15 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 		logger.LogInfo(ctx, fmt.Sprintf("reconcile RCG(paid): scanned=%d credited=%d failed=%d",
 			paid.Scanned, len(paid.Reconciled), len(paid.Failed)))
 	}
+	return paid
+}
 
-	created, cerr := reconcileCreatedFn(a, ctx, before)
+func (a *App) runReconcileNonPaidPaths(ctx context.Context, now time.Time) (created payment.ReconcileResult, sub ReconcileSubResult, agt ReconcileAgtResult) {
+	createdBefore := now.Add(-reconcileCreatedMinAge)
+	legacyBefore := now.Add(-reconcileMinAge)
+
+	var cerr error
+	created, cerr = reconcileCreatedFn(a, ctx, createdBefore)
 	if cerr != nil {
 		logger.LogWarn(ctx, "reconcile RCG(created) failed: "+cerr.Error())
 		created.Failed = map[string]string{"_error": cerr.Error()}
@@ -84,7 +140,8 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 			created.Scanned, len(created.Reconciled), len(created.Expired), len(created.Failed)))
 	}
 
-	sub, serr := reconcileSubFn(a, ctx, before)
+	var serr error
+	sub, serr = reconcileSubFn(a, ctx, legacyBefore)
 	if serr != nil {
 		logger.LogWarn(ctx, "reconcile SUB failed: "+serr.Error())
 		sub.Failed = map[string]string{"_error": serr.Error()}
@@ -93,7 +150,8 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 			sub.Scanned, len(sub.Activated), len(sub.Unpaid), len(sub.Expired), len(sub.Failed)))
 	}
 
-	agt, aerr := reconcileAgtFn(a, ctx, before)
+	var aerr error
+	agt, aerr = reconcileAgtFn(a, ctx, legacyBefore)
 	if aerr != nil {
 		logger.LogWarn(ctx, "reconcile AGT failed: "+aerr.Error())
 		agt.Failed = map[string]string{"_error": aerr.Error()}
@@ -101,7 +159,10 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 		logger.LogInfo(ctx, fmt.Sprintf("reconcile AGT: scanned=%d activated=%d unpaid=%d expired=%d failed=%d",
 			agt.Scanned, len(agt.Activated), len(agt.Unpaid), len(agt.Expired), len(agt.Failed)))
 	}
+	return created, sub, agt
+}
 
+func (a *App) finishReconcileRun(ctx context.Context, trigger string, paid, created payment.ReconcileResult, sub ReconcileSubResult, agt ReconcileAgtResult) {
 	stuck := paid.Scanned + created.Scanned + sub.Scanned + agt.Scanned
 	failed := len(paid.Failed) + len(created.Failed) + len(sub.Failed) + len(agt.Failed)
 	prevRun := a.updateReconcileHeartbeat(ctx, trigger, stuck, failed)
@@ -110,7 +171,6 @@ func (a *App) runReconcileAll(ctx context.Context, before time.Time, trigger str
 	if trigger == "manual" || reconcileHasFacts(paid, created, sub, agt) {
 		a.recordReconcileRun(ctx, trigger, paid, created, sub, agt)
 	}
-	return paid, created, sub, agt
 }
 
 func (a *App) reconcileBillingCommissions(ctx context.Context, limit int) error {

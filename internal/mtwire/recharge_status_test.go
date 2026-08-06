@@ -48,12 +48,21 @@ func seedRechargeOrder(t *testing.T, app *App, userID int64) string {
 }
 
 type rechargeStatusOut struct {
-	Paid   bool   `json:"paid"`
-	Status string `json:"status"`
+	OrderNo       string  `json:"order_no"`
+	Paid          bool    `json:"paid"`
+	ProviderPaid  bool    `json:"provider_paid"`
+	Credited      bool    `json:"credited"`
+	Status        string  `json:"status"`
+	AmountCNY     float64 `json:"amount_cny"`
+	AmountUSD     float64 `json:"amount_usd"`
+	CreditedQuota int     `json:"credited_quota"`
+	CurrentQuota  int     `json:"current_quota"`
+	ExpiresAt     string  `json:"expires_at"`
 }
 
-// TestRechargeStatusPaid：已支付订单 + 本人查询 → paid:true, status:"paid"。
-func TestRechargeStatusPaid(t *testing.T) {
+// TestRechargeStatusPaidProcessing：入账中间态 paid → provider_paid=true、credited=false、
+// 兼容字段 paid=false（PAY-STA-01：不得把中间态当成到账完成）。
+func TestRechargeStatusPaidProcessing(t *testing.T) {
 	app, repo := newRechargeStatusApp()
 	orderNo := seedRechargeOrder(t, app, 100)
 	if ok, err := repo.CompareAndSetStatus(context.Background(), orderNo, payment.OrderCreated, payment.OrderPaid); err != nil || !ok {
@@ -72,12 +81,58 @@ func TestRechargeStatusPaid(t *testing.T) {
 	if err := json.Unmarshal(r.Data, &out); err != nil {
 		t.Fatalf("decode data: %v", err)
 	}
-	if !out.Paid || out.Status != string(payment.OrderPaid) {
-		t.Fatalf("paid status = %+v, want paid=true status=%q", out, payment.OrderPaid)
+	if out.Status != string(payment.OrderPaid) {
+		t.Fatalf("status = %q, want %q", out.Status, payment.OrderPaid)
+	}
+	if !out.ProviderPaid {
+		t.Fatalf("provider_paid = false, want true for intermediate paid")
+	}
+	if out.Credited || out.Paid {
+		t.Fatalf("credited/paid must be false while status=paid (got credited=%v paid=%v)", out.Credited, out.Paid)
+	}
+	if out.OrderNo != orderNo {
+		t.Fatalf("order_no = %q, want %q", out.OrderNo, orderNo)
+	}
+	if out.AmountCNY != 73 || out.AmountUSD != 10 {
+		t.Fatalf("amounts = cny=%v usd=%v, want 73 / 10", out.AmountCNY, out.AmountUSD)
+	}
+	if out.ExpiresAt == "" {
+		t.Fatal("expires_at must be set from CreatedAt + QR validity")
 	}
 }
 
-// TestRechargeStatusCreatedNotPaid：待支付订单 + 本人查询 → paid:false, status:"created"。
+// TestRechargeStatusCredited：终态 credited → provider_paid/credited/paid 均为 true。
+func TestRechargeStatusCredited(t *testing.T) {
+	app, repo := newRechargeStatusApp()
+	orderNo := seedRechargeOrder(t, app, 100)
+	if ok, err := repo.CompareAndSetStatus(context.Background(), orderNo, payment.OrderCreated, payment.OrderPaid); err != nil || !ok {
+		t.Fatalf("advance to paid: ok=%v err=%v", ok, err)
+	}
+	if ok, err := repo.CompareAndSetStatus(context.Background(), orderNo, payment.OrderPaid, payment.OrderCredited); err != nil || !ok {
+		t.Fatalf("advance to credited: ok=%v err=%v", ok, err)
+	}
+
+	c, w := testCtx("GET", "/api/tenant/wallet/recharge/status?order_no="+orderNo, "")
+	setID(c, 100)
+	app.HandleWalletRechargeStatus(c)
+
+	r := decodeResp(t, w)
+	if !r.Success {
+		t.Fatalf("credited status request failed: code=%s body=%s", r.Code, w.Body.String())
+	}
+	var out rechargeStatusOut
+	if err := json.Unmarshal(r.Data, &out); err != nil {
+		t.Fatalf("decode data: %v", err)
+	}
+	if out.Status != string(payment.OrderCredited) || !out.ProviderPaid || !out.Credited || !out.Paid {
+		t.Fatalf("credited status = %+v, want provider_paid/credited/paid all true", out)
+	}
+	if out.CreditedQuota <= 0 {
+		t.Fatalf("credited_quota = %d, want >0 for credited order", out.CreditedQuota)
+	}
+}
+
+// TestRechargeStatusCreatedNotPaid：待支付订单 + 本人查询 → 全部未付标记为 false。
 func TestRechargeStatusCreatedNotPaid(t *testing.T) {
 	app, _ := newRechargeStatusApp()
 	orderNo := seedRechargeOrder(t, app, 100)
@@ -94,8 +149,8 @@ func TestRechargeStatusCreatedNotPaid(t *testing.T) {
 	if err := json.Unmarshal(r.Data, &out); err != nil {
 		t.Fatalf("decode data: %v", err)
 	}
-	if out.Paid || out.Status != string(payment.OrderCreated) {
-		t.Fatalf("created status = %+v, want paid=false status=%q", out, payment.OrderCreated)
+	if out.Paid || out.ProviderPaid || out.Credited || out.Status != string(payment.OrderCreated) {
+		t.Fatalf("created status = %+v, want all paid flags false status=created", out)
 	}
 }
 

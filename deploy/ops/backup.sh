@@ -48,11 +48,13 @@ cleanup() {
   trap - EXIT
   set +e
   # 先恢复最重要的 app 运行状态；临时文件清理失败不得跳过这一步。
+  # 2026-08-05：曾出现「备份成功 + dc start 静默失败」→ app 停了 17h，
+  # 全站 502；healthcheck 只告警不自愈。此处必须可见错误 + 多策略重试。
   if [ "$APP_WAS_RUNNING" = "1" ] && [ "${KEEP_APP_STOPPED:-0}" != "1" ]; then
-    if dc start "$APP_SVC" >/dev/null 2>&1; then
+    if ensure_app_running; then
       ok "app 已恢复到备份前的 running 状态"
     else
-      warn "备份已产生，但 app 恢复启动失败；必须人工处理"
+      warn "备份已产生，但 app 恢复启动失败；必须人工处理：cd $SERVER_REPO && docker compose -p $STACK --env-file $ENV_FILE -f $COMPOSE_FILE up -d --no-build $APP_SVC"
       rc=1
     fi
   fi

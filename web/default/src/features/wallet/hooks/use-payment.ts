@@ -105,17 +105,21 @@ export function usePayment() {
           return false
         }
 
-        // Handle Stripe payment
+        // PAY-EXT-01：打开收银台 / 跳转 ≠ 付款成功。仅提示已打开收银台，不 toast 成功到账。
         if (isStripe && response.data?.pay_link) {
           if (!openHttpUrlInNewTab(response.data.pay_link)) {
             toast.error(i18next.t('Invalid payment redirect URL'))
             return false
           }
-          toast.success(i18next.t('Redirecting to payment page...'))
+          toast.info(
+            i18next.t('Checkout opened — return here after payment', {
+              defaultValue: '收银台已打开，付款完成后请返回本页刷新余额',
+            })
+          )
           return true
         }
 
-        // Handle non-Stripe payment
+        // Handle non-Stripe payment (Epay form post)
         if (!isStripe && response.data) {
           const url = (response as unknown as { url?: string }).url
           if (url) {
@@ -123,7 +127,11 @@ export function usePayment() {
               toast.error(i18next.t('Invalid payment redirect URL'))
               return false
             }
-            toast.success(i18next.t('Redirecting to payment page...'))
+            toast.info(
+              i18next.t('Checkout opened — return here after payment', {
+                defaultValue: '收银台已打开，付款完成后请返回本页刷新余额',
+              })
+            )
             return true
           }
         }

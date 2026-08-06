@@ -6,107 +6,290 @@ import (
 	"encoding/hex"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// amountTolerance 是金额比对容差（元）：≤1 分视为相等，吸收浮点/汇率取整噪声。
+// amountTolerance 是金额比对容差（元）：仅当订单 ActualPaidFen==0（历史行）时回退使用。
 const amountTolerance = 0.011
 
-// amountMatches 报告回调实付金额是否与库内订单金额一致。
-// paidCNY<=0 视为「调用方未提供金额」（如对账兜底主动查单路径），跳过比对。
-func amountMatches(paidCNY, orderCNY float64) bool {
-	if paidCNY <= 0 {
-		return true
+// amountMatches 报告回调实付是否与库内订单一致（优先整数分比对，PAY-FACT-01）。
+// paidCNY<=0 且 paidFen<=0 视为「调用方未提供金额」——新路径禁止在 requireStrict 下跳过。
+func amountMatches(paidCNY float64, order *PayOrder) bool {
+	if order == nil {
+		return false
 	}
-	return math.Abs(paidCNY-orderCNY) <= amountTolerance
+	orderFen := OrderActualPaidFen(order)
+	if paidCNY > 0 {
+		paidFen := YuanToFen(paidCNY)
+		if orderFen > 0 {
+			return paidFen == orderFen
+		}
+		// 历史行无 fen：浮点容差
+		return math.Abs(paidCNY-order.ActualPaid) <= amountTolerance
+	}
+	// 未提供金额：仅历史兼容路径放行
+	return true
 }
 
-// 订单号业务前缀（与 defaultOrderNo 的 "PAY" 同构，便于人工与日志辨识订单用途）。
+// amountMatchesFen 用分比对。
+func amountMatchesFen(paidFen, orderFen int64) bool {
+	if paidFen <= 0 || orderFen <= 0 {
+		return false
+	}
+	return paidFen == orderFen
+}
+
+// 订单号业务前缀。
 const (
-	// OrderNoPrefixRecharge 钱包充值订单前缀。
-	OrderNoPrefixRecharge = "RCG"
-	// OrderNoPrefixSubscription tokenplan 套餐订单前缀。
+	OrderNoPrefixRecharge     = "RCG"
 	OrderNoPrefixSubscription = "SUB"
 )
 
-// NewOrderNo 生成带业务前缀的全局唯一订单号：<PREFIX> + 纳秒时间(base36) + 6 字节随机(hex)。
-// 供主站下单时按订单类型选择前缀（recharge→RCG、subscription→SUB），注入 WithOrderNoFunc。
+// placeholderTxnIDs 禁止作为 provider_transaction_id 持久化的伪交易号。
+var placeholderTxnIDs = map[string]struct{}{
+	"query": {}, "reconcile": {}, "unknown": {}, "pending": {}, "n/a": {}, "na": {},
+}
+
+// IsPlaceholderTxnID 报告是否为禁止持久化的占位交易号。
+func IsPlaceholderTxnID(txnID string) bool {
+	k := strings.ToLower(strings.TrimSpace(txnID))
+	if k == "" {
+		return true
+	}
+	_, ok := placeholderTxnIDs[k]
+	return ok
+}
+
+// NewOrderNo 生成带业务前缀的全局唯一订单号。
 func NewOrderNo(prefix string) string {
 	var b [6]byte
-	_, _ = rand.Read(b[:]) // crypto/rand 失败概率可忽略；退化为纯时间序仍唯一性极高
+	_, _ = rand.Read(b[:])
 	return prefix + strconv.FormatInt(time.Now().UnixNano(), 36) + hex.EncodeToString(b[:])
 }
 
-// CreditPaidOrder 是「可信内网入账」路径（detailed-design §2.8 / §3.3 的入账段）。
-//
-// 与 handle（公网回调）的区别：调用方已在进程内支付适配器完成平台验签，故此处**不再验签**；
-// 金额一律以库内订单为准，不信外部报文
-// （只透传 txnID 作审计/收益引用）。强幂等仍由订单状态机保证：
-//
-//	定位订单 → CAS(created|failed→paid) 原子占位（并发/重复只有一个胜者）
-//	  → 已 paid/credited → 幂等短路成功（不重复入账）
-//	  → 首个推进者：按 type 分发 OnPaid → 成功置 credited / 失败回滚 created 供上游重试
-//
-// 错误码：未知单 ORDER_NOT_FOUND；金额不符 PAY_AMOUNT_MISMATCH；类型无 Sink PAY_ORDER_TYPE_UNKNOWN；OnPaid 错误原样上浮。
-//
-// paidAmountCNY 是支付平台回传的用户实付（元）。本方法以**库内订单金额**入账（金额可信，不信外部报文），
-// 同时在推进状态机前比对回传金额，不一致即 PAY_AMOUNT_MISMATCH 拒绝入账（反篡改）。
-// paidAmountCNY<=0 表示调用方未提供（如对账兜底主动查单）——跳过比对。
-func (g *Gateway) CreditPaidOrder(ctx context.Context, orderNo, txnID string, paidAmountCNY float64) error {
-	ord, err := g.repo.GetByOrderNo(ctx, orderNo)
-	if err != nil {
-		return err // ORDER_NOT_FOUND
+// validatePaymentFacts 校验成功支付事实（PAY-FACT-01 / Phase D P0-1）。
+// requireStrict：强制真实交易号 + 正金额匹配；主动查单 SUCCESS 路径也必须 strict。
+func validatePaymentFacts(ord *PayOrder, provider Provider, txnID string, paidCNY float64, requireStrict bool) error {
+	if ord == nil {
+		return ErrOrderNotFound
 	}
-
-	// 反篡改：回传实付金额必须与库内订单一致（在 CAS 推进前校验，金额不符则不动状态、不入账）。
-	if !amountMatches(paidAmountCNY, ord.ActualPaid) {
-		return ErrAmountMismatch
+	if strings.TrimSpace(ord.OrderNo) == "" {
+		return ErrPaymentFactInvalid
 	}
-
-	// 幂等占位：created/failed→paid 原子 CAS。failed 可能是本地过期对账刚写入；可信已付事实
-	// 必须覆盖该本地判断，不能把 CAS 失败静默 ACK 成成功而永久丢款。
-	first, err := g.claimPaidOrder(ctx, orderNo, ord.Status)
-	if err != nil {
-		return err // ORDER_NOT_FOUND（极端竞态：订单被删）
+	if provider != "" && ord.Provider != provider {
+		return ErrPaymentFactInvalid
 	}
-	if !first {
-		// 已 paid/credited → 幂等短路返回成功，绝不重复入账。
+	txn := strings.TrimSpace(txnID)
+	if IsPlaceholderTxnID(txn) {
+		// 空串或占位符：strict 一律拒绝；非 strict 亦不得用占位符入账
+		if requireStrict || txn != "" {
+			return ErrPaymentFactInvalid
+		}
+	}
+	if requireStrict {
+		if txn == "" || IsPlaceholderTxnID(txn) {
+			return ErrPaymentFactInvalid
+		}
+		// 必须有可校验的正金额
+		if paidCNY <= 0 {
+			return ErrPaymentFactInvalid
+		}
+		if !amountMatches(paidCNY, ord) {
+			return ErrAmountMismatch
+		}
 		return nil
 	}
-
-	sink, ok := g.sinks[ord.Type]
-	if !ok {
-		// 防御：下单时已校验 type，正常不达。回滚占位避免卡在 paid。
-		_, _ = g.repo.CompareAndSetStatus(ctx, orderNo, OrderPaid, OrderCreated)
-		return ErrOrderTypeUnknown
-	}
-
-	info := &CallbackInfo{Provider: ord.Provider, OrderNo: orderNo, Success: true, TxnID: txnID}
-	paid := ord.toPaidOrder(info, g.now())
-	if err := sink.OnPaid(ctx, paid); err != nil {
-		// 入账失败 → 回滚 paid→created，使上游重试时可重新分发（避免丢账）。
-		_, _ = g.repo.CompareAndSetStatus(ctx, orderNo, OrderPaid, OrderCreated)
-		return err
-	}
-
-	// 入账成功 → 置终态 credited。额度已由 sink 幂等入账（RCG 走 order_no 唯一台账），
-	// 故此处状态推进失败**不会**导致双扣：订单留在 paid，由 ReconcileStuckPaid 重跑（sink 幂等短路）后置 credited。
-	// 但不再静默吞错——上报观测，避免 stuck-paid 无声堆积。
-	if ok, csErr := g.repo.CompareAndSetStatus(ctx, orderNo, OrderPaid, OrderCredited); csErr != nil || !ok {
-		g.logf("payment: credit %s: advance paid→credited failed (ok=%v err=%v); left paid for reconcile", orderNo, ok, csErr)
+	if paidCNY > 0 && !amountMatches(paidCNY, ord) {
+		return ErrAmountMismatch
 	}
 	return nil
 }
 
-// claimPaidOrder 用可信已付事实原子认领订单。created 是正常支付路径；failed 是本地超时/未付判断，
-// 若它恰在回调读取订单后由对账写入，必须重读并允许 failed→paid。并发认领的败者看到 paid/credited
-// 即幂等短路，只有一个调用方会执行实际入账。
+// CreditPaidOrder 是「可信内网入账」路径（已废弃宽松签名；保留兼容，强制 requireStrict=false 仅历史）。
+// 新代码应使用 CreditFromQueryResult / CreditPaidOrderWithProvider(..., requireStrict=true)。
+//
+// 注意：txnID 为 "query"/"reconcile" 会被拒绝。
+func (g *Gateway) CreditPaidOrder(ctx context.Context, orderNo, txnID string, paidAmountCNY float64) error {
+	return g.CreditPaidOrderWithProvider(ctx, orderNo, "", txnID, paidAmountCNY, true)
+}
+
+// CreditFromQueryResult 用主动查单的结构化结果入账（P0-1）。
+// 必须通过 QueryPaidOK + BindingsOK；不写 callback_received_at；ProviderPaidAt 用平台时间。
+func (g *Gateway) CreditFromQueryResult(ctx context.Context, orderNo string, qr *QueryResult) error {
+	if qr == nil {
+		return ErrPaymentFactInvalid
+	}
+	if qr.NotExist {
+		return ErrOrderNotExist
+	}
+	ord, err := g.repo.GetByOrderNo(ctx, orderNo)
+	if err != nil {
+		return err
+	}
+	if !qr.QueryPaidOK() {
+		return ErrPaymentFactInvalid
+	}
+	if !qr.BindingsOK(orderNo, ord.Provider) {
+		return ErrPaymentFactInvalid
+	}
+	if IsPlaceholderTxnID(qr.TransactionID) {
+		return ErrPaymentFactInvalid
+	}
+	orderFen := OrderActualPaidFen(ord)
+	if orderFen <= 0 || qr.PaidAmountFen != orderFen {
+		return ErrAmountMismatch
+	}
+	paidCNY := FenToYuan(qr.PaidAmountFen)
+	return g.creditPaidWithPaidAt(ctx, orderNo, qr.Provider, qr.TransactionID, paidCNY, false, qr.ProviderPaidAt)
+}
+
+// validateMerchantBinding 校验查单返回的商户/应用与订单渠道一致（字段非空时）。
+func validateMerchantBinding(ord *PayOrder, qr *QueryResult) error {
+	if ord == nil || qr == nil {
+		return ErrPaymentFactInvalid
+	}
+	// Provider 已在上层比对；此处预留 MchID/AppID 扩展字段匹配。
+	if qr.MchID != "" && qr.ExpectedMchID != "" && qr.MchID != qr.ExpectedMchID {
+		return ErrPaymentFactInvalid
+	}
+	if qr.AppID != "" && qr.ExpectedAppID != "" && qr.AppID != qr.ExpectedAppID {
+		return ErrPaymentFactInvalid
+	}
+	return nil
+}
+
+// CreditPaidOrderWithProvider 带渠道绑定的入账（回调路径传真实 provider 与 requireStrict）。
+// fromCallback 语义由 requireStrict+真实回调调用方保证：仅回调路径写 callback_received_at。
+func (g *Gateway) CreditPaidOrderWithProvider(ctx context.Context, orderNo string, provider Provider, txnID string, paidAmountCNY float64, requireStrict bool) error {
+	// 回调路径：fromCallback=true
+	return g.creditPaid(ctx, orderNo, provider, txnID, paidAmountCNY, requireStrict)
+}
+
+// creditPaid 核心入账。
+func (g *Gateway) creditPaid(ctx context.Context, orderNo string, provider Provider, txnID string, paidAmountCNY float64, fromCallback bool) error {
+	return g.creditPaidWithPaidAt(ctx, orderNo, provider, txnID, paidAmountCNY, fromCallback, time.Time{})
+}
+
+// creditPaidWithPaidAt 带平台支付时间的入账。
+func (g *Gateway) creditPaidWithPaidAt(ctx context.Context, orderNo string, provider Provider, txnID string, paidAmountCNY float64, fromCallback bool, providerPaidAt time.Time) error {
+	t0 := g.now()
+	ord, err := g.repo.GetByOrderNo(ctx, orderNo)
+	if err != nil {
+		return err
+	}
+	if provider == "" {
+		provider = ord.Provider
+	}
+	if err := validatePaymentFacts(ord, provider, txnID, paidAmountCNY, true); err != nil {
+		return err
+	}
+
+	first, err := g.claimPaidOrder(ctx, orderNo, ord.Status)
+	if err != nil {
+		return err
+	}
+	if !first {
+		current, gErr := g.repo.GetByOrderNo(ctx, orderNo)
+		if gErr != nil {
+			return gErr
+		}
+		_ = g.persistFactsAt(ctx, current, txnID, fromCallback, false, providerPaidAt)
+		if current.Status == OrderCredited {
+			return nil
+		}
+		if current.Status == OrderPaid {
+			g.logf("payment: credit %s: not CAS winner, status=paid; defer credit to stuck-paid", orderNo)
+			return nil
+		}
+		return nil
+	}
+	g.logStage(StageOrderClaimed, orderNo, provider, elapsedMs(t0), "")
+
+	if err := g.persistFactsAt(ctx, ord, txnID, fromCallback, false, providerPaidAt); err != nil {
+		_, _ = g.repo.CompareAndSetStatus(ctx, orderNo, OrderPaid, OrderCreated)
+		return err
+	}
+
+	sink, ok := g.sinks[ord.Type]
+	if !ok {
+		_, _ = g.repo.CompareAndSetStatus(ctx, orderNo, OrderPaid, OrderCreated)
+		_ = g.repo.ScheduleNextQuery(ctx, orderNo, g.now().Add(5*time.Second), ord.QueryAttempts)
+		return ErrOrderTypeUnknown
+	}
+
+	info := &CallbackInfo{Provider: provider, OrderNo: orderNo, Success: true, TxnID: txnID, PaidAmount: paidAmountCNY}
+	if refreshed, rErr := g.repo.GetByOrderNo(ctx, orderNo); rErr == nil {
+		ord = refreshed
+	}
+	paid := ord.toPaidOrder(info, g.now())
+	if err := sink.OnPaid(ctx, paid); err != nil {
+		_, _ = g.repo.CompareAndSetStatus(ctx, orderNo, OrderPaid, OrderCreated)
+		_ = g.repo.ScheduleNextQuery(ctx, orderNo, g.now().Add(5*time.Second), ord.QueryAttempts)
+		return err
+	}
+	g.logStage(StageLedgerCommitted, orderNo, provider, elapsedMs(t0), "")
+
+	_ = g.persistFactsAt(ctx, ord, txnID, fromCallback, true, providerPaidAt)
+
+	if ok, csErr := g.repo.MarkCredited(ctx, orderNo, g.now()); csErr != nil || !ok {
+		if ok2, csErr2 := g.repo.CompareAndSetStatus(ctx, orderNo, OrderPaid, OrderCredited); csErr2 != nil || !ok2 {
+			g.logf("payment: credit %s: advance paid→credited failed (ok=%v err=%v); left paid for reconcile", orderNo, ok2, csErr2)
+		}
+	} else {
+		g.logStage(StageOrderCredited, orderNo, provider, elapsedMs(t0), "")
+	}
+	return nil
+}
+
+func (g *Gateway) persistFacts(ctx context.Context, ord *PayOrder, txnID string, fromCallback, clearNextQuery bool) error {
+	return g.persistFactsAt(ctx, ord, txnID, fromCallback, clearNextQuery, time.Time{})
+}
+
+func (g *Gateway) persistFactsAt(ctx context.Context, ord *PayOrder, txnID string, fromCallback, clearNextQuery bool, providerPaidAt time.Time) error {
+	if ord == nil {
+		return nil
+	}
+	txn := strings.TrimSpace(txnID)
+	paidAt := providerPaidAt
+	if paidAt.IsZero() {
+		// 仅回调路径在无平台时间时用本站 now；查单路径应尽量带 SuccessTime
+		if fromCallback {
+			paidAt = g.now()
+		}
+	}
+	if IsPlaceholderTxnID(txn) {
+		if fromCallback {
+			return ErrPaymentFactInvalid
+		}
+		return g.repo.SavePaymentFacts(ctx, ord.OrderNo, PaymentFacts{
+			ClearNextQuery: clearNextQuery,
+			ProviderPaidAt: paidAt,
+		})
+	}
+	facts := PaymentFacts{
+		ProviderTransactionID: txn,
+		ProviderPaidAt:        paidAt,
+		ClearNextQuery:        clearNextQuery,
+		Provider:              ord.Provider,
+	}
+	if fromCallback {
+		facts.CallbackReceivedAt = g.now()
+		if facts.ProviderPaidAt.IsZero() {
+			facts.ProviderPaidAt = g.now()
+		}
+	}
+	return g.repo.SavePaymentFacts(ctx, ord.OrderNo, facts)
+}
+
+// claimPaidOrder 用可信已付事实原子认领订单。
+// 允许从 created / failed / cancelled（legacy）→ paid。
 func (g *Gateway) claimPaidOrder(ctx context.Context, orderNo string, status OrderStatus) (bool, error) {
 	for {
 		switch status {
 		case OrderPaid, OrderCredited:
 			return false, nil
-		case OrderCreated, OrderFailed:
+		case OrderCreated, OrderFailed, OrderCancelled:
 			claimed, err := g.repo.CompareAndSetStatus(ctx, orderNo, status, OrderPaid)
 			if err != nil {
 				return false, err

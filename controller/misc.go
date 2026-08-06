@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	paymentmigrate "github.com/QuantumNous/new-api/internal/payment/migrate"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -33,6 +34,7 @@ func HealthLive(c *gin.Context) {
 // HealthReady checks every dependency required by the configured process. It
 // deliberately bypasses the cached admin DB check so stale successes cannot
 // produce a false-green deployment signal.
+// 另含只读 payment schema version 检查（低于 SchemaVersion 则 not ready）。
 func HealthReady(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), readinessCheckTimeout)
 	defer cancel()
@@ -52,6 +54,20 @@ func HealthReady(c *gin.Context) {
 		checks["redis"] = "ok"
 	} else {
 		checks["redis"] = "disabled"
+	}
+
+	// payment schema：只读 CurrentVersion，不得 AutoMigrate
+	if ready && model.DB != nil {
+		v, err := paymentmigrate.CurrentVersion(ctx, model.DB)
+		if err != nil {
+			checks["payment_schema"] = "unavailable"
+			ready = false
+		} else if v < paymentmigrate.SchemaVersion {
+			checks["payment_schema"] = fmt.Sprintf("version=%d need=%d", v, paymentmigrate.SchemaVersion)
+			ready = false
+		} else {
+			checks["payment_schema"] = fmt.Sprintf("ok version=%d", v)
+		}
 	}
 
 	if !ready {

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -171,7 +172,7 @@ type failingSubscriptionPayCreator struct {
 	cancel context.CancelFunc
 }
 
-func (f *failingSubscriptionPayCreator) CreatePay(context.Context, payment.Provider, string, string, float64, string) (string, error) {
+func (f *failingSubscriptionPayCreator) CreatePay(context.Context, payment.Provider, string, string, float64, string, ...time.Time) (string, error) {
 	f.calls++
 	if f.cancel != nil {
 		f.cancel()

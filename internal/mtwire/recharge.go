@@ -58,17 +58,18 @@ func loadRechargeConfig() rechargeConfig {
 
 // ---- 入账分发目标（OrderSink 实现）----
 
-// rechargeCreditLedgerRow 是充值入账幂等台账（每 order_no 至多一条）。它把「是否已入账」
-// 从订单状态机中解耦出来，作为**唯一事实源**：无论 OnPaid 被调用几次（回调重推、对账
-// ReconcileStuckPaid 重跑、崩溃恢复），台账写入与额度自增在同一 DB 事务内完成，order_no
-// 唯一约束保证每单只入账一次——彻底消除额度双扣（审计 C1），并顺带补上充值入账的审计台账。
+// rechargeCreditLedgerRow 是充值入账幂等台账（每 attempt order_no 至多一条）。
+// Phase F：权威比较用 integer quota + actual_paid_fen，禁止 float 精确相等。
+// amount_usd 与 payment_orders 对齐 decimal(20,8)，仅审计展示。
 type rechargeCreditLedgerRow struct {
-	OrderNo   string    `gorm:"column:order_no;primaryKey;type:varchar(64)"`
-	TenantID  int64     `gorm:"column:tenant_id;not null;index"`
-	UserID    int64     `gorm:"column:user_id;not null;index"`
-	Quota     int64     `gorm:"column:quota;not null"`                                   // 入账的原生 quota 单位
-	AmountUSD float64   `gorm:"column:amount_usd;type:decimal(20,4);not null;default:0"` // 入账美元额（审计）
-	CreatedAt time.Time `gorm:"column:created_at"`
+	OrderNo       string    `gorm:"column:order_no;primaryKey;type:varchar(64)"`
+	RootOrderNo   string    `gorm:"column:root_order_no;type:varchar(64);not null;default:'';index:idx_mt_rcl_root"`
+	TenantID      int64     `gorm:"column:tenant_id;not null;index"`
+	UserID        int64     `gorm:"column:user_id;not null;index"`
+	Quota         int64     `gorm:"column:quota;not null"` // 权威入账额度（整数）
+	ActualPaidFen int64     `gorm:"column:actual_paid_fen;not null;default:0"`
+	AmountUSD     float64   `gorm:"column:amount_usd;type:decimal(20,8);not null;default:0"` // 审计；与订单同精度
+	CreatedAt     time.Time `gorm:"column:created_at"`
 }
 
 // TableName 固定表名（mt_ 前缀，避让原生表）。
@@ -88,100 +89,120 @@ type rechargeQuotaSink struct {
 	alerter alert.AlertSink
 }
 
+// errLedgerDuplicate 是「ledger 主键冲突」专用 sentinel。
+// 在事务内返回它使整事务回滚（含 PostgreSQL aborted 语义），
+// 事务外再读既有 ledger 校验后按幂等成功处理——**绝不**用 RowsAffected 判所有权
+// （MySQL clientFoundRows=true 下 ON DUPLICATE KEY 可能 RowsAffected=1，见 Phase E P0-DB-01）。
+var errLedgerDuplicate = errors.New("mtwire: recharge ledger already exists")
+
+// errRechargeLedgerInvariant ledger 字段与本次 PaidOrder 不一致（资金不变量）。
+var errRechargeLedgerInvariant = apperr.New("RECHARGE_LEDGER_INVARIANT", "充值台账与订单意图不一致", http.StatusConflict)
+
+// errRechargeTopUpInvariant TopUp 与本次意图不一致。
+var errRechargeTopUpInvariant = apperr.New("RECHARGE_TOPUP_INVARIANT", "充值账单与订单意图不一致", http.StatusConflict)
+
+// errRechargeQuotaInvalid q<=0 不得入账后标 credited。
+var errRechargeQuotaInvalid = apperr.New("RECHARGE_QUOTA_INVALID", "充值额度无效", http.StatusBadRequest)
+
+// errRechargeTopUpMissing ledger 存在但 TopUp 缺失且无法安全补建。
+var errRechargeTopUpMissing = apperr.New("RECHARGE_TOPUP_MISSING", "充值账单缺失，待恢复", http.StatusConflict)
+
 func (s rechargeQuotaSink) OnPaid(ctx context.Context, o payment.PaidOrder) error {
 	q := rechargeQuota(o.AmountUSD)
 	if q <= 0 {
-		return nil
+		return errRechargeQuotaInvalid
 	}
-	// TODO(recharge_spread / 口径未决)：充值差价分润 = 用户实付¥ − 代理成本¥。当前单一汇率模型下，
-	// 用户实付 = AmountUSD × USDExchangeRate（= 主站标准价），代理无独立「充值成本/加价率」字段，
-	// 故差价恒为 0、暂不入账。待数据模型补充 agent 充值加价/成本率后，在此按
-	// (o.ActualPaid − agentRechargeCostCNY) 经 AgentEarnings.AddEarning(source=recharge_spread,
-	// SourceID=o.OrderNo) 幂等落账（须先有 agent_profile）。详见报告「风险/未决」。
-	credited := false
-	softDeletedCredited := false // 命中软删用户行（钱已 Unscoped 落其行）→ 提交后 SysLog + Critical 告警知会风控
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 幂等台账：order_no 为主键。已存在（本单已入账）→ 唯一约束冲突 → 短路不加额度。
-		// 用「唯一约束错误」判定幂等，而非 RowsAffected 数值——后者依赖 driver 的 affected/found-rows
-		// 语义（如 DSN 开 clientFoundRows 会使 OnConflict 的 RowsAffected 失真而误判成双扣，审计复核 M-1）。
-		if err := tx.Create(&rechargeCreditLedgerRow{
-			OrderNo:   o.OrderNo,
-			TenantID:  o.TenantID,
-			UserID:    o.UserID,
-			Quota:     int64(q),
-			AmountUSD: o.AmountUSD,
-			CreatedAt: time.Now(),
-		}).Error; err != nil {
+	wantFen := o.ActualPaidFen
+	if wantFen <= 0 {
+		wantFen = payment.YuanToFen(o.ActualPaid)
+	}
+	root := o.RootOrderNo
+	if root == "" {
+		root = o.OrderNo
+	}
+	// TODO(recharge_spread)：差价分润待数据模型。
+	softDeletedCredited := false
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// P0-DB-01：普通 INSERT；唯一冲突 → sentinel 整事务回滚；禁止 RowsAffected 所有权。
+		ledger := rechargeCreditLedgerRow{
+			OrderNo:       o.OrderNo,
+			RootOrderNo:   root,
+			TenantID:      o.TenantID,
+			UserID:        o.UserID,
+			Quota:         int64(q),
+			ActualPaidFen: wantFen,
+			AmountUSD:     o.AmountUSD,
+			CreatedAt:     time.Now(),
+		}
+		if err := tx.Create(&ledger).Error; err != nil {
 			if isDuplicateLedgerErr(err) {
-				return nil // 已入账过 → 幂等短路，不重复加额度
+				return errLedgerDuplicate
 			}
 			return err
 		}
-		credited = true
-		// 与台账写入同事务落 users.quota，二者原子：要么都成、要么都回滚。
-		// **软删作用域陷阱**：model.User 是软删模型（user.go DeletedAt gorm.DeletedAt），tx.Model(&model.User{})
-		// 会被 GORM 自动注入 `AND deleted_at IS NULL`。若用户在回调落地前被管理员/风控软删，普通 Update 会
-		// 匹配 0 行、**不报 error**、事务照常提交 → 台账 + TopUp 落库但 quota 纹丝不动、订单推进 credited、
-		// 幂等台账(order_no 主键)令重跑短路、ReconcileStuckPaid 只扫 paid 不扫 credited ⇒ 永久静默丢账、零告警。
-		// 故：① 作用域内 Update，命中(RowsAffected==1)即正常；② 未命中→ Unscoped 绕作用域把额度**必落**到该
-		// 用户行（钱永不丢、可恢复，与兑换路径 Table("users") 同语义）；③ Unscoped 仍 0 行→用户行真不存在→
-		// 报错回滚（整事务撤销、订单留待重推/对账+告警）。命中软删行则置 softDeletedCredited，提交后告警风控。
-		res := tx.Model(&model.User{}).Where("id = ?", o.UserID).
+		uresQ := tx.Model(&model.User{}).Where("id = ?", o.UserID).
 			Update("quota", gorm.Expr("quota + ?", q))
-		if res.Error != nil {
-			return res.Error
+		if uresQ.Error != nil {
+			return uresQ.Error
 		}
-		if res.RowsAffected == 0 {
+		if uresQ.RowsAffected == 0 {
 			ures := tx.Unscoped().Model(&model.User{}).Where("id = ?", o.UserID).
 				Update("quota", gorm.Expr("quota + ?", q))
 			if ures.Error != nil {
 				return ures.Error
 			}
 			if ures.RowsAffected == 0 {
-				return errRechargeUserMissing // 用户行真不存在 → 回滚，绝不静默丢账
+				return errRechargeUserMissing
 			}
-			softDeletedCredited = true // 命中软删行：钱已落其行，事务提交后告警风控
+			softDeletedCredited = true
 		}
-		// 账单历史可见性修复：同事务补写一条已完成的原生 model.TopUp，使这笔 MT 充值出现在
-		// GetUserTopUps（GET /api/user/topup/self，钱包「账单历史」数据源）——此前 OnPaid 只写
-		// 幂等台账 + users.quota，从不写 top_ups，充值成功但用户在账单历史里"查无此单"。
-		// 仅展示用途：额度已由上面一次性加好，这里不触发任何二次入账或钩子。
-		// 与台账同事务意味着若这里失败，整个事务（含台账与 quota）一并回滚，下次重试从头
-		// 再来、幂等不受影响；TradeNo 唯一索引对同一 order_no 亦是双保险，防并发下重复写行。
-		return tx.Create(&model.TopUp{
+		if err := tx.Create(&model.TopUp{
 			UserId:          int(o.UserID),
-			Amount:          int64(math.Round(o.AmountUSD)), // USD，口径同 formatCurrencyFromUSD 的历史 Amount 展示
-			Money:           o.ActualPaid,                   // ¥ 实付（充值差价基准，同订单落库金额，不信回调报文）
+			Amount:          int64(math.Round(o.AmountUSD)),
+			Money:           o.ActualPaid,
 			TradeNo:         o.OrderNo,
-			PaymentMethod:   rechargePaymentMethod(o.Provider), // wxpay_official / alipay_official（与前端 PAYMENT_METHOD_NAMES 同约定）
+			PaymentMethod:   rechargePaymentMethod(o.Provider),
 			PaymentProvider: string(o.Provider),
 			CreateTime:      time.Now().Unix(),
 			CompleteTime:    time.Now().Unix(),
 			Status:          common.TopUpStatusSuccess,
-		}).Error
-	}); err != nil {
+		}).Error; err != nil {
+			if isDuplicateLedgerErr(err) {
+				return fmt.Errorf("topup unique after ledger claim: %w", err)
+			}
+			return err
+		}
+		if err := enqueueCacheInvalidationOutboxTx(tx, o.OrderNo, o.UserID); err != nil {
+			return err
+		}
+		return nil
+	})
+	if errors.Is(err, errLedgerDuplicate) {
+		return s.finishIdempotentLedgerHit(ctx, o, int64(q), wantFen, root)
+	}
+	if err != nil {
 		return err
 	}
-	if credited {
-		// DB 已提交。使额度缓存失效（下次读从 DB 重载，缓存永不与 DB 发散——顺带修审计 M5）。
-		if cErr := model.InvalidateUserCache(int(o.UserID)); cErr != nil {
-			common.SysLog("recharge credit: invalidate user cache failed (order " + o.OrderNo + "): " + cErr.Error())
-		}
-		if softDeletedCredited {
-			// 异常路径：用户在回调落地前被软删，额度已 Unscoped 落到其行（可恢复、不丢账）。留持久日志痕迹
-			// 并经 AlertSink 发 Critical 告警知会风控核查（退款 / 恢复账号）。best-effort：绝不影响入账结果，
-			// 幂等台账已保证同单只到此一次，故告警亦只发一次（DedupKey 再兜底防并发/重推重复分发）。
-			msg := fmt.Sprintf("充值入账命中软删用户：order=%s user=%d quota=%d ¥%.2f（额度已落其行、可恢复；请风控核查是否退款/恢复账号）",
-				o.OrderNo, o.UserID, q, o.ActualPaid)
-			common.SysLog(msg)
-			if s.alerter != nil {
-				_ = s.alerter.Dispatch(ctx, alert.Alert{
-					Level:    alert.LevelCritical,
-					Subject:  "充值入账命中软删用户",
-					Body:     msg,
-					DedupKey: "recharge_softdeleted_credit:" + o.OrderNo,
-				})
-			}
+	// Redis 删除在提交后立即执行；失败由 outbox 循环补失效。
+	if cErr := model.InvalidateUserCache(int(o.UserID)); cErr != nil {
+		common.SysLog("recharge credit: invalidate user cache failed (order " + o.OrderNo + "): " + cErr.Error())
+	} else {
+		markCacheInvalidationOutboxDone(s.db, o.OrderNo)
+	}
+	if softDeletedCredited {
+		// 异常路径：用户在回调落地前被软删，额度已 Unscoped 落到其行（可恢复、不丢账）。留持久日志痕迹
+		// 并经 AlertSink 发 Critical 告警知会风控核查（退款 / 恢复账号）。best-effort：绝不影响入账结果，
+		// 幂等台账已保证同单只到此一次，故告警亦只发一次（DedupKey 再兜底防并发/重推重复分发）。
+		msg := fmt.Sprintf("充值入账命中软删用户：order=%s user=%d quota=%d ¥%.2f（额度已落其行、可恢复；请风控核查是否退款/恢复账号）",
+			o.OrderNo, o.UserID, q, o.ActualPaid)
+		common.SysLog(msg)
+		if s.alerter != nil {
+			_ = s.alerter.Dispatch(ctx, alert.Alert{
+				Level:    alert.LevelCritical,
+				Subject:  "充值入账命中软删用户",
+				Body:     msg,
+				DedupKey: "recharge_softdeleted_credit:" + o.OrderNo,
+			})
 		}
 	}
 	return nil
@@ -196,9 +217,7 @@ func rechargePaymentMethod(p payment.Provider) string {
 	return string(p) + "_official"
 }
 
-// isDuplicateLedgerErr 报告是否为唯一约束/主键冲突错误（跨 MySQL/sqlite，driver 无关）。
-// 与 internal/payment/gormrepo.Create 同范式：既认 gorm 翻译错误（TranslateError 开启时，如测试库），
-// 又认原始 driver 错误串（主库未开 TranslateError）——两路兜底，稳过。
+// isDuplicateLedgerErr 报告是否为唯一约束/主键冲突错误（跨 MySQL/sqlite/PostgreSQL，driver 无关）。
 func isDuplicateLedgerErr(err error) bool {
 	if err == nil {
 		return false
@@ -207,12 +226,101 @@ func isDuplicateLedgerErr(err error) bool {
 		return true
 	}
 	msg := strings.ToLower(err.Error())
-	for _, frag := range []string{"duplicate entry", "unique constraint", "duplicate key", "duplicated key", "1062"} {
+	for _, frag := range []string{
+		"duplicate entry", "unique constraint", "duplicate key", "duplicated key",
+		"1062", "unique violation", "sqlstate 23505",
+	} {
 		if strings.Contains(msg, frag) {
 			return true
 		}
 	}
 	return false
+}
+
+// finishIdempotentLedgerHit：ledger 冲突后事务外校验（整数 quota/fen，禁止 float==）。
+// TopUp 缺失：不增加 quota 的前提下安全补建；查询错误不得吞掉。
+func (s rechargeQuotaSink) finishIdempotentLedgerHit(ctx context.Context, o payment.PaidOrder, wantQuota, wantFen int64, root string) error {
+	var row rechargeCreditLedgerRow
+	if err := s.db.WithContext(ctx).Take(&row, "order_no = ?", o.OrderNo).Error; err != nil {
+		return err
+	}
+	// 权威比较：quota + actual_paid_fen + tenant/user/root（禁止 float AmountUSD）
+	if row.TenantID != o.TenantID || row.UserID != o.UserID || row.Quota != wantQuota {
+		return s.ledgerInvariantAlert(ctx, o, row, wantQuota, wantFen)
+	}
+	if row.ActualPaidFen > 0 && wantFen > 0 && row.ActualPaidFen != wantFen {
+		return s.ledgerInvariantAlert(ctx, o, row, wantQuota, wantFen)
+	}
+	if row.RootOrderNo != "" && root != "" && row.RootOrderNo != root {
+		return s.ledgerInvariantAlert(ctx, o, row, wantQuota, wantFen)
+	}
+
+	var top model.TopUp
+	err := s.db.WithContext(ctx).Where("trade_no = ?", o.OrderNo).Take(&top).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err // 查询错误不得吞掉
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 不增加 quota，安全补建 TopUp（ledger 已证明入账过）
+		if cErr := s.db.WithContext(ctx).Create(&model.TopUp{
+			UserId:          int(o.UserID),
+			Amount:          int64(math.Round(o.AmountUSD)),
+			Money:           o.ActualPaid,
+			TradeNo:         o.OrderNo,
+			PaymentMethod:   rechargePaymentMethod(o.Provider),
+			PaymentProvider: string(o.Provider),
+			CreateTime:      time.Now().Unix(),
+			CompleteTime:    time.Now().Unix(),
+			Status:          common.TopUpStatusSuccess,
+		}).Error; cErr != nil {
+			if !isDuplicateLedgerErr(cErr) {
+				common.SysLog("recharge topup repair failed order=" + o.OrderNo + ": " + cErr.Error())
+				return errRechargeTopUpMissing
+			}
+		}
+	} else {
+		if top.UserId != int(o.UserID) || top.Status != common.TopUpStatusSuccess ||
+			top.Amount != int64(math.Round(o.AmountUSD)) ||
+			(o.Provider != "" && top.PaymentProvider != "" && top.PaymentProvider != string(o.Provider)) {
+			msg := fmt.Sprintf("recharge topup invariant: order=%s topup user=%d amount=%d status=%s",
+				o.OrderNo, top.UserId, top.Amount, top.Status)
+			common.SysLog(msg)
+			if s.alerter != nil {
+				_ = s.alerter.Dispatch(ctx, alert.Alert{
+					Level: alert.LevelCritical, Subject: "充值账单与订单意图不一致",
+					Body: msg, DedupKey: "recharge_topup_invariant:" + o.OrderNo,
+				})
+			}
+			return errRechargeTopUpInvariant
+		}
+	}
+
+	// outbox：缺失可靠补建；冲突校验 order_no/user_id
+	if err := enqueueCacheInvalidationOutboxTx(s.db, o.OrderNo, o.UserID); err != nil {
+		if !isDuplicateLedgerErr(err) {
+			return err
+		}
+	}
+	if cErr := model.InvalidateUserCache(int(o.UserID)); cErr != nil {
+		common.SysLog("recharge credit: invalidate user cache failed (order " + o.OrderNo + "): " + cErr.Error())
+	} else {
+		markCacheInvalidationOutboxDone(s.db, o.OrderNo)
+	}
+	return nil
+}
+
+func (s rechargeQuotaSink) ledgerInvariantAlert(ctx context.Context, o payment.PaidOrder, row rechargeCreditLedgerRow, wantQuota, wantFen int64) error {
+	msg := fmt.Sprintf("recharge ledger invariant: order=%s have(tenant=%d user=%d q=%d fen=%d root=%s) want(tenant=%d user=%d q=%d fen=%d)",
+		o.OrderNo, row.TenantID, row.UserID, row.Quota, row.ActualPaidFen, row.RootOrderNo,
+		o.TenantID, o.UserID, wantQuota, wantFen)
+	common.SysLog(msg)
+	if s.alerter != nil {
+		_ = s.alerter.Dispatch(ctx, alert.Alert{
+			Level: alert.LevelCritical, Subject: "充值台账与订单意图不一致",
+			Body: msg, DedupKey: "recharge_ledger_invariant:" + o.OrderNo,
+		})
+	}
+	return errRechargeLedgerInvariant
 }
 
 // rechargeQuota 把充值美元额折算为 new-api 内部 quota 单位（$1 = common.QuotaPerUnit；截断）。
@@ -270,9 +378,10 @@ func amountMatchesCNY(paidCNY, orderCNY float64) bool {
 //
 // 两路最终都归一到 (amountUSD, actualPaid¥)，入账仍以 amountUSD 折原生 quota（$1=QuotaPerUnit），计费数学不变。
 type rechargeRequest struct {
-	AmountUSD float64 `json:"amount_usd"`
-	AmountCNY float64 `json:"amount_cny"` // 可选：人民币充值，>0 时优先，实付精确到分
-	Provider  string  `json:"provider"`   // wxpay | alipay
+	AmountUSD      float64 `json:"amount_usd"`
+	AmountCNY      float64 `json:"amount_cny"`      // 可选：人民币充值，>0 时优先，实付精确到分
+	Provider       string  `json:"provider"`        // wxpay | alipay
+	IdempotencyKey string  `json:"idempotency_key"` // 可选：客户端支付意图幂等键（网络重试复用）
 }
 
 // HandleWalletRecharge POST /api/tenant/wallet/recharge —— 钱包充值下单。需 UserAuth + Host 租户
@@ -324,15 +433,21 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 		subject = fmt.Sprintf("钱包充值 ¥%.2f", actualPaid)
 	}
 	order, err := a.RechargeGateway.CreateOrder(reqCtx(c), payment.OrderInput{
-		Type:       payment.OrderTypeRecharge,
-		TenantID:   t.ID,
-		UserID:     userID,
-		Provider:   provider,
-		AmountUSD:  amountUSD,
-		ActualPaid: actualPaid,
-		Subject:    subject,
+		Type:           payment.OrderTypeRecharge,
+		TenantID:       t.ID,
+		UserID:         userID,
+		Provider:       provider,
+		AmountUSD:      amountUSD,
+		ActualPaid:     actualPaid,
+		Subject:        subject,
+		IdempotencyKey: strings.TrimSpace(body.IdempotencyKey),
 	})
+	// P0-4：outcome_unknown / pay_url 落库失败时 order 仍非 nil，须返回 order_no 供轮询
 	if err != nil {
+		if order != nil && (errors.Is(err, payment.ErrCreateOutcomeUnknown) || errors.Is(err, payment.ErrPayURLPersist) || errors.Is(err, payment.ErrPayURLMissing)) {
+			respondCreateUnknown(c, order, amountUSD, actualPaid, provider, err)
+			return
+		}
 		respondErr(c, err)
 		return
 	}
@@ -344,18 +459,70 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 	case payment.ProviderAlipay:
 		pay["alipay_url"] = order.PayURL // 前端跳转
 	}
+	expiresAt := ""
+	if !order.ExpiresAt.IsZero() {
+		expiresAt = order.ExpiresAt.Format(time.RFC3339)
+	}
 	respondOK(c, gin.H{
-		"order_no":   order.OrderNo,
-		"amount_usd": amountUSD,
-		"amount_cny": actualPaid,
-		"provider":   string(provider),
-		"pay":        pay,
+		"order_no":        order.OrderNo,
+		"amount_usd":      amountUSD,
+		"amount_cny":      actualPaid,
+		"amount_cny_fen":  payment.OrderActualPaidFen(order),
+		"provider":        string(provider),
+		"idempotency_key": order.IdempotencyKey,
+		"expires_at":      expiresAt,
+		"status":          string(order.Status),
+		"pay":             pay,
 	})
 }
 
+// respondCreateUnknown 返回 202 + order_no，前端可轮询 status 直至出现二维码或终态。
+func respondCreateUnknown(c *gin.Context, order *payment.PayOrder, amountUSD, actualPaid float64, provider payment.Provider, err error) {
+	expiresAt := ""
+	if order != nil && !order.ExpiresAt.IsZero() {
+		expiresAt = order.ExpiresAt.Format(time.RFC3339)
+	}
+	orderNo, status, idem := "", "created", ""
+	if order != nil {
+		orderNo = order.OrderNo
+		status = string(order.Status)
+		idem = order.IdempotencyKey
+	}
+	code := payment.CodeCreateOutcomeUnknown
+	msg := "支付订单确认中，请稍后查询状态"
+	if ae, ok := err.(*apperr.AppError); ok && ae != nil {
+		code = ae.Code
+		msg = ae.Msg
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"success": false,
+		"message": msg,
+		"code":    code,
+		"data": gin.H{
+			"order_no":        orderNo,
+			"status":          status,
+			"amount_usd":      amountUSD,
+			"amount_cny":      actualPaid,
+			"provider":        string(provider),
+			"idempotency_key": idem,
+			"expires_at":      expiresAt,
+			"poll_path":       "/api/tenant/wallet/recharge/status?order_no=" + orderNo,
+			"pay":             gin.H{},
+		},
+	})
+}
+
+// rechargeQRValidity 微信 Native 二维码默认有效窗口（对账过期同口径 2h）。状态接口用它推算
+// expires_at，供前端倒计时；无独立 DB 字段时以 CreatedAt+窗口为权威近似。
+const rechargeQRValidity = 2 * time.Hour
+
 // HandleWalletRechargeStatus GET /api/tenant/wallet/recharge/status?order_no=... —— 充值订单支付状态查询。
-// 需 UserAuth。前端扫码支付（微信 native 无服务端跳转）后靠此端点轮询探活，探到已支付即结束轮询、
-// 刷新余额（修「付完款不跳转」：原先只弹二维码、无状态轮询、无支付后动作）。
+// 需 UserAuth。前端扫码支付（微信 native 无服务端跳转）后靠此端点轮询探活。
+//
+// 状态语义（PAY-STA-01）：
+//   - provider_paid：支付机构已确认（status=paid 或 credited）
+//   - credited：本站余额入账完成（仅 status=credited）
+//   - paid（兼容旧客户端）：**仅当 credited 时为 true**，避免把入账中间态误判为到账完成
 //
 // **越权红线**：订单只可被其归属用户本人查询——跨用户一律回落 payment.ErrOrderNotFound（404），
 // 不区分「订单不存在」与「订单存在但不是你的」，避免通过状态码差异枚举他人 order_no（对齐
@@ -375,13 +542,104 @@ func (a *App) HandleWalletRechargeStatus(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
-	// 越权红线：仅订单归属用户本人可查；不匹配一律当「不存在」处理，绝不泄露他人订单状态。
+	// 越权红线：UserID + Host 解析 TenantID 任一不匹配 → 与不存在相同的 404
 	if ord.UserID != int64(c.GetInt("id")) {
 		respondErr(c, payment.ErrOrderNotFound)
 		return
 	}
+	if t, tErr := a.resolveBuyerTenant(c); tErr == nil && t != nil && ord.TenantID != t.ID {
+		respondErr(c, payment.ErrOrderNotFound)
+		return
+	}
+
+	providerPaid := ord.Status == payment.OrderPaid || ord.Status == payment.OrderCredited
+	credited := ord.Status == payment.OrderCredited
+	creditedQuota := 0
+	if credited {
+		creditedQuota = rechargeQuota(ord.AmountUSD)
+	}
+	// current_quota 读主库权威值（fromDB=true），避免 Redis 缓存滞后导致前端拿到旧余额。
+	// model.DB 未装配（纯内存网关单测）时跳过，返回 0。
+	currentQuota := 0
+	if model.DB != nil {
+		if q, qErr := model.GetUserQuota(int(ord.UserID), true); qErr == nil {
+			currentQuota = q
+		}
+	}
+
+	expiresAt := ""
+	if !ord.ExpiresAt.IsZero() {
+		expiresAt = ord.ExpiresAt.Format(time.RFC3339)
+	} else if !ord.CreatedAt.IsZero() {
+		expiresAt = ord.CreatedAt.Add(rechargeQRValidity).Format(time.RFC3339)
+	}
+	updatedAt := ""
+	if !ord.UpdatedAt.IsZero() {
+		updatedAt = ord.UpdatedAt.Format(time.RFC3339)
+	}
+	providerPaidAt := ""
+	if !ord.ProviderPaidAt.IsZero() {
+		providerPaidAt = ord.ProviderPaidAt.Format(time.RFC3339)
+	}
+	creditedAt := ""
+	if !ord.CreditedAt.IsZero() {
+		creditedAt = ord.CreditedAt.Format(time.RFC3339)
+	}
+
+	// 仅 active + credential_ready + 未过期 返回 PayURL（不返回 failed/closed/replaced 旧码）
+	pay := gin.H{}
+	rootNo := ord.RootOrderNo
+	if rootNo == "" {
+		rootNo = ord.OrderNo
+	}
+	activeNo := ord.ActiveOrderNo
+	if activeNo == "" {
+		activeNo = ord.OrderNo
+	}
+	// 若查的是旧 attempt，跟随 active（同 root）
+	display := ord
+	if activeNo != "" && activeNo != ord.OrderNo && a.RechargeGateway != nil {
+		if act, aErr := a.RechargeGateway.GetByOrderNo(reqCtx(c), activeNo); aErr == nil && act.UserID == ord.UserID {
+			display = act
+		}
+	}
+	// 任意 attempt 已 paid/credited → 资金事实优先
+	if display.Status == payment.OrderPaid || display.Status == payment.OrderCredited {
+		providerPaid = true
+		credited = display.Status == payment.OrderCredited
+	}
+	canExposePay := display.Status == payment.OrderCreated &&
+		(display.CreateState == payment.CreateStateCredentialReady || display.CreateState == "" && strings.TrimSpace(display.PayURL) != "") &&
+		(display.ExpiresAt.IsZero() || display.ExpiresAt.After(time.Now())) &&
+		strings.TrimSpace(display.PayURL) != ""
+	if canExposePay {
+		switch display.Provider {
+		case payment.ProviderWxpay:
+			pay["wxpay_qr"] = display.PayURL
+		case payment.ProviderAlipay:
+			pay["alipay_url"] = display.PayURL
+		}
+	}
+
 	respondOK(c, gin.H{
-		"paid":   ord.Status == payment.OrderPaid || ord.Status == payment.OrderCredited,
-		"status": string(ord.Status),
+		"order_no":             display.OrderNo,
+		"root_order_no":        rootNo,
+		"active_order_no":      activeNo,
+		"status":               string(display.Status),
+		"create_state":         string(display.CreateState),
+		"provider_trade_state": display.ProviderTradeState,
+		"provider_paid":        providerPaid || display.Status == payment.OrderPaid || display.Status == payment.OrderCredited,
+		"credited":             credited || display.Status == payment.OrderCredited,
+		"paid":                 credited || display.Status == payment.OrderCredited,
+		"amount_cny":           display.ActualPaid,
+		"amount_cny_fen":       payment.OrderActualPaidFen(display),
+		"amount_usd":           display.AmountUSD,
+		"credited_quota":       creditedQuota,
+		"current_quota":        currentQuota,
+		"expires_at":           expiresAt,
+		"provider_paid_at":     providerPaidAt,
+		"credited_at":          creditedAt,
+		"updated_at":           updatedAt,
+		"pay":                  pay,
 	})
 }

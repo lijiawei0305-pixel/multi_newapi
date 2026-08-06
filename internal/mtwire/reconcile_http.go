@@ -78,8 +78,7 @@ func (a *App) HandleAdminListStuck(c *gin.Context) {
 // drift）、更新心跳、落一条历史。返回四路径结果（best-effort：单路径错误折进各自 failed，仍返回 200）。AdminAuth。
 func (a *App) HandleAdminRunReconcile(c *gin.Context) {
 	ctx := reqCtx(c)
-	before := time.Now().Add(-reconcileMinAge)
-	paid, created, sub, agt := a.runReconcileAll(ctx, before, "manual")
+	paid, created, sub, agt := a.runReconcileAll(ctx, "manual")
 	respondOK(c, gin.H{
 		"rcg":         gin.H{"scanned": paid.Scanned, "credited": paid.Reconciled, "failed": paid.Failed},
 		"rcg_created": gin.H{"scanned": created.Scanned, "credited": created.Reconciled, "expired": created.Expired, "failed": created.Failed},

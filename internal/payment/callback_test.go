@@ -59,9 +59,9 @@ func TestCallbackSubscriptionDispatchesToSubSink(t *testing.T) {
 	ctx := context.Background()
 	g, repo, recharge, sub := newGateway()
 	no := seedOrder(t, repo, OrderTypeSubscription)
-
-	if err := g.HandleAlipay(ctx, signedRaw(no, true)); err != nil {
-		t.Fatalf("HandleAlipay: %v", err)
+	// seedOrder 默认 ProviderWxpay，须与回调渠道一致（PAY-FACT-01 渠道绑定）。
+	if err := g.HandleWxpay(ctx, signedRaw(no, true)); err != nil {
+		t.Fatalf("HandleWxpay: %v", err)
 	}
 	if sub.count() != 1 || recharge.count() != 0 {
 		t.Fatalf("dispatch counts sub=%d recharge=%d, want 1/0", sub.count(), recharge.count())
@@ -217,7 +217,10 @@ func TestCallbackUnknownTypeIsDefensive(t *testing.T) {
 	repo := NewMemRepo()
 	// 仅注册 recharge sink；预置一个 subscription 订单制造「无对应 sink」。
 	g := NewGateway(repo, &fakeSDK{verifyFn: okVerify()}, map[OrderType]OrderSink{OrderTypeRecharge: newFakeSink()})
-	o := &PayOrder{OrderNo: "PAYX", Type: OrderTypeSubscription, TenantID: 1, UserID: 1, Status: OrderCreated}
+	o := &PayOrder{
+		OrderNo: "PAYX", Type: OrderTypeSubscription, TenantID: 1, UserID: 1,
+		Provider: ProviderWxpay, ActualPaid: 120, ActualPaidFen: 12000, Status: OrderCreated,
+	}
 	_ = repo.Create(ctx, o)
 
 	if got := apperr.CodeOf(g.HandleWxpay(ctx, []byte("PAYX"))); got != CodeOrderTypeUnknown {

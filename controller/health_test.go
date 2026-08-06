@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	paymentmigrate "github.com/QuantumNous/new-api/internal/payment/migrate"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -65,6 +67,8 @@ func TestHealthReadyChecksCurrentDatabaseAndConfiguredRedis(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open("file:health-ready?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
+	// payment schema readiness 要求 CurrentVersion >= SchemaVersion
+	require.NoError(t, paymentmigrate.EnsureSchema(context.Background(), db))
 	model.DB = db
 	common.RedisEnabled = false
 	common.RDB = nil
@@ -73,7 +77,10 @@ func TestHealthReadyChecksCurrentDatabaseAndConfiguredRedis(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	payload := decodeHealthResponse(t, recorder)
 	assert.Equal(t, "ok", payload["status"])
-	assert.Equal(t, map[string]any{"database": "ok", "redis": "disabled"}, payload["checks"])
+	checks := payload["checks"].(map[string]any)
+	assert.Equal(t, "ok", checks["database"])
+	assert.Equal(t, "disabled", checks["redis"])
+	assert.Contains(t, fmt.Sprint(checks["payment_schema"]), "ok")
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

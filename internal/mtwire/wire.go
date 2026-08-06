@@ -32,6 +32,7 @@ import (
 	moderationrepo "github.com/QuantumNous/new-api/internal/moderation/gormrepo"
 	"github.com/QuantumNous/new-api/internal/payment"
 	paymentrepo "github.com/QuantumNous/new-api/internal/payment/gormrepo"
+	paymentmigrate "github.com/QuantumNous/new-api/internal/payment/migrate"
 	"github.com/QuantumNous/new-api/internal/pricing"
 	"github.com/QuantumNous/new-api/internal/promotion"
 	promotionrepo "github.com/QuantumNous/new-api/internal/promotion/gormrepo"
@@ -354,7 +355,8 @@ func (a *App) Migrate() error {
 			"risk purchase ledger import: scanned=%d imported=%d skipped=%d errors=%d",
 			res.Scanned, res.Imported, res.Skipped, res.Errors))
 	}
-	if err := paymentrepo.AutoMigrate(a.DB); err != nil { // payment_orders（Track 2 充值订单）
+	// payment_orders：版本化 expand（payment/migrate），禁止直接 AutoMigrate 加 NOT NULL 破坏存量
+	if err := paymentmigrate.EnsureSchema(context.Background(), a.DB); err != nil {
 		return err
 	}
 	if err := modelgroup.AutoMigrate(a.DB); err != nil { // model_groups（2D 倍率 · 模型分组登记，§2.15）
@@ -393,6 +395,10 @@ func (a *App) Migrate() error {
 	}
 	// 充值入账幂等台账：mt_recharge_credit_ledger（order_no 唯一，防额度双扣，审计 C1）。
 	if err := migrateRechargeLedger(a.DB); err != nil {
+		return err
+	}
+	// 用户缓存失效 durable outbox（PAY-CACHE-01）：入账后 Redis 失败可重试，不重复加额度。
+	if err := migrateCacheInvalidationOutbox(a.DB); err != nil {
 		return err
 	}
 	// 目标③桥接表：mt_subscription_orders（SUB 套餐订单状态机）+ mt_native_subscription_plans

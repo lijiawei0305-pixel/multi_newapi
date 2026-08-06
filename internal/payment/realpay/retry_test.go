@@ -6,9 +6,11 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/QuantumNous/new-api/internal/payment"
 )
 
-// fakeTimeoutErr 实现 net.Error 且 Timeout()=true，模拟网络超时错误。
+// fakeTimeoutErr 实现 net.Error 且 Timeout()=true。
 type fakeTimeoutErr struct{}
 
 func (fakeTimeoutErr) Error() string   { return "fake timeout" }
@@ -23,11 +25,10 @@ func TestIsTransientPayErr(t *testing.T) {
 	}{
 		{"nil", nil, false},
 		{"deadline", context.DeadlineExceeded, true},
-		{"wrapped-deadline", errors.New("x"), false},
 		{"net-timeout", fakeTimeoutErr{}, true},
-		{"op-error-conn-refused", &net.OpError{Op: "dial", Err: errors.New("connection refused")}, true},
-		{"business", errors.New("PARAM_ERROR"), false},
+		{"op-error", &net.OpError{Op: "dial", Err: errors.New("connection refused")}, true},
 		{"canceled", context.Canceled, false},
+		{"definitive", payment.NewOutcomeError(payment.CreateOutcomeDefinitiveReject, "param_error", "response", errors.New("PARAM_ERROR")), false},
 	}
 	for _, c := range cases {
 		if got := isTransientPayErr(c.err); got != c.want {
@@ -36,66 +37,73 @@ func TestIsTransientPayErr(t *testing.T) {
 	}
 }
 
-func TestRetryTransientPay_SuccessFirstTry(t *testing.T) {
+func TestRetryCreatePay_SuccessFirstTry(t *testing.T) {
 	calls := 0
-	err := retryTransientPay(context.Background(), 3, time.Second, 0, func(context.Context) error {
+	clock := attemptClock{now: time.Now, sleep: func(context.Context, time.Duration) error { return nil }}
+	err := retryCreatePay(context.Background(), clock, func(context.Context, int, int) error {
 		calls++
 		return nil
-	})
+	}, nil)
 	if err != nil || calls != 1 {
 		t.Fatalf("got err=%v calls=%d, want nil/1", err, calls)
 	}
 }
 
-func TestRetryTransientPay_TransientThenSuccess(t *testing.T) {
+func TestRetryCreatePay_PreWriteThenSuccess(t *testing.T) {
 	calls := 0
-	err := retryTransientPay(context.Background(), 3, time.Second, 0, func(context.Context) error {
+	clock := attemptClock{now: time.Now, sleep: func(context.Context, time.Duration) error { return nil }}
+	err := retryCreatePay(context.Background(), clock, func(context.Context, int, int) error {
 		calls++
-		if calls < 3 {
-			return context.DeadlineExceeded // transient
+		if calls < 2 {
+			return payment.NewOutcomeError(payment.CreateOutcomeUnknown, "connect", "connect", errors.New("connection refused"))
 		}
 		return nil
-	})
-	if err != nil || calls != 3 {
-		t.Fatalf("got err=%v calls=%d, want nil/3", err, calls)
+	}, nil)
+	if err != nil || calls != 2 {
+		t.Fatalf("got err=%v calls=%d, want nil/2", err, calls)
 	}
 }
 
-func TestRetryTransientPay_AlwaysTransient_GivesUp(t *testing.T) {
+func TestRetryCreatePay_AlwaysPreWrite_GivesUp(t *testing.T) {
 	calls := 0
-	err := retryTransientPay(context.Background(), 3, time.Second, 0, func(context.Context) error {
+	clock := attemptClock{now: time.Now, sleep: func(context.Context, time.Duration) error { return nil }}
+	err := retryCreatePay(context.Background(), clock, func(context.Context, int, int) error {
 		calls++
-		return context.DeadlineExceeded
-	})
-	if !errors.Is(err, context.DeadlineExceeded) || calls != 3 {
-		t.Fatalf("got err=%v calls=%d, want deadline/3", err, calls)
+		return payment.NewOutcomeError(payment.CreateOutcomeUnknown, "connect", "connect", errors.New("connection refused"))
+	}, nil)
+	if err == nil || calls != payCreateMaxAttempts {
+		t.Fatalf("got err=%v calls=%d, want error/%d", err, calls, payCreateMaxAttempts)
 	}
 }
 
-func TestRetryTransientPay_NonTransient_NoRetry(t *testing.T) {
+func TestRetryCreatePay_PostWrite_NoRetry(t *testing.T) {
 	calls := 0
-	businessErr := errors.New("PARAM_ERROR")
-	err := retryTransientPay(context.Background(), 3, time.Second, 0, func(context.Context) error {
+	clock := attemptClock{now: time.Now, sleep: func(context.Context, time.Duration) error { return nil }}
+	err := retryCreatePay(context.Background(), clock, func(context.Context, int, int) error {
 		calls++
-		return businessErr
-	})
-	if !errors.Is(err, businessErr) || calls != 1 {
-		t.Fatalf("got err=%v calls=%d, want business/1", err, calls)
+		return payment.NewOutcomeError(payment.CreateOutcomeUnknown, "timeout", "ttfb", context.DeadlineExceeded)
+	}, nil)
+	if err == nil || calls != 1 {
+		t.Fatalf("got err=%v calls=%d, want error/1", err, calls)
+	}
+	if !payment.IsOutcomeUnknown(err) {
+		t.Fatalf("want outcome_unknown, got %v", err)
 	}
 }
 
-func TestRetryTransientPay_ParentCanceled_StopsAtBackoff(t *testing.T) {
+func TestRetryCreatePay_ParentCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already canceled
+	cancel()
+	clock := attemptClock{now: time.Now, sleep: func(context.Context, time.Duration) error { return context.Canceled }}
 	calls := 0
-	err := retryTransientPay(ctx, 5, time.Second, 200*time.Millisecond, func(context.Context) error {
+	err := retryCreatePay(ctx, clock, func(tryCtx context.Context, attempt, max int) error {
 		calls++
-		return context.DeadlineExceeded // transient → would retry, but backoff sees ctx canceled
-	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("got err=%v, want context.Canceled", err)
+		return tryCtx.Err()
+	}, nil)
+	if err == nil {
+		t.Fatal("want error")
 	}
-	if calls != 1 {
-		t.Fatalf("calls=%d, want 1 (stop at first backoff)", calls)
+	if calls > 1 {
+		t.Fatalf("calls=%d, want <=1", calls)
 	}
 }

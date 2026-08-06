@@ -3,67 +3,119 @@ package realpay
 import (
 	"context"
 	"errors"
-	"net"
 	"time"
+
+	"github.com/QuantumNous/new-api/internal/payment"
 )
 
-// 出站下单（微信 Prepay / 支付宝下单）重试参数。
-//
-// 背景：本环境到微信/支付宝 API 为跨境访问，时延间歇性偏高，单次下单可能挂到超时
-// （实测 TLS 握手 0.5~9s，偶尔整次 >30s，用户表现为「点击微信支付超时」）。下单按
-// out_trade_no 幂等（同单号 → 同 code_url/跳转），故对「瞬时网络/超时」错误做有限次
-// 短超时重试，把「偶发一次卡死」变成「快速重试后成功」，而不改变入账语义。
+// 同步 Prepay 三重边界（PAY-LAT-02）：overall + per-attempt + max attempts。
+// 禁止回到 3×8s + 退避 ≈ 24.6s。
 const (
-	payCreateAttempts   = 3                      // 最多尝试次数
-	payCreatePerTry     = 8 * time.Second        // 每次尝试的独立超时（短于外层 http.Client 的 30s）
-	payCreateRetryDelay = 300 * time.Millisecond // 尝试间退避
+	payCreateMaxAttempts = 2
+	payCreatePerAttempt  = 5 * time.Second
+	payCreateOverall     = 12 * time.Second
+	payCreateRetryDelay  = 200 * time.Millisecond // 仅 pre-write 失败后短退避
+	payQueryPerAttempt   = 4 * time.Second
+	payQueryMaxAttempts  = 1 // 查单内部禁止乘法重试风暴；外层 5s/30s/60s 调度
 )
 
-// retryTransientPay 用独立的短超时 ctx 反复执行 fn，直到成功、遇到非瞬时错误或用尽次数。
-//
-// fn 必须幂等（下单按 out_trade_no 幂等，重试安全）。仅对 isTransientPayErr 判定为瞬时的
-// 错误重试；业务错误（参数非法等）快速失败、原样返回。父 ctx 取消 → 立即停止并返回其错误。
-func retryTransientPay(ctx context.Context, attempts int, perTry, delay time.Duration, fn func(context.Context) error) error {
-	if attempts < 1 {
-		attempts = 1
-	}
-	var err error
-	for i := 0; i < attempts; i++ {
-		tryCtx, cancel := context.WithTimeout(ctx, perTry)
-		err = fn(tryCtx)
-		cancel()
-		if err == nil || !isTransientPayErr(err) {
-			return err
-		}
-		if i == attempts-1 {
-			break // 最后一次不再退避
-		}
-		select {
-		case <-time.After(delay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	return err
+// attemptClock 可注入的时钟/睡眠（测试用 fake）。
+type attemptClock struct {
+	now   func() time.Time
+	sleep func(ctx context.Context, d time.Duration) error
 }
 
-// isTransientPayErr 判断错误是否为可重试的瞬时网络错误（超时 / 连接层失败）。
-// 超时（含 context.DeadlineExceeded、net 超时）、拨号/连接层错误（net.OpError）→ 可重试；
-// 业务错误、context.Canceled（调用方主动放弃）→ 不重试。
+func realClock() attemptClock {
+	return attemptClock{
+		now: time.Now,
+		sleep: func(ctx context.Context, d time.Duration) error {
+			t := time.NewTimer(d)
+			defer t.Stop()
+			select {
+			case <-t.C:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+	}
+}
+
+// retryCreatePay 对 fn 做有界重试：仅 pre-write 瞬时错误可重试；写出后 unknown 立即返回。
+// 每次 attempt 带 X-Pay-Attempt 由调用方在 HTTP 层设置；此处返回最后一次错误（已包装 Outcome）。
+// onAttempt(attempt, max, err) 供观测（attempt 从 1 起）。
+func retryCreatePay(
+	ctx context.Context,
+	clock attemptClock,
+	fn func(tryCtx context.Context, attempt, maxAttempts int) error,
+	onAttempt func(attempt, maxAttempts int, err error),
+) error {
+	if clock.now == nil {
+		clock = realClock()
+	}
+	max := payCreateMaxAttempts
+	overall, cancel := context.WithTimeout(ctx, payCreateOverall)
+	defer cancel()
+
+	var last error
+	for attempt := 1; attempt <= max; attempt++ {
+		if err := overall.Err(); err != nil {
+			return payment.NewOutcomeError(payment.CreateOutcomeUnknown, "canceled", "context", err)
+		}
+		tryCtx, tryCancel := context.WithTimeout(overall, payCreatePerAttempt)
+		err := fn(tryCtx, attempt, max)
+		tryCancel()
+		if onAttempt != nil {
+			onAttempt(attempt, max, err)
+		}
+		if err == nil {
+			return nil
+		}
+		last = err
+		// context 取消：立即停
+		if errors.Is(err, context.Canceled) || overall.Err() != nil {
+			return payment.AsOutcome(err)
+		}
+		oe := payment.AsOutcome(err)
+		if oe.Outcome == payment.CreateOutcomeDefinitiveReject {
+			return oe
+		}
+		// 不可 Prepay 重试（可能已送达）
+		if !payment.IsPreWriteRetryable(err) {
+			return oe
+		}
+		if attempt == max {
+			break
+		}
+		if sleepErr := clock.sleep(overall, payCreateRetryDelay); sleepErr != nil {
+			return payment.NewOutcomeError(payment.CreateOutcomeUnknown, "canceled", "context", sleepErr)
+		}
+	}
+	return payment.AsOutcome(last)
+}
+
+// isTransientPayErr 保留兼容旧测试与调用：瞬时网络错误。
+// 注意：写出后的 timeout 也返回 true，但 retryCreatePay 用 IsPreWriteRetryable 收紧。
 func isTransientPayErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
+	oe := payment.AsOutcome(err)
+	if oe.ErrorClass == "canceled" || oe.Outcome == payment.CreateOutcomeDefinitiveReject {
+		return false
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
-	}
-	var opErr *net.OpError
-	if errors.As(err, &opErr) { // 拨号失败 / 连接重置 / TLS 建连失败等
-		return true
-	}
-	return false
+	return oe.ErrorClass == "timeout" || oe.ErrorClass == "dns" || oe.ErrorClass == "connect" ||
+		oe.ErrorClass == "connect_refused" || oe.ErrorClass == "tls" || oe.ErrorClass == "reset" ||
+		oe.ErrorClass == "eof" || oe.ErrorClass == "unknown"
+}
+
+// retryTransientPay 兼容旧测试名：委托 retryCreatePay（无真实 sleep 的 clock 由测试注入时需改用 retryCreatePay）。
+func retryTransientPay(ctx context.Context, attempts int, perTry, delay time.Duration, fn func(context.Context) error) error {
+	// 映射到新三重边界：忽略旧 attempts/perTry 参数中的过大值，强制安全预算
+	_ = attempts
+	_ = perTry
+	_ = delay
+	return retryCreatePay(ctx, realClock(), func(tryCtx context.Context, attempt, maxAttempts int) error {
+		return fn(tryCtx)
+	}, nil)
 }

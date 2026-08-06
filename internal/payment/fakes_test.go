@@ -63,8 +63,15 @@ func (f *fakeSDK) Verify(_ context.Context, provider Provider, raw []byte) (*Cal
 }
 
 // okVerify 返回一个把 raw 直接当作 order_no、交易成功的验签函数（驱动入账分发）。
+// PaidAmount=120 对齐 seedOrder 的 ActualPaid，满足回调严格支付事实校验。
 func okVerify() func(Provider, []byte) (*CallbackInfo, error) {
 	return func(p Provider, raw []byte) (*CallbackInfo, error) {
-		return &CallbackInfo{Provider: p, OrderNo: string(raw), Success: true, TxnID: "txn-" + string(raw)}, nil
+		return &CallbackInfo{
+			Provider:   p,
+			OrderNo:    string(raw),
+			Success:    true,
+			TxnID:      "txn-" + string(raw),
+			PaidAmount: 120,
+		}, nil
 	}
 }

@@ -5,41 +5,33 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // Gateway 同时实现 PaymentGateway（下单）与 CallbackHandler（回调入账分发）。
-// 所有依赖以接口注入，便于测试和生产装配。
 type Gateway struct {
 	repo       OrderRepo
 	sdk        PaySDK
-	sinks      map[OrderType]OrderSink // 按订单类型分发的入账目标（main 注入）
-	notifyBase string                  // notify_url 前缀（公网回调基址）
-	newOrderNo func() string           // 订单号生成器（可注入，便于测试唯一冲突）
+	sinks      map[OrderType]OrderSink
+	notifyBase string
+	newOrderNo func() string
 	now        func() time.Time
-	logf       func(format string, args ...any) // 异常观测钩子（默认 no-op；main 注入 SysLog），本包保持纯净
+	logf       func(format string, args ...any)
 }
 
-// 编译期断言：Gateway 实现两个对外接口。
 var (
 	_ PaymentGateway  = (*Gateway)(nil)
 	_ CallbackHandler = (*Gateway)(nil)
 )
 
-// Option 是 Gateway 的可选配置。
 type Option func(*Gateway)
 
-// WithNotifyBaseURL 设置异步回调地址前缀（如 https://api.example.com）。
-func WithNotifyBaseURL(base string) Option { return func(g *Gateway) { g.notifyBase = base } }
-
-// WithClock 注入时钟（测试用）。
+func WithNotifyBaseURL(base string) Option  { return func(g *Gateway) { g.notifyBase = base } }
 func WithClock(now func() time.Time) Option { return func(g *Gateway) { g.now = now } }
-
-// WithOrderNoFunc 注入订单号生成器（测试用，可制造唯一冲突）。
-func WithOrderNoFunc(fn func() string) Option { return func(g *Gateway) { g.newOrderNo = fn } }
-
-// WithErrorLogf 注入异常观测钩子（如 common.SysLog 包装）。用于把「入账成功后状态推进失败」
-// 等静默异常上报，替代原先 `_, _ =` 的吞错；默认 no-op，保持本包无外部日志依赖。
+func WithOrderNoFunc(fn func() string) Option {
+	return func(g *Gateway) { g.newOrderNo = fn }
+}
 func WithErrorLogf(fn func(format string, args ...any)) Option {
 	return func(g *Gateway) {
 		if fn != nil {
@@ -48,7 +40,6 @@ func WithErrorLogf(fn func(format string, args ...any)) Option {
 	}
 }
 
-// NewGateway 组装支付网关。sinks 按订单类型映射入账目标（recharge→Wallet、subscription→TokenPlan）。
 func NewGateway(repo OrderRepo, sdk PaySDK, sinks map[OrderType]OrderSink, opts ...Option) *Gateway {
 	g := &Gateway{
 		repo:       repo,
@@ -56,7 +47,7 @@ func NewGateway(repo OrderRepo, sdk PaySDK, sinks map[OrderType]OrderSink, opts 
 		sinks:      sinks,
 		newOrderNo: defaultOrderNo,
 		now:        time.Now,
-		logf:       func(string, ...any) {}, // 默认 no-op；main 经 WithErrorLogf 注入 SysLog
+		logf:       func(string, ...any) {},
 	}
 	for _, opt := range opts {
 		opt(g)
@@ -64,46 +55,147 @@ func NewGateway(repo OrderRepo, sdk PaySDK, sinks map[OrderType]OrderSink, opts 
 	return g
 }
 
-// notifyURL 拼接某渠道的完整回调地址。
 func (g *Gateway) notifyURL(p Provider) string {
 	return g.notifyBase + p.NotifyPath()
 }
 
-// CreateOrder 下单（detailed-design §2.8 / tasks/08-payment.md）：
+// IdempotencyKeyMaxLen 幂等键应用层长度上限（三库 varchar 行为一致）。
+const IdempotencyKeyMaxLen = 64
+
+// validateIdempotencyKey 应用层格式校验（P0-5）。
+func validateIdempotencyKey(key string) error {
+	if key == "" {
+		return nil
+	}
+	if len(key) > IdempotencyKeyMaxLen {
+		return ErrOrderInvalid
+	}
+	// 仅允许可打印 ASCII（避免控制字符 / 超长 unicode 在三库表现不一）
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		if c < 0x21 || c > 0x7e {
+			return ErrOrderInvalid
+		}
+	}
+	return nil
+}
+
+// CreateOrder 下单（PAY-LAT-02 / PAY-IDEM-01 / Phase D）：
 //
-//	校验入参 → 生成唯一 order_no → 回填 notify_url → **先落 created 订单** → 向平台下单拿支付凭据 → 回填 PayURL
-//
-// 顺序修正（审计 M3）：先落库再向平台下单。避免「平台已建单、本地无记录」的孤儿单——
-// 若本地 Create 失败，直接返回错误、根本不向平台建单；若平台下单失败，本地 created 单置 failed
-// （终态，不被对账反复查单）。本地存在而平台无单是无害的（用户拿不到支付凭据、不会去付）。
+//	校验 → 幂等复用（含意图校验）→ 落 created → CreatePay
+//	→ success 且 pay_url 落库成功才返回成功
+//	→ definitive_reject → failed
+//	→ outcome_unknown → 返回 (order, PAY_CREATE_UNKNOWN)，保持 created + 调度查单
 func (g *Gateway) CreateOrder(ctx context.Context, in OrderInput) (*PayOrder, error) {
+	t0 := g.now()
+	g.logStage(StageRequestReceived, "", in.Provider, 0, "")
+
 	if err := in.validate(); err != nil {
-		return nil, err // PAY_ORDER_INVALID
+		return nil, err
 	}
+	idemKey := strings.TrimSpace(in.IdempotencyKey)
+	if err := validateIdempotencyKey(idemKey); err != nil {
+		return nil, err
+	}
+	if idemKey != "" {
+		if existing, err := g.repo.GetByIdempotencyKey(ctx, idemKey); err == nil {
+			if reused, ok, rerr := g.reuseOrRecoverOrder(ctx, existing, in); ok {
+				g.logStage(StageResponseSent, reused.OrderNo, in.Provider, elapsedMs(t0), "idempotent_reuse=1")
+				return reused, nil
+			} else if rerr != nil {
+				// unknown / pay_url missing：仍返回 order 供前端轮询
+				return existing, rerr
+			}
+			return nil, ErrIdempotencyConflict
+		} else if err != ErrOrderNotFound {
+			return nil, err
+		}
+	}
+
 	now := g.now()
+	fen := YuanToFen(in.ActualPaid)
+	orderNo := g.newOrderNo()
+	exp := now.Add(DefaultQRValidity)
 	o := &PayOrder{
-		OrderNo:    g.newOrderNo(),
-		Type:       in.Type,
-		TenantID:   in.TenantID,
-		UserID:     in.UserID,
-		Provider:   in.Provider,
-		AmountUSD:  in.AmountUSD,
-		ActualPaid: in.ActualPaid,
-		GroupID:    in.GroupID,
-		PlanID:     in.PlanID,
-		Subject:    in.Subject,
-		Reference:  in.Reference,
-		Status:     OrderCreated,
-		NotifyURL:  g.notifyURL(in.Provider),
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		OrderNo:        orderNo,
+		Type:           in.Type,
+		TenantID:       in.TenantID,
+		UserID:         in.UserID,
+		Provider:       in.Provider,
+		AmountUSD:      in.AmountUSD,
+		ActualPaid:     in.ActualPaid,
+		ActualPaidFen:  fen,
+		GroupID:        in.GroupID,
+		PlanID:         in.PlanID,
+		Subject:        in.Subject,
+		Reference:      in.Reference,
+		IdempotencyKey: idemKey,
+		Status:         OrderCreated,
+		CreateState:    CreateStateLocalCreated,
+		RootOrderNo:    orderNo,
+		AttemptNo:      1,
+		ActiveOrderNo:  orderNo,
+		NotifyURL:      g.notifyURL(in.Provider),
+		ExpiresAt:      exp,
+		NextQueryAt:    NextQueryAtForAttempt(now, 0, now),
+		QueryAttempts:  0,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 
-	// 先落 created 订单（本地权威）。失败则根本不向平台建单，无孤儿。
 	if err := g.repo.Create(ctx, o); err != nil {
-		return nil, err // PAY_ORDER_DUPLICATE（order_no 唯一约束冲突）
+		if err == ErrOrderDuplicate && idemKey != "" {
+			if existing, gErr := g.repo.GetByIdempotencyKey(ctx, idemKey); gErr == nil {
+				if reused, ok, rerr := g.reuseOrRecoverOrder(ctx, existing, in); ok {
+					return reused, nil
+				} else if rerr != nil {
+					return existing, rerr
+				}
+				return nil, ErrIdempotencyConflict
+			}
+		}
+		return nil, err
+	}
+	g.logStage(StageLocalOrderCreated, o.OrderNo, in.Provider, elapsedMs(t0), "")
+
+	return g.finishCreatePay(ctx, o, in, t0)
+}
+
+// prepayLease 覆盖 overall budget(12s)+grace，期间 Query 不得 claim。
+const prepayLease = 15 * time.Second
+
+// finishCreatePay 唯一 Prepay 路径：ClaimForPrepay → 单次 SDK → FinishPrepayFenced(token)。
+func (g *Gateway) finishCreatePay(ctx context.Context, o *PayOrder, in OrderInput, t0 time.Time) (*PayOrder, error) {
+	// 已有可交付凭据
+	if strings.TrimSpace(o.PayURL) != "" {
+		return o, nil
+	}
+	// 有效 inflight lease：HTTP 重试返回 202，不调用 SDK
+	now := g.now()
+	if o.CreateState == CreateStatePrepayInflight && !o.RecoveryClaimUntil.IsZero() && o.RecoveryClaimUntil.After(now) {
+		g.logStage(StageResponseSent, o.OrderNo, in.Provider, elapsedMs(t0), "outcome=inflight_lease")
+		return o, ErrCreateOutcomeUnknown
 	}
 
+	leaseUntil := now.Add(prepayLease)
+	token, claimed, err := g.repo.ClaimForPrepay(ctx, o.OrderNo, now, leaseUntil)
+	if err != nil {
+		return o, err
+	}
+	if !claimed {
+		cur, gErr := g.repo.GetByOrderNo(ctx, o.OrderNo)
+		if gErr != nil {
+			return o, gErr
+		}
+		if strings.TrimSpace(cur.PayURL) != "" {
+			return cur, nil
+		}
+		// 他人持有 lease 或状态不允许：返回 order_no + 202 语义
+		return cur, ErrCreateOutcomeUnknown
+	}
+	o.CreateState = CreateStatePrepayInflight
+
+	tPay := g.now()
 	cred, err := g.sdk.CreatePay(ctx, PayRequest{
 		Provider:   in.Provider,
 		OrderNo:    o.OrderNo,
@@ -111,32 +203,145 @@ func (g *Gateway) CreateOrder(ctx context.Context, in OrderInput) (*PayOrder, er
 		ActualPaid: in.ActualPaid,
 		Subject:    in.Subject,
 		NotifyURL:  o.NotifyURL,
+		ExpiresAt:  o.ExpiresAt,
 	})
+	oe := AsOutcome(err)
+	attempt, maxA := 0, 0
+	if oe != nil {
+		attempt, maxA = oe.Attempt, oe.MaxAttempts
+	}
 	if err != nil {
-		// 平台下单失败 → 本地 created 单置 failed（终态），避免被 ReconcileStuckCreated 反复查单。
-		if ok, csErr := g.repo.CompareAndSetStatus(ctx, o.OrderNo, OrderCreated, OrderFailed); csErr != nil || !ok {
-			g.logf("payment: create %s: CreatePay failed and mark-failed failed (ok=%v err=%v)", o.OrderNo, ok, csErr)
+		class, stage, outcomeStr := "unknown", "roundtrip", "unknown"
+		if oe != nil {
+			class, stage = oe.ErrorClass, oe.Stage
+			outcomeStr = string(oe.Outcome)
 		}
-		return nil, err // SDK 下单失败原样上浮
+		g.logStage(StageProviderAttemptEnd, o.OrderNo, in.Provider, elapsedMs(tPay),
+			"ok=0 attempt="+itoa(attempt)+" max_attempts="+itoa(maxA)+" outcome="+outcomeStr+" error_class="+class)
+
+		if IsDefinitiveReject(err) {
+			applied, fErr := g.repo.FinishPrepayFenced(ctx, o.OrderNo, token, CreateStateDefinitiveReject, "", time.Time{}, class, stage, max(attempt, 1))
+			if fErr != nil {
+				g.logf("payment: create %s: finish reject failed: %v", o.OrderNo, fErr)
+			}
+			if !applied {
+				g.logf("payment: create %s: stale reject ignored", o.OrderNo)
+			}
+			return o, err
+		}
+		// unknown：token 匹配才写 prepay_unknown + 调度
+		next := g.now().Add(5 * time.Second)
+		applied, fErr := g.repo.FinishPrepayFenced(ctx, o.OrderNo, token, CreateStatePrepayUnknown, "", next, class, stage, max(attempt, 1))
+		if fErr != nil || !applied {
+			g.logf("payment: create %s: finish unknown applied=%v err=%v", o.OrderNo, applied, fErr)
+		}
+		g.logStage(StageResponseSent, o.OrderNo, in.Provider, elapsedMs(t0), "outcome=unknown keep=created")
+		return o, ErrCreateOutcomeUnknown
+	}
+
+	g.logStage(StageProviderAttemptEnd, o.OrderNo, in.Provider, elapsedMs(tPay),
+		"ok=1 attempt="+itoa(attempt)+" max_attempts="+itoa(maxA)+" outcome=success")
+
+	if cred == nil || strings.TrimSpace(cred.PayURL) == "" {
+		next := g.now().Add(5 * time.Second)
+		_, _ = g.repo.FinishPrepayFenced(ctx, o.OrderNo, token, CreateStatePrepayUnknown, "", next, "empty_code_url", "response", 1)
+		return o, ErrCreateOutcomeUnknown
+	}
+
+	// success：token 匹配落库
+	next := g.now().Add(5 * time.Second)
+	applied, fErr := g.repo.FinishPrepayFenced(ctx, o.OrderNo, token, CreateStateCredentialReady, cred.PayURL, next, "", "", max(attempt, 1))
+	if fErr != nil {
+		g.logf("payment: create %s: persist pay_url failed: %v", o.OrderNo, fErr)
+		return o, ErrPayURLPersist
+	}
+	if !applied {
+		// stale：不得写回内存 QR 当成功
+		g.logf("payment: create %s: stale success ignored", o.OrderNo)
+		return o, ErrCreateOutcomeUnknown
 	}
 	o.PayURL = cred.PayURL
-
-	// 回填支付凭据。失败不阻断（PayURL 已在内存返回给前端）；仅观测。
-	if err := g.repo.SetPayURL(ctx, o.OrderNo, o.PayURL); err != nil {
-		g.logf("payment: create %s: persist pay_url failed: %v", o.OrderNo, err)
-	}
+	o.CreateState = CreateStateCredentialReady
+	g.logStage(StagePayURLPersisted, o.OrderNo, in.Provider, elapsedMs(t0), "")
+	g.logStage(StageResponseSent, o.OrderNo, in.Provider, elapsedMs(t0), "outcome=success")
 	return o, nil
 }
 
-// GetByOrderNo 按订单号查单笔订单快照（只读，不改变状态机）。供 order-status 端点（扫码支付后
-// 前端轮询探活）与其他需要直读单笔订单的调用方使用。不存在时原样上浮 repo 的 ErrOrderNotFound。
+// samePaymentIntent 校验幂等键复用时不可变支付意图一致（P0-5）。
+func samePaymentIntent(existing *PayOrder, in OrderInput) bool {
+	if existing == nil {
+		return false
+	}
+	if existing.TenantID != in.TenantID || existing.UserID != in.UserID {
+		return false
+	}
+	if existing.Type != in.Type || existing.Provider != in.Provider {
+		return false
+	}
+	if existing.AmountUSD != in.AmountUSD {
+		return false
+	}
+	if OrderActualPaidFen(existing) != YuanToFen(in.ActualPaid) {
+		return false
+	}
+	return true
+}
+
+// reuseOrRecoverOrder 幂等复用：意图校验 → 有 pay_url 返回；无 pay_url 可尝试同单 Prepay 恢复。
+func (g *Gateway) reuseOrRecoverOrder(ctx context.Context, existing *PayOrder, in OrderInput) (*PayOrder, bool, error) {
+	if existing == nil {
+		return nil, false, nil
+	}
+	if !samePaymentIntent(existing, in) {
+		return nil, false, ErrIdempotencyConflict
+	}
+	switch existing.Status {
+	case OrderCreated:
+		if !existing.ExpiresAt.IsZero() && existing.ExpiresAt.Before(g.now()) {
+			return nil, false, nil
+		}
+		if strings.TrimSpace(existing.PayURL) != "" {
+			return existing, true, nil
+		}
+		// 无 QR：禁止空二维码成功。同 order_no 再试 Prepay（不得新开第二可支付单）。
+		// 不得假设重复 Prepay 返回原 code_url。
+		g.logf("payment: create recover %s: pending without pay_url; retry same out_trade_no", existing.OrderNo)
+		o2, err := g.finishCreatePay(ctx, existing, in, g.now())
+		if err == nil && o2 != nil && strings.TrimSpace(o2.PayURL) != "" {
+			return o2, true, nil
+		}
+		if err == ErrCreateOutcomeUnknown || err == ErrPayURLPersist || err == ErrPayURLMissing {
+			return existing, false, err
+		}
+		if err != nil {
+			_ = g.repo.ScheduleNextQuery(ctx, existing.OrderNo, g.now().Add(5*time.Second), existing.QueryAttempts)
+			return existing, false, ErrCreateOutcomeUnknown
+		}
+		return existing, false, ErrPayURLMissing
+	case OrderPaid, OrderCredited:
+		return nil, false, ErrIdempotencyConflict
+	default:
+		return nil, false, ErrIdempotencyConflict
+	}
+}
+
 func (g *Gateway) GetByOrderNo(ctx context.Context, orderNo string) (*PayOrder, error) {
 	return g.repo.GetByOrderNo(ctx, orderNo)
 }
 
-// defaultOrderNo 生成全局唯一订单号：PAY + 纳秒时间(base36) + 6 字节随机(hex)。
 func defaultOrderNo() string {
 	var b [6]byte
-	_, _ = rand.Read(b[:]) // crypto/rand 失败概率可忽略；退化为纯时间序仍唯一性极高
+	_, _ = rand.Read(b[:])
 	return "PAY" + strconv.FormatInt(time.Now().UnixNano(), 36) + hex.EncodeToString(b[:])
+}
+
+func itoa(n int) string {
+	return strconv.Itoa(n)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

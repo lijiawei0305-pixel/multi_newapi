@@ -220,6 +220,31 @@ func sqliteDSNWithSafeTransactions(dsn string) string {
 	return parsed.String()
 }
 
+// OpenMainDBWithoutMigrate 仅打开主库连接，不执行全站 AutoMigrate、不启 Redis/HTTP。
+// 供 --payment-migrate-only / --payment-schema-verify 使用。
+func OpenMainDBWithoutMigrate() (*gorm.DB, error) {
+	db, dbType, err := chooseDB("SQL_DSN", false)
+	if err != nil {
+		return nil, err
+	}
+	common.SetMainDatabaseType(dbType)
+	if os.Getenv("LOG_SQL_DSN") == "" {
+		common.SetLogDatabaseType(dbType)
+	}
+	initCol()
+	if common.DebugEnabled {
+		db = db.Debug()
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 10))
+	sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 20))
+	sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+	return db, nil
+}
+
 func InitDB() (err error) {
 	db, dbType, err := chooseDB("SQL_DSN", false)
 	if err == nil {

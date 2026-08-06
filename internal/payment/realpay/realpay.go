@@ -19,29 +19,14 @@ package realpay
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"time"
 
 	"github.com/QuantumNous/new-api/internal/payment"
 )
 
-// ipv4OnlyHTTPClient 返回强制走 IPv4 拨号的 HTTP 客户端，供微信/支付宝适配器共用。
-//
-// 背景：本环境出网 IPv6 不可达——宿主机上 connect 会快速失败（no route），但容器内 Go 默认双栈拨号
-// 遇到微信/支付宝域名的 AAAA 记录会挂起直到超时，表现为 "TLS handshake timeout"（而非快速报错），
-// 一次下单请求可能要挂到 10s+ 才失败。强制 tcp4 拨号后直接命中可用的 IPv4 地址，避免这一无谓等待。
-func ipv4OnlyHTTPClient() *http.Client {
-	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-	return &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialer.DialContext(ctx, "tcp4", addr)
-			},
-		},
-	}
-}
+// 支付 HTTP client 见 httpclient.go（独立 Transport、强制 TLS 校验、IPv4、httptrace）。
+// 旧名 ipv4OnlyHTTPClient 保留为 paymentHTTPClientShared 别名。
 
 // WxpayConfig 微信支付商户凭据（微信支付公钥模式：商户私钥 + 证书序列号 + APIv3 密钥 + 微信支付公钥）。
 //
@@ -97,7 +82,9 @@ type SDK struct {
 
 // New 装配真实适配器。两个渠道独立装配：某渠道凭据不全则该渠道不可用（调用时报错），
 // 另一渠道仍可用（允许只接其中之一）。两者都不可用则返回错误（避免静默空跑）。
+// 凭据轮换重建时关闭旧 idle 连接。
 func New(ctx context.Context, cfg Config) (*SDK, error) {
+	ClosePaymentIdleConnections()
 	s := &SDK{}
 	var err error
 	if cfg.Wxpay.complete() {
@@ -129,21 +116,43 @@ func (s *SDK) Available(provider payment.Provider) bool {
 }
 
 // CreatePay 向支付平台下单，返回支付凭据（微信：code_url 二维码内容；支付宝：跳转 URL）。
-// amountCNY 为用户应付人民币（元）。
-func (s *SDK) CreatePay(ctx context.Context, provider payment.Provider, orderNo, subject string, amountCNY float64, notifyURL string) (string, error) {
+// amountCNY 为用户应付人民币（元）。expiresAt 写入平台 TimeExpire/TimeoutExpress。
+func (s *SDK) CreatePay(ctx context.Context, provider payment.Provider, orderNo, subject string, amountCNY float64, notifyURL string, expiresAt ...time.Time) (string, error) {
+	var exp time.Time
+	if len(expiresAt) > 0 {
+		exp = expiresAt[0]
+	}
 	switch provider {
 	case payment.ProviderWxpay:
 		if s.wx == nil {
 			return "", fmt.Errorf("realpay: wxpay not configured")
 		}
-		return s.wx.createPay(ctx, orderNo, subject, amountCNY, notifyURL)
+		return s.wx.createPay(ctx, orderNo, subject, amountCNY, notifyURL, exp)
 	case payment.ProviderAlipay:
 		if s.ali == nil {
 			return "", fmt.Errorf("realpay: alipay not configured")
 		}
-		return s.ali.createPay(ctx, orderNo, subject, amountCNY, notifyURL)
+		return s.ali.createPay(ctx, orderNo, subject, amountCNY, notifyURL, exp)
 	default:
 		return "", fmt.Errorf("realpay: unknown provider %q", provider)
+	}
+}
+
+// CloseOrder 关闭未支付订单（微信 Native close；支付宝 trade.close）。
+func (s *SDK) CloseOrder(ctx context.Context, provider payment.Provider, orderNo string) error {
+	switch provider {
+	case payment.ProviderWxpay:
+		if s.wx == nil {
+			return fmt.Errorf("realpay: wxpay not configured")
+		}
+		return s.wx.CloseOrder(ctx, orderNo)
+	case payment.ProviderAlipay:
+		if s.ali == nil {
+			return fmt.Errorf("realpay: alipay not configured")
+		}
+		return s.ali.CloseOrder(ctx, orderNo)
+	default:
+		return fmt.Errorf("realpay: unknown provider %q", provider)
 	}
 }
 
@@ -166,20 +175,20 @@ func (s *SDK) VerifyNotify(ctx context.Context, provider payment.Provider, r *ht
 	}
 }
 
-// QueryOrder 主动向支付平台查单（对账兜底）：返回该订单是否已收款（成功/已结）。
-func (s *SDK) QueryOrder(ctx context.Context, provider payment.Provider, orderNo string) (bool, error) {
+// QueryOrder 主动向支付平台查单（对账兜底）：返回结构化 QueryResult（含真实交易号与金额分）。
+func (s *SDK) QueryOrder(ctx context.Context, provider payment.Provider, orderNo string) (*payment.QueryResult, error) {
 	switch provider {
 	case payment.ProviderWxpay:
 		if s.wx == nil {
-			return false, fmt.Errorf("realpay: wxpay not configured")
+			return nil, fmt.Errorf("realpay: wxpay not configured")
 		}
 		return s.wx.queryOrder(ctx, orderNo)
 	case payment.ProviderAlipay:
 		if s.ali == nil {
-			return false, fmt.Errorf("realpay: alipay not configured")
+			return nil, fmt.Errorf("realpay: alipay not configured")
 		}
 		return s.ali.queryOrder(ctx, orderNo)
 	default:
-		return false, fmt.Errorf("realpay: unknown provider %q", provider)
+		return nil, fmt.Errorf("realpay: unknown provider %q", provider)
 	}
 }

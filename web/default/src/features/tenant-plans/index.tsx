@@ -270,9 +270,21 @@ function TenantPlansContent() {
           onOpenChange={(o) => {
             if (!o) setQrState(null)
           }}
-          qr={qrState?.qr ?? null}
-          orderNo={qrState?.orderNo}
-          amountCny={qrState?.amountCny}
+          phase={qrState ? 'pending' : 'idle'}
+          order={
+            qrState
+              ? {
+                  orderNo: qrState.orderNo ?? '',
+                  qr: qrState.qr,
+                  amountUsd: 0,
+                  amountCny: qrState.amountCny ?? 0,
+                  provider: 'wxpay',
+                  expiresAt: null,
+                  startedAt: Date.now(),
+                  idempotencyKey: '',
+                }
+              : null
+          }
         />
       </SectionPageLayout.Content>
     </SectionPageLayout>

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -40,7 +41,7 @@ import (
 
 type buyerTestPayCreator struct{}
 
-func (buyerTestPayCreator) CreatePay(context.Context, payment.Provider, string, string, float64, string) (string, error) {
+func (buyerTestPayCreator) CreatePay(context.Context, payment.Provider, string, string, float64, string, ...time.Time) (string, error) {
 	return "https://pay.example.test/checkout", nil
 }
 

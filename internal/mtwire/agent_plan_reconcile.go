@@ -27,7 +27,7 @@ var agtOrderPaidQuery = func(a *App, ctx context.Context, orderNo, provider stri
 	if a.providerMgr == nil {
 		return false, errProviderMgrUnset
 	}
-	return a.providerMgr.QueryOrder(ctx, payment.Provider(provider), orderNo)
+	return a.providerMgr.QueryOrderPaid(ctx, payment.Provider(provider), orderNo)
 }
 
 // activatePaidAgtHook 激活一笔已确认支付的 AGT 订单（对账兜底用）；单测替换为计数桩。

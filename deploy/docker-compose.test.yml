@@ -16,6 +16,8 @@ services:
       # app 不再持有 MySQL root。mysql-access-bootstrap 在每次启动前幂等创建/轮换
       # schema-scoped 用户；密码只存 root:600 的服务器 .env。缺失即 Compose fail-closed。
       SQL_DSN: "${MYSQL_APP_USER:-newapi}:${MYSQL_APP_PASSWORD:?MYSQL_APP_PASSWORD 必须在服务器 .env 提供 64 位十六进制随机值}@tcp(mysql:3306)/new-api-test"
+      # 自动关单/替换未实现：必须 false；true 时进程启动失败（FEATURE_NOT_IMPLEMENTED）
+      PAY_AUTO_CLOSE_REPLACE: "false"
       # Redis default 用户关闭；app 仅使用显式 ACL 用户。账号/密码采用 URI-safe 的
       # 标识符与十六进制格式，redis 启动命令会在读取任何数据前再次验证。
       REDIS_CONN_STRING: "redis://${REDIS_APP_USER:-newapi}:${REDIS_PASSWORD:?REDIS_PASSWORD 必须在服务器 .env 提供 64 位十六进制随机值}@redis"

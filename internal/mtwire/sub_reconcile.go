@@ -21,7 +21,7 @@ var subOrderPaidQuery = func(a *App, ctx context.Context, orderNo, provider stri
 	if a.providerMgr == nil {
 		return false, errProviderMgrUnset
 	}
-	return a.providerMgr.QueryOrder(ctx, payment.Provider(provider), orderNo)
+	return a.providerMgr.QueryOrderPaid(ctx, payment.Provider(provider), orderNo)
 }
 
 // activatePaidSubHook 激活一笔已确认支付的 SUB 订单（对账兜底用）；单测替换为计数桩。

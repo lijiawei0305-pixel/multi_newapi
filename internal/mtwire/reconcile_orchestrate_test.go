@@ -61,7 +61,7 @@ func TestRunReconcileAllAggregatesThreePaths(t *testing.T) {
 	sub := ReconcileSubResult{Scanned: 3, Activated: []string{"SUB-a"}, Failed: map[string]string{}}
 	stubReconcileSeams(t, paid, created, sub)
 
-	gotP, gotC, gotS, _ := app.runReconcileAll(context.Background(), time.Now(), "cron")
+	gotP, gotC, gotS, _ := app.runReconcileAll(context.Background(), "cron")
 	if gotP.Scanned != 1 || gotC.Scanned != 2 || gotS.Scanned != 3 {
 		t.Fatalf("aggregate paid=%d created=%d sub=%d, want 1/2/3", gotP.Scanned, gotC.Scanned, gotS.Scanned)
 	}
@@ -78,21 +78,21 @@ func TestRunReconcileAllRecordPolicy(t *testing.T) {
 
 	app1 := newReconcileHistoryApp(t)
 	stubReconcileSeams(t, empty, empty, emptySub)
-	app1.runReconcileAll(ctx, time.Now(), "cron")
+	app1.runReconcileAll(ctx, "cron")
 	if rows, _ := app1.listReconcileRuns(ctx, 50); len(rows) != 0 {
 		t.Fatalf("cron empty recorded %d rows, want 0", len(rows))
 	}
 
 	app2 := newReconcileHistoryApp(t)
 	stubReconcileSeams(t, empty, empty, emptySub)
-	app2.runReconcileAll(ctx, time.Now(), "manual")
+	app2.runReconcileAll(ctx, "manual")
 	if rows, _ := app2.listReconcileRuns(ctx, 50); len(rows) != 1 {
 		t.Fatalf("manual empty recorded %d rows, want 1 (always record manual)", len(rows))
 	}
 
 	app3 := newReconcileHistoryApp(t)
 	stubReconcileSeams(t, payment.ReconcileResult{Scanned: 1, Failed: map[string]string{}}, empty, emptySub)
-	app3.runReconcileAll(ctx, time.Now(), "cron")
+	app3.runReconcileAll(ctx, "cron")
 	if rows, _ := app3.listReconcileRuns(ctx, 50); len(rows) != 1 {
 		t.Fatalf("cron with facts recorded %d rows, want 1", len(rows))
 	}
@@ -103,7 +103,7 @@ func TestRunReconcileAllUpdatesHeartbeat(t *testing.T) {
 	app := newReconcileHistoryApp(t)
 	empty := payment.ReconcileResult{Failed: map[string]string{}}
 	stubReconcileSeams(t, empty, empty, ReconcileSubResult{Failed: map[string]string{}})
-	app.runReconcileAll(context.Background(), time.Now(), "cron")
+	app.runReconcileAll(context.Background(), "cron")
 	hb, ok := app.getReconcileHeartbeat(context.Background())
 	if !ok || hb.TodayRuns != 1 || hb.LastTrigger != "cron" {
 		t.Fatalf("heartbeat after empty cron: ok=%v hb=%+v, want runs=1 trigger=cron", ok, hb)
@@ -120,7 +120,7 @@ func TestRunReconcileAll_FailuresDispatchAlert(t *testing.T) {
 	sub := ReconcileSubResult{Scanned: 3, Failed: map[string]string{"s1": "e", "s2": "e", "s3": "e"}}
 	stubReconcileSeams(t, empty, empty, sub)
 
-	app.runReconcileAll(context.Background(), time.Now(), "cron")
+	app.runReconcileAll(context.Background(), "cron")
 	if !sinkHasSubject(sink.alerts, "对账失败告警") {
 		t.Fatalf("失败轮应分发『对账失败告警』，实得 %+v", sink.alerts)
 	}
@@ -134,7 +134,7 @@ func TestRunReconcileAll_HealthyFirstRunNoAlert(t *testing.T) {
 	empty := payment.ReconcileResult{Failed: map[string]string{}}
 	stubReconcileSeams(t, empty, empty, ReconcileSubResult{Failed: map[string]string{}})
 
-	app.runReconcileAll(context.Background(), time.Now(), "cron")
+	app.runReconcileAll(context.Background(), "cron")
 	if len(sink.alerts) != 0 {
 		t.Fatalf("健康且首轮不应有任何告警，实得 %+v", sink.alerts)
 	}
@@ -149,7 +149,7 @@ func TestRunReconcileAll_StaleGapDispatchesAlert(t *testing.T) {
 	empty := payment.ReconcileResult{Failed: map[string]string{}}
 	stubReconcileSeams(t, empty, empty, ReconcileSubResult{Failed: map[string]string{}})
 
-	app.runReconcileAll(context.Background(), time.Now(), "cron")
+	app.runReconcileAll(context.Background(), "cron")
 	if !sinkHasSubject(sink.alerts, "对账循环曾停滞") {
 		t.Fatalf("陈旧 cron 轮应分发『对账循环曾停滞』，实得 %+v", sink.alerts)
 	}
@@ -164,7 +164,7 @@ func TestRunReconcileAll_ManualSkipsStaleAlert(t *testing.T) {
 	empty := payment.ReconcileResult{Failed: map[string]string{}}
 	stubReconcileSeams(t, empty, empty, ReconcileSubResult{Failed: map[string]string{}})
 
-	app.runReconcileAll(context.Background(), time.Now(), "manual")
+	app.runReconcileAll(context.Background(), "manual")
 	if sinkHasSubject(sink.alerts, "对账循环曾停滞") {
 		t.Fatalf("手动触发不应分发陈旧告警，实得 %+v", sink.alerts)
 	}

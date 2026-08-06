@@ -35,6 +35,18 @@ const (
 	CodeOrderTypeUnknown = "PAY_ORDER_TYPE_UNKNOWN"
 	// CodeAmountMismatch 回调实付金额与库内订单金额不一致（疑似篡改）—— 拒绝入账。
 	CodeAmountMismatch = "PAY_AMOUNT_MISMATCH"
+	// CodeProviderTxnConflict 同一支付机构交易号已绑定其他订单。
+	CodeProviderTxnConflict = "PAY_PROVIDER_TXN_CONFLICT"
+	// CodePaymentFactInvalid 支付事实不完整（缺交易号/金额/渠道不一致等）。
+	CodePaymentFactInvalid = "PAY_FACT_INVALID"
+	// CodeCreateOutcomeUnknown 平台下单结果未知（可能已送达）；订单保持 created，须查单恢复。
+	CodeCreateOutcomeUnknown = "PAY_CREATE_UNKNOWN"
+	// CodePayURLPersist 平台已返回凭据但本站落库失败。
+	CodePayURLPersist = "PAY_URL_PERSIST_FAILED"
+	// CodePayURLMissing 订单存在但无可用二维码，且无法安全恢复。
+	CodePayURLMissing = "PAY_URL_MISSING"
+	// CodeIdempotencyConflict 同一幂等键但支付意图（金额/渠道等）不一致。
+	CodeIdempotencyConflict = "PAY_IDEMPOTENCY_CONFLICT"
 )
 
 var (
@@ -54,4 +66,16 @@ var (
 	ErrOrderTypeUnknown = apperr.New(CodeOrderTypeUnknown, "未知订单类型", http.StatusInternalServerError)
 	// ErrAmountMismatch 回调实付金额与库内订单金额不一致（反篡改）。
 	ErrAmountMismatch = apperr.New(CodeAmountMismatch, "支付金额与订单不一致", http.StatusBadRequest)
+	// ErrProviderTxnConflict 支付机构交易号与其它订单冲突。
+	ErrProviderTxnConflict = apperr.New(CodeProviderTxnConflict, "支付机构交易号冲突", http.StatusConflict)
+	// ErrPaymentFactInvalid 支付事实校验失败。
+	ErrPaymentFactInvalid = apperr.New(CodePaymentFactInvalid, "支付事实不完整或无效", http.StatusBadRequest)
+	// ErrCreateOutcomeUnknown 下单结果未知（不标 failed）；HTTP 202，响应体须带 order_no。
+	ErrCreateOutcomeUnknown = apperr.New(CodeCreateOutcomeUnknown, "支付订单确认中，请稍后查询状态", http.StatusAccepted)
+	// ErrIdempotencyConflict 同一幂等键但支付意图字段不一致。
+	ErrIdempotencyConflict = apperr.New(CodeIdempotencyConflict, "幂等键与支付意图不一致", http.StatusConflict)
+	// ErrPayURLPersist 二维码落库失败。
+	ErrPayURLPersist = apperr.New(CodePayURLPersist, "支付凭据保存失败，请重试", http.StatusServiceUnavailable)
+	// ErrPayURLMissing 无可用二维码。
+	ErrPayURLMissing = apperr.New(CodePayURLMissing, "支付二维码不可用，请重新发起或联系客服", http.StatusConflict)
 )

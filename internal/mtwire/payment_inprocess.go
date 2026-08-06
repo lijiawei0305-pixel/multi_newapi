@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -46,9 +47,10 @@ var (
 
 // realSDK 抽象 providerManager 用到的 realpay.SDK 方法（*realpay.SDK 实现之）。
 type realSDK interface {
-	CreatePay(ctx context.Context, provider payment.Provider, orderNo, subject string, amountCNY float64, notifyURL string) (string, error)
+	CreatePay(ctx context.Context, provider payment.Provider, orderNo, subject string, amountCNY float64, notifyURL string, expiresAt ...time.Time) (string, error)
 	VerifyNotify(ctx context.Context, provider payment.Provider, r *http.Request) (*payment.CallbackInfo, error)
-	QueryOrder(ctx context.Context, provider payment.Provider, orderNo string) (bool, error)
+	QueryOrder(ctx context.Context, provider payment.Provider, orderNo string) (*payment.QueryResult, error)
+	CloseOrder(ctx context.Context, provider payment.Provider, orderNo string) error
 }
 
 // 编译期断言：*realpay.SDK 满足 realSDK。
@@ -56,6 +58,10 @@ var _ realSDK = (*realpay.SDK)(nil)
 
 // realpayNew 构造真实支付 SDK（含证书下载等副作用，绝不可每请求重建）；单测替换为计数桩。
 var realpayNew = func(ctx context.Context, cfg realpay.Config) (realSDK, error) {
+	// 支付 HTTP 分段日志接入主站 SysLog（禁敏感字段，见 realpay/httpclient.go）。
+	realpay.SetPayClientLogf(func(format string, args ...any) {
+		common.SysLog(fmt.Sprintf(format, args...))
+	})
 	sdk, err := realpay.New(ctx, cfg)
 	if err != nil {
 		return nil, err
@@ -215,7 +221,7 @@ func (m *providerManager) getSDK(ctx context.Context) (realSDK, error) {
 }
 
 // CreatePay 向真实平台下单（先校验渠道 Configured），返回支付凭据内容（微信 code_url / 支付宝跳转 URL）。
-func (m *providerManager) CreatePay(ctx context.Context, provider payment.Provider, orderNo, subject string, amountCNY float64, notifyURL string) (string, error) {
+func (m *providerManager) CreatePay(ctx context.Context, provider payment.Provider, orderNo, subject string, amountCNY float64, notifyURL string, expiresAt ...time.Time) (string, error) {
 	if !m.Configured(provider) {
 		return "", errProviderDisabled
 	}
@@ -223,7 +229,19 @@ func (m *providerManager) CreatePay(ctx context.Context, provider payment.Provid
 	if err != nil {
 		return "", err
 	}
-	return sdk.CreatePay(ctx, provider, orderNo, subject, amountCNY, notifyURL)
+	return sdk.CreatePay(ctx, provider, orderNo, subject, amountCNY, notifyURL, expiresAt...)
+}
+
+// CloseOrder 关闭未支付订单。
+func (m *providerManager) CloseOrder(ctx context.Context, provider payment.Provider, orderNo string) error {
+	if !m.credsComplete(provider) {
+		return errProviderDisabled
+	}
+	sdk, err := m.getSDK(ctx)
+	if err != nil {
+		return err
+	}
+	return sdk.CloseOrder(ctx, provider, orderNo)
 }
 
 // VerifyNotify 验签并解析异步回调（不预检 Configured：SDK 内部按渠道是否装配返回 ErrCallbackInvalid）。
@@ -235,17 +253,29 @@ func (m *providerManager) VerifyNotify(ctx context.Context, provider payment.Pro
 	return sdk.VerifyNotify(ctx, provider, r)
 }
 
-// QueryOrder 主动查单（对账兜底）：预检**凭据齐全**（credsComplete，而非 Configured）——即便渠道被禁用，
-// 只要凭据仍在就应能查单结清在途已付订单（审计 M2）。仅清空凭据才使其无法查单。
-func (m *providerManager) QueryOrder(ctx context.Context, provider payment.Provider, orderNo string) (bool, error) {
+// QueryOrder 主动查单（对账兜底）：返回结构化 QueryResult（真实交易号/金额分）。
+// 预检凭据齐全（credsComplete）；即便渠道禁用仍可结清在途已付单（审计 M2）。
+func (m *providerManager) QueryOrder(ctx context.Context, provider payment.Provider, orderNo string) (*payment.QueryResult, error) {
 	if !m.credsComplete(provider) {
-		return false, errProviderDisabled
+		return nil, errProviderDisabled
 	}
 	sdk, err := m.getSDK(ctx)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	return sdk.QueryOrder(ctx, provider, orderNo)
+}
+
+// QueryOrderPaid 兼容旧 bool 查单（SUB/AGT 路径）；RCG 应使用 QueryOrder + CreditFromQueryResult。
+func (m *providerManager) QueryOrderPaid(ctx context.Context, provider payment.Provider, orderNo string) (bool, error) {
+	qr, err := m.QueryOrder(ctx, provider, orderNo)
+	if err != nil {
+		return false, err
+	}
+	if qr == nil {
+		return false, nil
+	}
+	return qr.Paid, nil
 }
 
 // ---- 回调路径 / 公网基址 ----
@@ -278,7 +308,7 @@ var _ payment.PaySDK = (*inProcessPaySDK)(nil)
 // CreatePay 组装 notify_url（base + 契约回调路径，不用 Gateway 注入的旧 NotifyPath）后向平台下单。
 func (s *inProcessPaySDK) CreatePay(ctx context.Context, req payment.PayRequest) (*payment.PayCredential, error) {
 	notifyURL := resolveNotifyBase() + notifyPathFor(req.Provider)
-	payURL, err := s.mgr.CreatePay(ctx, req.Provider, req.OrderNo, req.Subject, req.ActualPaid, notifyURL)
+	payURL, err := s.mgr.CreatePay(ctx, req.Provider, req.OrderNo, req.Subject, req.ActualPaid, notifyURL, req.ExpiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -306,11 +336,12 @@ var notifyActivateSub = func(a *App, ctx context.Context, orderNo string, paidCN
 }
 
 // notifyCreditRecharge 入账一笔已支付的 RCG 充值订单（强幂等状态机）；单测替换为计数桩。
-var notifyCreditRecharge = func(a *App, ctx context.Context, orderNo, txnID string, paidCNY float64) error {
+// 回调路径 requireStrict=true：强制交易号、正金额与渠道绑定（PAY-FACT-01）。
+var notifyCreditRecharge = func(a *App, ctx context.Context, provider payment.Provider, orderNo, txnID string, paidCNY float64) error {
 	if a.RechargeGateway == nil {
 		return apperr.New("RECHARGE_UNAVAILABLE", "充值服务未装配", http.StatusServiceUnavailable)
 	}
-	return a.RechargeGateway.CreditPaidOrder(ctx, orderNo, txnID, paidCNY)
+	return a.RechargeGateway.CreditPaidOrderWithProvider(ctx, orderNo, provider, txnID, paidCNY, true)
 }
 
 // HandleWechatNotify POST /api/pay/wechat/notify —— 微信支付异步回调（公开，handler 内验签，无 UserAuth）。
@@ -345,7 +376,7 @@ func (a *App) handlePayNotify(c *gin.Context, provider payment.Provider) {
 	case IsAgentPlanOrderNo(info.OrderNo):
 		creditErr = notifyActivateAgentPlan(a, ctx, info.OrderNo, info.PaidAmount)
 	default:
-		creditErr = notifyCreditRecharge(a, ctx, info.OrderNo, info.TxnID, info.PaidAmount)
+		creditErr = notifyCreditRecharge(a, ctx, provider, info.OrderNo, info.TxnID, info.PaidAmount)
 	}
 	if creditErr != nil {
 		common.SysLog("pay notify credit failed (" + info.OrderNo + "): " + creditErr.Error())

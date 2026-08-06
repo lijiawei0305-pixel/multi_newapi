@@ -654,18 +654,45 @@ if ! remote "
   die_keep_lock "staging 验证/换树失败或 SSH 结果不确定；已保留 ops lock 供人工核对。"
 fi
 
-log "6/8 后台构建/启动，并记录可轮询的真实退出状态"
+log "6/8 构建 candidate 镜像（停服前构建；禁止停服后再长时间 build）"
 remote "
   set -e
   command -v setsid >/dev/null
   rm -f '$SERVER_REPO/deploy-build.status' '$SERVER_REPO/deploy-build.status.tmp' '$SERVER_REPO/deploy-build.pid'
   cd '$SERVER_REPO'
-  nohup setsid sh -c '$DC up -d --build; rc=\$?; printf \"%s\\n\" \"\$rc\" > \"$SERVER_REPO/deploy-build.status.tmp\"; mv \"$SERVER_REPO/deploy-build.status.tmp\" \"$SERVER_REPO/deploy-build.status\"; exit \"\$rc\"' \
-    > '$SERVER_REPO/deploy-build.log' 2>&1 </dev/null &
+  nohup setsid sh -c '
+    set -e
+    write_status() { printf \"%s\\n\" \"\$1\" > \"'"$SERVER_REPO"'/deploy-build.status.tmp\"; mv \"'"$SERVER_REPO"'/deploy-build.status.tmp\" \"'"$SERVER_REPO"'/deploy-build.status\"; }
+    '"$DC"' build '"$APP_SVC"'
+    # 停 app（唯一 writer），保留 mysql/redis；备份后不得恢复旧 app 再写入再迁
+    '"$DC"' stop '"$APP_SVC"' || true
+    if ! '"$DC"' run --rm --no-deps '"$APP_SVC"' --payment-migrate-only; then
+      echo \"payment-migrate-only failed\" >&2
+      # 迁移失败：启动旧 :prev 镜像若可能；保留 additive schema，不做 down migration
+      docker tag '"$APP_IMG"':prev '"$APP_IMG"':latest 2>/dev/null || true
+      '"$DC"' up -d --no-build '"$APP_SVC"' || true
+      write_status 42
+      exit 42
+    fi
+    if ! '"$DC"' run --rm --no-deps '"$APP_SVC"' --payment-schema-verify; then
+      echo \"payment-schema-verify failed\" >&2
+      docker tag '"$APP_IMG"':prev '"$APP_IMG"':latest 2>/dev/null || true
+      '"$DC"' up -d --no-build '"$APP_SVC"' || true
+      write_status 43
+      exit 43
+    fi
+    # 迁移成功：--no-build 启动 candidate（禁止停服后重新长时间构建）
+    if '"$DC"' up -d --no-build; then
+      write_status 0
+      exit 0
+    fi
+    write_status 1
+    exit 1
+  ' > '$SERVER_REPO/deploy-build.log' 2>&1 </dev/null &
   printf '%s\n' \$! > '$SERVER_REPO/deploy-build.pid'
-" || rollback_and_die "无法启动可跟踪的后台构建"
+" || rollback_and_die "无法启动可跟踪的后台构建/迁移"
 
-log "7/8 等待构建完成（总时限 ${HEALTH_TIMEOUT}s）"
+log "7/8 等待构建+payment migrate+启动完成（总时限 ${HEALTH_TIMEOUT}s）"
 deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
 build_status=""
 while [ "$(date +%s)" -lt "$deadline" ]; do
@@ -675,11 +702,11 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   [ -z "$build_status" ] || break
   sleep 5
 done
-[ "$build_status" = "0" ] || rollback_and_die "构建失败或未在 ${HEALTH_TIMEOUT}s 内完成（status=${build_status:-timeout}）"
+[ "$build_status" = "0" ] || rollback_and_die "构建/payment-migrate/启动失败或超时（status=${build_status:-timeout}；42=migrate 43=verify）"
 
 remaining=$(( deadline - $(date +%s) ))
 [ "$remaining" -gt 0 ] || rollback_and_die "构建完成时已用尽部署时限"
-log "7.5/8 验证 MySQL/Redis/app 就绪且版本精确为 $APP_VERSION"
+log "7.5/8 验证 MySQL/Redis/app 就绪、版本精确为 $APP_VERSION、payment schema ready"
 if ! remote "
   STACK='$STACK' EXPECTED_STACK='$EXPECTED_STACK' SERVER_REPO='$SERVER_REPO' \
     COMPOSE_FILE='$COMPOSE_FILE' ENV_FILE='$ENV_FILE' HOST_HEADER='$HOST_HEADER' \
@@ -687,6 +714,19 @@ if ! remote "
     bash -c '. \"\$SERVER_REPO/deploy/ops/lib.sh\"; wait_runtime_ready \"$APP_VERSION\" \"$remaining\"'
 "; then
   rollback_and_die "新 release 的依赖/readiness/版本验收失败"
+fi
+# 只读核验 PAY_AUTO_CLOSE_REPLACE 与 payment schema version
+if ! remote "
+  set -e
+  cd '$SERVER_REPO'
+  env_flag=\$($DC exec -T $APP_SVC printenv PAY_AUTO_CLOSE_REPLACE 2>/dev/null | tr -d '\\r' || true)
+  [ \"\$env_flag\" = 'false' ] || [ \"\$env_flag\" = '0' ] || {
+    echo \"PAY_AUTO_CLOSE_REPLACE must be false, got: \$env_flag\" >&2
+    exit 1
+  }
+  $DC run --rm --no-deps $APP_SVC --payment-schema-verify
+"; then
+  rollback_and_die "payment schema / PAY_AUTO_CLOSE_REPLACE 核验失败"
 fi
 
 NEW_ID="$(remote "docker image inspect -f '{{.Id}}' '$APP_IMG:latest'")"

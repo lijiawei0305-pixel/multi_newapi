@@ -3,9 +3,12 @@ package realpay
 import (
 	"context"
 	"crypto/rsa"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/wechatpay-apiv3/wechatpay-go/core"
 	"github.com/wechatpay-apiv3/wechatpay-go/core/auth/verifiers"
@@ -19,9 +22,6 @@ import (
 )
 
 // wxpayAdapter 封装微信支付 V3：Native 下单 / 回调验签+AES-256-GCM 解密 / 主动查单。
-// 采用「微信支付公钥」模式：WithWechatPayPublicKeyAuthCipher 用商户私钥签名出站请求，
-// 用微信支付固定公钥（PublicKeyID + PublicKey）验证应答/回调签名——微信自 2024 起对新商户
-// 强制此模式，不再签发平台证书（GET /v3/certificates 会返回 404 RESOURCE_NOT_EXISTS）。
 type wxpayAdapter struct {
 	appID   string
 	mchID   string
@@ -29,8 +29,6 @@ type wxpayAdapter struct {
 	handler *notify.Handler
 }
 
-// loadWxPrivateKey 读取微信商户私钥：PrivateKey（PEM 内容）优先，否则回退 PrivateKeyPath（文件路径）。
-// 进程内模式由 setting.NativePaymentConfig 注入内容；auth-service dormant 仍可用文件路径。
 func loadWxPrivateKey(cfg WxpayConfig) (*rsa.PrivateKey, error) {
 	if cfg.PrivateKey != "" {
 		priv, err := utils.LoadPrivateKey(cfg.PrivateKey)
@@ -55,9 +53,10 @@ func newWxpayAdapter(ctx context.Context, cfg WxpayConfig) (*wxpayAdapter, error
 	if err != nil {
 		return nil, fmt.Errorf("wxpay: load wechat pay public key: %w", err)
 	}
+	// 独立安全 HTTP client；不 Clone DefaultTransport（避免 TLS_INSECURE_SKIP_VERIFY 污染）。
 	client, err := core.NewClient(ctx, option.WithWechatPayPublicKeyAuthCipher(
 		cfg.MchID, cfg.CertSerialNo, priv, cfg.PublicKeyID, pubKey,
-	), option.WithHTTPClient(ipv4OnlyHTTPClient()))
+	), option.WithHTTPClient(paymentHTTPClientShared()))
 	if err != nil {
 		return nil, fmt.Errorf("wxpay: new client: %w", err)
 	}
@@ -70,16 +69,20 @@ func newWxpayAdapter(ctx context.Context, cfg WxpayConfig) (*wxpayAdapter, error
 	}, nil
 }
 
-// yuanToFen 把人民币元换算为分（四舍五入）。微信金额单位为分（整数）。
 func yuanToFen(amountCNY float64) int64 {
 	return int64(math.Round(amountCNY * 100))
 }
 
-// createPay 调 Native 下单，返回 code_url（前端渲染为二维码）。金额：元 → 分（四舍五入）。
-func (a *wxpayAdapter) createPay(ctx context.Context, orderNo, subject string, amountCNY float64, notifyURL string) (string, error) {
+// createPay 调 Native 下单。
+//
+// 重要（PAY-LAT-02）：微信官方对重复 out_trade_no 返回 OUT_TRADE_NO_USED，
+// **不得**假设「相同 out_trade_no 重试会返回同一 code_url」。
+// 仅 pre-write 瞬时失败可短重试；写出后 unknown 须走查单恢复。
+func (a *wxpayAdapter) createPay(ctx context.Context, orderNo, subject string, amountCNY float64, notifyURL string, expiresAt time.Time) (string, error) {
 	totalFen := yuanToFen(amountCNY)
 	if totalFen <= 0 {
-		return "", fmt.Errorf("wxpay: invalid amount %.2f", amountCNY)
+		return "", payment.NewOutcomeError(payment.CreateOutcomeDefinitiveReject, "invalid_amount", "validate",
+			fmt.Errorf("wxpay: invalid amount %.2f", amountCNY))
 	}
 	req := native.PrepayRequest{
 		Appid:       core.String(a.appID),
@@ -92,35 +95,95 @@ func (a *wxpayAdapter) createPay(ctx context.Context, orderNo, subject string, a
 			Currency: core.String("CNY"),
 		},
 	}
-	// 跨境到微信 API 间歇性慢 → 对幂等的 Native 下单做短超时重试（同 out_trade_no 返回同 code_url，
-	// 重试不会重复下单/扣款）。把「偶发单次 30s 卡死」变成「快速重试后成功」。见 retry.go。
+	// Phase E：必须传 TimeExpire，与 DB expires_at 对齐；禁止依赖微信默认最长 7 天
+	if !expiresAt.IsZero() {
+		req.TimeExpire = core.Time(expiresAt)
+	}
+
 	var resp *native.PrepayResponse
-	err := retryTransientPay(ctx, payCreateAttempts, payCreatePerTry, payCreateRetryDelay,
-		func(tryCtx context.Context) error {
-			r, _, e := a.svc.Prepay(tryCtx, req)
+	err := retryCreatePay(ctx, realClock(),
+		func(tryCtx context.Context, attempt, maxAttempts int) error {
+			// typed context 观测 + request-local 主备：attempt1 主域，pre-write 可重试时 attempt2 备域
+			tryCtx = context.WithValue(tryCtx, ctxKeyPayAttempt{}, attempt)
+			tryCtx = context.WithValue(tryCtx, ctxKeyPayMaxAttempts{}, maxAttempts)
+			tryCtx = context.WithValue(tryCtx, ctxKeyPayOperation{}, "prepay")
+			tryCtx = context.WithValue(tryCtx, ctxKeyPayProvider{}, "wxpay")
+			tryCtx = context.WithValue(tryCtx, ctxKeyPayPreferBackup{}, attempt > 1)
+			r, result, e := a.svc.Prepay(tryCtx, req)
 			if e != nil {
-				return e
+				return sanitizeAPIError(classifyWxAPIError(e, result))
 			}
 			resp = r
 			return nil
-		})
+		},
+		func(attempt, maxAttempts int, err error) {
+			// attempt 级观测由 tracingRoundTripper + gateway 双层记录
+			_ = attempt
+			_ = maxAttempts
+			_ = err
+		},
+	)
 	if err != nil {
-		return "", fmt.Errorf("wxpay prepay: %w", err)
+		return "", err
 	}
 	if resp == nil || resp.CodeUrl == nil || *resp.CodeUrl == "" {
-		return "", fmt.Errorf("wxpay prepay: empty code_url")
+		return "", payment.NewOutcomeError(payment.CreateOutcomeUnknown, "empty_code_url", "response",
+			fmt.Errorf("wxpay prepay: empty code_url"))
 	}
 	return *resp.CodeUrl, nil
 }
 
-// verifyNotify 验签 + AES-256-GCM 解密回调，解析为 Transaction，再经纯函数映射为 CallbackInfo。
+// classifyWxAPIError 将 wechatpay-go 错误转为 OutcomeError（P1-3：不保留 Body/Detail）。
+func classifyWxAPIError(err error, result *core.APIResult) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *core.APIError
+	if errorsAsAPIError(err, &apiErr) {
+		code := apiErr.Code
+		status := apiErr.StatusCode
+		if result != nil && result.Response != nil && status == 0 {
+			status = result.Response.StatusCode
+		}
+		oe := payment.ClassifyHTTPStatus(status, code, true)
+		// 仅保留稳定 code/status，不包装完整 APIError（含 Body/Detail）
+		oe.Err = fmt.Errorf("wxpay: status=%d code=%s", status, code)
+		oe.HTTPStatus = status
+		return oe
+	}
+	msg := err.Error()
+	for _, c := range []string{"OUT_TRADE_NO_USED", "PARAM_ERROR", "NO_AUTH", "SIGN_ERROR"} {
+		if strings.Contains(msg, c) {
+			oe := payment.ClassifyHTTPStatus(0, c, true)
+			oe.Err = fmt.Errorf("wxpay: code=%s", c)
+			return oe
+		}
+	}
+	return payment.AsOutcome(fmt.Errorf("wxpay: request failed"))
+}
+
+func errorsAsAPIError(err error, target **core.APIError) bool {
+	if err == nil || target == nil {
+		return false
+	}
+	return errors.As(err, target)
+}
+
+// sanitizeAPIError 确保不向上游泄漏 SDK Detail/Body。
+func sanitizeAPIError(err error) error {
+	if err == nil {
+		return nil
+	}
+	// 已是 OutcomeError 且消息安全则直接返回
+	if oe := payment.AsOutcome(err); oe != nil {
+		return oe
+	}
+	return payment.AsOutcome(fmt.Errorf("wxpay: request failed"))
+}
+
 func (a *wxpayAdapter) verifyNotify(ctx context.Context, r *http.Request) (*payment.CallbackInfo, error) {
 	tx := new(payments.Transaction)
-	// ParseNotifyRequest 内部：读 Wechatpay-* 头验签 → AES-256-GCM 解密 resource → 反序列化到 tx。
 	if _, err := a.handler.ParseNotifyRequest(ctx, r, tx); err != nil {
-		// 诊断（临时）：surface ParseNotifyRequest 的真实报错 + 回调头 Wechatpay-Serial，
-		// 定位验签卡在哪一步（时间戳容差 / serial 不对上 PublicKeyID / RSA 签名 / APIv3 解密）。
-		// %w 保留 payment.ErrSignInvalid，下游 handlePayNotify 的 errors.Is 判定与 ack 行为不变。
 		return nil, fmt.Errorf("%w: parseNotify: %v (Wechatpay-Serial=%q Timestamp=%q Nonce=%q)",
 			payment.ErrSignInvalid, err,
 			r.Header.Get("Wechatpay-Serial"), r.Header.Get("Wechatpay-Timestamp"), r.Header.Get("Wechatpay-Nonce"))
@@ -128,10 +191,6 @@ func (a *wxpayAdapter) verifyNotify(ctx context.Context, r *http.Request) (*paym
 	return wxTransactionToInfo(tx, a.appID, a.mchID)
 }
 
-// wxTransactionToInfo 把验签解密后的 Transaction 映射为 CallbackInfo，并做商户校验（纯函数，可单测）：
-//   - 缺关键字段（out_trade_no/trade_state）→ ErrCallbackInvalid；
-//   - appid/mchid 与本商户不符 → ErrCallbackInvalid（拒绝伪造/串站）；
-//   - trade_state==SUCCESS → Success；金额分→元。
 func wxTransactionToInfo(tx *payments.Transaction, appID, mchID string) (*payment.CallbackInfo, error) {
 	if tx == nil || tx.OutTradeNo == nil || tx.TradeState == nil {
 		return nil, payment.ErrCallbackInvalid
@@ -151,27 +210,126 @@ func wxTransactionToInfo(tx *payments.Transaction, appID, mchID string) (*paymen
 		info.TxnID = *tx.TransactionId
 	}
 	if tx.Amount != nil && tx.Amount.Total != nil {
-		info.PaidAmount = float64(*tx.Amount.Total) / 100.0 // 分 → 元
+		info.PaidAmount = float64(*tx.Amount.Total) / 100.0
 	}
 	return info, nil
 }
 
-// queryOrder 按商户订单号主动查单：trade_state==SUCCESS 视为已收款。
-func (a *wxpayAdapter) queryOrder(ctx context.Context, orderNo string) (bool, error) {
-	resp, _, err := a.svc.QueryOrderByOutTradeNo(ctx, native.QueryOrderByOutTradeNoRequest{
+func (a *wxpayAdapter) queryOrder(ctx context.Context, orderNo string) (*payment.QueryResult, error) {
+	qCtx, cancel := context.WithTimeout(ctx, payQueryPerAttempt)
+	defer cancel()
+	qCtx = context.WithValue(qCtx, ctxKeyPayOperation{}, "query")
+	qCtx = context.WithValue(qCtx, ctxKeyPayProvider{}, "wxpay")
+	qCtx = context.WithValue(qCtx, ctxKeyPayAttempt{}, 1)
+	qCtx = context.WithValue(qCtx, ctxKeyPayMaxAttempts{}, payQueryMaxAttempts)
+	// 查单始终从主域发起，不继承 Prepay 的备域粘滞
+	qCtx = context.WithValue(qCtx, ctxKeyPayPreferBackup{}, false)
+
+	resp, result, err := a.svc.QueryOrderByOutTradeNo(qCtx, native.QueryOrderByOutTradeNoRequest{
 		OutTradeNo: core.String(orderNo),
 		Mchid:      core.String(a.mchID),
 	})
 	if err != nil {
-		// 「订单不存在」(ORDER_NOT_EXIST)：该单在微信侧从未创建/已被清除，永不会被支付——返回终态哨兵
-		// payment.ErrOrderNotExist，供对账超时后安全过期（区别于可重试的瞬时错误）。core.IsAPIError 精确判 Code。
 		if core.IsAPIError(err, "ORDER_NOT_EXIST") {
-			return false, fmt.Errorf("wxpay query order not exist: %w", payment.ErrOrderNotExist)
+			return &payment.QueryResult{
+				Provider: payment.ProviderWxpay,
+				OrderNo:  orderNo,
+				NotExist: true,
+			}, fmt.Errorf("wxpay query order not exist: %w", payment.ErrOrderNotExist)
 		}
-		return false, fmt.Errorf("wxpay query: %w", err)
+		return nil, classifyWxAPIError(err, result)
+	}
+	qr := &payment.QueryResult{
+		Provider:      payment.ProviderWxpay,
+		ExpectedMchID: a.mchID,
+		ExpectedAppID: a.appID,
 	}
 	if resp == nil || resp.TradeState == nil {
-		return false, nil
+		qr.NormalizedState = payment.TradeStateUnknown
+		return qr, nil
 	}
-	return *resp.TradeState == "SUCCESS", nil
+	// 响应字段：不得用请求 orderNo 冒充
+	if resp.OutTradeNo != nil {
+		qr.OrderNo = *resp.OutTradeNo
+	}
+	qr.TradeState = *resp.TradeState
+	qr.NormalizedState = normalizeWxTradeState(*resp.TradeState)
+	if resp.Mchid != nil {
+		qr.MchID = *resp.Mchid
+	}
+	if resp.Appid != nil {
+		qr.AppID = *resp.Appid
+	}
+	switch qr.NormalizedState {
+	case payment.TradeStateSuccess:
+		qr.Paid = true
+		if resp.TransactionId != nil {
+			qr.TransactionID = *resp.TransactionId
+		}
+		if resp.Amount != nil {
+			if resp.Amount.Total != nil {
+				qr.PaidAmountFen = *resp.Amount.Total
+			}
+			// 禁止伪造 currency：仅响应有值时填充
+			if resp.Amount.Currency != nil {
+				qr.Currency = *resp.Amount.Currency
+			}
+		}
+		if resp.SuccessTime != nil {
+			if t, e := time.Parse(time.RFC3339, *resp.SuccessTime); e == nil {
+				qr.ProviderPaidAt = t
+			}
+		}
+	case payment.TradeStateClosed:
+		qr.Closed = true
+	case payment.TradeStateOrderNotExist:
+		qr.NotExist = true
+	}
+	return qr, nil
 }
+
+func normalizeWxTradeState(s string) payment.ProviderTradeState {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "SUCCESS":
+		return payment.TradeStateSuccess
+	case "NOTPAY":
+		return payment.TradeStateNotPay
+	case "CLOSED":
+		return payment.TradeStateClosed
+	case "REFUND":
+		return payment.TradeStateRefund
+	case "REVOKED":
+		return payment.TradeStateRevoked
+	case "USERPAYING":
+		return payment.TradeStateUserPaying
+	case "PAYERROR":
+		return payment.TradeStatePayError
+	default:
+		return payment.TradeStateUnknown
+	}
+}
+
+// CloseOrder 关闭未支付订单（官方 close）。204 成功不表示可立即创建新单——须再 Query 确认 CLOSED。
+func (a *wxpayAdapter) CloseOrder(ctx context.Context, orderNo string) error {
+	cCtx, cancel := context.WithTimeout(ctx, payQueryPerAttempt)
+	defer cancel()
+	cCtx = context.WithValue(cCtx, ctxKeyPayOperation{}, "close")
+	cCtx = context.WithValue(cCtx, ctxKeyPayProvider{}, "wxpay")
+	result, err := a.svc.CloseOrder(cCtx, native.CloseOrderRequest{
+		OutTradeNo: core.String(orderNo),
+		Mchid:      core.String(a.mchID),
+	})
+	if err != nil {
+		return sanitizeAPIError(classifyWxAPIError(err, result))
+	}
+	return nil
+}
+
+// context keys for attempt observability（Transport 从 typed context 读取，禁止 X-Pay-* Header）
+type (
+	ctxKeyPayAttempt      struct{}
+	ctxKeyPayMaxAttempts  struct{}
+	ctxKeyPayOperation    struct{}
+	ctxKeyPayProvider     struct{}
+	ctxKeyPayPreferBackup struct{} // true 时本请求走备域（request-local，不粘滞）
+)

@@ -114,6 +114,9 @@ func TestRechargeQuotaSinkIdempotent(t *testing.T) {
 	if err := migrateRechargeLedger(db); err != nil {
 		t.Fatalf("migrate ledger: %v", err)
 	}
+	if err := migrateCacheInvalidationOutbox(db); err != nil {
+		t.Fatalf("migrate cache outbox: %v", err)
+	}
 	if err := db.Create(&rechargeTestUser{Id: 42, Quota: 0}).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
@@ -164,6 +167,9 @@ func TestRechargeQuotaSinkWritesTopUpRow(t *testing.T) {
 	}
 	if err := migrateRechargeLedger(db); err != nil {
 		t.Fatalf("migrate ledger: %v", err)
+	}
+	if err := migrateCacheInvalidationOutbox(db); err != nil {
+		t.Fatalf("migrate cache outbox: %v", err)
 	}
 	if err := db.Create(&rechargeTestUser{Id: 77, Quota: 0}).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
@@ -247,6 +253,9 @@ func TestRechargeQuotaSinkSoftDeletedUserStillCredited(t *testing.T) {
 	if err := migrateRechargeLedger(db); err != nil {
 		t.Fatalf("migrate ledger: %v", err)
 	}
+	if err := migrateCacheInvalidationOutbox(db); err != nil {
+		t.Fatalf("migrate cache outbox: %v", err)
+	}
 	if err := db.Create(&rechargeTestUser{Id: 42, Quota: 0}).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
@@ -318,6 +327,9 @@ func TestRechargeQuotaSinkMissingUser(t *testing.T) {
 	}
 	if err := migrateRechargeLedger(db); err != nil {
 		t.Fatalf("migrate ledger: %v", err)
+	}
+	if err := migrateCacheInvalidationOutbox(db); err != nil {
+		t.Fatalf("migrate cache outbox: %v", err)
 	}
 	// 不 seed 任何用户：UserID=999 行根本不存在。
 

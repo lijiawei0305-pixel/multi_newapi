@@ -2,6 +2,7 @@ package mtwire
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,8 +14,16 @@ import (
 )
 
 const (
-	reconcileTickInterval = 5 * time.Minute // 对账扫描周期
-	reconcileMinAge       = 5 * time.Minute // 只对账「落单/占位超过此时长」的卡单，过滤仍在途的订单
+	reconcileTickInterval = 5 * time.Minute // 全量对账扫描周期（created / SUB / AGT 扫尾）
+	reconcileMinAge       = 5 * time.Minute // created/SUB/AGT：只对账「落单超过此时长」的卡单
+	// reconcilePaidMinAge：RCG stuck-paid 可更短——入账中间态 paid 应秒级恢复，不必等 5 分钟
+	// （PAY-REC-01 / PAY-TXN-01）。OnPaid 强幂等，与回调竞态不会双扣。
+	reconcilePaidMinAge = 30 * time.Second
+	// reconcilePaidTickInterval：stuck-paid + next_query_at 到期查单的快路径周期。
+	reconcilePaidTickInterval = 5 * time.Second
+	// reconcileCreatedMinAge：created 主动查单最短年龄。低于全量 5min，使回调失达后约 1–1.5min
+	// 内有机会被查单补账（完整 5s/30s/60s 持久化调度见后续 next_query_at 方案）。
+	reconcileCreatedMinAge = 60 * time.Second
 	// reconcileCreatedExpireAge：created 未付超过此时长 → 对账查证仍未付即自动置 failed（未付超时/过期），
 	// 清出「待支付」。贴微信 Native 二维码默认有效期 2h（超时二维码作废、无人能再付）。
 	reconcileCreatedExpireAge = 2 * time.Hour
@@ -31,10 +40,14 @@ const (
 var (
 	reconcileOnce    sync.Once
 	reconcileRunning atomic.Bool
+	// reconcilePaidRunning 保护 stuck-paid 快路径与全量轮互斥（共享网关/DB，防双跑）。
+	reconcilePaidRunning atomic.Bool
 )
 
 // StartReconcileLoop 启动支付卡单对账兜底定时任务（仅 master 节点，sync.Once 保证只起一次）：
-// 每 reconcileTickInterval 扫一次 RCG 充值卡单（重跑入账）+ SUB 套餐卡单 + AGT 代理套餐卡单（查单→补激活）。
+//   - 全量：每 reconcileTickInterval 扫 RCG paid/created + SUB + AGT
+//   - 快路径：每 reconcilePaidTickInterval 只扫 RCG stuck-paid（缩短 paid→credited 崩溃窗口）
+//
 // 全程 best-effort：幂等 + atomic 防重入，失败仅记日志，绝不影响主流程。
 // 由 App 装配完成后（InstallHooks 同处）调用。
 func (a *App) StartReconcileLoop() {
@@ -53,6 +66,16 @@ func (a *App) StartReconcileLoop() {
 				safeLoopRun("reconcile", a.runReconcileOnce)
 			}
 		})
+		// stuck-paid 快路径：与全量循环独立 ticker，缩短回调后崩溃/卡 paid 的恢复时间。
+		gopool.Go(func() {
+			logger.LogInfo(context.Background(), "payment stuck-paid fast loop started: tick="+reconcilePaidTickInterval.String())
+			ticker := time.NewTicker(reconcilePaidTickInterval)
+			defer ticker.Stop()
+			safeLoopRun("reconcile-paid", a.runReconcilePaidOnce)
+			for range ticker.C {
+				safeLoopRun("reconcile-paid", a.runReconcilePaidOnce)
+			}
+		})
 	})
 }
 
@@ -63,9 +86,40 @@ func (a *App) runReconcileOnce() {
 		return
 	}
 	defer reconcileRunning.Store(false)
+	// 与 paid 快路径互斥：全量轮占用时快路径跳过；快路径占用时全量仍跑但 paid 子路径由 atomic 防重。
+	// 这里额外拿 paid 锁，避免与快路径并发扫同一批 stuck-paid。
+	if !reconcilePaidRunning.CompareAndSwap(false, true) {
+		// paid 快路径在跑：本轮仍扫 created/SUB/AGT，paid 交给快路径（或下轮）。
+		ctx, cancel := context.WithTimeout(context.Background(), reconcileRunTimeout)
+		defer cancel()
+		a.runReconcileAllExceptPaid(ctx, "cron")
+		return
+	}
+	defer reconcilePaidRunning.Store(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), reconcileRunTimeout)
 	defer cancel()
-	before := time.Now().Add(-reconcileMinAge)
-	a.runReconcileAll(ctx, before, "cron")
+	a.runReconcileAll(ctx, "cron")
+}
+
+// runReconcilePaidOnce 快路径：next_query_at 到期查单 + stuck-paid 恢复。
+func (a *App) runReconcilePaidOnce() {
+	if !reconcilePaidRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer reconcilePaidRunning.Store(false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), reconcileRunTimeout)
+	defer cancel()
+	a.runReconcileDueQueryPath(ctx)
+	before := time.Now().Add(-reconcilePaidMinAge)
+	paid, err := reconcilePaidFn(a, ctx, before)
+	if err != nil {
+		logger.LogWarn(ctx, "reconcile RCG(paid-fast) failed: "+err.Error())
+		return
+	}
+	if len(paid.Reconciled) > 0 || len(paid.Failed) > 0 {
+		logger.LogInfo(ctx, fmt.Sprintf("reconcile RCG(paid-fast): scanned=%d credited=%d failed=%d",
+			paid.Scanned, len(paid.Reconciled), len(paid.Failed)))
+	}
 }

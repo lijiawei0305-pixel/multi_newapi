@@ -383,7 +383,7 @@ func (a *App) HandlePurchase(c *gin.Context) {
 // 故下单只传人民币应付额。notify_url 用契约回调路径（base + notifyPathFor(provider)）。
 // 支付创建口必须由生产装配或测试桩显式提供；缺失时 fail closed，绝不返回不可支付的占位链接。
 type subscriptionPayCreator interface {
-	CreatePay(ctx context.Context, provider payment.Provider, orderNo, subject string, amountCNY float64, notifyURL string) (string, error)
+	CreatePay(ctx context.Context, provider payment.Provider, orderNo, subject string, amountCNY float64, notifyURL string, expiresAt ...time.Time) (string, error)
 }
 
 func (a *App) subscriptionPayURL(ctx context.Context, ticket *tokenplan.PurchaseTicket, provider payment.Provider) (string, error) {

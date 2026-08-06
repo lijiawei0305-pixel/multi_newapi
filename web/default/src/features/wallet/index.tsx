@@ -23,6 +23,7 @@ import { SectionPageLayout } from '@/components/layout'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { getSelf } from '@/lib/api'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { AgentReferralRewardsCard } from './components/agent-referral-rewards-card'
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
@@ -30,7 +31,6 @@ import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
 import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
-import { TENANT_RECHARGE_PAID_EVENT } from './components/tenant-recharge-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
 import { DEFAULT_DISCOUNT_RATE } from './constants'
 import {
@@ -41,6 +41,7 @@ import {
   useWaffoPayment,
   useWaffoPancakePayment,
 } from './hooks'
+import type { RechargeCreditInfo } from './hooks/use-tenant-recharge'
 import {
   getDefaultPaymentType,
   getMinTopupAmount,
@@ -96,44 +97,66 @@ export function Wallet(props: WalletProps) {
   const { processing: pancakeProcessing, processWaffoPancakePayment } =
     useWaffoPancakePayment()
 
-  // Fetch and refresh user data
-  const fetchUser = useCallback(async () => {
+  // Fetch and refresh user data. silent=true 时不整卡 Skeleton（后台校验刷新）。
+  const fetchUser = useCallback(async (opts?: { silent?: boolean }) => {
     try {
-      setUserLoading(true)
+      if (!opts?.silent) {
+        setUserLoading(true)
+      }
       const response = await getSelf()
       if (response.success && response.data) {
-        setUser(response.data as UserWalletData)
+        const next = response.data as UserWalletData
+        setUser(next)
+        // 与 Dashboard 共享 auth.user 余额事实源（PAY-UI-01）
+        const auth = useAuthStore.getState().auth
+        if (auth.user) {
+          auth.setUser({
+            ...auth.user,
+            quota: next.quota,
+            used_quota: next.used_quota,
+            request_count: next.request_count,
+          })
+        }
       }
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Failed to fetch user data:', error)
     } finally {
-      setUserLoading(false)
+      if (!opts?.silent) {
+        setUserLoading(false)
+      }
     }
   }, [])
 
   useEffect(() => {
-    fetchUser()
+    void fetchUser()
   }, [fetchUser])
 
-  // TenantRechargeCard (nested inside RechargeFormCard) dispatches this once a
-  // pending WeChat-native QR order is confirmed paid via status polling — the
-  // QR flow has no server redirect, so this + polling is the only way we learn
-  // the payment landed. Refresh the balance shown by WalletStatsCard.
+  // PAY-EXT-01：从 Epay/Stripe/Creem/Waffo 收银台返回时刷新余额（打开收银台 ≠ 付款成功）。
   useEffect(() => {
-    const handleTenantRechargePaid = () => {
-      fetchUser()
+    const onFocus = () => {
+      void fetchUser({ silent: true })
     }
-    window.addEventListener(
-      TENANT_RECHARGE_PAID_EVENT,
-      handleTenantRechargePaid
-    )
-    return () =>
-      window.removeEventListener(
-        TENANT_RECHARGE_PAID_EVENT,
-        handleTenantRechargePaid
-      )
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   }, [fetchUser])
+
+  // 官方充值 credited：先用状态接口权威 current_quota 立刻更新 Wallet + auth store，
+  // 再 silent refetch /api/user/self 校验；不再使用 window CustomEvent。
+  const handleTenantRechargeCredited = useCallback(
+    (info: RechargeCreditInfo) => {
+      const nextQuota = info.currentQuota
+      if (nextQuota != null) {
+        setUser((prev) => (prev ? { ...prev, quota: nextQuota } : prev))
+        const auth = useAuthStore.getState().auth
+        if (auth.user) {
+          auth.setUser({ ...auth.user, quota: nextQuota })
+        }
+      }
+      void fetchUser({ silent: true })
+    },
+    [fetchUser]
+  )
 
   useEffect(() => {
     if (props.initialShowHistory) {
@@ -293,6 +316,7 @@ export function Wallet(props: WalletProps) {
                   enableWaffoPancakeTopup={
                     topupInfo?.enable_waffo_pancake_topup
                   }
+                  onTenantRechargeCredited={handleTenantRechargeCredited}
                 />
               </div>
 

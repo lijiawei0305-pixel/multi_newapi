@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/payment"
@@ -94,14 +95,17 @@ func TestProviderManagerConfigured(t *testing.T) {
 // fakeRealSDK 是 realSDK 的桩（不触真实证书/网络），供指纹缓存测试注入。
 type fakeRealSDK struct{}
 
-func (fakeRealSDK) CreatePay(context.Context, payment.Provider, string, string, float64, string) (string, error) {
+func (fakeRealSDK) CreatePay(context.Context, payment.Provider, string, string, float64, string, ...time.Time) (string, error) {
 	return "stub://pay", nil
 }
 func (fakeRealSDK) VerifyNotify(context.Context, payment.Provider, *http.Request) (*payment.CallbackInfo, error) {
 	return nil, nil
 }
-func (fakeRealSDK) QueryOrder(context.Context, payment.Provider, string) (bool, error) {
-	return false, nil
+func (fakeRealSDK) QueryOrder(context.Context, payment.Provider, string) (*payment.QueryResult, error) {
+	return &payment.QueryResult{}, nil
+}
+func (fakeRealSDK) CloseOrder(context.Context, payment.Provider, string) error {
+	return nil
 }
 
 // TestProviderManagerSDKCaching 同凭据复用同一 SDK（只构造一次）；凭据变更触发重建（指纹缓存）。
@@ -150,7 +154,7 @@ func stubVerifyNotify(t *testing.T, info *payment.CallbackInfo, err error) {
 	}
 }
 
-func stubNotifyCredit(t *testing.T, fn func(*App, context.Context, string, string, float64) error) {
+func stubNotifyCredit(t *testing.T, fn func(*App, context.Context, payment.Provider, string, string, float64) error) {
 	t.Helper()
 	orig := notifyCreditRecharge
 	t.Cleanup(func() { notifyCreditRecharge = orig })
@@ -195,7 +199,7 @@ func TestHandlePayNotify_DispatchRecharge(t *testing.T) {
 	app := &App{}
 	stubVerifyNotify(t, &payment.CallbackInfo{Provider: payment.ProviderWxpay, OrderNo: "RCG-1", Success: true, TxnID: "T1", PaidAmount: 7.3}, nil)
 	var credited []string
-	stubNotifyCredit(t, func(_ *App, _ context.Context, orderNo, txnID string, paid float64) error {
+	stubNotifyCredit(t, func(_ *App, _ context.Context, _ payment.Provider, orderNo, txnID string, paid float64) error {
 		credited = append(credited, orderNo)
 		if txnID != "T1" || paid != 7.3 {
 			t.Fatalf("credit args txn=%q paid=%v want T1/7.3", txnID, paid)
@@ -233,7 +237,7 @@ func TestHandlePayNotify_DispatchSubscription(t *testing.T) {
 		}
 		return nil
 	})
-	stubNotifyCredit(t, func(_ *App, _ context.Context, orderNo, _ string, _ float64) error {
+	stubNotifyCredit(t, func(_ *App, _ context.Context, _ payment.Provider, orderNo, _ string, _ float64) error {
 		t.Fatalf("SUB order must not dispatch to recharge credit: %s", orderNo)
 		return nil
 	})
@@ -256,7 +260,7 @@ func TestHandlePayNotify_DispatchSubscription(t *testing.T) {
 func TestHandlePayNotify_NotSuccessNoCredit(t *testing.T) {
 	app := &App{}
 	stubVerifyNotify(t, &payment.CallbackInfo{Provider: payment.ProviderWxpay, OrderNo: "RCG-2", Success: false}, nil)
-	stubNotifyCredit(t, func(*App, context.Context, string, string, float64) error {
+	stubNotifyCredit(t, func(*App, context.Context, payment.Provider, string, string, float64) error {
 		t.Fatal("Success=false must not credit")
 		return nil
 	})
@@ -280,7 +284,7 @@ func TestHandlePayNotify_NotSuccessNoCredit(t *testing.T) {
 func TestHandlePayNotify_CreditFailAckFail(t *testing.T) {
 	app := &App{}
 	stubVerifyNotify(t, &payment.CallbackInfo{Provider: payment.ProviderWxpay, OrderNo: "RCG-3", Success: true, PaidAmount: 7.3}, nil)
-	stubNotifyCredit(t, func(*App, context.Context, string, string, float64) error {
+	stubNotifyCredit(t, func(*App, context.Context, payment.Provider, string, string, float64) error {
 		return payment.ErrAmountMismatch // 入账被拒（反篡改）
 	})
 

@@ -445,6 +445,58 @@ app_ready() {
     | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
 }
 
+# ops_lock_held：另一运维入口（backup/deploy/restore）正持有原子锁时为真。
+# healthcheck 自动拉起必须尊重此锁，否则会在备份停写窗口把 app 抢跑起来，
+# 破坏 writers-stopped 一致性。
+ops_lock_held() {
+  [ -d "$OPS_LOCK_DIR" ]
+}
+
+# ensure_app_running：把 app 服务拉到 running，并尽量等到 /health/live。
+# 用于 backup 结束后的强制恢复，以及 healthcheck 在无 ops 锁时的自愈。
+# 顺序：compose start（复用已有容器）→ 失败再 up -d --no-build（会重跑
+# mysql-access-bootstrap 依赖）→ 最多 3 轮；错误写到 stderr，不静默吞。
+ensure_app_running() {
+  local attempt=1 max_attempts=3 err=""
+  if app_live; then
+    return 0
+  fi
+  while [ "$attempt" -le "$max_attempts" ]; do
+    err="$(dc start "$APP_SVC" 2>&1)" && {
+      if wait_for_app_live 45; then
+        ok "app 已恢复（compose start，attempt=$attempt）"
+        return 0
+      fi
+      err="compose start 成功但 /health/live 未在超时内就绪"
+    }
+    warn "compose start app 未就绪 attempt=$attempt：${err:-unknown}"
+    err="$(dc up -d --no-build "$APP_SVC" 2>&1)" && {
+      if wait_for_app_live 90; then
+        ok "app 已恢复（compose up -d，attempt=$attempt）"
+        return 0
+      fi
+      err="compose up 成功但 /health/live 未在超时内就绪"
+    }
+    warn "compose up -d app 未就绪 attempt=$attempt：${err:-unknown}"
+    attempt=$((attempt + 1))
+    sleep 2
+  done
+  return 1
+}
+
+# wait_for_app_live <seconds>：只等进程级存活，不要求 ready（DB 瞬时抖动不挡恢复判定）。
+wait_for_app_live() {
+  local timeout="${1:-60}" elapsed=0
+  while [ "$elapsed" -lt "$timeout" ]; do
+    if app_live; then
+      return 0
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+  return 1
+}
+
 db_ready() {
   dc exec -T "$MYSQL_SVC" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -uroot --silent' >/dev/null 2>&1
 }

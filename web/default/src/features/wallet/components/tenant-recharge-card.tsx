@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Loader2 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -28,20 +28,11 @@ import { cn } from '@/lib/utils'
 
 import {
   useTenantRecharge,
+  type RechargeCreditInfo,
   type RechargeProvider,
 } from '../hooks/use-tenant-recharge'
 import { getPaymentIcon } from '../lib'
 import { RechargeQrDialog } from './dialogs/recharge-qr-dialog'
-
-/**
- * Fired on `window` once a pending QR order is confirmed paid (see
- * use-tenant-recharge's status polling). TenantRechargeCard is mounted a couple
- * of layers below the Wallet page (inside RechargeFormCard, which is out of
- * scope for this fix), so a DOM event is the least invasive way to let the page
- * refresh the balance without threading a prop through that intermediate file.
- * `index.tsx` listens for this event and re-fetches the current user.
- */
-export const TENANT_RECHARGE_PAID_EVENT = 'mt:tenant-recharge-paid'
 
 // 人民币整数预设档位（元）。官方微信/支付宝以 ¥ 结算，中国用户按整数元充值最直观——
 // 所见即所付：选 ¥100 → 微信扣 ¥100 → 后端按汇率折美元入原生额度（$1 = 500k quota）。
@@ -56,23 +47,22 @@ type TenantRechargeCardProps = {
    * page can reuse the result. Empty → the whole card is hidden.
    */
   providers: RechargeProvider[]
-  /** Optional: called once when a pending order is confirmed paid (balance refresh hook). */
-  onPaid?: () => void
+  /**
+   * 仅在 credited 时调用一次；可携带 current_quota 立即更新余额 UI。
+   * 不再使用 window CustomEvent 桥接（PAY-UI-01）。
+   */
+  onCredited?: (info: RechargeCreditInfo) => void
 }
 
 /**
  * TenantRechargeCard is the multi-tenant recharge section (official WeChat /
  * Alipay, in-process real SDK).
  *
- * Amount is in USD ($1 minimum, credited as native quota at $1 = 500k). WeChat
- * shows a QR modal; Alipay redirects. Distinct from the Epay/Stripe flow — it
- * calls POST /api/tenant/wallet/recharge and settles in-process via the real
- * WeChat/Alipay SDK (notify verify / active query).
+ * Amount is in CNY (minimum derived from $1 × exchange rate). WeChat shows a QR
+ * modal (opens immediately on click while creating); Alipay redirects. Distinct
+ * from the Epay/Stripe flow.
  */
-export function TenantRechargeCard({
-  providers,
-  onPaid,
-}: TenantRechargeCardProps) {
+export function TenantRechargeCard(props: TenantRechargeCardProps) {
   const { t } = useTranslation()
   const { currency } = useSystemConfig()
   // 汇率取系统「货币显示」配置的 usd_exchange_rate（¥/USD）；仅用于推算 ¥ 下限，实付以后端为准。
@@ -81,33 +71,34 @@ export function TenantRechargeCard({
   const [amount, setAmount] = useState<string>('100')
   const [provider, setProvider] = useState<RechargeProvider>('wxpay')
 
-  // Bridge payment confirmation up to the Wallet page: call the caller's
-  // onPaid (if wired) and always dispatch the window event, since the current
-  // parent (RechargeFormCard) doesn't pass onPaid through.
-  const handlePaid = useCallback(() => {
-    onPaid?.()
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent(TENANT_RECHARGE_PAID_EVENT))
-    }
-  }, [onPaid])
-
-  const { submitting, qrState, submit, closeQr } = useTenantRecharge({
-    onPaid: handlePaid,
+  const {
+    submitting,
+    phase,
+    dialogOpen,
+    setDialogOpen,
+    activeOrder,
+    errorMessage,
+    submit,
+    closeDialog,
+    dismissOrder,
+    retryCreate,
+  } = useTenantRecharge({
+    onCredited: props.onCredited,
   })
 
   // Keep the selected provider within the configured set (default = first).
   useEffect(() => {
-    if (providers.length > 0 && !providers.includes(provider)) {
-      setProvider(providers[0])
+    if (props.providers.length > 0 && !props.providers.includes(provider)) {
+      setProvider(props.providers[0])
     }
-  }, [providers, provider])
+  }, [props.providers, provider])
 
   // No enabled && configured channel → hide the whole card.
-  if (providers.length === 0) return null
+  if (props.providers.length === 0) return null
 
   const amountNum = Number.parseFloat(amount) || 0
   const belowMin = amountNum < minCny
-  const busy = submitting !== null
+  const busy = submitting !== null || phase === 'creating'
 
   const providerButton = (value: RechargeProvider, label: string) => (
     <Button
@@ -185,16 +176,19 @@ export function TenantRechargeCard({
       </div>
 
       <div className='flex gap-2'>
-        {providers.includes('wxpay') &&
+        {props.providers.includes('wxpay') &&
           providerButton('wxpay', t('WeChat Pay'))}
-        {providers.includes('alipay') && providerButton('alipay', t('Alipay'))}
+        {props.providers.includes('alipay') &&
+          providerButton('alipay', t('Alipay'))}
       </div>
 
       <Button
         type='button'
         data-testid='recharge-submit'
         disabled={busy || belowMin}
-        onClick={() => submit(amountNum, provider)}
+        onClick={() => {
+          void submit(amountNum, provider)
+        }}
         className='w-full'
       >
         {busy ? <Loader2 className='mr-2 h-4 w-4 animate-spin' /> : null}
@@ -210,14 +204,31 @@ export function TenantRechargeCard({
       </Button>
 
       <RechargeQrDialog
-        open={qrState !== null}
+        open={dialogOpen}
         onOpenChange={(o) => {
-          if (!o) closeQr()
+          if (!o) {
+            // 关闭弹窗只藏 UI；终态可 dismiss 清监控，否则保持 activeOrder 轮询
+            if (
+              phase === 'credited' ||
+              phase === 'failed' ||
+              phase === 'expired' ||
+              phase === 'poll_timeout' ||
+              phase === 'creating_error' ||
+              phase === 'idle'
+            ) {
+              dismissOrder()
+            } else {
+              closeDialog()
+            }
+          } else {
+            setDialogOpen(true)
+          }
         }}
-        qr={qrState?.qr ?? null}
-        orderNo={qrState?.orderNo}
-        amountUsd={qrState?.amountUsd}
-        amountCny={qrState?.amountCny}
+        phase={phase}
+        order={activeOrder}
+        errorMessage={errorMessage}
+        onRetry={retryCreate}
+        onDismiss={dismissOrder}
       />
     </div>
   )

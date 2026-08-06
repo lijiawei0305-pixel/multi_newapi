@@ -13,10 +13,13 @@ import (
 	"strings"
 	"time"
 
+	"context"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/i18n"
+	paymentmigrate "github.com/QuantumNous/new-api/internal/payment/migrate"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -49,6 +52,22 @@ var classicBuildFS embed.FS
 var classicIndexPage []byte
 
 func main() {
+	// 支付专用 CLI：只连主库，不启 HTTP/Redis/后台任务/全站 AutoMigrate。
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "--payment-migrate-only":
+			if err := runPaymentMigrateOnly(); err != nil {
+				log.Fatal("payment-migrate-only: ", err)
+			}
+			return
+		case "--payment-schema-verify":
+			if err := runPaymentSchemaVerify(); err != nil {
+				log.Fatal("payment-schema-verify: ", err)
+			}
+			return
+		}
+	}
+
 	startTime := time.Now()
 
 	err := InitResources()
@@ -232,6 +251,63 @@ func main() {
 	if err != nil {
 		common.FatalLog("failed to start HTTP server: " + err.Error())
 	}
+}
+
+// runPaymentMigrateOnly 仅连接主库执行 payment schema EnsureSchema。
+// 不启动 HTTP、Redis、后台任务，不执行无关全站 AutoMigrate。
+func runPaymentMigrateOnly() error {
+	_ = godotenv.Load(".env")
+	if p := strings.TrimSpace(os.Getenv("SQLITE_PATH")); p != "" {
+		common.SQLitePath = p
+	}
+	db, err := model.OpenMainDBWithoutMigrate()
+	if err != nil {
+		return err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	defer sqlDB.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := paymentmigrate.EnsureSchema(ctx, db); err != nil {
+		return err
+	}
+	v, err := paymentmigrate.CurrentVersion(ctx, db)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("payment-migrate-only: ok schema_version=%d\n", v)
+	return nil
+}
+
+// runPaymentSchemaVerify 只读核验 payment schema version + 关键列/索引。
+func runPaymentSchemaVerify() error {
+	_ = godotenv.Load(".env")
+	if p := strings.TrimSpace(os.Getenv("SQLITE_PATH")); p != "" {
+		common.SQLitePath = p
+	}
+	db, err := model.OpenMainDBWithoutMigrate()
+	if err != nil {
+		return err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	defer sqlDB.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := paymentmigrate.VerifyOnly(ctx, db); err != nil {
+		return err
+	}
+	v, err := paymentmigrate.CurrentVersion(ctx, db)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("payment-schema-verify: ok schema_version=%d\n", v)
+	return nil
 }
 
 func newPprofServer(bindAddress, port string) (*http.Server, error) {

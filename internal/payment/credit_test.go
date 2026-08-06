@@ -33,7 +33,7 @@ func seedCreatedOrder(t *testing.T, repo *MemRepo, no string, typ OrderType) {
 	t.Helper()
 	if err := repo.Create(context.Background(), &PayOrder{
 		OrderNo: no, Type: typ, TenantID: 1, UserID: 42, Provider: ProviderWxpay,
-		AmountUSD: 10, ActualPaid: 73, Status: OrderCreated,
+		AmountUSD: 10, ActualPaid: 73, ActualPaidFen: 7300, Status: OrderCreated,
 	}); err != nil {
 		t.Fatalf("seed order: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestCreditPaidOrderConcurrentCreditsOnce(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
-			_ = g.CreditPaidOrder(context.Background(), orderNo, "txn-x", 0)
+			_ = g.CreditPaidOrder(context.Background(), orderNo, "txn-x", 73)
 		}()
 	}
 	wg.Wait()
@@ -72,10 +72,10 @@ func TestCreditPaidOrderRepeatShortCircuits(t *testing.T) {
 	const orderNo = "RCG-repeat"
 	seedCreatedOrder(t, repo, orderNo, OrderTypeRecharge)
 
-	if err := g.CreditPaidOrder(context.Background(), orderNo, "t1", 0); err != nil {
+	if err := g.CreditPaidOrder(context.Background(), orderNo, "t1", 73); err != nil {
 		t.Fatalf("first credit: %v", err)
 	}
-	if err := g.CreditPaidOrder(context.Background(), orderNo, "t2", 0); err != nil {
+	if err := g.CreditPaidOrder(context.Background(), orderNo, "t1", 73); err != nil {
 		t.Fatalf("second credit must short-circuit success, got %v", err)
 	}
 	if got := recharge.count(); got != 1 {
@@ -86,7 +86,7 @@ func TestCreditPaidOrderRepeatShortCircuits(t *testing.T) {
 // TestCreditPaidOrderUnknownOrder 未知订单号 → ORDER_NOT_FOUND。
 func TestCreditPaidOrderUnknownOrder(t *testing.T) {
 	g, _, _, _ := newGateway()
-	err := g.CreditPaidOrder(context.Background(), "nope", "t", 0)
+	err := g.CreditPaidOrder(context.Background(), "nope", "t", 73)
 	if got := apperr.CodeOf(err); got != CodeOrderNotFound {
 		t.Fatalf("code = %q, want %q", got, CodeOrderNotFound)
 	}
@@ -101,7 +101,7 @@ func TestCreditPaidOrderSinkErrorRollsBack(t *testing.T) {
 	const orderNo = "RCG-rollback"
 	seedCreatedOrder(t, repo, orderNo, OrderTypeRecharge)
 
-	if err := g.CreditPaidOrder(context.Background(), orderNo, "t", 0); err == nil {
+	if err := g.CreditPaidOrder(context.Background(), orderNo, "t", 73); err == nil {
 		t.Fatal("expected sink error to propagate")
 	}
 	got, _ := repo.GetByOrderNo(context.Background(), orderNo)
@@ -111,7 +111,7 @@ func TestCreditPaidOrderSinkErrorRollsBack(t *testing.T) {
 
 	// 上游重试：sink 恢复后应能成功入账。
 	recharge.err = nil
-	if err := g.CreditPaidOrder(context.Background(), orderNo, "t-retry", 0); err != nil {
+	if err := g.CreditPaidOrder(context.Background(), orderNo, "t-retry", 73); err != nil {
 		t.Fatalf("retry credit: %v", err)
 	}
 	if recharge.count() != 1 {

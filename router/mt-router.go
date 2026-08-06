@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/mtwire"
+	"github.com/QuantumNous/new-api/internal/payment"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 )
@@ -24,6 +25,12 @@ import (
 func SetMtRouter(router *gin.Engine) {
 	if model.DB == nil {
 		common.SysError("mt-router: model.DB is nil, skip multitenant wiring")
+		return
+	}
+
+	// 拒绝启用未完成的自动关单/替换（FEATURE_NOT_IMPLEMENTED）
+	if err := payment.ValidateAutoCloseReplaceConfig(); err != nil {
+		common.FatalLog("mt-router: " + err.Error())
 		return
 	}
 
@@ -187,10 +194,18 @@ func SetMtRouter(router *gin.Engine) {
 
 	// 支付平台异步回调（目标③，支付重构后）：微信/支付宝 POST 到此，handler 内验签（无 UserAuth/TenantMiddleware）。
 	// 签名校验在 providerManager.VerifyNotify；金额/幂等以库内订单为权威。公开路由（平台来源 IP 不固定）。
-	payGroup := apiBase.Group("/pay")
+	//
+	// PAY-CBK-01：回调挂独立基础链，**不**继承 apiBase 的 GlobalAPIRateLimit。
+	// 合法财务回调来自有限出口 IP，不应与普通用户共用 Redis/IP 限流桶；Redis 故障 fail-closed
+	// 时会在验签前 429，阻断入账。仍保留 RouteTag / gzip / BodyStorageCleanup + 严格 body 上限与验签。
+	payBase := router.Group("/api")
+	payBase.Use(middleware.RouteTag("api"))
+	payBase.Use(gzip.Gzip(gzip.DefaultCompression))
+	payBase.Use(middleware.BodyStorageCleanup())
+	payGroup := payBase.Group("/pay")
 	{
 		// anonymousRequestBodyLimit：公开未认证回调，任意人可 POST；限体积防 1GB body → VerifyNotify 读全量 OOM，
-		// 对齐上游 /api/stripe|creem|waffo/webhook。baseline GlobalAPIRateLimit 已由 apiBase 覆盖。
+		// 对齐上游 /api/stripe|creem|waffo/webhook。
 		payGroup.POST("/wechat/notify", anonymousRequestBodyLimit, app.HandleWechatNotify)
 		payGroup.POST("/alipay/notify", anonymousRequestBodyLimit, app.HandleAlipayNotify)
 	}
