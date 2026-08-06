@@ -14,11 +14,9 @@
   },
   "locales": {
     "en": {
-      "keyCount": 5926,
+      "keyCount": 5927,
       "unchangedValueAllowlistCount": 0,
-      "missingSourceKeys": [
-        "Payment order was not created by the provider, please retry"
-      ],
+      "missingSourceKeys": [],
       "missingBaseKeys": [],
       "extraKeys": [],
       "placeholderMismatches": [],
@@ -26,11 +24,9 @@
       "staleUnchangedValueAllowlist": []
     },
     "zh": {
-      "keyCount": 5926,
+      "keyCount": 5927,
       "unchangedValueAllowlistCount": 0,
-      "missingSourceKeys": [
-        "Payment order was not created by the provider, please retry"
-      ],
+      "missingSourceKeys": [],
       "missingBaseKeys": [],
       "extraKeys": [],
       "placeholderMismatches": [],
@@ -38,11 +34,9 @@
       "staleUnchangedValueAllowlist": []
     },
     "fr": {
-      "keyCount": 5926,
+      "keyCount": 5927,
       "unchangedValueAllowlistCount": 118,
-      "missingSourceKeys": [
-        "Payment order was not created by the provider, please retry"
-      ],
+      "missingSourceKeys": [],
       "missingBaseKeys": [],
       "extraKeys": [],
       "placeholderMismatches": [],
@@ -50,11 +44,9 @@
       "staleUnchangedValueAllowlist": []
     },
     "ja": {
-      "keyCount": 5926,
+      "keyCount": 5927,
       "unchangedValueAllowlistCount": 0,
-      "missingSourceKeys": [
-        "Payment order was not created by the provider, please retry"
-      ],
+      "missingSourceKeys": [],
       "missingBaseKeys": [],
       "extraKeys": [],
       "placeholderMismatches": [],
@@ -62,11 +54,9 @@
       "staleUnchangedValueAllowlist": []
     },
     "ru": {
-      "keyCount": 5926,
+      "keyCount": 5927,
       "unchangedValueAllowlistCount": 0,
-      "missingSourceKeys": [
-        "Payment order was not created by the provider, please retry"
-      ],
+      "missingSourceKeys": [],
       "missingBaseKeys": [],
       "extraKeys": [],
       "placeholderMismatches": [],
@@ -74,11 +64,9 @@
       "staleUnchangedValueAllowlist": []
     },
     "vi": {
-      "keyCount": 5926,
+      "keyCount": 5927,
       "unchangedValueAllowlistCount": 28,
-      "missingSourceKeys": [
-        "Payment order was not created by the provider, please retry"
-      ],
+      "missingSourceKeys": [],
       "missingBaseKeys": [],
       "extraKeys": [],
       "placeholderMismatches": [],
