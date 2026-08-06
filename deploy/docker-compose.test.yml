@@ -18,6 +18,18 @@ services:
       SQL_DSN: "${MYSQL_APP_USER:-newapi}:${MYSQL_APP_PASSWORD:?MYSQL_APP_PASSWORD 必须在服务器 .env 提供 64 位十六进制随机值}@tcp(mysql:3306)/new-api-test"
       # 自动关单/替换未实现：必须 false；true 时进程启动失败（FEATURE_NOT_IMPLEMENTED）
       PAY_AUTO_CLOSE_REPLACE: "false"
+      # —— 支付延迟优化 v2 的四个功能开关（非密钥，可内联默认；C1 只禁密钥字面量）——
+      # 本服务用显式 environment 而非 env_file：**只写进服务器 .env 不会注入容器**，
+      # 必须在此显式透传，否则改 .env 是静默空操作。
+      #   WARMER        连接保温器（60s 维持微信主/备 + 支付宝 idle 连接）
+      #   PREPAY_DRIVER 后台补下单（unknown 之后真正把二维码生成出来）
+      #   HEDGE         主备对冲（会把发往微信的下单请求翻倍）
+      #   BREAKER       熔断（改变故障期用户可见行为）
+      # 分阶段上线：先 warmer+driver，验证「连接永远是冷的」假设后再开后两项。
+      PAYMENT_WARMER_ENABLED: "${PAYMENT_WARMER_ENABLED:-true}"
+      PAYMENT_PREPAY_DRIVER_ENABLED: "${PAYMENT_PREPAY_DRIVER_ENABLED:-true}"
+      PAYMENT_HEDGE_ENABLED: "${PAYMENT_HEDGE_ENABLED:-false}"
+      PAYMENT_BREAKER_ENABLED: "${PAYMENT_BREAKER_ENABLED:-false}"
       # Redis default 用户关闭；app 仅使用显式 ACL 用户。账号/密码采用 URI-safe 的
       # 标识符与十六进制格式，redis 启动命令会在读取任何数据前再次验证。
       REDIS_CONN_STRING: "redis://${REDIS_APP_USER:-newapi}:${REDIS_PASSWORD:?REDIS_PASSWORD 必须在服务器 .env 提供 64 位十六进制随机值}@redis"
