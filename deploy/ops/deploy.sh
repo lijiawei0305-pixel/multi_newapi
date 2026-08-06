@@ -61,6 +61,12 @@ OFFSITE_STAGE="${SERVER_REPO}.offsite-stage-${TS}"
 OPS_LOCK_DIR="${OPS_LOCK_DIR:-/run/lock/newapi-ops.lock.d}"
 OPS_LOCK_TOKEN="deploy-$TS-$$-${RANDOM:-0}"
 DEPLOY_LOCK_HELD=0
+# 完成哨兵：只有走到最后一行验收成功才置 1。
+# 为什么需要：EXIT trap 里的 rc=$? 取的是「上一条已完成命令」的状态；当 set -u
+# 因未绑定变量中止脚本时，$? 仍是上一步的 0 → 脚本会在**没部署**的情况下 exit 0。
+# 2026-08-06 实测：6/8 步一条注释里的未转义特殊参数触发 unbound，脚本静默退出 0，
+# 源码树已换、镜像仍是旧的，而调用方看到「成功」。
+DEPLOY_COMPLETED=0
 KEEP_DEPLOY_LOCK=0
 OFFSITE_STAGE_CREATED=0
 OFFSITE_STAGE_CLEANUP_SAFE=1
@@ -123,6 +129,11 @@ MANIFEST_JSON="$(printf \
 release_deploy_lock() {
   local rc=$?
   trap - EXIT
+  # 未走到验收成功 → 一律非零，绝不允许「静默 exit 0 但没部署」。
+  if [ "$DEPLOY_COMPLETED" != 1 ] && [ "$rc" = 0 ]; then
+    log "部署未走到验收步骤即退出（可能是 set -u/set -e 中止）；强制以失败码返回。"
+    rc=1
+  fi
   if [ "$OFFSITE_STAGE_CREATED" = 1 ] && [ "$OFFSITE_STAGE_CLEANUP_SAFE" = 1 ]; then
     if remote "
       set -e
@@ -706,7 +717,9 @@ EOF
   chmod 700 '$SERVER_REPO/deploy-build.runner.sh'
   nohup setsid '$SERVER_REPO/deploy-build.runner.sh' \
     > '$SERVER_REPO/deploy-build.log' 2>&1 </dev/null &
-  # 注意：local 为 set -u + 双引号 remote 时，\\$! 会先展开本地 $!；必须用 \\\$! 传到远端。
+  # 注意：本段整体是 remote 的双引号字符串，这里的 # 对本地 shell 并非注释。
+  # 捕获远端后台 PID 的特殊参数必须写成三重转义才不会被本地先行展开；
+  # 说明文字里也绝不能出现未转义的该符号本身（否则 set -u 会在本地报 unbound）。
   printf '%s\\n' \\\$! > '$SERVER_REPO/deploy-build.pid'
 " || rollback_and_die "无法启动可跟踪的后台构建/迁移"
 
@@ -773,5 +786,6 @@ if ! remote "
 "; then
   log "部署验收已通过，但旧归档清理失败；不影响当前 release。"
 fi
+DEPLOY_COMPLETED=1
 ok "部署成功：版本 $APP_VERSION，可重建归档 $ARCHIVE"
 log "回滚：$SERVER_REPO/deploy/ops/rollback.sh 或 --to $TS"
