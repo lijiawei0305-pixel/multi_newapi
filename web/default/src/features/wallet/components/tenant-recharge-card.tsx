@@ -98,7 +98,8 @@ export function TenantRechargeCard(props: TenantRechargeCardProps) {
 
   const amountNum = Number.parseFloat(amount) || 0
   const belowMin = amountNum < minCny
-  const busy = submitting !== null || phase === 'creating'
+  // 仅「进行中提交」或「弹窗仍开着的 creating」锁表单；关窗 dismiss 后不得残留 busy 转圈
+  const busy = submitting !== null || (phase === 'creating' && dialogOpen)
 
   const providerButton = (value: RechargeProvider, label: string) => (
     <Button
@@ -207,8 +208,12 @@ export function TenantRechargeCard(props: TenantRechargeCardProps) {
         open={dialogOpen}
         onOpenChange={(o) => {
           if (!o) {
-            // 关闭弹窗只藏 UI；终态可 dismiss 清监控，否则保持 activeOrder 轮询
-            if (
+            // 无二维码 creating：关掉 = 放弃（清 session + 停转圈）
+            // 有 QR 的 pending：只藏 UI，继续轮询入账
+            // 终态：完整 dismiss
+            if (phase === 'creating' && !activeOrder?.qr) {
+              dismissOrder()
+            } else if (
               phase === 'credited' ||
               phase === 'failed' ||
               phase === 'expired' ||

@@ -18,7 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { describe, expect, it } from 'vitest'
 
-import { interpretRechargeStatus } from './recharge-status'
+import {
+  CREATE_QR_WAIT_MAX_MS,
+  interpretRechargeStatus,
+  shouldAbandonCreateWait,
+} from './recharge-status'
 
 describe('interpretRechargeStatus (PAY-STA-01)', () => {
   it('treats intermediate paid as paid_processing, not credited', () => {
@@ -93,5 +97,50 @@ describe('interpretRechargeStatus (PAY-STA-01)', () => {
         Date.parse('2026-08-06T00:00:00Z')
       )
     ).toBe('paid_processing')
+  })
+})
+
+describe('shouldAbandonCreateWait', () => {
+  it('keeps waiting when qr exists', () => {
+    expect(
+      shouldAbandonCreateWait({
+        hasQr: true,
+        startedAt: Date.now() - CREATE_QR_WAIT_MAX_MS * 2,
+        providerTradeState: 'ORDER_NOT_EXIST',
+      })
+    ).toBe(false)
+  })
+
+  it('abandons on ORDER_NOT_EXIST without qr', () => {
+    expect(
+      shouldAbandonCreateWait({
+        hasQr: false,
+        startedAt: Date.now(),
+        providerTradeState: 'ORDER_NOT_EXIST',
+      })
+    ).toBe(true)
+  })
+
+  it('abandons after max wait without qr', () => {
+    const now = 1_700_000_000_000
+    expect(
+      shouldAbandonCreateWait({
+        hasQr: false,
+        startedAt: now - CREATE_QR_WAIT_MAX_MS,
+        nowMs: now,
+      })
+    ).toBe(true)
+  })
+
+  it('waits within window without trade state', () => {
+    const now = 1_700_000_000_000
+    expect(
+      shouldAbandonCreateWait({
+        hasQr: false,
+        startedAt: now - 10_000,
+        nowMs: now,
+        status: 'created',
+      })
+    ).toBe(false)
   })
 })

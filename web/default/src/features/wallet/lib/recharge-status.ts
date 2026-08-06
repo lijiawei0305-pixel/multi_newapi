@@ -72,3 +72,41 @@ export function interpretRechargeStatus(
   }
   return 'pending'
 }
+
+/** 等待 Prepay 二维码的前端上限（秒级 UX；后台查单可继续，但不得无限转圈）。 */
+export const CREATE_QR_WAIT_MAX_MS = 90_000
+
+/**
+ * 无 QR 时是否应结束 creating 转圈：
+ * - 平台已明确 ORDER_NOT_EXIST / 本地 failed
+ * - 或等待超过 maxWaitMs
+ * 有 QR 或已支付相关态不得放弃。
+ */
+export function shouldAbandonCreateWait(opts: {
+  hasQr: boolean
+  startedAt: number
+  nowMs?: number
+  maxWaitMs?: number
+  providerTradeState?: string
+  status?: string
+}): boolean {
+  if (opts.hasQr) return false
+  const status = (opts.status || '').toLowerCase()
+  if (status === 'failed' || status === 'credited' || status === 'paid') {
+    return status === 'failed'
+  }
+  const trade = (opts.providerTradeState || '').toUpperCase()
+  if (
+    trade === 'ORDER_NOT_EXIST' ||
+    trade.endsWith('_NOT_EXIST') ||
+    trade.includes('NOT_EXIST')
+  ) {
+    return true
+  }
+  const now = opts.nowMs ?? Date.now()
+  const max = opts.maxWaitMs ?? CREATE_QR_WAIT_MAX_MS
+  if (opts.startedAt > 0 && now - opts.startedAt >= max) {
+    return true
+  }
+  return false
+}

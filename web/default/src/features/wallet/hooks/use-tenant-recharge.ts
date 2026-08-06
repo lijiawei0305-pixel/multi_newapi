@@ -25,7 +25,10 @@ import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { createTenantRecharge, isApiSuccess } from '../api'
-import { interpretRechargeStatus } from '../lib/recharge-status'
+import {
+  interpretRechargeStatus,
+  shouldAbandonCreateWait,
+} from '../lib/recharge-status'
 
 // $1 minimum recharge (USD); native quota credit is $1 = 500k units.
 export const MIN_RECHARGE_USD = 1
@@ -36,7 +39,7 @@ const STATUS_POLL_INTERVAL_MS = 2000
 const STATUS_REQUEST_TIMEOUT_MS = 8000
 /**
  * 前端监控上限：对齐微信 Native 二维码约 2h 有效期；真正终态由 status/failed/expired 决定。
- * 关闭 Dialog 不停止 activeOrder 监控。
+ * 有 QR 后关弹窗可继续后台轮询；无 QR 的 creating 关弹窗则完整 dismiss。
  */
 const STATUS_POLL_MAX_MS = 2 * 60 * 60 * 1000
 
@@ -196,7 +199,7 @@ function markTiming(name: string) {
  * - 点击即 creating（Dialog 可立即打开，不等待创建接口）
  * - 微信：pending 展示 QR，串行轮询本站 status；仅 credited 完成
  * - 支付宝：跳转收银台（不视为付款成功）
- * - dialogOpen 与 activeOrder 分离：关弹窗不停止未终结订单监控
+ * - 有 QR 后关弹窗可继续轮询；无 QR creating / 错误态关弹窗 = 完整 dismiss
  */
 export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
   const { onCredited } = opts
@@ -217,12 +220,15 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
   const creditedHandledRef = useRef<string | null>(null)
   const pollAbortRef = useRef<AbortController | null>(null)
   const pollInFlightRef = useRef(false)
+  /** 用户 dismiss / 新 submit 递增；过期 create 响应不得写回状态（关窗竞态）。 */
+  const intentGenRef = useRef(0)
   const activeOrderRef = useRef(activeOrder)
   useEffect(() => {
     activeOrderRef.current = activeOrder
   }, [activeOrder])
 
-  // 页面 reload：从 sessionStorage 恢复支付意图并继续轮询 status
+  // 页面 reload：从 sessionStorage 恢复支付意图。
+  // 不按「本地 90s」直接清意图（服务端可能仍有 pay_url）；打开后首轮 status 判定 QR / NOT_EXIST。
   useEffect(() => {
     if (activeOrder) return
     const stored = loadRechargeIntent()
@@ -236,6 +242,7 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
       clearRechargeIntent()
       return
     }
+    const startedAt = stored.startedAt || Date.now()
     setActiveOrder({
       orderNo: stored.orderNo || '',
       qr: null,
@@ -243,13 +250,23 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
       amountCny: stored.amountCny,
       provider: stored.provider,
       expiresAt: null,
-      startedAt: stored.startedAt || Date.now(),
+      startedAt,
       idempotencyKey: stored.idempotencyKey,
     })
-    setPhase(stored.orderNo ? 'creating' : 'creating_error')
-    if (stored.orderNo) {
+    if (!stored.orderNo) {
+      // 半截意图（无 order_no）：不得无限 creating
+      setPhase('creating_error')
+      setErrorMessage(
+        i18next.t('Failed to create payment order', {
+          defaultValue: '创建支付订单失败',
+        })
+      )
       setDialogOpen(true)
+      return
     }
+    // 有 order_no：短暂 creating，由 status 拉回 QR 或 abandon（NOT_EXIST / 等码超时）
+    setPhase('creating')
+    setDialogOpen(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only restore
   }, [])
 
@@ -421,6 +438,36 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
             }
           }
 
+          const hasQr = !!(
+            activeOrderRef.current?.qr ||
+            qrFromStatus ||
+            (activeOrderRef.current?.provider === 'alipay' && aliFromStatus)
+          )
+          // 无 QR 且平台无单 / 等码超时：结束转圈，提示重试（清意图防刷新复现）
+          if (
+            !hasQr &&
+            shouldAbandonCreateWait({
+              hasQr: false,
+              startedAt: activeOrderRef.current?.startedAt || pollStartedAt,
+              providerTradeState: data.provider_trade_state,
+              status: data.status,
+            })
+          ) {
+            stopPolling()
+            clearRechargeIntent()
+            setPhase('creating_error')
+            setDialogOpen(true)
+            const msg = i18next.t(
+              'Payment order was not created by the provider, please retry',
+              {
+                defaultValue: '支付渠道未能创建订单，请关闭后重新下单',
+              }
+            )
+            setErrorMessage(msg)
+            toast.error(msg)
+            return
+          }
+
           const interp = interpretRechargeStatus(data)
           if (interp === 'credited') {
             stopPolling()
@@ -498,13 +545,11 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
     }
   }, [pollOrderNo, pollStartedAt, phase, stopPolling, applyCredited])
 
-  const closeDialog = useCallback(() => {
-    // 只关 UI，不清理 activeOrder / 不停止轮询（未终结订单继续监控）
-    setDialogOpen(false)
-  }, [])
-
   const dismissOrder = useCallback(() => {
+    // 作废进行中的 create 响应，防止关窗后仍写回 creating
+    intentGenRef.current += 1
     stopPolling()
+    clearRechargeIntent()
     setActiveOrder(null)
     setPhase('idle')
     setErrorMessage(null)
@@ -512,6 +557,17 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
     setSubmitting(null)
     creditedHandledRef.current = null
   }, [stopPolling])
+
+  const closeDialog = useCallback(() => {
+    // 有 QR 的 pending/paid_processing：只关 UI，后台继续轮询到账。
+    // 无 QR 的 creating / creating_error：关掉 = 放弃，完整 dismiss。
+    const cur = activeOrderRef.current
+    if ((phase === 'creating' && !cur?.qr) || phase === 'creating_error') {
+      dismissOrder()
+      return
+    }
+    setDialogOpen(false)
+  }, [phase, dismissOrder])
 
   const submit = useCallback(
     async (amountCny: number, provider: RechargeProvider) => {
@@ -530,6 +586,8 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
 
       markTiming('recharge_click')
       creditedHandledRef.current = null
+      const intentGen = ++intentGenRef.current
+      const stillActive = () => intentGen === intentGenRef.current
       setSubmitting(provider)
       setErrorMessage(null)
       setPhase('creating')
@@ -577,6 +635,9 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           provider,
           idempotency_key: idempotencyKey,
         })
+        if (!stillActive()) {
+          return false
+        }
         markTiming('recharge_create_response')
         const data = res.data
         // 202 / PAY_CREATE_UNKNOWN：有 order_no 则进入确认中并轮询
@@ -599,6 +660,9 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           toast.error(msg)
           return false
         }
+        if (!stillActive()) {
+          return false
+        }
         const {
           order_no,
           amount_usd,
@@ -608,12 +672,13 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           idempotency_key,
         } = data
         const keyOut = idempotency_key || idempotencyKey
+        const orderStartedAt = Date.now()
         saveRechargeIntent({
           orderNo: order_no,
           idempotencyKey: keyOut,
           provider,
           amountCny: amount_cny,
-          startedAt: Date.now(),
+          startedAt: orderStartedAt,
           userId: useAuthStore.getState().auth.user?.id,
         })
         const baseOrder = {
@@ -622,7 +687,7 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           amountCny: amount_cny,
           provider,
           expiresAt: expires_at ?? null,
-          startedAt: Date.now(),
+          startedAt: orderStartedAt,
           idempotencyKey: keyOut,
         } as const
 
@@ -662,14 +727,8 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
         const url = pay?.alipay_url
         if (!url) {
           setActiveOrder({
-            orderNo: order_no,
+            ...baseOrder,
             qr: null,
-            amountUsd: amount_usd,
-            amountCny: amount_cny,
-            provider,
-            expiresAt: expires_at ?? null,
-            startedAt: Date.now(),
-            idempotencyKey: keyOut,
           })
           setPhase('creating')
           return true
@@ -683,20 +742,17 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           return false
         }
         setActiveOrder({
-          orderNo: order_no,
+          ...baseOrder,
           qr: null,
-          amountUsd: amount_usd,
-          amountCny: amount_cny,
-          provider,
-          expiresAt: expires_at ?? null,
-          startedAt: Date.now(),
-          idempotencyKey: keyOut,
         })
         setPhase('pending')
         setDialogOpen(false)
         window.location.href = safeUrl
         return true
       } catch {
+        if (!stillActive()) {
+          return false
+        }
         const msg = i18next.t('Payment service busy, please retry', {
           defaultValue: '支付服务网络繁忙，请稍后重试',
         })
@@ -705,7 +761,9 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
         toast.error(msg)
         return false
       } finally {
-        setSubmitting(null)
+        if (stillActive()) {
+          setSubmitting(null)
+        }
       }
     },
     [submitting]

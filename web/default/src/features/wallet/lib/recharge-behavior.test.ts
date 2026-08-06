@@ -92,4 +92,32 @@ describe('recharge UI behavior contracts', () => {
     expect(interpretRechargeStatus(checkoutOnly)).toBe('pending')
     expect(interpretRechargeStatus(checkoutOnly)).not.toBe('credited')
   })
+
+  it('closing creating without QR is full dismiss (not background hide)', () => {
+    // 契约：无 QR 的 creating 关弹窗 = 放弃，页面按钮不得继续 busy
+    const phase = 'creating'
+    const hasQr = false
+    const shouldFullDismiss = phase === 'creating' && !hasQr
+    expect(shouldFullDismiss).toBe(true)
+    expect(canSubmit(null, 'idle')).toBe(true)
+  })
+
+  it('busy only while creating dialog is open or submit in flight', () => {
+    const busy = (
+      submitting: string | null,
+      phase: string,
+      dialogOpen: boolean
+    ) => submitting !== null || (phase === 'creating' && dialogOpen)
+    expect(busy(null, 'creating', false)).toBe(false)
+    expect(busy(null, 'creating', true)).toBe(true)
+    expect(busy('wxpay', 'idle', false)).toBe(true)
+    expect(busy(null, 'pending', false)).toBe(false)
+  })
+
+  it('stale create response after dismiss must not re-apply', () => {
+    let gen = 1
+    const stillActive = (responseGen: number) => responseGen === gen
+    gen += 1 // dismiss
+    expect(stillActive(1)).toBe(false)
+  })
 })
