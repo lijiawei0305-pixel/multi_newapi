@@ -33,6 +33,7 @@ import (
 	"github.com/QuantumNous/new-api/internal/payment"
 	paymentrepo "github.com/QuantumNous/new-api/internal/payment/gormrepo"
 	paymentmigrate "github.com/QuantumNous/new-api/internal/payment/migrate"
+	"github.com/QuantumNous/new-api/internal/payment/realpay"
 	"github.com/QuantumNous/new-api/internal/pricing"
 	"github.com/QuantumNous/new-api/internal/promotion"
 	promotionrepo "github.com/QuantumNous/new-api/internal/promotion/gormrepo"
@@ -247,6 +248,13 @@ func New(db *gorm.DB) *App {
 		payment.WithNotifyBaseURL(rechargeCfg.notifyBaseURL),
 		// 把入账状态推进等静默异常接到主站日志（替代原 `_, _ =` 吞错）。
 		payment.WithErrorLogf(func(format string, args ...any) { common.SysLog(fmt.Sprintf(format, args...)) }),
+	)
+	// P1-B：熔断钩子（realpay 进程内计数；开路时同步 create 跳过 Prepay 直接 queued）
+	payment.SetBreakerHooks(
+		realpay.BreakerAllowSync,
+		realpay.BreakerRecordSuccess,
+		realpay.BreakerRecordUnknown,
+		realpay.BreakerRecordDefinitive,
 	)
 
 	// report（财务报表）：聚合仓储（raw Table()/Joins() 跨表只读聚合），构于同一主库。

@@ -5926,6 +5926,11 @@
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
     "Zoom in": "Увеличить",
-    "Payment order was not created by the provider, please retry": "Платёжный провайдер не создал заказ. Закройте окно и создайте заказ заново"
+    "Payment order was not created by the provider, please retry": "Платёжный провайдер не создал заказ. Закройте окно и создайте заказ заново",
+    "WeChat merchant is not authorized for this product": "У WeChat-мерчанта нет прав или продукт не подключён",
+    "Payment channel response unclear, verifying order…": "Ответ платёжного канала неясен (сеть/таймаут), проверяем, создан ли заказ…",
+    "Payment QR was not returned, please retry": "QR-код оплаты не получен, повторите попытку",
+    "Verifying payment order": "Проверка платёжного заказа",
+    "Payment channel response unclear, please retry": "Неясный ответ канала или сбой сети. Закройте и создайте заказ заново"
   }
 }

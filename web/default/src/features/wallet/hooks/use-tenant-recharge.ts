@@ -20,7 +20,7 @@ import i18next from 'i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
-import { api } from '@/lib/api'
+import { api, getApiErrorCode } from '@/lib/api'
 import { normalizeHttpNavigationUrl } from '@/lib/safe-navigation'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -33,10 +33,12 @@ import {
 // $1 minimum recharge (USD); native quota credit is $1 = 500k units.
 export const MIN_RECHARGE_USD = 1
 
-/** 串行状态轮询间隔（PAY-REC-01：约 2s；禁止 setInterval(async)）。 */
+/** 有二维码后的状态轮询间隔（PAY-REC-01；禁止 setInterval(async)）。 */
 const STATUS_POLL_INTERVAL_MS = 2000
-/** 单次状态请求超时。 */
-const STATUS_REQUEST_TIMEOUT_MS = 8000
+/** 无 QR 核实阶段用更短间隔，尽快拿到 code_url 或失败。 */
+const STATUS_POLL_VERIFY_INTERVAL_MS = 1000
+/** 单次状态请求超时（与后端 query 预算同量级）。 */
+const STATUS_REQUEST_TIMEOUT_MS = 6000
 /**
  * 前端监控上限：对齐微信 Native 二维码约 2h 有效期；真正终态由 status/failed/expired 决定。
  * 有 QR 后关弹窗可继续后台轮询；无 QR 的 creating 关弹窗则完整 dismiss。
@@ -338,6 +340,14 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
     const ac = new AbortController()
     pollAbortRef.current = ac
 
+    const nextPollDelayMs = () => {
+      // 无 QR 核实：1s；已有码等支付：2s
+      if (!activeOrderRef.current?.qr) {
+        return STATUS_POLL_VERIFY_INTERVAL_MS
+      }
+      return STATUS_POLL_INTERVAL_MS
+    }
+
     const schedule = (delayMs: number) => {
       if (cancelled) return
       timer = setTimeout(() => {
@@ -347,7 +357,7 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
 
     const tick = async () => {
       if (cancelled || pollInFlightRef.current) {
-        schedule(STATUS_POLL_INTERVAL_MS)
+        schedule(nextPollDelayMs())
         return
       }
       if (Date.now() >= deadline) {
@@ -405,7 +415,7 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
               userId: useAuthStore.getState().auth.user?.id,
             })
             // 下轮 tick 用新 order_no（依赖 activeOrder 更新 effect）
-            schedule(STATUS_POLL_INTERVAL_MS)
+            schedule(nextPollDelayMs())
             return
           }
 
@@ -488,9 +498,9 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
             setPhase('creating_error')
             setDialogOpen(true)
             const msg = i18next.t(
-              'Payment order was not created by the provider, please retry',
+              'Payment channel response unclear, please retry',
               {
-                defaultValue: '支付渠道未能创建订单，请关闭后重新下单',
+                defaultValue: '支付渠道响应不确定或网络异常，请关闭后重新下单',
               }
             )
             setErrorMessage(msg)
@@ -536,15 +546,15 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
         setPhase('creating_error')
         setDialogOpen(true)
         const msg = i18next.t(
-          'Payment order was not created by the provider, please retry',
+          'Payment channel response unclear, please retry',
           {
-            defaultValue: '支付渠道未能创建订单，请关闭后重新下单',
+            defaultValue: '支付渠道响应不确定或网络异常，请关闭后重新下单',
           }
         )
         setErrorMessage(msg)
         return
       }
-      schedule(STATUS_POLL_INTERVAL_MS)
+      schedule(nextPollDelayMs())
     }
 
     // 立即首查（不等待 interval）
@@ -617,8 +627,15 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
       setPhase('creating')
       setDialogOpen(true)
       markTiming('recharge_dialog_open')
-      // 同一支付意图复用 idempotency key（retry / 202 unknown 恢复不得新开 key）
+      // 同一支付意图复用 key：仅 creating/pending 等可恢复路径。
+      // failed / creating_error（含 NO_AUTH）必须新 key，否则与已 failed 订单冲突。
+      const canReuseKey =
+        phase === 'creating' ||
+        phase === 'pending' ||
+        phase === 'paid_processing' ||
+        phase === 'idle'
       const existingKey =
+        canReuseKey &&
         activeOrderRef.current?.idempotencyKey &&
         activeOrderRef.current.amountCny === amountCny &&
         activeOrderRef.current.provider === provider
@@ -664,20 +681,34 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
         }
         markTiming('recharge_create_response')
         const data = res.data
-        // 202 / PAY_CREATE_UNKNOWN：有 order_no 则进入确认中并轮询
+        // 三态：NO_AUTH/业务拒绝→failed；PAY_CREATE_UNKNOWN/queued→轮询出码；出码→pending
         const code = (res as { code?: string }).code
-        const isUnknown =
+        const isQueued =
           code === 'PAY_CREATE_UNKNOWN' ||
-          code === 'PAY_URL_PERSIST_FAILED' ||
-          code === 'PAY_URL_MISSING'
+          data?.status === 'queued' ||
+          (data?.order_no &&
+            !data?.pay?.wxpay_qr &&
+            !data?.pay?.alipay_url &&
+            !isApiSuccess(res))
+        const isUnknown = isQueued
         if ((!isApiSuccess(res) || !data) && !(isUnknown && data?.order_no)) {
-          const msg = res.message || i18next.t('Payment request failed')
-          // 无 order_no 的半截意图清掉，避免刷新再弹 creating_error 死循环感
+          let msg = res.message || i18next.t('Payment request failed')
+          const isBizReject =
+            code === 'PAY_PROVIDER_NO_AUTH' || code === 'PAY_PROVIDER_REJECT'
+          if (isBizReject) {
+            msg =
+              res.message ||
+              i18next.t('WeChat merchant is not authorized for this product', {
+                defaultValue:
+                  '微信支付商户无权限或未开通该产品，请检查商户配置',
+              })
+          }
           if (!data?.order_no) {
             clearRechargeIntent()
           }
           setErrorMessage(msg)
-          setPhase('creating_error')
+          // 业务拒绝用 failed（终态文案）；其它创建失败用 creating_error
+          setPhase(isBizReject ? 'failed' : 'creating_error')
           toast.error(msg)
           return false
         }
@@ -725,8 +756,8 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           setActiveOrder({ ...baseOrder, qr: null })
           setPhase('creating')
           toast.info(
-            i18next.t('Confirming payment order', {
-              defaultValue: '正在确认订单，请稍候…',
+            i18next.t('Generating payment QR code, please wait…', {
+              defaultValue: '正在生成支付二维码，请稍候',
             })
           )
           return true
@@ -736,13 +767,13 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           const qr = pay?.wxpay_qr
           if (!qr) {
             setActiveOrder({ ...baseOrder, qr: null })
-            setPhase('creating')
-            toast.info(
-              i18next.t('Confirming payment order', {
-                defaultValue: '正在确认订单，请稍候…',
-              })
-            )
-            return true
+            setPhase('creating_error')
+            const msg = i18next.t('Payment QR was not returned, please retry', {
+              defaultValue: '未返回支付二维码，请重试或检查支付配置',
+            })
+            setErrorMessage(msg)
+            toast.error(msg)
+            return false
           }
           setActiveOrder({
             ...baseOrder,
@@ -752,15 +783,20 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
           markTiming('recharge_qr_rendered')
           return true
         }
-        // Alipay: 打开收银台 ≠ 付款成功；仅表示 redirect_created
+        // Alipay: 打开收银台 ≠ 付款成功
         const url = pay?.alipay_url
         if (!url) {
           setActiveOrder({
             ...baseOrder,
             qr: null,
           })
-          setPhase('creating')
-          return true
+          setPhase('creating_error')
+          const msg = i18next.t('Payment QR was not returned, please retry', {
+            defaultValue: '未返回支付跳转链接，请重试或检查支付配置',
+          })
+          setErrorMessage(msg)
+          toast.error(msg)
+          return false
         }
         const safeUrl = normalizeHttpNavigationUrl(url)
         if (!safeUrl) {
@@ -778,18 +814,34 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
         setDialogOpen(false)
         window.location.href = safeUrl
         return true
-      } catch {
+      } catch (err) {
         if (!stillActive()) {
           return false
         }
-        const msg = i18next.t('Payment service busy, please retry', {
-          defaultValue: '支付服务网络繁忙，请稍后重试',
-        })
+        const errCode = getApiErrorCode(err)
+        const apiMsg =
+          (err as { response?: { data?: { message?: string } } })?.response
+            ?.data?.message || ''
+        const isBizReject =
+          errCode === 'PAY_PROVIDER_NO_AUTH' ||
+          errCode === 'PAY_PROVIDER_REJECT'
+        let msg = apiMsg
+        if (isBizReject) {
+          msg =
+            apiMsg ||
+            i18next.t('WeChat merchant is not authorized for this product', {
+              defaultValue: '微信支付商户无权限或未开通该产品，请检查商户配置',
+            })
+        } else if (!msg) {
+          msg = i18next.t('Payment service busy, please retry', {
+            defaultValue: '支付服务网络繁忙，请稍后重试',
+          })
+        }
         if (!activeOrderRef.current?.orderNo) {
           clearRechargeIntent()
         }
         setErrorMessage(msg)
-        setPhase('creating_error')
+        setPhase(isBizReject ? 'failed' : 'creating_error')
         toast.error(msg)
         return false
       } finally {
@@ -798,13 +850,13 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
         }
       }
     },
-    [submitting]
+    [submitting, phase]
   )
 
   const retryCreate = useCallback(() => {
     const order = activeOrder
     if (!order || submitting !== null) return
-    // 复用原支付意图（同一 amount/provider/idempotencyKey），不得生成新 key
+    // failed/creating_error：submit 内会换新 idempotency key；creating(unknown) 可复用
     void submit(order.amountCny, order.provider)
   }, [activeOrder, submit, submitting])
 

@@ -8,10 +8,17 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/internal/alert"
 	"github.com/QuantumNous/new-api/internal/payment"
+	"github.com/QuantumNous/new-api/internal/payment/realpay"
 	"github.com/QuantumNous/new-api/internal/platform/agenthook"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 )
+
+func realpayPrepayDriverEnabled() bool { return realpay.PrepayDriverEnabled() }
+
+func withRealpayBgBudget(ctx context.Context) context.Context {
+	return realpay.WithBudgetMode(ctx, realpay.BudgetBackground)
+}
 
 // 三路径 seam（仿 subOrderPaidQuery/activatePaidSubHook 的包级钩子）：默认接真实网关，单测替换为桩。
 var reconcilePaidFn = func(a *App, ctx context.Context, before time.Time) (payment.ReconcileResult, error) {
@@ -40,6 +47,20 @@ var reconcileDueQueryFn = func(a *App, ctx context.Context) (payment.ReconcileRe
 		return a.providerMgr.QueryOrder(ctx, payment.Provider(provider), orderNo)
 	}
 	return a.RechargeGateway.ReconcileDueQueries(ctx, reconcileCreatedLimit, query)
+}
+
+// reconcilePendingPrepayFn P0-B：local_created && pay_url 空 → 后台补 Prepay（宽预算）。
+// PAYMENT_PREPAY_DRIVER_ENABLED=false 可关。
+var reconcilePendingPrepayFn = func(a *App, ctx context.Context) (payment.ReconcileResult, error) {
+	if a.RechargeGateway == nil {
+		return payment.ReconcileResult{}, nil
+	}
+	if !realpayPrepayDriverEnabled() {
+		return payment.ReconcileResult{}, nil
+	}
+	bg := payment.WithBackgroundPrepay(ctx)
+	bg = withRealpayBgBudget(bg)
+	return a.RechargeGateway.ReconcilePendingPrepay(bg, 50)
 }
 
 var reconcileSubFn = func(a *App, ctx context.Context, before time.Time) (ReconcileSubResult, error) {
@@ -77,6 +98,8 @@ func (a *App) runReconcileAllExceptPaid(ctx context.Context, trigger string) {
 }
 
 func (a *App) runReconcileDueQueryPath(ctx context.Context) {
+	// P0-B：先补 Prepay（缺码），再查单（有码/未知态）
+	a.runReconcilePendingPrepayPath(ctx)
 	due, err := reconcileDueQueryFn(a, ctx)
 	if err != nil {
 		logger.LogWarn(ctx, "reconcile RCG(due-query) failed: "+err.Error())
@@ -85,6 +108,37 @@ func (a *App) runReconcileDueQueryPath(ctx context.Context) {
 	if len(due.Reconciled) > 0 || len(due.Expired) > 0 || len(due.Failed) > 0 {
 		logger.LogInfo(ctx, fmt.Sprintf("reconcile RCG(due-query): scanned=%d credited=%d expired=%d failed=%d",
 			due.Scanned, len(due.Reconciled), len(due.Expired), len(due.Failed)))
+	}
+}
+
+func (a *App) runReconcilePendingPrepayPath(ctx context.Context) {
+	pre, err := reconcilePendingPrepayFn(a, ctx)
+	if err != nil {
+		logger.LogWarn(ctx, "reconcile RCG(pending-prepay) failed: "+err.Error())
+		// C5：驱动器本身失败进告警
+		if a.AlertSink != nil {
+			_ = a.AlertSink.Dispatch(ctx, alert.Alert{
+				Level:    alert.LevelCritical,
+				Subject:  "Prepay 驱动器失败",
+				Body:     "reconcile pending-prepay: " + err.Error(),
+				DedupKey: "prepay_driver_error",
+			})
+		}
+		return
+	}
+	if pre.Scanned > 0 || len(pre.Reconciled) > 0 || len(pre.Failed) > 0 {
+		logger.LogInfo(ctx, fmt.Sprintf("reconcile RCG(pending-prepay): scanned=%d ready=%d failed=%d",
+			pre.Scanned, len(pre.Reconciled), len(pre.Failed)))
+	}
+	// C5：补下单失败（含 unknown 持续）进告警；definitive 与 unknown 都计
+	if n := len(pre.Failed); n > 0 && a.AlertSink != nil {
+		_ = a.AlertSink.Dispatch(ctx, alert.Alert{
+			Level:   alert.LevelCritical,
+			Subject: "Prepay 补下单失败",
+			Body: fmt.Sprintf("本轮 pending-prepay %d 笔未出码（scanned=%d ready=%d）。unknown 将重试；definitive 见卡单页。",
+				n, pre.Scanned, len(pre.Reconciled)),
+			DedupKey: "prepay_driver_failed",
+		})
 	}
 }
 
@@ -269,6 +323,36 @@ func (a *App) alertReconcileHealth(ctx context.Context, trigger string, prevRun 
 			Body: fmt.Sprintf("本轮对账 %d 笔失败：RCG-paid %d / RCG-created %d / SUB %d / AGT %d。已付未入账订单将于下轮重试，持续失败需人工核查对账记录。",
 				failed, len(paid.Failed), len(created.Failed), len(sub.Failed), len(agt.Failed)),
 			DedupKey: "reconcile_failed",
+		})
+	}
+	// P2 SLI：熔断开路 / TLS 成功率过低 → 健康告警（供 egress Go/No-Go 对照）
+	a.alertPaymentSLI(ctx)
+}
+
+// alertPaymentSLI 支付出口 SLI 告警（breaker / TLS / 复用率）。
+func (a *App) alertPaymentSLI(ctx context.Context) {
+	if a.AlertSink == nil {
+		return
+	}
+	if realpay.BreakerIsOpen() {
+		snap := realpay.SnapshotMetrics()
+		_ = a.AlertSink.Dispatch(ctx, alert.Alert{
+			Level:   alert.LevelCritical,
+			Subject: "支付 Prepay 熔断开路",
+			Body: fmt.Sprintf("连续 unknown 触发熔断，同步下单将直接 queued。breaker_open_seconds=%.1f unknown_streak=%d prepay_sync_p95_ms=%d conn_reuse_rate=%.2f tls_success_rate=%.2f",
+				snap.BreakerOpenSeconds, snap.UnknownStreak, snap.PrepaySyncP95Ms, snap.ConnReuseRate, snap.TLSSuccessRate),
+			DedupKey: "payment_breaker_open",
+		})
+	}
+	snap := realpay.SnapshotMetrics()
+	// 样本足够且 TLS 成功率 < 99% 时告警（对齐 payment-egress-ops-plan §7）
+	if snap.TLSSuccessRate >= 0 && snap.TLSSuccessRate < 0.99 {
+		_ = a.AlertSink.Dispatch(ctx, alert.Alert{
+			Level:   alert.LevelCritical,
+			Subject: "支付 TLS 成功率低于门禁",
+			Body: fmt.Sprintf("tls_success_rate=%.3f（门禁≥0.99）；cold+reused 样本不足时不报。conn_reuse_rate=%.3f prepay_sync_p95_ms=%d prepay_bg_p95_ms=%d",
+				snap.TLSSuccessRate, snap.ConnReuseRate, snap.PrepaySyncP95Ms, snap.PrepayBgP95Ms),
+			DedupKey: "payment_tls_sli",
 		})
 	}
 }

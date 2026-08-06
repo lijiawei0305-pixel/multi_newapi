@@ -3,6 +3,7 @@ package payment
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
@@ -47,6 +48,10 @@ const (
 	CodePayURLMissing = "PAY_URL_MISSING"
 	// CodeIdempotencyConflict 同一幂等键但支付意图（金额/渠道等）不一致。
 	CodeIdempotencyConflict = "PAY_IDEMPOTENCY_CONFLICT"
+	// CodeProviderNoAuth 支付机构明确拒绝：商户无权限/未开通产品（微信 NO_AUTH 等）。
+	CodeProviderNoAuth = "PAY_PROVIDER_NO_AUTH"
+	// CodeProviderReject 支付机构其它确定性业务拒绝（签名错、参数错、商户不匹配等）。
+	CodeProviderReject = "PAY_PROVIDER_REJECT"
 )
 
 var (
@@ -71,11 +76,50 @@ var (
 	// ErrPaymentFactInvalid 支付事实校验失败。
 	ErrPaymentFactInvalid = apperr.New(CodePaymentFactInvalid, "支付事实不完整或无效", http.StatusBadRequest)
 	// ErrCreateOutcomeUnknown 下单结果未知（不标 failed）；HTTP 202，响应体须带 order_no。
-	ErrCreateOutcomeUnknown = apperr.New(CodeCreateOutcomeUnknown, "支付订单确认中，请稍后查询状态", http.StatusAccepted)
+	// 文案避免「确认中」误导：多数是网络/超时，并非商户已受理。
+	ErrCreateOutcomeUnknown = apperr.New(CodeCreateOutcomeUnknown, "支付渠道响应不确定，正在核实是否已下单", http.StatusAccepted)
 	// ErrIdempotencyConflict 同一幂等键但支付意图字段不一致。
 	ErrIdempotencyConflict = apperr.New(CodeIdempotencyConflict, "幂等键与支付意图不一致", http.StatusConflict)
 	// ErrPayURLPersist 二维码落库失败。
 	ErrPayURLPersist = apperr.New(CodePayURLPersist, "支付凭据保存失败，请重试", http.StatusServiceUnavailable)
 	// ErrPayURLMissing 无可用二维码。
 	ErrPayURLMissing = apperr.New(CodePayURLMissing, "支付二维码不可用，请重新发起或联系客服", http.StatusConflict)
+	// ErrProviderNoAuth 商户未授权/无产品权限（应对用户展示明确配置问题，禁止「确认中」）。
+	ErrProviderNoAuth = apperr.New(CodeProviderNoAuth, "微信支付商户无权限或未开通该产品，请检查商户配置后重试", http.StatusBadRequest)
+	// ErrProviderReject 支付机构确定性拒绝（非网络未知）。
+	ErrProviderReject = apperr.New(CodeProviderReject, "支付机构拒绝本次下单，请检查支付配置或更换支付方式", http.StatusBadRequest)
 )
+
+// MapCreateError 将 CreatePay 链路错误映射为可对外返回的 AppError。
+// - definitive_reject + NO_AUTH → PAY_PROVIDER_NO_AUTH
+// - 其它 definitive_reject → PAY_PROVIDER_REJECT
+// - outcome_unknown → PAY_CREATE_UNKNOWN（保持 202 语义由上层决定）
+// - 已是 AppError 原样返回
+func MapCreateError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var ae *apperr.AppError
+	if errors.As(err, &ae) && ae != nil {
+		return err
+	}
+	if errors.Is(err, ErrCreateOutcomeUnknown) || errors.Is(err, ErrPayURLPersist) || errors.Is(err, ErrPayURLMissing) {
+		return err
+	}
+	oe := AsOutcome(err)
+	if oe == nil {
+		return err
+	}
+	switch oe.Outcome {
+	case CreateOutcomeDefinitiveReject:
+		class := strings.ToLower(oe.ErrorClass)
+		if class == "platform_no_auth" || strings.Contains(class, "no_auth") {
+			return ErrProviderNoAuth.Wrap(err)
+		}
+		return ErrProviderReject.Wrap(err)
+	case CreateOutcomeUnknown:
+		return ErrCreateOutcomeUnknown
+	default:
+		return err
+	}
+}

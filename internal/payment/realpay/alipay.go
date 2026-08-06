@@ -19,6 +19,7 @@ type alipayAdapter struct {
 	appID     string
 	sellerID  string
 	returnURL string
+	prod      bool
 	client    *alipay.Client
 }
 
@@ -35,6 +36,7 @@ func newAlipayAdapter(cfg AlipayConfig) (*alipayAdapter, error) {
 		appID:     cfg.AppID,
 		sellerID:  cfg.SellerID,
 		returnURL: cfg.ReturnURL,
+		prod:      cfg.IsProduction,
 		client:    client,
 	}, nil
 }

@@ -112,7 +112,7 @@ func TestReconcileStuckCreated(t *testing.T) {
 }
 
 // TestReconcileStuckCreatedExpire Phase E：本地过期不得在 NOTPAY 时直接 failed（微信默认最长 7 天）。
-// 已付仍补入账；未付无 QR → close_pending。
+// 已付仍补入账；未付无 QR 且未过期 → local_created（P0-B 允许同单号重放 Prepay）。
 func TestReconcileStuckCreatedExpire(t *testing.T) {
 	g, repo, _, _ := newGateway()
 	seedCreatedOrder(t, repo, "RCG-paid", OrderTypeRecharge)
@@ -138,10 +138,11 @@ func TestReconcileStuckCreatedExpire(t *testing.T) {
 		t.Fatalf("RCG-paid status=%q, want credited", got.Status)
 	}
 	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-stale"); got.Status != OrderCreated {
-		t.Fatalf("RCG-stale status=%q, want created (close_pending path)", got.Status)
+		t.Fatalf("RCG-stale status=%q, want created (re-prepay path)", got.Status)
 	}
-	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-stale"); got.CreateState != CreateStateClosePending {
-		t.Fatalf("RCG-stale create_state=%q, want close_pending", got.CreateState)
+	// P0-B：query NOTPAY + 无 pay_url + 未过期 → local_created，交驱动器补码（不再 close_pending 死单）
+	if got, _ := repo.GetByOrderNo(context.Background(), "RCG-stale"); got.CreateState != CreateStateLocalCreated {
+		t.Fatalf("RCG-stale create_state=%q, want local_created", got.CreateState)
 	}
 }
 

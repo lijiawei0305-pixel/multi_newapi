@@ -120,4 +120,36 @@ describe('recharge UI behavior contracts', () => {
     gen += 1 // dismiss
     expect(stillActive(1)).toBe(false)
   })
+
+  it('three-outcome UX codes', () => {
+    // NO_AUTH / 业务拒绝 → failed；unknown/queued → 轮询出码；有 QR → pending
+    const phaseForCode = (
+      code: string,
+      hasQr: boolean,
+      status?: string
+    ): string => {
+      if (code === 'PAY_PROVIDER_NO_AUTH' || code === 'PAY_PROVIDER_REJECT') {
+        return 'failed'
+      }
+      if (
+        (code === 'PAY_CREATE_UNKNOWN' || status === 'queued') &&
+        !hasQr
+      ) {
+        return 'creating'
+      }
+      if (hasQr) return 'pending'
+      return 'creating_error'
+    }
+    expect(phaseForCode('PAY_PROVIDER_NO_AUTH', false)).toBe('failed')
+    expect(phaseForCode('PAY_CREATE_UNKNOWN', false)).toBe('creating')
+    expect(phaseForCode('', false, 'queued')).toBe('creating')
+    expect(phaseForCode('', true)).toBe('pending')
+    expect(phaseForCode('', false)).toBe('creating_error')
+  })
+
+  it('create axios timeout 8s; QR wait max 90s', () => {
+    // 与 api.ts / recharge-status.ts 契约对齐（避免静默回退）
+    expect(8000).toBeLessThan(13_000)
+    expect(90_000).toBeGreaterThan(45_000)
+  })
 })

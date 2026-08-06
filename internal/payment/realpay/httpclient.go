@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,13 +15,17 @@ import (
 	"github.com/QuantumNous/new-api/internal/payment"
 )
 
-// 支付 HTTP 超时预算（PAY-LAT-02）：不得回到 3×8s≈24.6s 同步长等待。
+// 支付 HTTP 超时预算（P2 回调，在 P0/P1 之后）：
+//
+//	dial 3s + TLS 4s = 7s 冷连地板 ≤ 后台 per-attempt 8s；
+//	同步路径由 context overall 2.5s 截断，不依赖过紧的 Transport 超时砍成功握手。
+//	禁止回到 3×8s 同步长等待。
 const (
 	payDialTimeout           = 3 * time.Second
-	payTLSHandshakeTimeout   = 5 * time.Second
+	payTLSHandshakeTimeout   = 4 * time.Second
 	payResponseHeaderTimeout = 5 * time.Second
 	payIdleConnTimeout       = 90 * time.Second
-	payClientTimeout         = 12 * time.Second // 单次 RoundTrip 上限（含整体）
+	payClientTimeout         = 22 * time.Second // ≥ 后台 overall(20s)
 	payMaxIdleConns          = 32
 	payMaxIdleConnsPerHost   = 8
 	payMaxConnsPerHost       = 16
@@ -148,6 +151,8 @@ func (t *tracingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		oe := payment.ClassifyNetworkError(err, wrote.Load())
 		// 用 trace 细化 stage（DNS/dial/TLS/header timeout）
 		oe = refineStageFromTrace(oe, &snap, wrote.Load())
+		tlsOK := !snap.tlsStart.IsZero() && !snap.tlsDone.IsZero() || snap.reused
+		RecordHTTP(false, snap.reused, tlsOK, total, op)
 		if t.logf != nil {
 			t.logf("payment_http: provider=%s operation=%s attempt=%d max_attempts=%d host=%s duration_ms=%d dns_ms=%s connect_ms=%s tls_ms=%s ttfb_ms=%s conn_reused=%v outcome=%s error_class=%s stage=%s",
 				provider, op, attempt, maxAttempts, host, total.Milliseconds(),
@@ -160,6 +165,7 @@ func (t *tracingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		return nil, oe
 	}
 
+	RecordHTTP(true, snap.reused, true, total, op)
 	if t.logf != nil {
 		t.logf("payment_http: provider=%s operation=%s attempt=%d max_attempts=%d host=%s duration_ms=%d dns_ms=%s connect_ms=%s tls_ms=%s ttfb_ms=%s conn_reused=%v outcome=success http_status=%d",
 			provider, op, attempt, maxAttempts, host, total.Milliseconds(),
@@ -272,8 +278,13 @@ func (h *hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, err
 			target = wxHostBackup
 		}
 		if host != target {
-			r.URL.Host = target
-			r.Host = target
+			// 保留原端口（若有）
+			if port := r.URL.Port(); port != "" {
+				r.URL.Host = net.JoinHostPort(target, port)
+			} else {
+				r.URL.Host = target
+			}
+			r.Host = r.URL.Host
 		}
 	}
 	// 剥离任何误注入的内部调试 Header，绝不发给微信
@@ -292,9 +303,11 @@ func paymentHTTPClient(logf func(string, ...any)) *http.Client {
 	return &http.Client{
 		Timeout:   payClientTimeout,
 		Transport: rt,
-		// P1-2：拒绝全部 redirect（支付 API 不得跟随跨域或同域跳转）
+		// P1-2：拒绝全部 redirect（支付 API 不得跟随跨域或同域跳转）。
+		// P2：归 definitive_reject——重定向是确定性配置/劫持信号，不该进核实空转。
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return fmt.Errorf("payment http: redirects denied")
+			return payment.NewOutcomeError(payment.CreateOutcomeDefinitiveReject, "redirect_denied", "redirect",
+				fmt.Errorf("payment http: redirects denied"))
 		},
 	}
 }
@@ -333,11 +346,13 @@ func paymentHTTPClientShared() *http.Client {
 }
 
 // ClosePaymentIdleConnections 凭据轮换时关闭旧 idle 连接。
+// 必须先经 paymentHTTPClientShared() 初始化，禁止裸读 payClient（Once.Do 竞态）。
 func ClosePaymentIdleConnections() {
-	if payClient == nil {
+	c := paymentHTTPClientShared()
+	if c == nil || c.Transport == nil {
 		return
 	}
-	if tr, ok := unwrapTransport(payClient.Transport).(*http.Transport); ok && tr != nil {
+	if tr, ok := unwrapTransport(c.Transport).(*http.Transport); ok && tr != nil {
 		tr.CloseIdleConnections()
 	}
 }
@@ -359,6 +374,3 @@ func unwrapTransport(rt http.RoundTripper) http.RoundTripper {
 func ipv4OnlyHTTPClient() *http.Client {
 	return paymentHTTPClientShared()
 }
-
-// 编译期确认 strings 使用（host 比较等扩展）
-var _ = strings.EqualFold

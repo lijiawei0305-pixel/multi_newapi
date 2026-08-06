@@ -93,6 +93,74 @@ func (g *Gateway) ListStuckPaid(ctx context.Context, before time.Time) ([]*PayOr
 	return g.repo.ListByStatus(ctx, OrderPaid, before, reconcileScanLimit)
 }
 
+// maxPrepayReplay 同 out_trade_no 在 NOTPAY 确认后允许重放 Prepay 的次数上限（含首次）。
+const maxPrepayReplay = 3
+
+// prepayPendingLimit 快循环每轮最多补下单数。
+const prepayPendingLimit = 50
+
+// ListStuckPendingPrepay 只读：缺码卡单（local_created + 无 pay_url），供 /admin/reconcile/stuck。
+func (g *Gateway) ListStuckPendingPrepay(ctx context.Context, now time.Time) ([]*PayOrder, error) {
+	if now.IsZero() {
+		now = g.now()
+	}
+	return g.repo.ListPendingPrepay(ctx, now, reconcileScanLimit)
+}
+
+// ReconcilePendingPrepay P0-B 驱动器：扫 local_created && pay_url 空，经 ClaimForPrepay + finishCreatePay 补下单。
+// 后台预算由调用方在 ctx 注入（realpay.WithBudgetMode Background）；未注入时 finishCreatePay 仍走同步短预算。
+// 资金语义：unknown 不 failed；definitive 走 FinishPrepayFenced；有码 → credential_ready。
+func (g *Gateway) ReconcilePendingPrepay(ctx context.Context, limit int) (ReconcileResult, error) {
+	if limit <= 0 {
+		limit = prepayPendingLimit
+	}
+	now := g.now()
+	list, err := g.repo.ListPendingPrepay(ctx, now, limit)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
+	res := ReconcileResult{Scanned: len(list), Failed: map[string]string{}}
+	for _, ord := range list {
+		if ord == nil {
+			continue
+		}
+		in := OrderInput{
+			Type:       ord.Type,
+			TenantID:   ord.TenantID,
+			UserID:     ord.UserID,
+			Provider:   ord.Provider,
+			AmountUSD:  ord.AmountUSD,
+			ActualPaid: ord.ActualPaid,
+			GroupID:    ord.GroupID,
+			PlanID:     ord.PlanID,
+			Subject:    ord.Subject,
+			Reference:  ord.Reference,
+		}
+		t0 := g.now()
+		g.logf("payment: prepay_driver start order=%s provider=%s create_attempts=%d",
+			ord.OrderNo, ord.Provider, ord.CreateAttempts)
+		o2, err := g.finishCreatePay(ctx, ord, in, t0)
+		if err == nil && o2 != nil && strings.TrimSpace(o2.PayURL) != "" {
+			res.Reconciled = append(res.Reconciled, ord.OrderNo)
+			g.logf("payment: prepay_driver ok order=%s duration_ms=%d", ord.OrderNo, elapsedMs(t0))
+			continue
+		}
+		if err != nil {
+			if IsDefinitiveReject(err) {
+				res.Failed[ord.OrderNo] = "definitive: " + err.Error()
+				g.logf("payment: prepay_driver definitive order=%s err=%v", ord.OrderNo, err)
+				continue
+			}
+			// unknown：保持 created，留待下轮 / 查单
+			res.Failed[ord.OrderNo] = "unknown: " + err.Error()
+			g.logf("payment: prepay_driver unknown order=%s err=%v", ord.OrderNo, err)
+			continue
+		}
+		res.Failed[ord.OrderNo] = "no pay_url after prepay"
+	}
+	return res, nil
+}
+
 // ReconcileStuckCreated 扫卡在 created 的订单，经权威查单补账或过期。
 //
 // 已付 → CreditFromQueryResult（真实 txn + 金额分）；
@@ -407,11 +475,32 @@ func (g *Gateway) processDueOrderWithToken(ctx context.Context, ord *PayOrder, q
 		return ir
 	}
 
-	// NOTPAY：凭据有效 → 继续等待；凭据丢失/过期 → close_pending 标记（auto-close 本阶段不可达）
+	// NOTPAY：
+	// - 有 pay_url：credential_ready，继续等付
+	// - 无 pay_url 且未过期：经成功 query 确认未付未关 → 允许同 out_trade_no 重放 Prepay
+	//   （微信 Native 幂等返回同一 code_url）；重放次数有上限，超限 close_pending
+	// - 已过期：close_pending
 	cs := CreateStateCredentialReady
-	if strings.TrimSpace(ord.PayURL) == "" || expiredLocal {
+	tradeState := qr.TradeState
+	if strings.TrimSpace(ord.PayURL) == "" {
+		if expiredLocal {
+			cs = CreateStateClosePending
+		} else if ord.CreateAttempts >= maxPrepayReplay {
+			cs = CreateStateClosePending
+			g.logf("payment: prepay_replay_cap order=%s attempts=%d trade=NOTPAY → close_pending",
+				ord.OrderNo, ord.CreateAttempts)
+		} else {
+			// 同单号可再 Prepay：重置 local_created，驱动器 / finishCreatePay 接手
+			cs = CreateStateLocalCreated
+			g.logf("payment: prepay_replay_allowed order=%s attempts=%d/%d trade=NOTPAY → local_created",
+				ord.OrderNo, ord.CreateAttempts, maxPrepayReplay)
+		}
+	} else if expiredLocal {
 		cs = CreateStateClosePending
 	}
-	_, _ = g.repo.FinishQueryFenced(ctx, ord.OrderNo, token, next, attempts, cs, qr.TradeState)
+	if qr.NormalizedState == TradeStateNotPay && tradeState == "" {
+		tradeState = string(TradeStateNotPay)
+	}
+	_, _ = g.repo.FinishQueryFenced(ctx, ord.OrderNo, token, next, attempts, cs, tradeState)
 	return ir
 }

@@ -5926,6 +5926,11 @@
     "Zhipu V4": "Zhipu V 4",
     "Zoom": "ズーム",
     "Zoom in": "拡大",
-    "Payment order was not created by the provider, please retry": "決済事業者で注文を作成できませんでした。閉じてから再度お試しください"
+    "Payment order was not created by the provider, please retry": "決済事業者で注文を作成できませんでした。閉じてから再度お試しください",
+    "WeChat merchant is not authorized for this product": "WeChat決済の加盟店に権限がないか、製品が未開通です",
+    "Payment channel response unclear, verifying order…": "決済チャネル応答が不明です（ネットワーク/タイムアウト）。注文作成を確認中…",
+    "Payment QR was not returned, please retry": "支払いQRが返りませんでした。再試行してください",
+    "Verifying payment order": "支払い注文を確認中",
+    "Payment channel response unclear, please retry": "決済チャネル応答が不明、またはネットワーク異常です。閉じて再試行してください"
   }
 }

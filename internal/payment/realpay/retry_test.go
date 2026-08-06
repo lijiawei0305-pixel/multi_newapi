@@ -50,9 +50,11 @@ func TestRetryCreatePay_SuccessFirstTry(t *testing.T) {
 }
 
 func TestRetryCreatePay_PreWriteThenSuccess(t *testing.T) {
+	// 后台预算允许多次 pre-write 重试
 	calls := 0
 	clock := attemptClock{now: time.Now, sleep: func(context.Context, time.Duration) error { return nil }}
-	err := retryCreatePay(context.Background(), clock, func(context.Context, int, int) error {
+	ctx := WithBudgetMode(context.Background(), BudgetBackground)
+	err := retryCreatePay(ctx, clock, func(context.Context, int, int) error {
 		calls++
 		if calls < 2 {
 			return payment.NewOutcomeError(payment.CreateOutcomeUnknown, "connect", "connect", errors.New("connection refused"))
@@ -67,12 +69,25 @@ func TestRetryCreatePay_PreWriteThenSuccess(t *testing.T) {
 func TestRetryCreatePay_AlwaysPreWrite_GivesUp(t *testing.T) {
 	calls := 0
 	clock := attemptClock{now: time.Now, sleep: func(context.Context, time.Duration) error { return nil }}
+	ctx := WithBudgetMode(context.Background(), BudgetBackground)
+	err := retryCreatePay(ctx, clock, func(context.Context, int, int) error {
+		calls++
+		return payment.NewOutcomeError(payment.CreateOutcomeUnknown, "connect", "connect", errors.New("connection refused"))
+	}, nil)
+	if err == nil || calls != payCreateMaxAttemptsBg {
+		t.Fatalf("got err=%v calls=%d, want error/%d", err, calls, payCreateMaxAttemptsBg)
+	}
+}
+
+func TestRetryCreatePay_SyncSingleAttempt(t *testing.T) {
+	calls := 0
+	clock := attemptClock{now: time.Now, sleep: func(context.Context, time.Duration) error { return nil }}
 	err := retryCreatePay(context.Background(), clock, func(context.Context, int, int) error {
 		calls++
 		return payment.NewOutcomeError(payment.CreateOutcomeUnknown, "connect", "connect", errors.New("connection refused"))
 	}, nil)
-	if err == nil || calls != payCreateMaxAttempts {
-		t.Fatalf("got err=%v calls=%d, want error/%d", err, calls, payCreateMaxAttempts)
+	if err == nil || calls != 1 {
+		t.Fatalf("sync budget: err=%v calls=%d, want error/1", err, calls)
 	}
 }
 

@@ -100,24 +100,33 @@ func (a *wxpayAdapter) createPay(ctx context.Context, orderNo, subject string, a
 		req.TimeExpire = core.Time(expiresAt)
 	}
 
-	var resp *native.PrepayResponse
+	var codeURL string
 	err := retryCreatePay(ctx, realClock(),
 		func(tryCtx context.Context, attempt, maxAttempts int) error {
-			// typed context 观测 + request-local 主备：attempt1 主域，pre-write 可重试时 attempt2 备域
-			tryCtx = context.WithValue(tryCtx, ctxKeyPayAttempt{}, attempt)
-			tryCtx = context.WithValue(tryCtx, ctxKeyPayMaxAttempts{}, maxAttempts)
-			tryCtx = context.WithValue(tryCtx, ctxKeyPayOperation{}, "prepay")
-			tryCtx = context.WithValue(tryCtx, ctxKeyPayProvider{}, "wxpay")
-			tryCtx = context.WithValue(tryCtx, ctxKeyPayPreferBackup{}, attempt > 1)
-			r, result, e := a.svc.Prepay(tryCtx, req)
+			// P1-B：主备对冲（同 out_trade_no）；单 attempt 内主域 700ms 无果则并发备域
+			url, e := runHedged(tryCtx, func(hctx context.Context, preferBackup bool) (string, error) {
+				hctx = context.WithValue(hctx, ctxKeyPayAttempt{}, attempt)
+				hctx = context.WithValue(hctx, ctxKeyPayMaxAttempts{}, maxAttempts)
+				hctx = context.WithValue(hctx, ctxKeyPayOperation{}, "prepay")
+				hctx = context.WithValue(hctx, ctxKeyPayProvider{}, "wxpay")
+				hctx = context.WithValue(hctx, ctxKeyPayPreferBackup{}, preferBackup)
+				r, result, pe := a.svc.Prepay(hctx, req)
+				if pe != nil {
+					return "", sanitizeAPIError(classifyWxAPIError(pe, result))
+				}
+				if r == nil || r.CodeUrl == nil || *r.CodeUrl == "" {
+					return "", payment.NewOutcomeError(payment.CreateOutcomeUnknown, "empty_code_url", "response",
+						fmt.Errorf("wxpay prepay: empty code_url"))
+				}
+				return *r.CodeUrl, nil
+			})
 			if e != nil {
-				return sanitizeAPIError(classifyWxAPIError(e, result))
+				return e
 			}
-			resp = r
+			codeURL = url
 			return nil
 		},
 		func(attempt, maxAttempts int, err error) {
-			// attempt 级观测由 tracingRoundTripper + gateway 双层记录
 			_ = attempt
 			_ = maxAttempts
 			_ = err
@@ -126,11 +135,11 @@ func (a *wxpayAdapter) createPay(ctx context.Context, orderNo, subject string, a
 	if err != nil {
 		return "", err
 	}
-	if resp == nil || resp.CodeUrl == nil || *resp.CodeUrl == "" {
+	if strings.TrimSpace(codeURL) == "" {
 		return "", payment.NewOutcomeError(payment.CreateOutcomeUnknown, "empty_code_url", "response",
 			fmt.Errorf("wxpay prepay: empty code_url"))
 	}
-	return *resp.CodeUrl, nil
+	return codeURL, nil
 }
 
 // classifyWxAPIError 将 wechatpay-go 错误转为 OutcomeError（P1-3：不保留 Body/Detail）。

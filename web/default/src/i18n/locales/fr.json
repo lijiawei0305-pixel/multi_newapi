@@ -5926,6 +5926,11 @@
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
     "Zoom in": "Agrandir",
-    "Payment order was not created by the provider, please retry": "Le fournisseur de paiement n'a pas créé la commande, veuillez fermer et réessayer"
+    "Payment order was not created by the provider, please retry": "Le fournisseur de paiement n'a pas créé la commande, veuillez fermer et réessayer",
+    "WeChat merchant is not authorized for this product": "Le marchand WeChat n'est pas autorisé pour ce produit",
+    "Payment channel response unclear, verifying order…": "Réponse du canal de paiement incertaine (réseau/délai), vérification en cours…",
+    "Payment QR was not returned, please retry": "Le QR de paiement n'a pas été renvoyé, veuillez réessayer",
+    "Verifying payment order": "Vérification de la commande de paiement",
+    "Payment channel response unclear, please retry": "Réponse du canal incertaine ou erreur réseau, fermez et réessayez"
   }
 }

@@ -3,6 +3,7 @@ package payment
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -170,6 +171,43 @@ func (r *MemRepo) ListByStatus(_ context.Context, status OrderStatus, before tim
 }
 
 // ListDueForQuery 返回 due 的 created 订单。
+// ListPendingPrepay 内存版：local_created + 无 pay_url + 未过期 + 无有效 lease。
+func (r *MemRepo) ListPendingPrepay(_ context.Context, now time.Time, limit int) ([]*PayOrder, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*PayOrder
+	for _, o := range r.orders {
+		if o.Status != OrderCreated {
+			continue
+		}
+		cs := o.CreateState
+		if cs == "" {
+			cs = CreateStateLocalCreated
+		}
+		if cs != CreateStateLocalCreated {
+			continue
+		}
+		if strings.TrimSpace(o.PayURL) != "" {
+			continue
+		}
+		if !o.ExpiresAt.IsZero() && !o.ExpiresAt.After(now) {
+			continue
+		}
+		if !o.RecoveryClaimUntil.IsZero() && o.RecoveryClaimUntil.After(now) {
+			continue
+		}
+		if !o.QueryClaimUntil.IsZero() && o.QueryClaimUntil.After(now) {
+			continue
+		}
+		cp := *o
+		out = append(out, &cp)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (r *MemRepo) ListDueForQuery(_ context.Context, now time.Time, limit int) ([]*PayOrder, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

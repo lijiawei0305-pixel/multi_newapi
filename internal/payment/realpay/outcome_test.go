@@ -26,8 +26,8 @@ func TestRetryCreatePayOnlyPreWrite(t *testing.T) {
 			return nil // no real sleep
 		},
 	}
-	// 第一次 connect 失败（pre-write），第二次成功
-	err := retryCreatePay(context.Background(), clock,
+	// 后台预算：第一次 connect 失败（pre-write），第二次成功
+	err := retryCreatePay(WithBudgetMode(context.Background(), BudgetBackground), clock,
 		func(tryCtx context.Context, attempt, maxAttempts int) error {
 			c := int(n.Add(1))
 			if c == 1 {
@@ -170,9 +170,71 @@ func TestSelfSignedWouldFail(t *testing.T) {
 }
 
 func TestBudgetConstantsNot24s(t *testing.T) {
-	// overall 12s * 不是 3*8+backoff
-	assert.LessOrEqual(t, int(payCreateOverall/time.Second), 12)
-	assert.LessOrEqual(t, payCreateMaxAttempts, 2)
-	totalWorst := payCreateOverall
-	assert.Less(t, totalWorst, 20*time.Second)
+	// 同步：best-effort ≤2.5s，禁止回到 3×8s 同步等待
+	assert.LessOrEqual(t, int(payCreateOverallSync/time.Millisecond), 2500)
+	assert.LessOrEqual(t, int(payCreatePerAttemptSync/time.Millisecond), 2500)
+	assert.Equal(t, 1, payCreateMaxAttemptsSync)
+	// 后台：8s/20s/3，仍远小于旧 24.6s 同步
+	assert.Equal(t, 8*time.Second, payCreatePerAttemptBg)
+	assert.Equal(t, 20*time.Second, payCreateOverallBg)
+	assert.Equal(t, 3, payCreateMaxAttemptsBg)
+	// minRetryBudget ≥ 冷连地板（dial 目标 3s + TLS 4s + 1s），仅后台使用
+	assert.GreaterOrEqual(t, payCreateMinRetryBudget, 8*time.Second)
+	// P2 Transport：dial 3 / TLS 4 / header 5；冷连地板 ≤ 后台 per-attempt
+	assert.Equal(t, 3*time.Second, payDialTimeout)
+	assert.Equal(t, 4*time.Second, payTLSHandshakeTimeout)
+	assert.Equal(t, 5*time.Second, payResponseHeaderTimeout)
+	assert.LessOrEqual(t, payDialTimeout+payTLSHandshakeTimeout, payCreatePerAttemptBg)
+	assert.GreaterOrEqual(t, payClientTimeout, payCreateOverallBg)
+}
+
+func TestCheckRedirectIsDefinitive(t *testing.T) {
+	c := paymentHTTPClient(nil)
+	err := c.CheckRedirect(nil, nil)
+	require.Error(t, err)
+	assert.True(t, payment.IsDefinitiveReject(err), "redirect must be definitive_reject, not unknown")
+}
+
+func TestClosePaymentIdleConnectionsNoRace(t *testing.T) {
+	// 并发 Close + Shared 不得 panic / data race（配合 -race）
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 50; i++ {
+			_ = paymentHTTPClientShared()
+			ClosePaymentIdleConnections()
+		}
+		close(done)
+	}()
+	for i := 0; i < 50; i++ {
+		_ = paymentHTTPClientShared()
+		ClosePaymentIdleConnections()
+	}
+	<-done
+}
+
+func TestRetrySkipsWhenOverallBudgetTooLow(t *testing.T) {
+	// 第一次用尽 overall 后不得再发起第二次 attempt
+	start := time.Now()
+	clock := attemptClock{
+		now: time.Now,
+		sleep: func(ctx context.Context, d time.Duration) error {
+			return nil
+		},
+	}
+	var n atomic.Int32
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	// 使用真实 overall 边界：手动缩短 overall via parent ctx
+	err := retryCreatePay(ctx, clock,
+		func(tryCtx context.Context, attempt, maxAttempts int) error {
+			n.Add(1)
+			// 耗尽 parent ctx
+			<-tryCtx.Done()
+			return payment.NewOutcomeError(payment.CreateOutcomeUnknown, "timeout", "connect",
+				errors.New("timeout pre-write"))
+		}, nil)
+	require.Error(t, err)
+	// parent 50ms 时通常只来得及 1 次
+	assert.LessOrEqual(t, n.Load(), int32(2))
+	assert.Less(t, time.Since(start), 500*time.Millisecond)
 }

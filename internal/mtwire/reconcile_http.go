@@ -3,6 +3,7 @@ package mtwire
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -37,6 +38,25 @@ func (a *App) HandleAdminListStuck(c *gin.Context) {
 			out = append(out, stuckOrderOut{
 				Kind: "RCG", OrderNo: o.OrderNo, TenantID: o.TenantID, UserID: o.UserID,
 				Amount: o.ActualPaid, Status: string(o.Status), StuckSecs: int64(now.Sub(o.UpdatedAt).Seconds()),
+			})
+		}
+		// C5：缺码 / 待补 Prepay 卡单可见
+		pending, err := a.RechargeGateway.ListStuckPendingPrepay(ctx, now)
+		if err != nil {
+			respondErr(c, err)
+			return
+		}
+		for _, o := range pending {
+			st := string(o.Status)
+			if o.CreateState != "" {
+				st = st + "/" + string(o.CreateState)
+			}
+			if strings.TrimSpace(o.PayURL) == "" {
+				st = st + "/no_qr"
+			}
+			out = append(out, stuckOrderOut{
+				Kind: "RCG", OrderNo: o.OrderNo, TenantID: o.TenantID, UserID: o.UserID,
+				Amount: o.ActualPaid, Status: st, StuckSecs: int64(now.Sub(o.UpdatedAt).Seconds()),
 			})
 		}
 	}

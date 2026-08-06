@@ -73,7 +73,12 @@ export function interpretRechargeStatus(
   return 'pending'
 }
 
-/** 等待 Prepay 二维码的前端上限（秒级 UX；后台查单可继续，但不得无限转圈）。 */
+/**
+ * 等待 Prepay 二维码的前端上限。
+ * 超时后必须失败展示，禁止假装「订单正在确认」。
+ * P1-A：同步 create 约 2.5s best-effort / axios 8s；出码由后台 Prepay 驱动器补齐，
+ * 故轮询上限 90s（真实补下单，不再是空转核实）。
+ */
 export const CREATE_QR_WAIT_MAX_MS = 90_000
 
 /**

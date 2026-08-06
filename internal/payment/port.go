@@ -63,6 +63,9 @@ type OrderRepo interface {
 	ListByStatus(ctx context.Context, status OrderStatus, before time.Time, limit int) ([]*PayOrder, error)
 	// ListDueForQuery 返回 status=created 且 next_query_at<=now 的待主动查单订单（ORDER BY next_query_at,id）。
 	ListDueForQuery(ctx context.Context, now time.Time, limit int) ([]*PayOrder, error)
+	// ListPendingPrepay 返回待后台补 Prepay 的订单：
+	// status=created && create_state=local_created && pay_url 空 && 未过期 && 无有效 lease。
+	ListPendingPrepay(ctx context.Context, now time.Time, limit int) ([]*PayOrder, error)
 	// SetPayURL 回填支付凭据 PayURL（下单改为「先落 created 订单、再向平台下单」后，
 	// 拿到凭据回填；订单不存在返回 ErrOrderNotFound）。
 	SetPayURL(ctx context.Context, orderNo, payURL string) error
@@ -77,8 +80,7 @@ type OrderRepo interface {
 	ScheduleNextQuery(ctx context.Context, orderNo string, nextAt time.Time, attempts int) error
 	// ClaimForQuery 查单租约：排除 prepay_inflight 与有效 operation lease。
 	ClaimForQuery(ctx context.Context, orderNo string, now, leaseUntil time.Time) (token string, ok bool, err error)
-	// ClaimForPrepay 认领唯一 Prepay 操作：仅 local_created|empty → prepay_inflight + token。
-	// prepay_unknown 不得直接再 Prepay；崩溃后须先 Query，仅 ORDER_NOT_EXIST 重置为 local_created。
+	// ClaimForPrepay 认领唯一 Prepay 操作：local_created|prepay_unknown → prepay_inflight + token。
 	// 同时把 next_query_at 推到 leaseUntil（≥ Prepay budget+grace），禁止 5s 内 Query 抢跑。
 	ClaimForPrepay(ctx context.Context, orderNo string, now, leaseUntil time.Time) (token string, ok bool, err error)
 	// FinishPrepayFenced token 持有者写回 create_state / pay_url 调度；返回 applied。

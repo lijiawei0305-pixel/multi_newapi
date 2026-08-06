@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/QuantumNous/new-api/internal/platform/apperr"
 )
 
 // Gateway 同时实现 PaymentGateway（下单）与 CallbackHandler（回调入账分发）。
@@ -161,8 +164,58 @@ func (g *Gateway) CreateOrder(ctx context.Context, in OrderInput) (*PayOrder, er
 	return g.finishCreatePay(ctx, o, in, t0)
 }
 
-// prepayLease 覆盖 overall budget(12s)+grace，期间 Query 不得 claim。
-const prepayLease = 15 * time.Second
+// prepayLeaseSync 覆盖同步 overall(2.5s)+grace；prepayLeaseBg 覆盖后台 overall(20s)+grace。
+// 期间 Query 不得 claim。
+const (
+	prepayLeaseSync = 5 * time.Second
+	prepayLeaseBg   = 25 * time.Second
+)
+
+// prepayLeaseFor 按 context 预算模式选租约。
+func prepayLeaseFor(ctx context.Context) time.Duration {
+	// 避免 import realpay 环：用 context value 约定（realpay.WithBudgetMode 写入同 key 类型不可见）
+	// 故用 Gateway 侧平行标记。
+	if v := ctx.Value(ctxKeyPrepayBg{}); v != nil {
+		return prepayLeaseBg
+	}
+	return prepayLeaseSync
+}
+
+type ctxKeyPrepayBg struct{}
+
+// WithBackgroundPrepay 标记后台补下单（租约 25s）。mtwire 驱动器调用。
+func WithBackgroundPrepay(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKeyPrepayBg{}, true)
+}
+
+func isSyncPrepay(ctx context.Context) bool {
+	return ctx.Value(ctxKeyPrepayBg{}) == nil
+}
+
+// breakerAllowSync / breakerRecord* 由 realpay 注入，避免 payment→realpay 循环依赖。
+// 默认允许（单测 / 未装配 realpay 时）。
+var (
+	breakerAllowSync = func() bool { return true }
+	breakerOnSuccess = func() {}
+	breakerOnUnknown = func() {}
+	breakerOnReject  = func() {}
+)
+
+// SetBreakerHooks 由 mtwire 在装配时注入 realpay 熔断（可测、可关）。
+func SetBreakerHooks(allow func() bool, onSuccess, onUnknown, onReject func()) {
+	if allow != nil {
+		breakerAllowSync = allow
+	}
+	if onSuccess != nil {
+		breakerOnSuccess = onSuccess
+	}
+	if onUnknown != nil {
+		breakerOnUnknown = onUnknown
+	}
+	if onReject != nil {
+		breakerOnReject = onReject
+	}
+}
 
 // finishCreatePay 唯一 Prepay 路径：ClaimForPrepay → 单次 SDK → FinishPrepayFenced(token)。
 func (g *Gateway) finishCreatePay(ctx context.Context, o *PayOrder, in OrderInput, t0 time.Time) (*PayOrder, error) {
@@ -177,7 +230,13 @@ func (g *Gateway) finishCreatePay(ctx context.Context, o *PayOrder, in OrderInpu
 		return o, ErrCreateOutcomeUnknown
 	}
 
-	leaseUntil := now.Add(prepayLease)
+	// P1-B 熔断：开路时同步路径跳过 Prepay（<100ms 返回 queued）；后台驱动器仍可半开探测
+	if isSyncPrepay(ctx) && !breakerAllowSync() {
+		g.logStage(StageResponseSent, o.OrderNo, in.Provider, elapsedMs(t0), "outcome=breaker_open queued")
+		return o, ErrCreateOutcomeUnknown
+	}
+
+	leaseUntil := now.Add(prepayLeaseFor(ctx))
 	token, claimed, err := g.repo.ClaimForPrepay(ctx, o.OrderNo, now, leaseUntil)
 	if err != nil {
 		return o, err
@@ -227,7 +286,9 @@ func (g *Gateway) finishCreatePay(ctx context.Context, o *PayOrder, in OrderInpu
 			if !applied {
 				g.logf("payment: create %s: stale reject ignored", o.OrderNo)
 			}
-			return o, err
+			breakerOnReject()
+			// 对外必须是 AppError（PAY_PROVIDER_NO_AUTH 等），禁止 INTERNAL + 原始 SDK 串
+			return o, MapCreateError(err)
 		}
 		// unknown：token 匹配才写 prepay_unknown + 调度
 		next := g.now().Add(5 * time.Second)
@@ -235,6 +296,7 @@ func (g *Gateway) finishCreatePay(ctx context.Context, o *PayOrder, in OrderInpu
 		if fErr != nil || !applied {
 			g.logf("payment: create %s: finish unknown applied=%v err=%v", o.OrderNo, applied, fErr)
 		}
+		breakerOnUnknown()
 		g.logStage(StageResponseSent, o.OrderNo, in.Provider, elapsedMs(t0), "outcome=unknown keep=created")
 		return o, ErrCreateOutcomeUnknown
 	}
@@ -262,6 +324,7 @@ func (g *Gateway) finishCreatePay(ctx context.Context, o *PayOrder, in OrderInpu
 	}
 	o.PayURL = cred.PayURL
 	o.CreateState = CreateStateCredentialReady
+	breakerOnSuccess()
 	g.logStage(StagePayURLPersisted, o.OrderNo, in.Provider, elapsedMs(t0), "")
 	g.logStage(StageResponseSent, o.OrderNo, in.Provider, elapsedMs(t0), "outcome=success")
 	return o, nil
@@ -310,14 +373,23 @@ func (g *Gateway) reuseOrRecoverOrder(ctx context.Context, existing *PayOrder, i
 		if err == nil && o2 != nil && strings.TrimSpace(o2.PayURL) != "" {
 			return o2, true, nil
 		}
-		if err == ErrCreateOutcomeUnknown || err == ErrPayURLPersist || err == ErrPayURLMissing {
-			return existing, false, err
+		if err == nil {
+			return existing, false, ErrPayURLMissing
 		}
-		if err != nil {
-			_ = g.repo.ScheduleNextQuery(ctx, existing.OrderNo, g.now().Add(5*time.Second), existing.QueryAttempts)
+		// 保留 NO_AUTH/业务拒绝等 AppError；禁止一律吞成 PAY_CREATE_UNKNOWN
+		mapped := MapCreateError(err)
+		code := apperr.CodeOf(mapped)
+		if code == CodeProviderNoAuth || code == CodeProviderReject {
+			return existing, false, mapped
+		}
+		if errors.Is(mapped, ErrCreateOutcomeUnknown) || code == CodeCreateOutcomeUnknown {
 			return existing, false, ErrCreateOutcomeUnknown
 		}
-		return existing, false, ErrPayURLMissing
+		if errors.Is(mapped, ErrPayURLPersist) || errors.Is(mapped, ErrPayURLMissing) {
+			return existing, false, mapped
+		}
+		_ = g.repo.ScheduleNextQuery(ctx, existing.OrderNo, g.now().Add(5*time.Second), existing.QueryAttempts)
+		return existing, false, ErrCreateOutcomeUnknown
 	case OrderPaid, OrderCredited:
 		return nil, false, ErrIdempotencyConflict
 	default:

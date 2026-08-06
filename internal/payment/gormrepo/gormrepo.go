@@ -247,6 +247,29 @@ func (r *Repo) ListDueForQuery(ctx context.Context, now time.Time, limit int) ([
 	return rowsToOrders(rows), nil
 }
 
+// ListPendingPrepay 待后台补 Prepay：local_created（含 legacy 空）+ pay_url 空 + 未过期 + 无有效 lease。
+func (r *Repo) ListPendingPrepay(ctx context.Context, now time.Time, limit int) ([]*payment.PayOrder, error) {
+	var rows []orderRow
+	q := r.db.WithContext(ctx).
+		Where("status = ?", string(payment.OrderCreated)).
+		Where("create_state IN ?", []string{
+			string(payment.CreateStateLocalCreated),
+			"",
+		}).
+		Where("(pay_url IS NULL OR pay_url = '')").
+		Where("(expires_at IS NULL OR expires_at > ?)", now).
+		Where("(recovery_claim_until IS NULL OR recovery_claim_until <= ?)", now).
+		Where("(query_claim_until IS NULL OR query_claim_until <= ?)", now).
+		Order("created_at ASC, id ASC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rowsToOrders(rows), nil
+}
+
 // SavePaymentFacts 持久化支付机构事实。
 // 冲突检测与真实复合唯一索引 (provider, provider_transaction_id) 语义一致。
 func (r *Repo) SavePaymentFacts(ctx context.Context, orderNo string, facts payment.PaymentFacts) error {

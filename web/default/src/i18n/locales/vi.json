@@ -5926,6 +5926,11 @@
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
     "Zoom in": "Phóng to",
-    "Payment order was not created by the provider, please retry": "Nhà cung cấp thanh toán không tạo được đơn. Vui lòng đóng và đặt lại"
+    "Payment order was not created by the provider, please retry": "Nhà cung cấp thanh toán không tạo được đơn. Vui lòng đóng và đặt lại",
+    "WeChat merchant is not authorized for this product": "Thương nhân WeChat không có quyền hoặc chưa mở sản phẩm",
+    "Payment channel response unclear, verifying order…": "Phản hồi kênh thanh toán không rõ (mạng/timeout), đang xác minh đơn…",
+    "Payment QR was not returned, please retry": "Không nhận được mã QR thanh toán, vui lòng thử lại",
+    "Verifying payment order": "Đang xác minh đơn thanh toán",
+    "Payment channel response unclear, please retry": "Phản hồi kênh không rõ hoặc lỗi mạng. Đóng và tạo lại đơn"
   }
 }

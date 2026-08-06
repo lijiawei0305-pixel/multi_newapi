@@ -82,8 +82,9 @@ type SDK struct {
 
 // New 装配真实适配器。两个渠道独立装配：某渠道凭据不全则该渠道不可用（调用时报错），
 // 另一渠道仍可用（允许只接其中之一）。两者都不可用则返回错误（避免静默空跑）。
-// 凭据轮换重建时关闭旧 idle 连接。
+// 凭据轮换重建时关闭旧 idle 连接，并（重）启动连接保温器。
 func New(ctx context.Context, cfg Config) (*SDK, error) {
+	StopSDKWarmer()
 	ClosePaymentIdleConnections()
 	s := &SDK{}
 	var err error
@@ -100,6 +101,8 @@ func New(ctx context.Context, cfg Config) (*SDK, error) {
 	if s.wx == nil && s.ali == nil {
 		return nil, fmt.Errorf("realpay: no provider configured (need wxpay and/or alipay credentials)")
 	}
+	// P0-A：仅已配置渠道启动保温；与业务共用 paymentHTTPClientShared。
+	s.StartSDKWarmer(getPayClientLogf())
 	return s, nil
 }
 

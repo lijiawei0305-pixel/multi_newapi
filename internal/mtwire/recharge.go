@@ -442,13 +442,17 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 		Subject:        subject,
 		IdempotencyKey: strings.TrimSpace(body.IdempotencyKey),
 	})
-	// P0-4：outcome_unknown / pay_url 落库失败时 order 仍非 nil，须返回 order_no 供轮询
+	// 三态出口：
+	// - PAY_CREATE_UNKNOWN（网络/超时）：202 + order_no，短轮询核实（勿当「已确认」）
+	// - NO_AUTH/业务拒绝等：MapCreateError 后 4xx + failed，禁止「确认中」
+	// - 其它错误：respondErr
 	if err != nil {
-		if order != nil && (errors.Is(err, payment.ErrCreateOutcomeUnknown) || errors.Is(err, payment.ErrPayURLPersist) || errors.Is(err, payment.ErrPayURLMissing)) {
+		if order != nil && errors.Is(err, payment.ErrCreateOutcomeUnknown) {
 			respondCreateUnknown(c, order, amountUSD, actualPaid, provider, err)
 			return
 		}
-		respondErr(c, err)
+		// 兜底：Create 链路 OutcomeError → 稳定 AppError
+		respondErr(c, payment.MapCreateError(err))
 		return
 	}
 
@@ -476,23 +480,29 @@ func (a *App) HandleWalletRecharge(c *gin.Context) {
 	})
 }
 
-// respondCreateUnknown 返回 202 + order_no，前端可轮询 status 直至出现二维码或终态。
+// respondCreateUnknown 返回 202 + order_no + status=queued，前端短轮询等后台驱动器出码。
+// 文案区分：无码排队生成 vs 有不确定结果待核实（均保持 created，绝不 failed）。
 func respondCreateUnknown(c *gin.Context, order *payment.PayOrder, amountUSD, actualPaid float64, provider payment.Provider, err error) {
 	expiresAt := ""
 	if order != nil && !order.ExpiresAt.IsZero() {
 		expiresAt = order.ExpiresAt.Format(time.RFC3339)
 	}
-	orderNo, status, idem := "", "created", ""
+	orderNo, idem := "", ""
+	createState := ""
 	if order != nil {
 		orderNo = order.OrderNo
-		status = string(order.Status)
 		idem = order.IdempotencyKey
+		createState = string(order.CreateState)
 	}
+	// P1-A：对外 status=queued，表示本地单已建、码由后台继续生成
+	status := "queued"
 	code := payment.CodeCreateOutcomeUnknown
-	msg := "支付订单确认中，请稍后查询状态"
+	msg := "正在生成支付二维码，请稍候"
 	if ae, ok := err.(*apperr.AppError); ok && ae != nil {
 		code = ae.Code
-		msg = ae.Msg
+		if ae.Msg != "" && ae.Code != payment.CodeCreateOutcomeUnknown {
+			msg = ae.Msg
+		}
 	}
 	c.JSON(http.StatusAccepted, gin.H{
 		"success": false,
@@ -501,6 +511,7 @@ func respondCreateUnknown(c *gin.Context, order *payment.PayOrder, amountUSD, ac
 		"data": gin.H{
 			"order_no":        orderNo,
 			"status":          status,
+			"create_state":    createState,
 			"amount_usd":      amountUSD,
 			"amount_cny":      actualPaid,
 			"provider":        string(provider),

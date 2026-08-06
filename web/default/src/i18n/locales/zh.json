@@ -5926,6 +5926,11 @@
     "Zhipu V4": "智谱 V4",
     "Zoom": "缩放",
     "Zoom in": "放大",
-    "Payment order was not created by the provider, please retry": "支付渠道未能创建订单，请关闭后重新下单"
+    "Payment order was not created by the provider, please retry": "支付渠道未能创建订单，请关闭后重新下单",
+    "WeChat merchant is not authorized for this product": "微信支付商户无权限或未开通该产品，请检查商户配置",
+    "Payment channel response unclear, verifying order…": "支付渠道响应不确定（网络/超时），正在核实是否已下单…",
+    "Payment QR was not returned, please retry": "未返回支付二维码，请重试或检查支付配置",
+    "Verifying payment order": "正在核实支付订单",
+    "Payment channel response unclear, please retry": "支付渠道响应不确定或网络异常，请关闭后重新下单"
   }
 }

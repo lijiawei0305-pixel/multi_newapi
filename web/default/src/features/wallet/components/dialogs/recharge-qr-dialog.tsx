@@ -80,6 +80,12 @@ export function RechargeQrDialog(props: RechargeQrDialogProps) {
   const title = (() => {
     switch (props.phase) {
       case 'creating':
+        // 有 order 无 QR = 后台补下单 / 排队出码（P1-A queued）
+        if (props.order?.orderNo && !props.order?.qr) {
+          return t('Generating payment QR code', {
+            defaultValue: '正在生成支付二维码',
+          })
+        }
         return t('Creating payment order', { defaultValue: '正在创建支付订单' })
       case 'paid_processing':
         return t('Payment confirmed', { defaultValue: '支付已确认' })
@@ -113,6 +119,11 @@ export function RechargeQrDialog(props: RechargeQrDialogProps) {
   const liveMessage = (() => {
     switch (props.phase) {
       case 'creating':
+        if (props.order?.orderNo && !props.order?.qr) {
+          return t('Generating payment QR code, please wait…', {
+            defaultValue: '正在生成支付二维码，请稍候',
+          })
+        }
         return t('Contacting payment provider, please wait…', {
           defaultValue: '正在连接支付渠道，请稍候…',
         })
@@ -132,7 +143,10 @@ export function RechargeQrDialog(props: RechargeQrDialogProps) {
           })
         )
       case 'failed':
-        return t('Payment failed', { defaultValue: '支付失败' })
+        return (
+          props.errorMessage ||
+          t('Payment failed', { defaultValue: '支付失败' })
+        )
       case 'expired':
         return t('Payment QR expired', {
           defaultValue: '支付二维码已过期，请重新下单',

@@ -279,8 +279,8 @@ export async function createTenantRecharge(
 ): Promise<TenantRechargeResponse> {
   const res = await api.post('/api/tenant/wallet/recharge', request, {
     skipBusinessError: true,
-    // 后端同步 Prepay 预算约 12s；前端 18s 上限，禁止再按 25s/30s 掩盖链路问题。
-    timeout: 18000,
+    // 后端同步 best-effort≈2.5s 后 202 queued；8s 远大于 2.5s+RTT+CF+DB，确保 202 先于 axios 超时。
+    timeout: 8000,
   } as Record<string, unknown>)
   return res.data
 }
