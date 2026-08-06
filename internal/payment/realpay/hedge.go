@@ -2,10 +2,10 @@ package realpay
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/internal/payment"
@@ -40,15 +40,16 @@ func hedgeDelay() time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-type hedgeResult struct {
-	val string
-	err error
-	// backup 是否来自备域（观测）
-	backup bool
-}
-
-// runHedged 对冲执行 fn(preferBackup)。
-// fn 必须在 preferBackup=true 时走备域；两路均可能「已写出」，失败不得判 definitive（由 fn 内部分类）。
+// runHedged 对冲执行 fn(preferBackup)：主域立即发出，hedgeDelay 后（或主域先失败时立即）
+// 并发备域，取先到的成功结果，另一路由 ctx cancel。
+//
+// 语义规则（P1 修复）：
+//   - 任一路返回 definitive_reject 立即短路返回该错误：definitive 表示支付机构**已应答并拒绝**
+//     （NO_AUTH / 参数错 / 签名错 / 证书错），主备两域面向同一商户配置，结论一致且与资金无关。
+//     绝不可降级成 unknown——否则用户看到「正在核实」而非「商户无权限」，
+//     后台驱动器还会对永久失败的配置错误反复重试，并把 unknown 计数喂给熔断器。
+//   - 其余失败一律保持 unknown（可能已写出），保留原有资金语义。
+//   - 同 out_trade_no 幂等 → 两路同时到达微信也不会产生双单。
 func runHedged(
 	ctx context.Context,
 	fn func(ctx context.Context, preferBackup bool) (string, error),
@@ -56,107 +57,69 @@ func runHedged(
 	if !hedgeEnabled() {
 		return fn(ctx, false)
 	}
-	// 父 ctx 取消则两路停
+
 	type out struct {
 		s   string
 		err error
 		bak bool
 	}
-	ch := make(chan out, 2)
-	var once sync.Once
-	var winner out
-	done := make(chan struct{})
 
+	// 任一路胜出即 cancel 另一路
+	hctx, cancelAll := context.WithCancel(ctx)
+	defer cancelAll()
+
+	ch := make(chan out, 2) // 缓冲 2：提前返回也不会泄漏 goroutine
 	run := func(preferBackup bool) {
-		cctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		// 与 sibling 联动：winner 产生后 cancel 由外层负责
-		s, err := fn(cctx, preferBackup)
-		select {
-		case ch <- out{s: s, err: err, bak: preferBackup}:
-		case <-done:
-		}
+		s, err := fn(hctx, preferBackup)
+		ch <- out{s: s, err: err, bak: preferBackup}
 	}
 
-	// 主域立即
 	go run(false)
 
-	delay := hedgeDelay()
-	timer := time.NewTimer(delay)
+	timer := time.NewTimer(hedgeDelay())
 	defer timer.Stop()
 
+	var firstErr error
+	pending := 1
 	backupStarted := false
-	for {
+
+	for pending > 0 {
 		select {
 		case <-ctx.Done():
-			close(done)
 			return "", payment.NewOutcomeError(payment.CreateOutcomeUnknown, "canceled", "context", ctx.Err())
+
 		case <-timer.C:
 			if !backupStarted {
 				backupStarted = true
+				pending++
 				go run(true)
 			}
+
 		case r := <-ch:
+			pending--
 			if r.err == nil && strings.TrimSpace(r.s) != "" {
-				once.Do(func() {
-					winner = r
-					close(done)
-				})
 				return r.s, nil
 			}
-			// 失败：若另一路还在跑，等它；两路都失败则返回 unknown
-			if backupStarted {
-				// 可能已收齐两路，或再等一个
-				select {
-				case r2 := <-ch:
-					if r2.err == nil && strings.TrimSpace(r2.s) != "" {
-						return r2.s, nil
-					}
-					// 两路皆败：优先返回「可能已写出」的 unknown
-					return "", preferUnknown(r.err, r2.err)
-				case <-ctx.Done():
-					return "", payment.AsOutcome(r.err)
-				case <-time.After(50 * time.Millisecond):
-					// 再给一点时间
-					select {
-					case r2 := <-ch:
-						if r2.err == nil && strings.TrimSpace(r2.s) != "" {
-							return r2.s, nil
-						}
-						return "", preferUnknown(r.err, r2.err)
-					default:
-						return "", payment.AsOutcome(r.err)
-					}
-				}
+			// 确定性拒绝：短路，不再启动备域、不再等待另一路
+			if payment.IsDefinitiveReject(r.err) {
+				return "", payment.AsOutcome(r.err)
 			}
-			// 主域先败且尚未启动备域：立即备域（不再干等 delay）
+			if firstErr == nil && r.err != nil {
+				firstErr = r.err
+			}
 			if !backupStarted {
+				// 主域已失败且非 definitive：立即起备域，不再干等 hedgeDelay
 				backupStarted = true
+				pending++
 				timer.Stop()
 				go run(true)
 			}
-			// 继续等备域
-			_ = winner
 		}
 	}
-}
 
-func preferUnknown(a, b error) error {
-	if a == nil {
-		return payment.AsOutcome(b)
+	if firstErr == nil {
+		firstErr = payment.NewOutcomeError(payment.CreateOutcomeUnknown, "empty_result", "response",
+			errors.New("hedge: no usable result from primary/backup"))
 	}
-	if b == nil {
-		return payment.AsOutcome(a)
-	}
-	// 任一 definitive 仍返回 definitive（如双路同 NO_AUTH）
-	if payment.IsDefinitiveReject(a) && payment.IsDefinitiveReject(b) {
-		return a
-	}
-	if payment.IsDefinitiveReject(a) && !payment.IsDefinitiveReject(b) {
-		return payment.AsOutcome(b)
-	}
-	if payment.IsDefinitiveReject(b) && !payment.IsDefinitiveReject(a) {
-		return payment.AsOutcome(a)
-	}
-	return payment.AsOutcome(a)
+	return "", payment.AsOutcome(firstErr)
 }
