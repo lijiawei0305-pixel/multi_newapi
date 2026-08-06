@@ -1426,6 +1426,8 @@
     "Created user {{username}} (role {{role}})": "ユーザー {{username}} を作成しました（ロール {{role}}）",
     "Creates a Pancake product in the saved store using this plan’s title and price. Requires Waffo Pancake to be fully configured in Payment settings first.": "保存済みストアに、このプランのタイトルと価格を使って Pancake 商品を作成します。事前に支払い設定で Waffo Pancake を完全に設定する必要があります。",
     "Creating payment order": "支払い注文を作成中",
+    "Generating payment QR code": "決済QRコードを生成しています",
+    "Generating payment QR code, please wait…": "決済QRコードを生成しています。しばらくお待ちください…",
     "Creating...": "作成中...",
     "Creation failed": "作成に失敗しました",
     "Credential refreshed": "認証情報を更新しました",

@@ -131,10 +131,7 @@ describe('recharge UI behavior contracts', () => {
       if (code === 'PAY_PROVIDER_NO_AUTH' || code === 'PAY_PROVIDER_REJECT') {
         return 'failed'
       }
-      if (
-        (code === 'PAY_CREATE_UNKNOWN' || status === 'queued') &&
-        !hasQr
-      ) {
+      if ((code === 'PAY_CREATE_UNKNOWN' || status === 'queued') && !hasQr) {
         return 'creating'
       }
       if (hasQr) return 'pending'

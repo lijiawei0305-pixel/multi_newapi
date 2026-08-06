@@ -1426,6 +1426,8 @@
     "Created user {{username}} (role {{role}})": "创建用户 {{username}}（角色 {{role}}）",
     "Creates a Pancake product in the saved store using this plan’s title and price. Requires Waffo Pancake to be fully configured in Payment settings first.": "使用此套餐的标题和价格，在已保存的店铺中创建 Pancake 产品。需要先在支付设置中完整配置 Waffo Pancake。",
     "Creating payment order": "正在创建支付订单",
+    "Generating payment QR code": "正在生成支付二维码",
+    "Generating payment QR code, please wait…": "正在生成支付二维码，请稍候",
     "Creating...": "创建中...",
     "Creation failed": "创建失败",
     "Credential refreshed": "凭据已刷新",

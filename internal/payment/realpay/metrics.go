@@ -94,9 +94,9 @@ func RecordPrepayDuration(bg bool, d time.Duration) {
 // RecordBreakerOpen / RecordBreakerClose 维护熔断开路时长。
 func RecordBreakerOpen() {
 	now := time.Now().UnixNano()
-	if payMetrics.breakerOpenSince.CompareAndSwap(0, now) {
-		// newly opened
-	}
+	// 只记录**首次**开路时刻：已在开路中则 CAS 失败、保持原值，
+	// 这样 breaker_open_seconds 统计的是整段开路时长而非最后一次触发。
+	payMetrics.breakerOpenSince.CompareAndSwap(0, now)
 }
 
 func RecordBreakerClose() {

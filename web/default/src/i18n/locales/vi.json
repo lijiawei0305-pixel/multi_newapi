@@ -1426,6 +1426,8 @@
     "Created user {{username}} (role {{role}})": "Đã tạo người dùng {{username}} (vai trò {{role}})",
     "Creates a Pancake product in the saved store using this plan’s title and price. Requires Waffo Pancake to be fully configured in Payment settings first.": "Tạo một sản phẩm Pancake trong cửa hàng đã lưu bằng tiêu đề và giá của gói này. Trước tiên cần cấu hình đầy đủ Waffo Pancake trong cài đặt Thanh toán.",
     "Creating payment order": "Đang tạo đơn thanh toán",
+    "Generating payment QR code": "Đang tạo mã QR thanh toán",
+    "Generating payment QR code, please wait…": "Đang tạo mã QR thanh toán, vui lòng đợi…",
     "Creating...": "Đang tạo...",
     "Creation failed": "Tạo thất bại",
     "Credential refreshed": "Đã làm mới thông tin xác thực",

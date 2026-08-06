@@ -14,7 +14,7 @@
   },
   "locales": {
     "en": {
-      "keyCount": 5932,
+      "keyCount": 5934,
       "unchangedValueAllowlistCount": 0,
       "missingSourceKeys": [],
       "missingBaseKeys": [],
@@ -24,7 +24,7 @@
       "staleUnchangedValueAllowlist": []
     },
     "zh": {
-      "keyCount": 5932,
+      "keyCount": 5934,
       "unchangedValueAllowlistCount": 0,
       "missingSourceKeys": [],
       "missingBaseKeys": [],
@@ -34,7 +34,7 @@
       "staleUnchangedValueAllowlist": []
     },
     "fr": {
-      "keyCount": 5932,
+      "keyCount": 5934,
       "unchangedValueAllowlistCount": 118,
       "missingSourceKeys": [],
       "missingBaseKeys": [],
@@ -44,7 +44,7 @@
       "staleUnchangedValueAllowlist": []
     },
     "ja": {
-      "keyCount": 5932,
+      "keyCount": 5934,
       "unchangedValueAllowlistCount": 0,
       "missingSourceKeys": [],
       "missingBaseKeys": [],
@@ -54,7 +54,7 @@
       "staleUnchangedValueAllowlist": []
     },
     "ru": {
-      "keyCount": 5932,
+      "keyCount": 5934,
       "unchangedValueAllowlistCount": 0,
       "missingSourceKeys": [],
       "missingBaseKeys": [],
@@ -64,7 +64,7 @@
       "staleUnchangedValueAllowlist": []
     },
     "vi": {
-      "keyCount": 5932,
+      "keyCount": 5934,
       "unchangedValueAllowlistCount": 28,
       "missingSourceKeys": [],
       "missingBaseKeys": [],

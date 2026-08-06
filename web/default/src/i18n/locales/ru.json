@@ -1426,6 +1426,8 @@
     "Created user {{username}} (role {{role}})": "Создан пользователь {{username}} (роль {{role}})",
     "Creates a Pancake product in the saved store using this plan’s title and price. Requires Waffo Pancake to be fully configured in Payment settings first.": "Создает продукт Pancake в сохраненном магазине с названием и ценой этого плана. Сначала необходимо полностью настроить Waffo Pancake в настройках платежей.",
     "Creating payment order": "Создание платёжного заказа",
+    "Generating payment QR code": "Создание QR-кода для оплаты",
+    "Generating payment QR code, please wait…": "Создание QR-кода для оплаты, подождите…",
     "Creating...": "Создание...",
     "Creation failed": "Создание не удалось",
     "Credential refreshed": "Учётные данные обновлены",
