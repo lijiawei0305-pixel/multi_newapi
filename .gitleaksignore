@@ -15,7 +15,7 @@ controller/token_test.go:generic-api-key:422
 controller/token_test.go:generic-api-key:449
 controller/token_test.go:generic-api-key:474
 docs/vendor/payments/alipay-sign-verify.md:private-key:186
-internal/mtwire/payment_inprocess_test.go:private-key:41
+internal/mtwire/payment_inprocess_test.go:private-key:42
 middleware/auth.go:generic-api-key:161
 relay/channel/vertex/service_account.go:private-key:79
 relay/channel/task/jimeng/adaptor.go:generic-api-key:226
@@ -23,3 +23,5 @@ relay/channel/task/jimeng/adaptor.go:generic-api-key:418
 relay/channel/task/jimeng/adaptor.go:generic-api-key:420
 web/default/src/features/system-settings/integrations/payment-gateway-tabs.tsx:private-key:514
 web/default/src/features/system-settings/integrations/payment-gateway-tabs.tsx:private-key:747
+web/default/src/features/wallet/hooks/use-tenant-recharge.ts:generic-api-key:44
+internal/mtwire/payment_inprocess_test.go:private-key:41
