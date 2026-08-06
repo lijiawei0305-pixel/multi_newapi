@@ -706,7 +706,8 @@ EOF
   chmod 700 '$SERVER_REPO/deploy-build.runner.sh'
   nohup setsid '$SERVER_REPO/deploy-build.runner.sh' \
     > '$SERVER_REPO/deploy-build.log' 2>&1 </dev/null &
-  printf '%s\\n' \\$! > '$SERVER_REPO/deploy-build.pid'
+  # 注意：local 为 set -u + 双引号 remote 时，\\$! 会先展开本地 $!；必须用 \\\$! 传到远端。
+  printf '%s\\n' \\\$! > '$SERVER_REPO/deploy-build.pid'
 " || rollback_and_die "无法启动可跟踪的后台构建/迁移"
 
 log "7/8 等待构建+payment migrate+启动完成（总时限 ${HEALTH_TIMEOUT}s）"
