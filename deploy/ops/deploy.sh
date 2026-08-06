@@ -655,41 +655,58 @@ if ! remote "
 fi
 
 log "6/8 构建 candidate 镜像（停服前构建；禁止停服后再长时间 build）"
+# 写远端 runner 文件，避免 sh -c 嵌套引号拆碎 docker compose。
 remote "
   set -e
   command -v setsid >/dev/null
-  rm -f '$SERVER_REPO/deploy-build.status' '$SERVER_REPO/deploy-build.status.tmp' '$SERVER_REPO/deploy-build.pid'
-  cd '$SERVER_REPO'
-  nohup setsid sh -c '
-    set -e
-    write_status() { printf \"%s\\n\" \"\$1\" > \"'"$SERVER_REPO"'/deploy-build.status.tmp\"; mv \"'"$SERVER_REPO"'/deploy-build.status.tmp\" \"'"$SERVER_REPO"'/deploy-build.status\"; }
-    '"$DC"' build '"$APP_SVC"'
-    # 停 app（唯一 writer），保留 mysql/redis；备份后不得恢复旧 app 再写入再迁
-    '"$DC"' stop '"$APP_SVC"' || true
-    if ! '"$DC"' run --rm --no-deps '"$APP_SVC"' --payment-migrate-only; then
-      echo \"payment-migrate-only failed\" >&2
-      # 迁移失败：启动旧 :prev 镜像若可能；保留 additive schema，不做 down migration
-      docker tag '"$APP_IMG"':prev '"$APP_IMG"':latest 2>/dev/null || true
-      '"$DC"' up -d --no-build '"$APP_SVC"' || true
-      write_status 42
-      exit 42
-    fi
-    if ! '"$DC"' run --rm --no-deps '"$APP_SVC"' --payment-schema-verify; then
-      echo \"payment-schema-verify failed\" >&2
-      docker tag '"$APP_IMG"':prev '"$APP_IMG"':latest 2>/dev/null || true
-      '"$DC"' up -d --no-build '"$APP_SVC"' || true
-      write_status 43
-      exit 43
-    fi
-    # 迁移成功：--no-build 启动 candidate（禁止停服后重新长时间构建）
-    if '"$DC"' up -d --no-build; then
-      write_status 0
-      exit 0
-    fi
-    write_status 1
-    exit 1
-  ' > '$SERVER_REPO/deploy-build.log' 2>&1 </dev/null &
-  printf '%s\n' \$! > '$SERVER_REPO/deploy-build.pid'
+  rm -f '$SERVER_REPO/deploy-build.status' '$SERVER_REPO/deploy-build.status.tmp' '$SERVER_REPO/deploy-build.pid' '$SERVER_REPO/deploy-build.runner.sh'
+  cat > '$SERVER_REPO/deploy-build.runner.sh' <<EOF
+#!/bin/sh
+set -eu
+REPO=$SERVER_REPO
+ENV_FILE=$ENV_FILE
+COMPOSE_FILE=$COMPOSE_FILE
+STACK=$STACK
+APP_SVC=$APP_SVC
+APP_IMG=$APP_IMG
+DC=\"docker compose -p \\\$STACK --env-file \\\$ENV_FILE -f \\\$COMPOSE_FILE\"
+write_status() {
+  printf '%s\\\\n' \"\\\$1\" > \"\\\$REPO/deploy-build.status.tmp\"
+  mv \"\\\$REPO/deploy-build.status.tmp\" \"\\\$REPO/deploy-build.status\"
+}
+cd \"\\\$REPO\"
+echo \"[runner] building candidate...\"
+\\\$DC build \"\\\$APP_SVC\"
+echo \"[runner] stopping app writer...\"
+\\\$DC stop \"\\\$APP_SVC\" || true
+echo \"[runner] payment-migrate-only...\"
+if ! \\\$DC run --rm --no-deps \"\\\$APP_SVC\" --payment-migrate-only; then
+  echo 'payment-migrate-only failed' >&2
+  docker tag \"\\\$APP_IMG:prev\" \"\\\$APP_IMG:latest\" 2>/dev/null || true
+  \\\$DC up -d --no-build \"\\\$APP_SVC\" || true
+  write_status 42
+  exit 42
+fi
+echo \"[runner] payment-schema-verify...\"
+if ! \\\$DC run --rm --no-deps \"\\\$APP_SVC\" --payment-schema-verify; then
+  echo 'payment-schema-verify failed' >&2
+  docker tag \"\\\$APP_IMG:prev\" \"\\\$APP_IMG:latest\" 2>/dev/null || true
+  \\\$DC up -d --no-build \"\\\$APP_SVC\" || true
+  write_status 43
+  exit 43
+fi
+echo \"[runner] starting candidate --no-build...\"
+if \\\$DC up -d --no-build; then
+  write_status 0
+  exit 0
+fi
+write_status 1
+exit 1
+EOF
+  chmod 700 '$SERVER_REPO/deploy-build.runner.sh'
+  nohup setsid '$SERVER_REPO/deploy-build.runner.sh' \
+    > '$SERVER_REPO/deploy-build.log' 2>&1 </dev/null &
+  printf '%s\\n' \\$! > '$SERVER_REPO/deploy-build.pid'
 " || rollback_and_die "无法启动可跟踪的后台构建/迁移"
 
 log "7/8 等待构建+payment migrate+启动完成（总时限 ${HEALTH_TIMEOUT}s）"
