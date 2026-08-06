@@ -78,7 +78,9 @@ function loadRechargeIntent(): StoredRechargeIntent | null {
   try {
     const raw = sessionStorage.getItem(RECHARGE_INTENT_STORAGE_KEY)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as StoredRechargeIntent & { savedAt?: number }
+    const parsed = JSON.parse(raw) as StoredRechargeIntent & {
+      savedAt?: number
+    }
     if (
       parsed.savedAt &&
       Date.now() - parsed.savedAt > RECHARGE_INTENT_TTL_MS
@@ -259,34 +261,37 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
     pollInFlightRef.current = false
   }, [])
 
-  const applyCredited = useCallback((data: RechargeStatusData, orderNo: string) => {
-    if (creditedHandledRef.current === orderNo) {
-      return
-    }
-    creditedHandledRef.current = orderNo
-    markTiming('recharge_credited_seen')
-
-    const currentQuota =
-      typeof data.current_quota === 'number' ? data.current_quota : null
-    if (currentQuota != null) {
-      const auth = useAuthStore.getState().auth
-      if (auth.user) {
-        auth.setUser({ ...auth.user, quota: currentQuota })
+  const applyCredited = useCallback(
+    (data: RechargeStatusData, orderNo: string) => {
+      if (creditedHandledRef.current === orderNo) {
+        return
       }
-      markTiming('recharge_balance_rendered')
-    }
+      creditedHandledRef.current = orderNo
+      markTiming('recharge_credited_seen')
 
-    const info: RechargeCreditInfo = {
-      orderNo,
-      amountCny: Number(data.amount_cny) || 0,
-      amountUsd: Number(data.amount_usd) || 0,
-      creditedQuota: Number(data.credited_quota) || 0,
-      currentQuota,
-    }
-    setPhase('credited')
-    toast.success(i18next.t('Operation successful'))
-    onCreditedRef.current?.(info)
-  }, [])
+      const currentQuota =
+        typeof data.current_quota === 'number' ? data.current_quota : null
+      if (currentQuota != null) {
+        const auth = useAuthStore.getState().auth
+        if (auth.user) {
+          auth.setUser({ ...auth.user, quota: currentQuota })
+        }
+        markTiming('recharge_balance_rendered')
+      }
+
+      const info: RechargeCreditInfo = {
+        orderNo,
+        amountCny: Number(data.amount_cny) || 0,
+        amountUsd: Number(data.amount_usd) || 0,
+        creditedQuota: Number(data.credited_quota) || 0,
+        currentQuota,
+      }
+      setPhase('credited')
+      toast.success(i18next.t('Operation successful'))
+      onCreditedRef.current?.(info)
+    },
+    []
+  )
 
   // 有待终结订单时串行轮询：立即首查，之后每 2s；任意时刻最多一个请求。
   // 依赖 orderNo + startedAt + phase；订单详情经 activeOrderRef 读取，避免 expiresAt 更新重置轮询。
@@ -376,8 +381,7 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
               orderNo: activeNo,
               rootOrderNo: data.root_order_no,
               activeOrderNo: activeNo,
-              idempotencyKey:
-                activeOrderRef.current?.idempotencyKey || '',
+              idempotencyKey: activeOrderRef.current?.idempotencyKey || '',
               provider: activeOrderRef.current?.provider || 'wxpay',
               amountCny: activeOrderRef.current?.amountCny || 0,
               startedAt: activeOrderRef.current?.startedAt || Date.now(),
@@ -403,10 +407,7 @@ export function useTenantRecharge(opts: UseTenantRechargeOptions = {}) {
 
           // 支付宝：status 返回 alipay_url 时仅安全跳转一次
           const aliFromStatus = data.pay?.alipay_url
-          if (
-            aliFromStatus &&
-            activeOrderRef.current?.provider === 'alipay'
-          ) {
+          if (aliFromStatus && activeOrderRef.current?.provider === 'alipay') {
             const stored = loadRechargeIntent()
             if (!stored?.alipayRedirected) {
               const safeUrl = normalizeHttpNavigationUrl(aliFromStatus)
