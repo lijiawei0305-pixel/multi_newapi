@@ -132,10 +132,12 @@ func GetStatus(c *gin.Context) {
 		"wechat_qrcode":               authRuntime.WeChatAccountQRCodeURL,
 		"wechat_login":                authRuntime.WeChatAuthEnabled,
 		"server_address":              system_setting.ServerAddress,
-		"turnstile_check":             authRuntime.TurnstileCheckEnabled,
-		"turnstile_site_key":          authRuntime.TurnstileSiteKey,
-		"docs_link":                   operation_setting.GetGeneralSetting().DocsLink,
-		"quota_per_unit":              common.QuotaPerUnit,
+		// Host-aware（方案 A）：仅主站 / TURNSTILE_EXTRA_HOSTS 对前端暴露 turnstile_check，
+		// 代理站与 OEM 自定义域不渲染组件，与 middleware.TurnstileCheck 一致。
+		"turnstile_check":    authRuntime.TurnstileCheckEnabled && common.TurnstileAppliesToHost(c.Request.Host),
+		"turnstile_site_key": authRuntime.TurnstileSiteKey,
+		"docs_link":          operation_setting.GetGeneralSetting().DocsLink,
+		"quota_per_unit":     common.QuotaPerUnit,
 		// 兼容旧前端：保留 display_in_currency，同时提供新的 quota_display_type
 		"display_in_currency":           operation_setting.IsCurrencyDisplay(),
 		"quota_display_type":            operation_setting.GetQuotaDisplayType(),

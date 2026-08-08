@@ -46,7 +46,9 @@ func verifyTurnstile(ctx context.Context, response, remoteIP, secret string) (bo
 func TurnstileCheck() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authRuntime := common.GetAuthRuntimeConfig()
-		if authRuntime.TurnstileCheckEnabled {
+		// 方案 A：全局开关打开后，仅主站 Host（及 TURNSTILE_EXTRA_HOSTS）强制校验；
+		// 代理子域 / OEM 自定义域名跳过，避免 CF Site Key 主机名白名单未覆盖时登录卡死。
+		if authRuntime.TurnstileCheckEnabled && common.TurnstileAppliesToHost(c.Request.Host) {
 			session := sessions.Default(c)
 			turnstileChecked := session.Get("turnstile")
 			if turnstileChecked != nil {

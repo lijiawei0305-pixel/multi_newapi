@@ -32,6 +32,7 @@ services:
     environment:
       - DEPLOYMENT_ENV=development
       - SESSION_COOKIE_SECURE=false
+      - TURNSTILE_EXTRA_HOSTS=${TURNSTILE_EXTRA_HOSTS:-}
       - SQL_DSN=postgresql://root:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be generated in .env}@postgres:5432/new-api
       - REDIS_CONN_STRING=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be generated in .env}@redis:6379
       - TZ=Asia/Shanghai

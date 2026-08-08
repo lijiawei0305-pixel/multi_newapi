@@ -30,6 +30,7 @@ services:
     environment:
       - DEPLOYMENT_ENV=development # Explicit local-only opt-in; omitted/unknown modes fail closed as production.
       - SESSION_COOKIE_SECURE=false # Local HTTP only. Production must set true behind HTTPS.
+      - TURNSTILE_EXTRA_HOSTS=${TURNSTILE_EXTRA_HOSTS:-} # Optional comma-separated platform-owned hosts.
       - SQL_DSN=postgresql://root:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be generated in .env}@postgres:5432/new-api
 #      - SQL_DSN=root:${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be generated in .env}@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL
 #      - LOG_SQL_DSN=postgresql://root:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be generated in .env}@postgres:5432/new-api-log # OPTIONAL: If you want a separate database for logging, uncomment and set this
