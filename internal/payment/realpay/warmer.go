@@ -48,11 +48,11 @@ type WarmTarget struct {
 
 // WarmResult 单次探测结果（可观测）。
 type WarmResult struct {
-	Provider   string
-	Host       string
-	OK         bool
-	Duration   time.Duration
-	TLSMs      int64 // -1 = not_run / reused
+	Provider string
+	Host     string
+	OK       bool
+	Duration time.Duration
+	TLSMs    int64 // -1 = not_run / reused
 	// ConnReused is meaningful only when ConnReuseKnown.
 	ConnReused     bool
 	ConnReuseKnown bool // false for SignedProbe outer path (unknown, not cold)

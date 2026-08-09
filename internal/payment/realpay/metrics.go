@@ -11,13 +11,13 @@ import (
 // TLS 成功率：仅 cold handshake 三态样本，滚动 30 分钟窗口，最少 30 个样本才 available。
 
 const (
-	metricsSampleCap       = 256
-	tlsWindow              = 30 * time.Minute
-	tlsMinSamples          = 30
-	tlsSuccessThreshold    = 0.99
-	tlsConsecutiveBadNeed  = 2
-	tlsReminderInterval    = 6 * time.Hour
-	prepayP95MinSamples    = 5
+	metricsSampleCap      = 256
+	tlsWindow             = 30 * time.Minute
+	tlsMinSamples         = 30
+	tlsSuccessThreshold   = 0.99
+	tlsConsecutiveBadNeed = 2
+	tlsReminderInterval   = 6 * time.Hour
+	prepayP95MinSamples   = 5
 )
 
 // TLSHandshakeResult is the cold-handshake outcome for one HTTP attempt.
@@ -216,18 +216,18 @@ func pruneDur(s []timedDur, now time.Time) []timedDur {
 
 // MetricsSnapshot 导出 SLI 只读视图。
 type MetricsSnapshot struct {
-	WarmOK, WarmFail int64
-	HTTPOK, HTTPFail int64
+	WarmOK, WarmFail     int64
+	HTTPOK, HTTPFail     int64
 	HTTPReused, HTTPCold int64
 
 	// TLS cold-handshake window
-	TLSOK, TLSFail   int64
-	TLSNotAttempted  int64
-	TLSSampleCount   int64
-	TLSAvailable     bool
-	TLSSuccessRate   float64 // only valid when TLSAvailable
-	TLSWindowStart   time.Time
-	TLSWindowEnd     time.Time
+	TLSOK, TLSFail  int64
+	TLSNotAttempted int64
+	TLSSampleCount  int64
+	TLSAvailable    bool
+	TLSSuccessRate  float64 // only valid when TLSAvailable
+	TLSWindowStart  time.Time
+	TLSWindowEnd    time.Time
 
 	// Conn reuse from HTTP path only
 	ConnReuseRate      float64
