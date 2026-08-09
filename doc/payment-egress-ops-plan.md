@@ -61,9 +61,24 @@
 
 | 指标 | 建议门禁 |
 | --- | --- |
-| TLS 握手成功率（主+备，跨时段） | P95 成功率 ≥ 99% |
+| TLS 握手成功率（主+备，跨时段） | 冷握手成功率 ≥ 99% |
 | 冷连接 TLS P95 | < 2s |
 | 复用连接 TTFB P95 | < 500ms |
 | 真实签名 Prepay | **另需授权** 后测，不得用 curl 代替 |
 
-未达标：**应用端已缓解；PAY-LAT-02 基础设施根因仍未关闭。**
+### 7.1 应用内 SLI 契约（2026-08-09）
+
+与 `internal/payment/realpay` 实现对齐（见 `doc/specs/2026-08-09-payment-tls-alert-audit-for-grok.md`）：
+
+| 项 | 规则 |
+| --- | --- |
+| TLS 样本 | **仅 cold handshake**：`TLSHandshakeDone(err==nil)`=成功，`err!=nil` 或 start 未完成=失败；**reused / DNS/TCP 未达 TLS 不进分母** |
+| 滚动窗口 | **30 分钟**；窗口内有效 cold TLS 样本 **≥30** 才 `available`；不足 → `n/a`，**不告警** |
+| 成功率门禁 | `available && rate < 0.99` 记为坏窗口 |
+| 告警状态机 | 连续 **2** 个坏窗口 → 发一次 degraded；持续异常 **6 小时** reminder 一次；恢复发一次 recovery；**不改**全局 Dedup TTL |
+| 严重度 | 仅 warm/query、无逻辑 Prepay 样本 → **Warning**；有真实 prepay_sync/bg 样本 → **Critical**；breaker open **独立 Critical** |
+| Prepay P95 | 按**逻辑** createPay 记一次（sync/bg）；样本 &lt;5 → `n/a (n=k)`，禁止展示 `-1` |
+| 连接复用率 | 仅 `payment_http`（tracingRoundTripper）权威；warm 外层不双计 |
+| 备域保温 | `api2.mch.weixin.qq.com` 探测必须真实访问备域（`preferBackup=true`） |
+
+未达标：**应用端已缓解；PAY-LAT-02 基础设施根因仍未关闭。** 邮件不再轰炸 ≠ 出口网络已修好。

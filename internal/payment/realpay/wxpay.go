@@ -100,6 +100,13 @@ func (a *wxpayAdapter) createPay(ctx context.Context, orderNo, subject string, a
 		req.TimeExpire = core.Time(expiresAt)
 	}
 
+	// 逻辑 Prepay 操作标签：sync vs bg（HTTP attempt 日志用；P95 用 RecordPrepayDuration 只记一次）
+	opLabel := "prepay_sync"
+	bg := budgetModeFrom(ctx) == BudgetBackground
+	if bg {
+		opLabel = "prepay_bg"
+	}
+	start := time.Now()
 	var codeURL string
 	err := retryCreatePay(ctx, realClock(),
 		func(tryCtx context.Context, attempt, maxAttempts int) error {
@@ -107,7 +114,7 @@ func (a *wxpayAdapter) createPay(ctx context.Context, orderNo, subject string, a
 			url, e := runHedged(tryCtx, func(hctx context.Context, preferBackup bool) (string, error) {
 				hctx = context.WithValue(hctx, ctxKeyPayAttempt{}, attempt)
 				hctx = context.WithValue(hctx, ctxKeyPayMaxAttempts{}, maxAttempts)
-				hctx = context.WithValue(hctx, ctxKeyPayOperation{}, "prepay")
+				hctx = context.WithValue(hctx, ctxKeyPayOperation{}, opLabel)
 				hctx = context.WithValue(hctx, ctxKeyPayProvider{}, "wxpay")
 				hctx = context.WithValue(hctx, ctxKeyPayPreferBackup{}, preferBackup)
 				r, result, pe := a.svc.Prepay(hctx, req)
@@ -132,6 +139,8 @@ func (a *wxpayAdapter) createPay(ctx context.Context, orderNo, subject string, a
 			_ = err
 		},
 	)
+	// 一次逻辑 createPay 只记一条 duration（hedge 多 attempt 不重复写 P95）
+	RecordPrepayDuration(bg, time.Since(start))
 	if err != nil {
 		return "", err
 	}

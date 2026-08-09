@@ -53,8 +53,10 @@ type WarmResult struct {
 	OK         bool
 	Duration   time.Duration
 	TLSMs      int64 // -1 = not_run / reused
-	ConnReused bool
-	Err        string
+	// ConnReused is meaningful only when ConnReuseKnown.
+	ConnReused     bool
+	ConnReuseKnown bool // false for SignedProbe outer path (unknown, not cold)
+	Err            string
 }
 
 // Warmer 后台连接保温器。
@@ -163,20 +165,29 @@ func (w *Warmer) tick() {
 		} else if res.TLSMs >= 0 {
 			tlsStr = strconv.FormatInt(res.TLSMs, 10)
 		}
-		w.logf("payment_warm: provider=%s host=%s ok=%v duration_ms=%d tls_ms=%s conn_reused=%v",
-			res.Provider, res.Host, res.OK, res.Duration.Milliseconds(), tlsStr, res.ConnReused)
-		RecordWarm(res.OK, res.ConnReused, res.Duration)
+		reuseStr := "unknown"
+		if res.ConnReuseKnown {
+			reuseStr = strconv.FormatBool(res.ConnReused)
+		}
+		w.logf("payment_warm: provider=%s host=%s ok=%v duration_ms=%d tls_ms=%s conn_reused=%s",
+			res.Provider, res.Host, res.OK, res.Duration.Milliseconds(), tlsStr, reuseStr)
+		// Warm 只记 ok/fail/duration；reuse/TLS 以 tracingRoundTripper 的 payment_http 为准，避免双计。
+		RecordWarm(res.OK, res.Duration)
 	}
 }
 
-func (w *Warmer) defaultProbe(ctx context.Context, t WarmTarget) WarmResult {
-	res := WarmResult{Provider: t.Provider, Host: t.Host, TLSMs: -1}
+func (w *Warmer) defaultProbe(ctx context.Context, t WarmTarget) (res WarmResult) {
+	res = WarmResult{Provider: t.Provider, Host: t.Host, TLSMs: -1}
 	start := time.Now()
+	// Named return so defer updates the actual returned Duration (F8/F7 in audit).
 	defer func() { res.Duration = time.Since(start) }()
 
 	if t.SignedProbe != nil {
+		// Outer SignedProbe has no httptrace here; reuse unknown (not cold).
+		// Inner SDK call still records payment_http via shared client.
 		err := t.SignedProbe(ctx)
 		res.OK = err == nil || isWarmAcceptableErr(err)
+		res.ConnReuseKnown = false
 		if err != nil && !res.OK {
 			res.Err = err.Error()
 		}
@@ -198,7 +209,9 @@ func (w *Warmer) defaultProbe(ctx context.Context, t WarmTarget) WarmResult {
 		res.Err = err.Error()
 		return res
 	}
-	req = req.WithContext(withPayMeta(req.Context(), "warm", t.Provider, 1, 1, false))
+	// 备域 target 必须真实访问 api2；按 Host/URL 设置 preferBackup，避免 hostRewrite 改回主域。
+	preferBackup := t.Host == wxHostBackup || strings.Contains(t.URL, wxHostBackup)
+	req = req.WithContext(withPayMeta(req.Context(), "warm", t.Provider, 1, 1, preferBackup))
 
 	tr := &traceTimings{}
 	var mu sync.Mutex
@@ -208,9 +221,11 @@ func (w *Warmer) defaultProbe(ctx context.Context, t WarmTarget) WarmResult {
 			tr.tlsStart = time.Now()
 			mu.Unlock()
 		},
-		TLSHandshakeDone: func(_ tls.ConnectionState, _ error) {
+		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
 			mu.Lock()
 			tr.tlsDone = time.Now()
+			tr.tlsErr = err
+			tr.tlsDoneSeen = true
 			mu.Unlock()
 		},
 		GotConn: func(info httptrace.GotConnInfo) {
@@ -221,8 +236,13 @@ func (w *Warmer) defaultProbe(ctx context.Context, t WarmTarget) WarmResult {
 	}))
 
 	resp, err := cli.Do(req)
+	// 实际请求 host（经 hostRewrite 后）写入结果，便于对账主/备
+	if req.URL != nil && req.URL.Hostname() != "" {
+		res.Host = req.URL.Hostname()
+	}
 	mu.Lock()
 	res.ConnReused = tr.reused
+	res.ConnReuseKnown = true
 	if !tr.tlsStart.IsZero() && !tr.tlsDone.IsZero() {
 		res.TLSMs = tr.tlsDone.Sub(tr.tlsStart).Milliseconds()
 	}

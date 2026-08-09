@@ -329,7 +329,7 @@ func (a *App) alertReconcileHealth(ctx context.Context, trigger string, prevRun 
 	a.alertPaymentSLI(ctx)
 }
 
-// alertPaymentSLI 支付出口 SLI 告警（breaker / TLS / 复用率）。
+// alertPaymentSLI 支付出口 SLI 告警（breaker 立即 Critical；TLS 走独立状态机，不依赖全局 Dedup 30min 轰炸）。
 func (a *App) alertPaymentSLI(ctx context.Context) {
 	if a.AlertSink == nil {
 		return
@@ -339,20 +339,29 @@ func (a *App) alertPaymentSLI(ctx context.Context) {
 		_ = a.AlertSink.Dispatch(ctx, alert.Alert{
 			Level:   alert.LevelCritical,
 			Subject: "支付 Prepay 熔断开路",
-			Body: fmt.Sprintf("连续 unknown 触发熔断，同步下单将直接 queued。breaker_open_seconds=%.1f unknown_streak=%d prepay_sync_p95_ms=%d conn_reuse_rate=%.2f tls_success_rate=%.2f",
-				snap.BreakerOpenSeconds, snap.UnknownStreak, snap.PrepaySyncP95Ms, snap.ConnReuseRate, snap.TLSSuccessRate),
+			Body: fmt.Sprintf("连续 unknown 触发熔断，同步下单将直接 queued。breaker_open_seconds=%.1f unknown_streak=%d prepay_sync_p95_ms=%s conn_reuse_rate=%s tls_success_rate=%s",
+				snap.BreakerOpenSeconds, snap.UnknownStreak,
+				realpay.FormatP95(snap.PrepaySyncP95Ms, snap.PrepaySyncSamples, snap.PrepaySyncAvailable),
+				realpay.FormatConnReuse(snap),
+				realpay.FormatTLSRate(snap)),
+			// breaker 仍用独立 DedupKey；不与 TLS warm 合并
 			DedupKey: "payment_breaker_open",
 		})
 	}
-	snap := realpay.SnapshotMetrics()
-	// 样本足够且 TLS 成功率 < 99% 时告警（对齐 payment-egress-ops-plan §7）
-	if snap.TLSSuccessRate >= 0 && snap.TLSSuccessRate < 0.99 {
-		_ = a.AlertSink.Dispatch(ctx, alert.Alert{
-			Level:   alert.LevelCritical,
-			Subject: "支付 TLS 成功率低于门禁",
-			Body: fmt.Sprintf("tls_success_rate=%.3f（门禁≥0.99）；cold+reused 样本不足时不报。conn_reuse_rate=%.3f prepay_sync_p95_ms=%d prepay_bg_p95_ms=%d",
-				snap.TLSSuccessRate, snap.ConnReuseRate, snap.PrepaySyncP95Ms, snap.PrepayBgP95Ms),
-			DedupKey: "payment_tls_sli",
-		})
+	// TLS：连续坏窗口 + 6h reminder + recovery；warm-only 为 Warning，有真实 Prepay 样本为 Critical。
+	// DedupKey 置空，避免与状态机双重节流；生命周期由 EvaluateTLSAlert 负责。
+	dec := realpay.EvaluateTLSAlert(time.Time{})
+	if dec.Kind == realpay.TLSAlertNone {
+		return
 	}
+	level := alert.LevelWarning
+	if dec.Critical {
+		level = alert.LevelCritical
+	}
+	_ = a.AlertSink.Dispatch(ctx, alert.Alert{
+		Level:    level,
+		Subject:  dec.Subject,
+		Body:     dec.Body,
+		DedupKey: "", // 状态机已控频
+	})
 }

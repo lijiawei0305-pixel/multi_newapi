@@ -103,9 +103,11 @@ func (t *tracingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 			tr.tlsStart = time.Now()
 			mu.Unlock()
 		},
-		TLSHandshakeDone: func(_ tls.ConnectionState, _ error) {
+		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
 			mu.Lock()
 			tr.tlsDone = time.Now()
+			tr.tlsErr = err
+			tr.tlsDoneSeen = true
 			mu.Unlock()
 		},
 		GotConn: func(info httptrace.GotConnInfo) {
@@ -151,8 +153,13 @@ func (t *tracingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		oe := payment.ClassifyNetworkError(err, wrote.Load())
 		// 用 trace 细化 stage（DNS/dial/TLS/header timeout）
 		oe = refineStageFromTrace(oe, &snap, wrote.Load())
-		tlsOK := !snap.tlsStart.IsZero() && !snap.tlsDone.IsZero() || snap.reused
-		RecordHTTP(false, snap.reused, tlsOK, total, op)
+		// TLS 握手失败时强制 stage=tls，保证日志与 TLSFail 计数一致
+		if tlsResultFromTrace(&snap) == TLSFailure && (oe.Stage == "" || oe.Stage == "connect" || oe.Stage == "roundtrip" || oe.Stage == "unknown") {
+			cp := *oe
+			cp.Stage = "tls"
+			oe = &cp
+		}
+		RecordHTTP(false, snap.reused, tlsResultFromTrace(&snap), total, op)
 		if t.logf != nil {
 			t.logf("payment_http: provider=%s operation=%s attempt=%d max_attempts=%d host=%s duration_ms=%d dns_ms=%s connect_ms=%s tls_ms=%s ttfb_ms=%s conn_reused=%v outcome=%s error_class=%s stage=%s",
 				provider, op, attempt, maxAttempts, host, total.Milliseconds(),
@@ -165,7 +172,7 @@ func (t *tracingRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 		return nil, oe
 	}
 
-	RecordHTTP(true, snap.reused, true, total, op)
+	RecordHTTP(true, snap.reused, tlsResultFromTrace(&snap), total, op)
 	if t.logf != nil {
 		t.logf("payment_http: provider=%s operation=%s attempt=%d max_attempts=%d host=%s duration_ms=%d dns_ms=%s connect_ms=%s tls_ms=%s ttfb_ms=%s conn_reused=%v outcome=success http_status=%d",
 			provider, op, attempt, maxAttempts, host, total.Milliseconds(),
@@ -208,7 +215,11 @@ func refineStageFromTrace(oe *payment.OutcomeError, tr *traceTimings, wrote bool
 		}
 		return &cp
 	}
-	// 未写出：按已发生的最远阶段
+	// 未写出：按已发生的最远阶段；TLS 已回调失败也算 tls stage
+	if tr.tlsDoneSeen && tr.tlsErr != nil {
+		cp.Stage = "tls"
+		return &cp
+	}
 	if !tr.tlsStart.IsZero() && tr.tlsDone.IsZero() {
 		cp.Stage = "tls"
 		if cp.ErrorClass == "timeout" || cp.ErrorClass == "unknown" {
@@ -237,12 +248,34 @@ type traceTimings struct {
 	dnsStart, dnsDone         time.Time
 	connectStart, connectDone time.Time
 	tlsStart, tlsDone         time.Time
+	tlsErr                    error
+	tlsDoneSeen               bool
 	gotConn                   time.Time
 	wroteHeaders              time.Time
 	wroteRequest              time.Time
 	ttfb                      time.Time
 	reused, wasIdle           bool
 	idleTime                  time.Duration
+}
+
+// tlsResultFromTrace maps httptrace TLS callbacks to handshake SLI samples.
+// Reused connections and pre-TLS failures are TLSNotAttempted (not TLSFail).
+func tlsResultFromTrace(tr *traceTimings) TLSHandshakeResult {
+	if tr == nil || tr.reused {
+		return TLSNotAttempted
+	}
+	if tr.tlsDoneSeen {
+		if tr.tlsErr != nil {
+			return TLSFailure
+		}
+		return TLSSuccess
+	}
+	// Handshake started but never completed (timeout / cancel mid-TLS).
+	if !tr.tlsStart.IsZero() {
+		return TLSFailure
+	}
+	// DNS/TCP never reached TLS.
+	return TLSNotAttempted
 }
 
 func msOrReused(start, end time.Time, reused bool) string {
