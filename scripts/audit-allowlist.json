@@ -2,5 +2,14 @@
   "$comment": "依赖审计豁免清单(scripts/audit-gate.mjs 消费)。仅收录『上游无兼容补丁可用』的公告;每条必须带 reason/added/expires,到期自动重新阻断,上游修复后立即删除条目并让真实升级过门。新增条目前先证明:① 无 in-range 修复;② override/升级会破坏运行时(写明证据)。",
   "web": [],
   "orbit": [],
-  "electron": []
+  "electron": [
+    {
+      "ghsa": "GHSA-jmr9-qjv8-65gv",
+      "cve": "CVE-2026-56876",
+      "package": "extract-zip",
+      "reason": "extract-zip 2.0.1 即 npm 最新版,无 in-range 补丁;electron 39.8.10 是 39.x 最后一版且仍直接依赖 extract-zip^2.0.1。干净路径是升 electron 40+(改用 @electron-internal/extract-zip),属跨大版本,桌面端需回归,不在本次做。override 到内部包不受支持且可能破坏 electron 安装解压。仅安装/打包时解官方 checksum 过的 zip,不处理不可信归档,不进 API/Web 产物。等决定升 40+ 或 39.x 换掉 extract-zip 后删除本条。",
+      "added": "2026-08-16",
+      "expires": "2026-11-14"
+    }
+  ]
 }
