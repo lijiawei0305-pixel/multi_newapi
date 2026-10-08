@@ -1284,13 +1284,13 @@ test_documented_commands_match_build_drivers() (
   if grep -E '^FROM[[:space:]]+' "$auth_image" | grep -Ev '@sha256:[0-9a-f]{64}([[:space:]]|$)' >/dev/null; then
     fail "legacy/archive image contains a floating builder or runtime base"
   fi
-  grep -Fq 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2' "$auth_image" \
+  grep -Fq 'golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c' "$auth_image" \
     || fail "legacy image does not reuse the audited main Go builder digest"
-  grep -Fq 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2' "$main_image" \
-    || fail "main image does not pin the audited Go 1.26.5 builder digest"
-  grep -Fq 'golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2' "$dev_image" \
+  grep -Fq 'golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c' "$main_image" \
+    || fail "main image does not pin the audited Go 1.26.8 builder digest"
+  grep -Fq 'golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c' "$dev_image" \
     || fail "development image does not reuse the audited Go builder digest"
-  grep -Fxq 'go 1.26.5' "$go_manifest" \
+  grep -Fxq 'go 1.26.8' "$go_manifest" \
     || fail "Go manifest does not require the patched standard library toolchain"
   grep -Fq 'debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a' "$auth_image" \
     || fail "legacy image does not reuse the audited main runtime digest"
