@@ -24,7 +24,7 @@ COPY ./VERSION /build/VERSION
 RUN VER="$(cat /build/VERSION)"; [ -n "$VER" ] || VER="v0.0.0-unknown"; \
     cd classic && VITE_REACT_APP_VERSION="$VER" bun run build
 
-FROM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS builder2
+FROM golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS builder2
 ENV GO111MODULE=on CGO_ENABLED=0
 
 ARG TARGETOS
