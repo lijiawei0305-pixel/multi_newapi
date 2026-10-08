@@ -24,7 +24,8 @@ jobs:
   verify:
     name: Reuse full CI verification
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 45m witness wait + 60m full preflight + 15m toolchain + 20m prefix/slack.
+    timeout-minutes: 140
     outputs:
       version: ${{ steps.version.outputs.version }}
       commit: ${{ steps.version.outputs.commit }}
@@ -88,10 +89,13 @@ jobs:
             bulb-orbit/v2/package-lock.json
             electron/package-lock.json
 
-      - name: Run shared preflight
+      - name: Reuse tag-push witness or run full preflight
         env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PREFLIGHT_SCOPE: all
           RUN_ORBIT_E2E: '1'
-        run: bash scripts/preflight.sh
+        run: bash scripts/reuse-or-run-release-preflight.sh
 
   linux:
     name: Linux release artifacts

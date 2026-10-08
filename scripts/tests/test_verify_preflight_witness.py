@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -742,9 +743,13 @@ class VerifyPreflightWitnessTests(unittest.TestCase):
         self.assertEqual(values["workflow_path"], WORKFLOW_PATH)
         self.assertEqual(values["artifact_name"], "preflight-witness")
         self.assertLess(int(values["timeout_seconds"]), 60 * 60)
+        # The 45-minute wait must finish with a full 60-minute preflight,
+        # toolchain setup, and slack still inside the verify job.
+        self.assertGreaterEqual(140 * 60, int(values["timeout_seconds"]) + 3600 + 900 + 1200)
         for name in ("release.yml", "electron-build.yml", "docker-build.yml"):
             text = (ROOT / ".github" / "workflows" / name).read_text()
-            self.assertIn("timeout-minutes: 60", text)
+            self.assertIn("timeout-minutes: 140", text)
+            self.assertNotIn("timeout-minutes: 60", text)
 
 
 class WritePreflightWitnessTests(unittest.TestCase):
@@ -1040,7 +1045,7 @@ class ReleaseWorkflowGuardTests(unittest.TestCase):
         self.assertIn("- '!nightly*'", text)
         self.assertIn("workflow_dispatch:", text)
 
-    def test_publish_workflows_still_run_their_own_preflight(self) -> None:
+    def test_publish_workflows_reuse_a_tag_push_witness_or_run_preflight(self) -> None:
         expected = {
             "release.yml": "group: formal-release-${{ github.ref_name || github.run_id }}",
             "electron-build.yml": "group: formal-release-${{ github.ref_name || github.run_id }}",
@@ -1049,11 +1054,24 @@ class ReleaseWorkflowGuardTests(unittest.TestCase):
         for name, group in expected.items():
             text = (ROOT / ".github" / "workflows" / name).read_text()
             self.assertIn(group, text)
-            self.assertIn("bash scripts/preflight.sh", text)
+            self.assertIn("bash scripts/reuse-or-run-release-preflight.sh", text)
+            self.assertIn("GH_TOKEN: ${{ github.token }}", text)
+            self.assertIn("GITHUB_TOKEN: ${{ github.token }}", text)
+            self.assertIn("PREFLIGHT_SCOPE: all", text)
             self.assertIn("RUN_ORBIT_E2E: '1'", text)
+            self.assertIn("timeout-minutes: 140", text)
+            self.assertNotIn("timeout-minutes: 60", text)
             self.assertNotIn("verify-preflight-witness.sh", text)
             self.assertNotIn("release-preflight.yml", text)
             self.assertNotIn("write-preflight-witness.sh", text)
+            verify_body = re.split(
+                r"\n  [A-Za-z0-9_]+:\n",
+                text.split("\n  verify:\n", 1)[1],
+                maxsplit=1,
+            )[0]
+            self.assertNotIn("id-token", verify_body)
+            self.assertNotIn("environment:", verify_body)
+            self.assertNotIn("\n    if:", verify_body)
 
 
 if __name__ == "__main__":
