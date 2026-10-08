@@ -49,11 +49,11 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.3.0",
     "dayjs": "catalog:",
-    "dompurify": "3.4.13",
+    "dompurify": "3.4.16",
     "i18next": "^26.2.0",
     "i18next-browser-languagedetector": "^8.2.1",
     "input-otp": "^1.4.2",
-    "katex": "^0.17.0",
+    "katex": "^0.18.11",
     "lucide-react": "^1.16.0",
     "marked": "^18.0.5",
     "motion": "^12.40.0",
@@ -99,6 +99,6 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "shadcn": "^4.8.0",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.11"
   }
 }
