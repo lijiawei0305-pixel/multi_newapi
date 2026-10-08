@@ -35,4 +35,10 @@ if ! grep -Fqx '!.env.example' .dockerignore; then
   exit 1
 fi
 
+# Dockerfile COPY paths and go:embed do not use this tree. Orbit CI checks out the repo itself.
+if ! grep -Fqx '/bulb-orbit' .dockerignore; then
+  echo '✗ .dockerignore 必须排除不参与镜像构建的 /bulb-orbit' >&2
+  exit 1
+fi
+
 echo '✓ Docker 构建上下文已排除环境密钥、私钥、数据库与备份文件'
