@@ -3,7 +3,7 @@
 # dependencies. Keep the image solely for historical recovery and isolated tests.
 # 与 new-api 同一 Go module，仅构建 ./auth-service/cmd/authservice 二进制。
 # 复用主 Dockerfile 已审核的 Go 版本与 immutable digest，避免归档镜像成为供应链例外。
-FROM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS builder
+FROM golang:1.26.8-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS builder
 ENV GO111MODULE=on CGO_ENABLED=0
 ENV GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64}
 WORKDIR /build
