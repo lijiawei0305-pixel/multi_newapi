@@ -81,16 +81,14 @@ preflight_file="scripts/preflight.sh"
 
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
   [ "$(git rev-parse HEAD)" = "$sha" ] || die "checkout HEAD does not match GITHUB_SHA" 1
+  # Full preflight leaves generated files behind: ignored dist and node_modules,
+  # plus untracked Orbit output such as bulb-orbit/v2/test-results. Those must
+  # not fail the witness. Tracked source still has to match HEAD.
   if ! git diff --quiet --; then
     die "witness refuses a dirty worktree" 1
   fi
   if ! git diff --cached --quiet --; then
     die "witness refuses a dirty index" 1
-  fi
-  untracked="$(git ls-files --others --exclude-standard)"
-  if [ -n "$untracked" ]; then
-    printf 'witness refuses untracked files:\n%s\n' "$untracked" >&2
-    exit 1
   fi
   for file in "$preflight_file" "$WORKFLOW_PATH"; do
     worktree_blob="$(git hash-object -- "$file")"

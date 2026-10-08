@@ -9,9 +9,17 @@
 #   exit 2   usage
 #
 # Exit 10 is the safe fallback (timeout, missing run, permission, or an
-# unreadable artifact). Exit 20 covers a witness that exists but is the wrong
-# source: fork, wrong tag, wrong SHA, workflow_dispatch, a CI run, a failed
-# run, or a hash that does not match this checkout.
+# unreadable artifact). Another tag on this same commit is not this tag's
+# witness: while this tag's push run is absent the script keeps polling and
+# exits 10. It does not report wrong-tag for that race. Exit 20 is a witness
+# for this tag that must not be reused: fork, wrong SHA, workflow_dispatch,
+# a CI run, a failed or cancelled run, or a hash that does not match.
+#
+# The default poll is 45 minutes so it ends before a 60-minute publish verify
+# job is killed. P3-B must not spend that whole wait and then start a full
+# preflight in the remaining 15 minutes. A slow fallback needs its own time
+# budget inside the verify job; a timeout during that fallback is a failure,
+# not a skipped gate.
 set -euo pipefail
 export LC_ALL=C LANG=C
 
@@ -192,9 +200,6 @@ classify_runs() {
           elif any(.workflow_runs[];
                 .head_sha != $sha and .head_branch == $tag and .path == $path) then
             {decision:"reject", reason:"wrong-sha"}
-          elif any(.workflow_runs[];
-                .head_sha == $sha and .head_branch != $tag and .event == "push" and .path == $path) then
-            {decision:"reject", reason:"wrong-tag"}
           else
             {decision:"wait", reason:"not-found"}
           end

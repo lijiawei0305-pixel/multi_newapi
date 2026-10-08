@@ -423,9 +423,74 @@ class VerifyPreflightWitnessTests(unittest.TestCase):
         self.assert_status(result, 20, "fork")
         self.assertNotIn("/artifacts", log)
 
-    def test_rejects_wrong_tag(self) -> None:
-        result, _log = self.execute(runs=[self.fixture.run(head_branch="v9.9.9")])
-        self.assert_status(result, 20, "wrong-tag")
+    def test_other_tag_on_the_same_sha_waits_instead_of_wrong_tag(self) -> None:
+        result, log = self.execute(
+            runs=[self.fixture.run(head_branch="v9.9.9", run_id=404)]
+        )
+        self.assert_status(result, 10, "not-found")
+        self.assertNotIn("wrong-tag", result.stdout)
+        self.assertNotIn("/artifacts", log)
+
+    def test_target_tag_success_after_another_tag_is_accepted(self) -> None:
+        other = self.fixture.run(head_branch="v9.9.9", run_id=404)
+        target = self.fixture.run(run_id=101)
+        result, log = self.execute(
+            runs_pages=[
+                {"total_count": 1, "workflow_runs": [other]},
+                {"total_count": 2, "workflow_runs": [other, target]},
+            ],
+            timeout="30",
+            poll="0",
+        )
+        self.assert_status(result, 0, "accepted")
+        self.assertIn("run_id=101", result.stdout)
+        self.assertNotIn("/actions/runs/404/", log)
+
+    def test_target_tag_failure_after_another_tag_is_rejected(self) -> None:
+        other = self.fixture.run(head_branch="v9.9.9", run_id=404)
+        failed = self.fixture.run(run_id=101, conclusion="failure")
+        result, log = self.execute(
+            runs_pages=[
+                {"total_count": 1, "workflow_runs": [other]},
+                {"total_count": 2, "workflow_runs": [other, failed]},
+            ],
+            timeout="30",
+            poll="0",
+        )
+        self.assert_status(result, 20, "conclusion")
+        self.assertIn("conclusion=failure", result.stderr)
+        self.assertNotIn("/artifacts", log)
+
+    def test_other_tag_success_does_not_hide_target_failure(self) -> None:
+        result, log = self.execute(
+            runs=[
+                self.fixture.run(head_branch="v9.9.9", run_id=404),
+                self.fixture.run(run_id=101, conclusion="failure"),
+            ]
+        )
+        self.assert_status(result, 20, "conclusion")
+        self.assertNotIn("/actions/runs/404/", log)
+
+    def test_other_tag_success_is_not_the_witness(self) -> None:
+        result, log = self.execute(
+            runs=[
+                self.fixture.run(head_branch="v9.9.9", run_id=404),
+                self.fixture.run(run_id=101),
+            ]
+        )
+        self.assert_status(result, 0, "accepted")
+        self.assertIn("run_id=101", result.stdout)
+        self.assertNotIn("/actions/runs/404/", log)
+
+    def test_target_in_progress_is_not_replaced_by_other_tag_success(self) -> None:
+        result, log = self.execute(
+            runs=[
+                self.fixture.run(head_branch="v9.9.9", run_id=404),
+                self.fixture.run(run_id=101, status="in_progress", conclusion=None),
+            ]
+        )
+        self.assert_status(result, 10, "timeout")
+        self.assertNotIn("/artifacts", log)
 
     def test_rejects_wrong_sha(self) -> None:
         result, _log = self.execute(runs=[self.fixture.run(head_sha=OTHER_SHA)])
@@ -858,6 +923,43 @@ class WritePreflightWitnessTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("dirty", result.stderr)
+
+    def test_writer_allows_preflight_build_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            workflow = repo / WORKFLOW_PATH
+            workflow.parent.mkdir(parents=True)
+            (repo / "scripts").mkdir()
+            (repo / "scripts" / "preflight.sh").write_text("committed-preflight\n")
+            workflow.write_text("committed-workflow\n")
+            (repo / ".gitignore").write_text("web/default/dist\nnew-api\n")
+            subprocess.run(["git", "-C", str(repo), "init", "-q", "-b", "main"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.email", "witness-test@example.invalid"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(repo), "config", "user.name", "witness-test"],
+                check=True,
+            )
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-qm", "witness"], check=True)
+            head = subprocess.check_output(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
+            ).strip()
+            screenshot = repo / "bulb-orbit" / "v2" / "test-results" / "landing-full.png"
+            screenshot.parent.mkdir(parents=True)
+            screenshot.write_bytes(b"png")
+            embed = repo / "web" / "default" / "dist" / "index.html"
+            embed.parent.mkdir(parents=True)
+            embed.write_text("<!doctype html>\n")
+            (repo / "new-api").write_bytes(b"binary")
+            out = repo / "witness.json"
+            result = self.run_writer(
+                self.writer_env(repo, out, GITHUB_SHA=head, GITHUB_ACTIONS="true")
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertTrue(out.is_file())
 
     def test_writer_refuses_unsafe_sources(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
