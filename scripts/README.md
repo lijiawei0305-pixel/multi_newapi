@@ -1,7 +1,7 @@
 # 自定义域名证书签发脚本（服务器侧）
 
 代理自助绑定自定义域名后，DNS TXT 校验通过（状态 `dns_verified`）的域名由这组脚本**异步**签发
-Let's Encrypt 证书、写 Nginx vhost 上线，并回写主站把状态推到 `active`（详见 `doc/domains-ssl.md`）。
+Let's Encrypt 证书、写 Nginx vhost 上线，并回写主站把状态推到 `active`。
 
 > 运行环境：服务器 `64.90.4.114`（Debian 12 + 宝塔 + Docker）。唯一现网多租户栈
 > `newapi_test` 的 app 监听 `127.0.0.1:3100`；原 `newapi_YFNf`（`:3000`）已删除，不得再当作隔离/回退目标。

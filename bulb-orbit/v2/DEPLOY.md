@@ -4,7 +4,7 @@
 > `*.wedreamhub.com`。**W4**：本文档在 Mac 端编写；下述涉及服务器 / 后台的步骤（②③④）由操作者在
 > 服务器 `64.90.4.114` 或后台管理界面**手动执行**，不随本次开发提交自动触发。
 
-## 前置事实（详见根 `CLAUDE.md`「服务器与部署」）
+## 前置事实
 
 - 唯一 newapi 生产栈 `newapi_test`（fork，`newapi_test-app` + `redis` + `mysql:8.2`），监听 `127.0.0.1:3100`。
 - `api` / `www` / `tokendream`.wedreamhub.com 三域名均经宝塔 nginx 反代到 3100。
