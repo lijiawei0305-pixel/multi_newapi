@@ -1,15 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  AlertCircle,
-  Boxes,
-  CheckCircle2,
-  Circle,
-  KeyRound,
-  Loader2,
-  Server,
-  Settings,
-} from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -28,40 +18,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  type ReactNode,
-  useEffect,
-  useState,
-  useMemo,
-  useCallback,
-  useRef,
-} from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { type SubmitErrorHandler, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import {
   sideDrawerContentClassName,
-  sideDrawerFooterClassName,
   sideDrawerFormClassName,
-  sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
 import { Form } from '@/components/ui/form'
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from '@/components/ui/sheet'
-import {
-  SecureVerificationDialog,
-  useSecureVerification,
-} from '@/features/auth/secure-verification'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
+import { useSecureVerification } from '@/features/auth/secure-verification'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { useHiddenClickUnlock } from '@/hooks/use-hidden-click-unlock'
 import {
@@ -70,7 +38,6 @@ import {
   hasPermission,
 } from '@/lib/admin-permissions'
 import { ROLE } from '@/lib/roles'
-import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
@@ -113,16 +80,11 @@ import {
 } from '../../lib/status-code-risk-guard'
 import type { Channel } from '../../types'
 import { useChannels } from '../channels-provider'
-import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
-import { FetchModelsDialog } from '../dialogs/fetch-models-dialog'
-import {
-  MissingModelsConfirmationDialog,
-  type MissingModelsAction,
-} from '../dialogs/missing-models-confirmation-dialog'
-import { ParamOverrideEditorDialog } from '../dialogs/param-override-editor-dialog'
-import { StatusCodeRiskDialog } from '../dialogs/status-code-risk-dialog'
+import type { MissingModelsAction } from '../dialogs/missing-models-confirmation-dialog'
 import { ChannelAdvancedFields } from './channel-advanced-fields'
 import { ChannelCredentialsFields } from './channel-credentials-fields'
+import { ChannelEditorNav } from './channel-editor-nav'
+import { deriveChannelEditorSections } from './channel-editor-status'
 import { ChannelIdentityFields } from './channel-identity-fields'
 import { ChannelModelsFields } from './channel-models-fields'
 import {
@@ -136,6 +98,12 @@ import {
   readAdvancedSettingsPreference,
   type ModelMappingGuardrail,
 } from './channel-mutate-model'
+import { ChannelMutateOverlays } from './channel-mutate-overlays'
+import {
+  ChannelMutateSheetFooter,
+  ChannelMutateSheetHeader,
+  ChannelSensitiveSettingsAlert,
+} from './channel-mutate-sheet'
 import { ChannelTypeLogo } from './channel-type-logo'
 import { ChannelEditorLoadingState } from './sections'
 
@@ -143,132 +111,6 @@ type ChannelMutateDrawerProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   currentRow?: Channel | null
-}
-
-type ChannelEditorSectionStatus = 'complete' | 'configured' | 'error' | 'idle'
-
-type ChannelEditorNavItem = {
-  id: string
-  title: string
-  description?: string
-  statusLabel: string
-  status: ChannelEditorSectionStatus
-  icon: ReactNode
-}
-
-function getSectionStatusIcon(status: ChannelEditorSectionStatus): ReactNode {
-  if (status === 'error') {
-    return <AlertCircle className='h-3.5 w-3.5' aria-hidden='true' />
-  }
-  if (status === 'complete' || status === 'configured') {
-    return <CheckCircle2 className='h-3.5 w-3.5' aria-hidden='true' />
-  }
-  return <Circle className='h-3.5 w-3.5' aria-hidden='true' />
-}
-
-function getCompletionStatus(
-  hasErrors: boolean,
-  isComplete: boolean
-): ChannelEditorSectionStatus {
-  if (hasErrors) return 'error'
-  if (isComplete) return 'complete'
-  return 'idle'
-}
-
-function getSectionStatusLabel(
-  status: ChannelEditorSectionStatus,
-  t: (key: string) => string
-): string {
-  if (status === 'error') return t('Error')
-  if (status === 'complete' || status === 'configured') return t('Ready')
-  return t('Incomplete')
-}
-
-function ChannelEditorNav(props: {
-  providerLogo: ReactNode
-  providerLabel: string
-  statusLabel: string
-  progressLabel: string
-  navigationLabel: string
-  items: ChannelEditorNavItem[]
-}) {
-  return (
-    <aside className='hidden self-start lg:sticky lg:top-4 lg:z-20 lg:block'>
-      <div className='flex max-h-[calc(100dvh-12rem)] flex-col gap-3 overflow-y-auto overscroll-contain pr-1'>
-        <div className='border-border/60 bg-muted/20 rounded-lg border p-3'>
-          <div className='flex min-w-0 items-center gap-2'>
-            <span className='bg-background flex size-8 shrink-0 items-center justify-center rounded-md border'>
-              {props.providerLogo}
-            </span>
-            <div className='min-w-0'>
-              <p className='truncate text-sm font-medium'>
-                {props.providerLabel}
-              </p>
-              <p className='text-muted-foreground truncate text-xs'>
-                {props.statusLabel} · {props.progressLabel}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <nav
-          className='border-border/60 bg-background rounded-lg border p-1'
-          aria-label={props.navigationLabel}
-        >
-          {props.items.map((item) => {
-            const isError = item.status === 'error'
-            const isDone =
-              item.status === 'complete' || item.status === 'configured'
-            return (
-              <button
-                key={item.id}
-                type='button'
-                className={cn(
-                  'hover:bg-muted/60 flex w-full items-start gap-2 rounded-md px-2 py-2 text-left transition-colors',
-                  isError && 'text-destructive hover:bg-destructive/10'
-                )}
-                onClick={() => {
-                  document
-                    .querySelector<HTMLElement>(`#${item.id}`)
-                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                }}
-              >
-                <span
-                  className={cn(
-                    'bg-muted text-muted-foreground mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md',
-                    isError && 'bg-destructive/10 text-destructive',
-                    isDone && !isError && 'text-primary'
-                  )}
-                >
-                  {item.icon}
-                </span>
-                <span className='min-w-0 flex-1'>
-                  <span className='block truncate text-sm font-medium'>
-                    {item.title}
-                  </span>
-                  {item.description && (
-                    <span className='text-muted-foreground block truncate text-xs'>
-                      {item.description}
-                    </span>
-                  )}
-                </span>
-                <span
-                  className={cn(
-                    'text-muted-foreground mt-1 shrink-0',
-                    isError && 'text-destructive',
-                    isDone && !isError && 'text-primary'
-                  )}
-                  aria-label={item.statusLabel}
-                >
-                  {getSectionStatusIcon(item.status)}
-                </span>
-              </button>
-            )
-          })}
-        </nav>
-      </div>
-    </aside>
-  )
 }
 
 export function ChannelMutateDrawer({
@@ -498,96 +340,45 @@ export function ChannelMutateDrawer({
   }, [currentType, t])
 
   const formErrors = form.formState.errors
-  const identityHasErrors = Boolean(
-    formErrors.name ||
-    formErrors.type ||
-    formErrors.status ||
-    formErrors.openai_organization
-  )
-  const credentialsHaveErrors = Boolean(
-    formErrors.key ||
-    formErrors.base_url ||
-    formErrors.other ||
-    formErrors.multi_key_mode ||
-    formErrors.multi_key_type ||
-    formErrors.key_mode ||
-    formErrors.vertex_key_type ||
-    formErrors.aws_key_type ||
-    formErrors.azure_responses_version
-  )
-  const modelsHaveErrors = Boolean(
-    formErrors.models || formErrors.group || formErrors.model_mapping
-  )
-  const advancedHaveErrors =
-    hasAdvancedSettingsErrors(formErrors) || Boolean(formErrors.advanced_custom)
-  const providerRequiresBaseUrl = [3, 8, 36, 45].includes(currentType)
-  const providerRequiresOther = [3, 18, 21, 39, 41, 49].includes(currentType)
-  const identityComplete = Boolean(currentName?.trim() && currentType > 0)
-  const credentialsComplete = Boolean(
-    (isEditing || currentKey?.trim()) &&
-    (!providerRequiresBaseUrl || currentBaseUrl?.trim()) &&
-    (!providerRequiresOther || currentOther?.trim())
-  )
-  const modelsComplete = Boolean(
-    currentModelsArray.length > 0 && currentGroups?.length
-  )
-  const requiredCompletedCount = [
-    identityComplete,
-    credentialsComplete,
-    modelsComplete,
-  ].filter(Boolean).length
+  const editorSections = deriveChannelEditorSections({
+    isEditing,
+    currentName,
+    currentType,
+    currentKey,
+    currentBaseUrl,
+    currentOther,
+    modelCount: currentModelsArray.length,
+    groupCount: currentGroups?.length ?? 0,
+    identityHasErrors: Boolean(
+      formErrors.name ||
+      formErrors.type ||
+      formErrors.status ||
+      formErrors.openai_organization
+    ),
+    credentialsHaveErrors: Boolean(
+      formErrors.key ||
+      formErrors.base_url ||
+      formErrors.other ||
+      formErrors.multi_key_mode ||
+      formErrors.multi_key_type ||
+      formErrors.key_mode ||
+      formErrors.vertex_key_type ||
+      formErrors.aws_key_type ||
+      formErrors.azure_responses_version
+    ),
+    modelsHaveErrors: Boolean(
+      formErrors.models || formErrors.group || formErrors.model_mapping
+    ),
+    advancedHaveErrors:
+      hasAdvancedSettingsErrors(formErrors) ||
+      Boolean(formErrors.advanced_custom),
+  })
   const currentStatusLabel =
     CHANNEL_STATUS_LABELS[
       currentStatus as keyof typeof CHANNEL_STATUS_LABELS
     ] || 'Unknown'
-  const progressLabel = `${requiredCompletedCount}/3`
-  const identityStatus = getCompletionStatus(
-    identityHasErrors,
-    identityComplete
-  )
-  const credentialsStatus = getCompletionStatus(
-    credentialsHaveErrors,
-    credentialsComplete
-  )
-  const modelsStatus = getCompletionStatus(modelsHaveErrors, modelsComplete)
-  const advancedStatus: ChannelEditorSectionStatus = advancedHaveErrors
-    ? 'error'
-    : 'idle'
-  const advancedSummary = advancedHaveErrors ? t('Error') : undefined
-  const editorNavItems: ChannelEditorNavItem[] = [
-    {
-      id: 'channel-section-identity',
-      title: t('Basic Information'),
-      description: getSectionStatusLabel(identityStatus, t),
-      statusLabel: getSectionStatusLabel(identityStatus, t),
-      status: identityStatus,
-      icon: <Server className='h-4 w-4' aria-hidden='true' />,
-    },
-    {
-      id: 'channel-section-credentials',
-      title: t('Credentials'),
-      description: getSectionStatusLabel(credentialsStatus, t),
-      statusLabel: getSectionStatusLabel(credentialsStatus, t),
-      status: credentialsStatus,
-      icon: <KeyRound className='h-4 w-4' aria-hidden='true' />,
-    },
-    {
-      id: 'channel-section-models',
-      title: t('Models & Groups'),
-      description: getSectionStatusLabel(modelsStatus, t),
-      statusLabel: getSectionStatusLabel(modelsStatus, t),
-      status: modelsStatus,
-      icon: <Boxes className='h-4 w-4' aria-hidden='true' />,
-    },
-    {
-      id: 'channel-section-advanced',
-      title: t('Advanced Settings'),
-      description: advancedSummary,
-      statusLabel: advancedSummary ?? t('Advanced Settings'),
-      status: advancedStatus,
-      icon: <Settings className='h-4 w-4' aria-hidden='true' />,
-    },
-  ]
+  const advancedSummary =
+    editorSections.advancedStatus === 'error' ? t('Error') : undefined
 
   // Extract redirect models from model_mapping (target values)
   const redirectModelList = useMemo(
@@ -1214,41 +1005,13 @@ export function ChannelMutateDrawer({
     <>
       <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent className={sideDrawerContentClassName('sm:max-w-5xl')}>
-          <SheetHeader className={sideDrawerHeaderClassName()}>
-            <SheetTitle className='flex items-center gap-3'>
-              <span className='bg-muted flex size-9 shrink-0 items-center justify-center rounded-md'>
-                <ChannelTypeLogo type={currentType} size={22} />
-              </span>
-              <span>
-                {isEditing ? t('Edit Channel') : t('Create Channel')}
-                <span className='text-muted-foreground ml-2 text-sm font-normal'>
-                  {t(currentTypeLabel)}
-                </span>
-              </span>
-            </SheetTitle>
-            <SheetDescription>
-              {isEditing
-                ? t(
-                    "Update channel configuration and click save when you're done."
-                  )
-                : t(
-                    'Add a new channel by providing the necessary information.'
-                  )}
-            </SheetDescription>
-          </SheetHeader>
+          <ChannelMutateSheetHeader
+            currentType={currentType}
+            isEditing={isEditing}
+            typeLabel={t(currentTypeLabel)}
+          />
 
-          {sensitiveLocked && (
-            <Alert className='border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-50'>
-              <AlertDescription>
-                {t(
-                  'Sensitive channel settings are read-only for your account.'
-                )}{' '}
-                {t(
-                  'You can still edit non-sensitive operations fields such as models, groups, priority, and weight.'
-                )}
-              </AlertDescription>
-            </Alert>
-          )}
+          {sensitiveLocked && <ChannelSensitiveSettingsAlert />}
 
           <Form {...form}>
             <form
@@ -1266,9 +1029,12 @@ export function ChannelMutateDrawer({
                     }
                     providerLabel={t(currentTypeLabel)}
                     statusLabel={t(currentStatusLabel)}
-                    progressLabel={progressLabel}
+                    progressLabel={editorSections.progressLabel}
                     navigationLabel={t('Channels')}
-                    items={editorNavItems}
+                    identityStatus={editorSections.identityStatus}
+                    credentialsStatus={editorSections.credentialsStatus}
+                    modelsStatus={editorSections.modelsStatus}
+                    advancedStatus={editorSections.advancedStatus}
                   />
                   <div className='flex min-w-0 flex-col gap-5'>
                     <ChannelIdentityFields
@@ -1361,54 +1127,39 @@ export function ChannelMutateDrawer({
             </form>
           </Form>
 
-          <SheetFooter className={sideDrawerFooterClassName()}>
-            <SheetClose
-              render={<Button variant='outline' disabled={isSubmitting} />}
-            >
-              {t('Cancel')}
-            </SheetClose>
-            <Button form='channel-form' type='submit' disabled={isSubmitting}>
-              {isSubmitting && (
-                <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-              )}
-              {isEditing ? t('Update Channel') : t('Save changes')}
-            </Button>
-          </SheetFooter>
+          <ChannelMutateSheetFooter
+            isEditing={isEditing}
+            isSubmitting={isSubmitting}
+          />
         </SheetContent>
       </Sheet>
 
-      {paramOverrideEditorOpen && !sensitiveLocked && (
-        <ParamOverrideEditorDialog
-          open={paramOverrideEditorOpen}
-          value={form.watch('param_override') || ''}
-          onOpenChange={setParamOverrideEditorOpen}
-          onSave={(nextValue) => {
-            form.setValue('param_override', nextValue, {
-              shouldDirty: true,
-              shouldValidate: true,
-            })
-          }}
-        />
-      )}
-
-      {advancedCustomEditorOpen && !sensitiveLocked && (
-        <AdvancedCustomEditorDialog
-          open={advancedCustomEditorOpen}
-          value={form.watch('advanced_custom') || ''}
-          onOpenChange={setAdvancedCustomEditorOpen}
-          onSave={(nextValue) => {
-            form.setValue('advanced_custom', nextValue, {
-              shouldDirty: true,
-              shouldValidate: true,
-            })
-          }}
-        />
-      )}
-
-      {/* Fetch Models Dialog */}
-      <FetchModelsDialog
-        open={fetchModelsDialogOpen}
-        onOpenChange={setFetchModelsDialogOpen}
+      <ChannelMutateOverlays
+        sensitiveLocked={sensitiveLocked}
+        paramOverrideEditorOpen={paramOverrideEditorOpen}
+        paramOverrideValue={
+          paramOverrideEditorOpen ? form.watch('param_override') || '' : ''
+        }
+        onParamOverrideOpenChange={setParamOverrideEditorOpen}
+        onSaveParamOverride={(nextValue) => {
+          form.setValue('param_override', nextValue, {
+            shouldDirty: true,
+            shouldValidate: true,
+          })
+        }}
+        advancedCustomEditorOpen={advancedCustomEditorOpen}
+        advancedCustomValue={
+          advancedCustomEditorOpen ? form.watch('advanced_custom') || '' : ''
+        }
+        onAdvancedCustomOpenChange={setAdvancedCustomEditorOpen}
+        onSaveAdvancedCustom={(nextValue) => {
+          form.setValue('advanced_custom', nextValue, {
+            shouldDirty: true,
+            shouldValidate: true,
+          })
+        }}
+        fetchModelsDialogOpen={fetchModelsDialogOpen}
+        onFetchModelsOpenChange={setFetchModelsDialogOpen}
         onModelsSelected={(models) => {
           form.setValue('models', formatModelsArray(models))
         }}
@@ -1421,40 +1172,32 @@ export function ChannelMutateDrawer({
             ? parseModelsString(form.getValues('models') || '')
             : undefined
         }
-      />
-
-      <SecureVerificationDialog
-        open={verificationOpen}
-        onOpenChange={(open) => {
-          if (!open) {
-            cancelVerification()
-          }
+        verification={{
+          open: verificationOpen,
+          onOpenChange: (nextOpen) => {
+            if (!nextOpen) {
+              cancelVerification()
+            }
+          },
+          methods: verificationMethods,
+          state: verificationState,
+          onVerify: async (method, code) => {
+            await executeVerification(method, code)
+          },
+          onCancel: cancelVerification,
+          onCodeChange: setVerificationCode,
+          onMethodChange: switchVerificationMethod,
         }}
-        methods={verificationMethods}
-        state={verificationState}
-        onVerify={async (method, code) => {
-          await executeVerification(method, code)
-        }}
-        onCancel={cancelVerification}
-        onCodeChange={setVerificationCode}
-        onMethodChange={switchVerificationMethod}
-      />
-
-      {/* Missing Models Confirmation Dialog */}
-      <MissingModelsConfirmationDialog
-        open={missingModelsDialogOpen}
+        missingModelsDialogOpen={missingModelsDialogOpen}
         missingModels={missingModelsList}
-        onConfirm={handleMissingModelsAction}
-        onOpenChange={setMissingModelsDialogOpen}
-      />
-
-      <StatusCodeRiskDialog
-        open={statusCodeRiskOpen}
-        onOpenChange={(v) => {
-          if (!v) handleStatusCodeRiskAction(false)
+        onMissingModelsAction={handleMissingModelsAction}
+        onMissingModelsOpenChange={setMissingModelsDialogOpen}
+        statusCodeRiskOpen={statusCodeRiskOpen}
+        statusCodeRiskDetailItems={statusCodeRiskDetailItems}
+        onStatusCodeRiskOpenChange={(nextOpen) => {
+          if (!nextOpen) handleStatusCodeRiskAction(false)
         }}
-        detailItems={statusCodeRiskDetailItems}
-        onConfirm={() => handleStatusCodeRiskAction(true)}
+        onStatusCodeRiskConfirm={() => handleStatusCodeRiskAction(true)}
       />
     </>
   )
