@@ -1,8 +1,7 @@
 # 迁移版本化说明（migrate-note）
 
 > 适用：唯一现网 / 生产栈 `newapi_test`。本文说明 Phase 2 fork 当前的 schema 迁移机制、
-> 升级/回滚注意点、以及"表撞名"检查规程。改表结构（加表/加字段/写迁移）前必读，
-> 详细数据模型见 [`doc/data-model.md`](../../doc/data-model.md)。
+> 升级/回滚注意点、以及"表撞名"检查规程。改表结构（加表/加字段/写迁移）前必读。
 
 ## 1. 当前机制：AutoMigrate + 幂等 raw ALTER（前向、幂等、无 down）
 

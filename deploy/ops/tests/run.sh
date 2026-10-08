@@ -1034,28 +1034,117 @@ test_payment_topology_and_demo_safety_contract() (
     || fail "payment runbook does not document the current WeChat callback"
   grep -Fq '/api/pay/alipay/notify' "$payment_runbook" \
     || fail "payment runbook does not document the current Alipay callback"
-  if grep -Eq '8180|AUTH_MOCK|AUTH_(WXPAY|ALIPAY)|/pay/wxpay/notify|/auth/alipay/notify' "$payment_runbook"; then
-    fail "payment runbook still contains an executable retired-topology recipe"
+  # 0 = every file exists and does not name the retired topology.
+  # 1 = retired topology is present. 2 = missing file or scan error.
+  # A missing path must not collapse into the clean result.
+  retired_topology_re='8180|auth-service/config\.yaml|AUTH_(MOCK|WXPAY|ALIPAY)|/pay/wxpay/notify|/auth/alipay/notify|/api/payment/(wechat|alipay)/notify'
+  scan_retired_payment_topology() {
+    local path status=0 saw_retired=0 grep_status
+    [ "$#" -gt 0 ] || return 2
+    for path in "$@"; do
+      if [ ! -f "$path" ]; then
+        printf 'missing %s\n' "$path" >&2
+        status=2
+        continue
+      fi
+      grep_status=0
+      if grep -nE "$retired_topology_re" "$path"; then
+        saw_retired=1
+      else
+        grep_status=$?
+        if [ "$grep_status" -ne 1 ]; then
+          status=2
+        fi
+      fi
+    done
+    if [ "$status" -ne 0 ]; then
+      return 2
+    fi
+    if [ "$saw_retired" -eq 1 ]; then
+      return 1
+    fi
+    return 0
+  }
+  printf '/api/pay/wechat/notify\n/api/pay/alipay/notify\n' > "$tmp/topology-current.md"
+  scan_retired_payment_topology "$tmp/topology-current.md" >/dev/null \
+    || fail "current payment topology fixture was rejected"
+  printf '/api/pay/wechat/notify\n8180\n' > "$tmp/topology-mixed.md"
+  mixed_status=0
+  scan_retired_payment_topology "$tmp/topology-mixed.md" >/dev/null 2>&1 || mixed_status=$?
+  [ "$mixed_status" -eq 1 ] || fail "current callback text hid a retired payment topology (status $mixed_status)"
+  for retired_marker in \
+    '8180' \
+    'auth-service/config.yaml' \
+    'AUTH_MOCK' \
+    'AUTH_WXPAY' \
+    'AUTH_ALIPAY' \
+    '/pay/wxpay/notify' \
+    '/auth/alipay/notify' \
+    '/api/payment/wechat/notify' \
+    '/api/payment/alipay/notify'
+  do
+    printf '%s\n' "$retired_marker" > "$tmp/topology-retired.md"
+    retired_status=0
+    scan_retired_payment_topology "$tmp/topology-retired.md" >/dev/null 2>&1 || retired_status=$?
+    [ "$retired_status" -eq 1 ] || fail "retired payment marker was not detected: $retired_marker (status $retired_status)"
+  done
+  missing_status=0
+  scan_retired_payment_topology "$tmp/topology-missing.md" >/dev/null 2>&1 || missing_status=$?
+  [ "$missing_status" -eq 2 ] || fail "missing document was treated as a passed payment topology scan (status $missing_status)"
+
+  runbook_status=0
+  scan_retired_payment_topology "$payment_runbook" >"$tmp/runbook-topology.out" 2>&1 || runbook_status=$?
+  if [ "$runbook_status" -ne 0 ]; then
+    cat "$tmp/runbook-topology.out" >&2
+    fail "payment runbook is missing or still contains an executable retired-topology recipe"
   fi
-  if grep -R -nE --include='*.md' \
-    '8180|auth-service/config\.yaml|AUTH_(MOCK|WXPAY|ALIPAY)|/pay/wxpay/notify|/auth/alipay/notify|/api/payment/(wechat|alipay)/notify' \
-    "$ROOT/docs/vendor/payments" >/dev/null; then
-    fail "a vendor payment guide still points project operators at a retired topology or callback"
+  [ -d "$ROOT/docs/vendor/payments" ] || fail "vendor payment guides directory is missing"
+  vendor_docs=()
+  while IFS= read -r -d '' vendor_doc; do
+    vendor_docs+=("$vendor_doc")
+  done < <(find "$ROOT/docs/vendor/payments" -type f -name '*.md' -print0)
+  [ "${#vendor_docs[@]}" -gt 0 ] || fail "vendor payment guides directory has no markdown to scan"
+  vendor_status=0
+  scan_retired_payment_topology "${vendor_docs[@]}" >"$tmp/vendor-topology.out" 2>&1 || vendor_status=$?
+  if [ "$vendor_status" -ne 0 ]; then
+    cat "$tmp/vendor-topology.out" >&2
+    fail "a vendor payment guide is missing or still points project operators at a retired topology or callback"
   fi
-  if grep -nE \
-    '8180|auth-service/config\.yaml|AUTH_(MOCK|WXPAY|ALIPAY)|/pay/wxpay/notify|/auth/alipay/notify|/api/payment/(wechat|alipay)/notify' \
-    "$ROOT/doc/proposal.md" "$ROOT/doc/acceptance.md" "$ROOT/doc/api-contract.md" >/dev/null; then
-    fail "an authoritative project document still presents the retired payment topology"
+  # doc/proposal.md, doc/acceptance.md, and doc/api-contract.md were removed.
+  # Scan the operator documents that remain; do not treat a deleted path as clean.
+  live_docs=(
+    "$ROOT/README.md"
+    "$ROOT/README.zh_CN.md"
+    "$ROOT/docs/release-governance.md"
+    "$ROOT/deploy/ops/README.md"
+    "$ROOT/deploy/ops/migrate-note.md"
+    "$ROOT/deploy/demo/README.md"
+  )
+  live_status=0
+  scan_retired_payment_topology "${live_docs[@]}" >"$tmp/live-topology.out" 2>&1 || live_status=$?
+  if [ "$live_status" -ne 0 ]; then
+    cat "$tmp/live-topology.out" >&2
+    fail "an authoritative project document is missing or still presents the retired payment topology"
   fi
-  if grep -R -nE --include='*.md' '凭据.*加密(落库|持久化)|从加密配置初始化' \
-    "$ROOT/docs/vendor/payments" "$env_example" >/dev/null; then
+  encrypt_claim=0
+  grep -R -nE --include='*.md' '凭据.*加密(落库|持久化)|从加密配置初始化' \
+    "$ROOT/docs/vendor/payments" "$env_example" >/dev/null || encrypt_claim=$?
+  if [ "$encrypt_claim" -eq 0 ]; then
     fail "payment documentation claims at-rest credential encryption that the options store does not implement"
+  elif [ "$encrypt_claim" -ne 1 ]; then
+    fail "payment credential-encryption scan did not run (status $encrypt_claim)"
   fi
 
   grep -Fq 'ALLOW_REAL_PAYMENT_DEMO=1' "$demo" \
     || fail "real-payment demo has no explicit opt-in gate"
-  if grep -Eq 'confirm_pay|AUTH_(MOCK|PORT|SVC)|127\.0\.0\.1:8180' "$demo" "$readme"; then
+  [ -f "$demo" ] || fail "real-payment demo script is missing"
+  [ -f "$readme" ] || fail "real-payment demo readme is missing"
+  demo_retired=0
+  grep -Eq 'confirm_pay|AUTH_(MOCK|PORT|SVC)|127\.0\.0\.1:8180' "$demo" "$readme" || demo_retired=$?
+  if [ "$demo_retired" -eq 0 ]; then
     fail "demo still contains a mock callback or retired payment topology"
+  elif [ "$demo_retired" -ne 1 ]; then
+    fail "demo retired-topology scan did not run (status $demo_retired)"
   fi
   if awk '/\.\/demo\.sh/ && $0 !~ /ALLOW_REAL_PAYMENT_DEMO=1/ { bad=1 } END { exit bad ? 0 : 1 }' "$demo" "$readme"; then
     fail "a documented demo command can bypass the explicit real-payment opt-in"
