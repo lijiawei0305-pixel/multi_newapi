@@ -1,0 +1,87 @@
+name: Release preflight witness
+
+# Phase 1 records a full preflight for a tag. Release, Electron, and Docker
+# still run their own preflight. Do not use formal-release-*. Release and
+# Electron already use that group and would deadlock if this job joined it
+# while they waited on this witness.
+on:
+  push:
+    tags:
+      - '*'
+      - '!nightly*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tag-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Witness full preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Bind checkout to the triggering source
+        env:
+          WITNESS_EVENT_REPOSITORY: ${{ github.event.repository.full_name }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$WITNESS_EVENT_REPOSITORY"
+          test "$GITHUB_REPOSITORY" = "$WITNESS_EVENT_REPOSITORY"
+          case "$GITHUB_EVENT_NAME" in
+            push|workflow_dispatch) ;;
+            *)
+              echo "::error::Release preflight witness does not accept ${GITHUB_EVENT_NAME}" >&2
+              exit 1
+              ;;
+          esac
+
+      # Module cache writes need a broader token than contents:read.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.11
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.12.0'
+
+      - name: Run shared preflight
+        env:
+          PREFLIGHT_SCOPE: all
+          RUN_ORBIT_E2E: '1'
+        run: bash scripts/preflight.sh
+
+      - name: Write source-bound witness
+        env:
+          WITNESS_EVENT_REPOSITORY: ${{ github.event.repository.full_name }}
+          WITNESS_OUT: ${{ github.workspace }}/preflight-witness.json
+          PREFLIGHT_SCOPE: all
+          RUN_ORBIT_E2E: '1'
+        run: bash scripts/write-preflight-witness.sh
+
+      - name: Upload source-bound witness
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: preflight-witness
+          path: preflight-witness.json
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
